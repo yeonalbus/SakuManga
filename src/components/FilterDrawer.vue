@@ -36,7 +36,7 @@ const categories: CategoryConfig[] = [
 const filterState = reactive({
   keywords: [] as string[],
   activeCategories: new Set<string>(categories.map((c) => c.key)),
-  minRating: 1,
+  minRating: 0,
   minPages: undefined as number | undefined,
   maxPages: undefined as number | undefined,
   onlyDownloaded: false,
@@ -60,7 +60,7 @@ watch(
       filterState.activeCategories = new Set(
         props.config.activeCategories || categories.map((c) => c.key),
       )
-      filterState.minRating = props.config.minRating || 1
+      filterState.minRating = props.config.minRating || 0
       filterState.minPages = props.config.minPages
       filterState.maxPages = props.config.maxPages
       filterState.onlyDownloaded = !!props.config.onlyDownloaded
@@ -106,7 +106,7 @@ const handleReset = () => {
   inputKeyword.value = ''
   filterState.keywords = []
   filterState.activeCategories = new Set(categories.map((c) => c.key))
-  filterState.minRating = 1
+  filterState.minRating = 0
   filterState.minPages = undefined
   filterState.maxPages = undefined
   filterState.onlyDownloaded = false
@@ -242,6 +242,7 @@ const handleApply = () => {
           <div class="form-row">
             <span class="row-label">最低评分</span>
             <select v-model="filterState.minRating" class="dark-select mini">
+              <option :value="0">0 ⭐ (全部)</option>
               <option :value="1">1 ⭐</option>
               <option :value="2">2 ⭐</option>
               <option :value="3">3 ⭐</option>

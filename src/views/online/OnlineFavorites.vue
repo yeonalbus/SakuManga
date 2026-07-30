@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
-import { generateOnlineComics } from '@/utils/mockData'
 import type { OnlineComic } from '@/types/comic'
+import { useUI } from '@/composables/useUI'
+
+const { toast } = useUI()
 
 const activeFav = ref(0) // 当前选中的收藏夹 0 ~ 9
 const currentPage = ref(1)
-const pageSize = 24
+const totalPages = ref(1)
+const isLoading = ref(false)
+const favComicList = ref<OnlineComic[]>([])
 
-// E 站 10 色 Favorite 经典代表配色
+// E 站 10 色 Favorite 代表配色
 const favColors = [
-  '#7f7f7f', // Fav 0 (灰色/深灰)
+  '#7f7f7f', // Fav 0 (灰色)
   '#f00000', // Fav 1 (红色)
   '#ff7800', // Fav 2 (橙色)
   '#f0d000', // Fav 3 (黄色)
-  '#00a000', // Fav 4 (绿色)
+  '#00a0a0', // Fav 4 (绿色)
   '#98e020', // Fav 5 (浅绿)
   '#00a0a0', // Fav 6 (青色)
   '#0000f0', // Fav 7 (蓝色)
@@ -22,47 +26,48 @@ const favColors = [
   '#f000a0', // Fav 9 (粉色)
 ]
 
-// 1. 根据当前选中的 activeFav，动态生成该收藏夹下的本子列表 (例如生成 48 条，共 2 页)
-const favComicList = ref<OnlineComic[]>([])
+// 核心：从 Go 后端拉取真实收藏夹列表
+const fetchFavData = async () => {
+  isLoading.value = true
+  try {
+    const res = await fetch(
+      `http://localhost:8080/api/v1/comics/online/favorites?favcat=${activeFav.value}&page=${currentPage.value}`,
+    )
+    const data = await res.json()
 
-const loadFavData = () => {
-  // 随机生成 30 ~ 60 条数据模拟当前收藏夹收藏的内容
-  const count = Math.floor(Math.random() * 30) + 30
-  favComicList.value = generateOnlineComics(count).map((item, i) => ({
-    ...item,
-    id: `fav-${activeFav.value}-${i + 1}`,
-    title: `⭐ [Fav ${activeFav.value}] ${item.title.replace(/^\[Hanazono\]\s*/, '')}`,
-    isFavorite: true,
-    favIndex: activeFav.value, // 强行绑定当前选中的 Fav 颜色
-  }))
+    if (res.ok) {
+      favComicList.value = data.comics || []
+      totalPages.value = data.totalPages || 1
+    } else {
+      toast.error(data.error || '获取收藏夹失败')
+    }
+  } catch (err) {
+    toast.error('网络连接失败')
+    console.error(err)
+  } finally {
+    isLoading.value = false
+  }
 }
 
-// 初始化与切换收藏夹时重新加载数据
-watch(
-  activeFav,
-  () => {
-    currentPage.value = 1
-    loadFavData()
-  },
-  { immediate: true },
-)
-
-// 2. 分页切片计算
-const totalPages = computed(() => Math.ceil(favComicList.value.length / pageSize))
-
-const currentPageItems = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return favComicList.value.slice(start, start + pageSize)
+// 切换收藏夹分类时重置页码并重新加载
+watch(activeFav, () => {
+  currentPage.value = 1
+  fetchFavData()
 })
 
 const selectFav = (favIndex: number) => {
   activeFav.value = favIndex
 }
 
+// 切页响应
 const handlePageChange = (page: number) => {
   currentPage.value = page
   window.scrollTo({ top: 0, behavior: 'smooth' })
+  fetchFavData()
 }
+
+// 初始触发加载
+fetchFavData()
 </script>
 
 <template>
@@ -85,12 +90,17 @@ const handlePageChange = (page: number) => {
       </button>
     </div>
 
+    <div v-if="isLoading" class="loading-state">加载收藏夹数据中...</div>
+
     <GridContainer
-      :items="currentPageItems"
+      v-else-if="favComicList.length > 0"
+      :items="favComicList"
       :current-page="currentPage"
       :total-pages="totalPages"
       @page-change="handlePageChange"
     />
+
+    <div v-else class="empty-tip">该收藏夹下暂无作品</div>
   </div>
 </template>
 
@@ -103,10 +113,18 @@ const handlePageChange = (page: number) => {
   min-height: 100%;
 }
 
-/* 2 行 5 列网格布局 */
+.loading-state,
+.empty-tip {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+  color: #888;
+}
+
 .fav-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr); /* 5 列等宽 */
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
   padding-bottom: 12px;
   border-bottom: 1px solid #2a2a2a;

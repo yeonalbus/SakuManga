@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 // 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
-import { offlineComics, offlineSearchConfig } from '@/stores/appStore'
+import { offlineComics, offlineSearchConfig, fetchOfflineComics } from '@/stores/appStore'
+
+onMounted(() => {
+  fetchOfflineComics()
+})
 
 const route = useRoute()
 
@@ -39,8 +43,19 @@ const filteredComics = computed(() => {
       }
     }
 
-    // 关卡 4：最低评分与页数范围...
-    if (cfg.minRating && (comic.rating || 0) < cfg.minRating) return false
+    // 关卡 4：评分与页数范围过滤
+    if (cfg.minRating !== undefined && (comic.rating || 0) < cfg.minRating) {
+      return false
+    }
+
+    // 🎯 补全页数范围过滤：
+    if (cfg.minPages !== undefined && cfg.minPages > 0 && (comic.pageCount || 0) < cfg.minPages) {
+      return false
+    }
+
+    if (cfg.maxPages !== undefined && cfg.maxPages > 0 && (comic.pageCount || 0) > cfg.maxPages) {
+      return false
+    }
 
     return true
   })

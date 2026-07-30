@@ -11,9 +11,11 @@
       </label>
     </div>
 
+    <!-- 🟢 代理服务器配置项 -->
     <div class="setting-item clickable" @click="handleProxySetting">
       <div class="item-info">
         <div class="item-title">代理服务器地址</div>
+        <div class="item-subtext">{{ proxyAddress || '未设置 (直连模式)' }}</div>
       </div>
       <span class="arrow-icon">›</span>
     </div>
@@ -69,24 +71,70 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 
-const { toast } = useUI()
+const { toast, modal } = useUI()
+const API_BASE = 'http://localhost:8080/api/v1'
 
 // 响应式状态绑定
 const domainFronting = ref(false)
+const proxyAddress = ref('')
 const pageCacheTime = ref('3d')
 const imageCacheTime = ref('30d')
 const connectTimeout = ref(6000)
 const receiveTimeout = ref(6000)
 
-const handleProxySetting = () => {
-  toast.info('打开代理服务器配置面板')
+// 获取后端当前设置的代理
+const fetchProxyConfig = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/network/proxy`)
+    if (res.ok) {
+      const data = await res.json()
+      proxyAddress.value = data.proxy || ''
+    }
+  } catch (err) {
+    console.error('获取代理配置失败:', err)
+  }
 }
+
+// 弹出输入框配置代理地址
+const handleProxySetting = async () => {
+  const input = await modal.prompt(
+    '请输入 HTTP / SOCKS5 代理地址（如 http://127.0.0.1:7897，留空表示直连）：',
+    proxyAddress.value || 'http://127.0.0.1:7897',
+    '配置代理服务器',
+  )
+
+  if (input !== null) {
+    const newProxy = input.trim()
+    try {
+      const res = await fetch(`${API_BASE}/network/proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proxy: newProxy }),
+      })
+
+      const data = await res.json()
+      if (res.ok) {
+        proxyAddress.value = newProxy
+        toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为直连模式')
+      } else {
+        toast.error(data.error || '设置失败')
+      }
+    } catch (err) {
+      toast.error('连接后端失败')
+    }
+  }
+}
+
+onMounted(() => {
+  fetchProxyConfig()
+})
 </script>
 
 <style scoped>
+/* 样式部分保持不变 */
 .network-settings {
   display: flex;
   flex-direction: column;
@@ -136,7 +184,6 @@ const handleProxySetting = () => {
   margin-left: 8px;
 }
 
-/* 下拉选择框 */
 .setting-select {
   background-color: transparent;
   color: #ffffff;
@@ -159,7 +206,6 @@ const handleProxySetting = () => {
   color: #ffffff;
 }
 
-/* 内联输入框 */
 .input-inline {
   display: flex;
   align-items: center;
@@ -196,7 +242,6 @@ const handleProxySetting = () => {
   margin-left: 4px;
 }
 
-/* Switch 开关 */
 .toggle-switch {
   position: relative;
   display: inline-block;

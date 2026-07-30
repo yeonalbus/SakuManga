@@ -1,52 +1,103 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
-// 🎯 核心引入：读取全局在线清单与切换函数
-import { onlineReadingList, toggleReadingList } from '@/stores/appStore'
-import { addHistory, recordComicClick } from '@/stores/appStore'
+import TagChip from '@/components/TagChip.vue'
+import { onlineReadingList, toggleReadingList, addHistory } from '@/stores/appStore'
 
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
 
-// 1. 当前选中的 Tab ('info' | 'preview' | 'comments')
 const activeTab = ref<'info' | 'preview' | 'comments'>('info')
+const isLoading = ref(true)
 
-// 2. 模拟当前的在线漫画详情数据
-const comic = ref<OnlineComic>({
-  id: (route.query.id as string) || 'online-101',
-  title: '[fau0101] みんなの頼れる修道女 [中文汉化] [全彩]',
-  coverUrl: 'https://via.placeholder.com/300x400/1e293b/ffffff?text=Nun+Comic',
+// 详情页扩展数据模型
+interface GalleryDetail extends OnlineComic {
+  subTitle?: string
+  previewPages: { pageIndex: number; url: string }[]
+  comments: { id: number; user: string; date: string; content: string }[]
+}
+
+const comic = ref<GalleryDetail>({
+  id: (route.query.id as string) || '',
+  token: (route.query.token as string) || '',
+  title: '加载中...',
+  subTitle: '',
+  coverUrl: '',
   source: 'online',
-  tags: [
-    'female:big breasts',
-    'female:nun',
-    'female:hood',
-    'male:vore',
-    'language:chinese',
-    'full color',
-  ],
-  rating: 4.6,
-  pageCount: 83,
-  updatedAt: '2026-07-29 13:29',
+  tags: [],
+  rating: 0,
+  pageCount: 0,
+  updatedAt: '',
   category: 'Doujinshi',
-  uploader: 'zhangyuan016',
-  isFavorite: true,
-  favIndex: 2, // Fav 2: 橙色
+  uploader: '',
+  isFavorite: false,
+  favIndex: 0,
   isDownloaded: false,
+  previewPages: [],
+  comments: [],
 })
 
-// --------------------------------------------------
-// 📑 阅读清单连贯状态响应
-// --------------------------------------------------
-// 动态计算当前作品是否已经在清单中
+// 1. 获取画廊真实详情
+const fetchDetail = async () => {
+  const gid = route.query.id as string
+  const token = route.query.token as string
+
+  if (!gid || !token) {
+    toast.error('画廊 ID 或 Token 参数缺失！')
+    return
+  }
+
+  isLoading.value = true
+  try {
+    const res = await fetch(
+      `http://localhost:8080/api/v1/comics/online/detail?id=${gid}&token=${token}`,
+    )
+    const data = await res.json()
+
+    if (res.ok) {
+      comic.value = {
+        ...data,
+        isFavorite: !!data.isFavorite, // 强转为 boolean
+        favIndex: data.favIndex ?? 0, // 使用 ?? 空值合并运算符，避免 0 被当作 false
+        tags: data.tags || [],
+        previewPages: data.previewPages || [],
+        comments: data.comments || [],
+      }
+      addHistory(comic.value)
+    } else {
+      toast.error(data.error || '获取详情失败')
+    }
+  } catch (err) {
+    toast.error('网络连接失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 2. 标签按 Namespace 智能分组 (画廊标准排版)
+const groupedTags = computed(() => {
+  const groups: Record<string, string[]> = {}
+  for (const tag of comic.value.tags || []) {
+    let ns = 'misc'
+    if (tag.includes(':')) {
+      ns = tag.split(':')[0].toLowerCase()
+    }
+    if (!groups[ns]) {
+      groups[ns] = []
+    }
+    groups[ns].push(tag)
+  }
+  return groups
+})
+
+// 3. 阅读清单与动作响应
 const isInReadingList = computed(() =>
   onlineReadingList.value.some((item) => item.id === comic.value.id),
 )
 
-// 点击切换：加入或移出清单
 const handleAddToReadingList = () => {
   toggleReadingList(comic.value)
   if (isInReadingList.value) {
@@ -56,9 +107,6 @@ const handleAddToReadingList = () => {
   }
 }
 
-// --------------------------------------------------
-// 其他已有函数保持不变...
-// --------------------------------------------------
 const handleBack = () => {
   if (window.history.length > 1) {
     router.back()
@@ -80,27 +128,20 @@ const favColors: Record<number, string> = {
   9: '#f000a0',
 }
 
-const parsedTags = computed(() => {
-  return comic.value.tags.map((t) => {
-    if (t.includes(':')) {
-      const [ns, name] = t.split(':')
-      return { ns, name, raw: t }
-    }
-    return { ns: 'misc', name: t, raw: t }
+// 5. 点击预览切片直接跳页阅读
+const handleStartReading = (targetPage: number = 1) => {
+  router.push({
+    path: '/reader',
+    query: {
+      id: comic.value.id,
+      token: comic.value.token,
+      source: 'online',
+      page: targetPage,
+    },
   })
-})
+}
 
-const previewPages = Array.from({ length: comic.value.pageCount || 24 }, (_, i) => ({
-  pageIndex: i + 1,
-  url: `https://via.placeholder.com/150x200/222225/888888?text=P.${i + 1}`,
-}))
-
-const comments = ref([
-  { id: 1, user: 'E_Master', date: '2026-07-29 14:10', content: '画风极其精致！', score: 5 },
-  { id: 2, user: 'Knight_9', date: '2026-07-29 15:30', content: '推荐下载保存。', score: 4.5 },
-])
-const newComment = ref('')
-
+// 🟢 1. 点击选择收藏夹 (0 ~ 9)
 const handleSelectFavorite = async () => {
   const chosenIndex = await modal.prompt(
     '请选择收藏夹 (输入 0 ~ 9)：',
@@ -110,177 +151,243 @@ const handleSelectFavorite = async () => {
   if (chosenIndex !== null) {
     const idx = parseInt(chosenIndex, 10)
     if (!isNaN(idx) && idx >= 0 && idx <= 9) {
-      comic.value.isFavorite = true
-      comic.value.favIndex = idx
-      toast.success(`已保存至 Favorite ${idx}`)
+      try {
+        const res = await fetch('http://localhost:8080/api/v1/comics/online/favorite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gid: comic.value.id,
+            token: comic.value.token,
+            favCat: idx,
+            note: '',
+          }),
+        })
+
+        if (res.ok) {
+          comic.value.isFavorite = true
+          comic.value.favIndex = idx
+          toast.success(`已成功存入 Favorite ${idx}`)
+        } else {
+          const errData = await res.json()
+          toast.error(errData.error || '设置收藏失败')
+        }
+      } catch {
+        toast.error('网络请求失败')
+      }
     } else {
       toast.error('请输入 0 到 9 之间的数字')
     }
   }
 }
 
-const handleDownload = () => {
-  comic.value.isDownloaded = true
-  toast.success('已加入下载队列，正在后台离线下载...')
+// 🟢 2. 长按取消收藏
+const handleRemoveFavorite = async () => {
+  if (!comic.value.isFavorite) return
+
+  const confirm = window.confirm(`确定要从收藏夹移除《${comic.value.title}》吗？`)
+  if (!confirm) return
+
+  try {
+    const res = await fetch('http://localhost:8080/api/v1/comics/online/favorite', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gid: comic.value.id,
+        token: comic.value.token,
+      }),
+    })
+
+    if (res.ok) {
+      comic.value.isFavorite = false
+      toast.success('已从收藏夹移除')
+    } else {
+      const errData = await res.json()
+      toast.error(errData.error || '取消收藏失败')
+    }
+  } catch {
+    toast.error('网络请求失败')
+  }
 }
 
-const handleAddComment = () => {
-  if (!newComment.value.trim()) return
-  comments.value.unshift({
-    id: Date.now(),
-    user: '我 (User)',
-    date: '刚刚',
-    content: newComment.value.trim(),
-    score: 5,
-  })
-  newComment.value = ''
-  toast.success('评论发表成功')
+// 🟢 3. 长按判定逻辑
+let pressTimer: number | null = null
+let isLongPress = false
+
+const handlePressStart = () => {
+  isLongPress = false
+  pressTimer = window.setTimeout(() => {
+    isLongPress = true
+    handleRemoveFavorite()
+  }, 700) // 长按超过 700ms 识别为取消收藏
 }
 
-const handleStartReading = () => {
-  router.push({
-    path: '/reader',
-    query: {
-      id: comic.value.id,
-      source: 'online',
-    },
-  })
+const handlePressEnd = () => {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
 }
+
+const handleFavClick = () => {
+  if (isLongPress) {
+    isLongPress = false
+    return
+  }
+  handleSelectFavorite()
+}
+
+onMounted(() => {
+  fetchDetail()
+})
 </script>
 
 <template>
   <div class="detail-page">
-    <div class="top-action-bar">
-      <button class="back-btn" @click="handleBack">‹ 返回</button>
+    <div v-if="isLoading" class="loading-state">加载中...</div>
 
-      <!-- 顶部右侧动作栏区域 -->
-      <div class="right-actions">
-        <!-- 🟢 动态加入/移除清单按钮 -->
-        <button
-          class="add-reading-btn"
-          :class="{ active: isInReadingList }"
-          @click="handleAddToReadingList"
-        >
-          {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
-        </button>
+    <template v-else>
+      <div class="top-action-bar">
+        <button class="back-btn" @click="handleBack">‹ 返回</button>
 
-        <button
-          class="action-btn fav-btn"
-          :style="
-            comic.isFavorite
-              ? { backgroundColor: favColors[comic.favIndex || 0], color: '#fff' }
-              : {}
-          "
-          @click="handleSelectFavorite"
-        >
-          ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex}` : '加入收藏' }}
-        </button>
+        <div class="right-actions">
+          <button
+            class="add-reading-btn"
+            :class="{ active: isInReadingList }"
+            @click="handleAddToReadingList"
+          >
+            {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+          </button>
 
-        <button
-          class="action-btn dl-btn"
-          :class="{ downloaded: comic.isDownloaded }"
-          @click="handleDownload"
-        >
-          {{ comic.isDownloaded ? '✓ 已离线' : '⬇️ 离线下载' }}
-        </button>
+          <button
+            class="action-btn fav-btn"
+            :style="
+              comic.isFavorite
+                ? { backgroundColor: favColors[comic.favIndex ?? 0], color: '#fff' }
+                : {}
+            "
+            @mousedown="handlePressStart"
+            @mouseup="handlePressEnd"
+            @mouseleave="handlePressEnd"
+            @touchstart="handlePressStart"
+            @touchend="handlePressEnd"
+            @click="handleFavClick"
+          >
+            ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
+          </button>
 
-        <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
-      </div>
-    </div>
-
-    <h1 class="comic-main-title">{{ comic.title }}</h1>
-
-    <div class="detail-tabs">
-      <button
-        class="tab-item"
-        :class="{ active: activeTab === 'info' }"
-        @click="activeTab = 'info'"
-      >
-        📌 基础信息
-      </button>
-      <button
-        class="tab-item"
-        :class="{ active: activeTab === 'preview' }"
-        @click="activeTab = 'preview'"
-      >
-        🖼️ 预览切片 ({{ comic.pageCount }}P)
-      </button>
-      <button
-        class="tab-item"
-        :class="{ active: activeTab === 'comments' }"
-        @click="activeTab = 'comments'"
-      >
-        💬 社区评论 ({{ comments.length }})
-      </button>
-    </div>
-
-    <div v-if="activeTab === 'info'" class="tab-content info-tab">
-      <div class="info-layout">
-        <div class="cover-box">
-          <img :src="comic.coverUrl" :alt="comic.title" />
+          <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
         </div>
+      </div>
 
-        <div class="metadata-box">
-          <div class="meta-row">
-            <span class="label">上传作者:</span>
-            <span class="value link">{{ comic.uploader }}</span>
-          </div>
-          <div class="meta-row">
-            <span class="label">作品分类:</span>
-            <span class="value category-badge">{{ comic.category }}</span>
-          </div>
-          <div class="meta-row">
-            <span class="label">全站评分:</span>
-            <span class="value rating-star">⭐ {{ comic.rating }} / 5.0</span>
-          </div>
-          <div class="meta-row">
-            <span class="label">发布时间:</span>
-            <span class="value">{{ comic.updatedAt }}</span>
+      <!-- 标题与英文/译名标题 -->
+      <div class="title-header">
+        <h1 class="comic-main-title">{{ comic.title }}</h1>
+        <h2 v-if="comic.subTitle && comic.subTitle !== comic.title" class="comic-sub-title">
+          {{ comic.subTitle }}
+        </h2>
+      </div>
+
+      <!-- 选项卡导航 -->
+      <div class="detail-tabs">
+        <button
+          class="tab-item"
+          :class="{ active: activeTab === 'info' }"
+          @click="activeTab = 'info'"
+        >
+          📌 基础信息
+        </button>
+        <button
+          class="tab-item"
+          :class="{ active: activeTab === 'preview' }"
+          @click="activeTab = 'preview'"
+        >
+          🖼️ 预览切片 ({{ comic.previewPages?.length || 0 }}P)
+        </button>
+        <button
+          class="tab-item"
+          :class="{ active: activeTab === 'comments' }"
+          @click="activeTab = 'comments'"
+        >
+          💬 社区评论 ({{ comic.comments?.length || 0 }})
+        </button>
+      </div>
+
+      <!-- Tab 1: 基础信息 -->
+      <div v-if="activeTab === 'info'" class="tab-content info-tab">
+        <div class="info-layout">
+          <div class="cover-box">
+            <img :src="comic.coverUrl" :alt="comic.title" referrerpolicy="no-referrer" />
           </div>
 
-          <div class="tags-section">
-            <h3 class="section-title">🏷️ Tag 属性云</h3>
-            <div class="tag-cloud">
-              <div v-for="tag in parsedTags" :key="tag.raw" class="tag-chip">
-                <span class="tag-ns">{{ tag.ns }}</span>
-                <span class="tag-name">{{ tag.name }}</span>
+          <div class="metadata-box">
+            <div class="meta-row">
+              <span class="label">上传作者:</span>
+              <span class="value link">{{ comic.uploader || '匿名' }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="label">作品分类:</span>
+              <span class="value category-badge">{{ comic.category }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="label">全站评分:</span>
+              <span class="value rating-star">⭐ {{ comic.rating }} / 5.0</span>
+            </div>
+            <div class="meta-row">
+              <span class="label">总页数:</span>
+              <span class="value">{{ comic.pageCount || 0 }} 页</span>
+            </div>
+            <div class="meta-row">
+              <span class="label">发布时间:</span>
+              <span class="value">{{ comic.updatedAt }}</span>
+            </div>
+
+            <!-- 按 Namespace 分组渲染 Tag -->
+            <div class="tags-section">
+              <h3 class="section-title">🏷️ Tag 属性云</h3>
+              <div class="grouped-tag-list">
+                <div v-for="(tags, ns) in groupedTags" :key="ns" class="ns-group-row">
+                  <span class="ns-label">{{ ns }}:</span>
+                  <div class="ns-tags">
+                    <TagChip v-for="tag in tags" :key="tag" :tag="tag" />
+                  </div>
+                </div>
+                <div v-if="!comic.tags?.length" class="empty-tip">暂无标签数据</div>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div v-if="activeTab === 'preview'" class="tab-content preview-tab">
-      <div class="preview-grid">
-        <div
-          v-for="page in previewPages"
-          :key="page.pageIndex"
-          class="preview-card"
-          @click="toast.info(`跳转至第 ${page.pageIndex} 页阅读`)"
-        >
-          <img :src="page.url" loading="lazy" />
-          <span class="page-num">{{ page.pageIndex }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="activeTab === 'comments'" class="tab-content comments-tab">
-      <div class="comment-input-box">
-        <textarea v-model="newComment" placeholder="分享你的阅读感受..." rows="3"></textarea>
-        <button class="send-btn" @click="handleAddComment">发表评论</button>
-      </div>
-
-      <div class="comments-list">
-        <div v-for="item in comments" :key="item.id" class="comment-card">
-          <div class="comment-header">
-            <span class="user-name">{{ item.user }}</span>
-            <span class="comment-time">{{ item.date }}</span>
+      <!-- Tab 2: 预览切片 -->
+      <div v-if="activeTab === 'preview'" class="tab-content preview-tab">
+        <div v-if="comic.previewPages?.length" class="preview-grid">
+          <div
+            v-for="page in comic.previewPages"
+            :key="page.pageIndex"
+            class="preview-card"
+            @click="handleStartReading(page.pageIndex)"
+          >
+            <img :src="page.url" loading="lazy" referrerpolicy="no-referrer" />
+            <span class="page-num">P{{ page.pageIndex }}</span>
           </div>
-          <p class="comment-body">{{ item.content }}</p>
         </div>
+        <div v-else class="empty-box">暂无预览切片数据</div>
       </div>
-    </div>
+
+      <!-- Tab 3: 社区评论 -->
+      <div v-if="activeTab === 'comments'" class="tab-content comments-tab">
+        <div v-if="comic.comments?.length" class="comments-list">
+          <div v-for="item in comic.comments" :key="item.id" class="comment-card">
+            <div class="comment-header">
+              <span class="user-name">{{ item.user }}</span>
+              <span class="comment-time">{{ item.date }}</span>
+            </div>
+            <p class="comment-body">{{ item.content }}</p>
+          </div>
+        </div>
+        <div v-else class="empty-box">该画廊暂无社区评论</div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -290,6 +397,16 @@ const handleStartReading = () => {
   max-width: 1100px;
   margin: 0 auto;
   color: #e0e0e0;
+}
+
+.loading-state,
+.empty-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 240px;
+  color: #777;
+  font-size: 14px;
 }
 
 .top-action-bar {
@@ -335,24 +452,30 @@ const handleStartReading = () => {
   color: #ccc;
   border: 1px solid #444;
 }
-.dl-btn {
-  background: #007acc;
-  color: #fff;
-}
-.dl-btn.downloaded {
-  background: #10b981;
-}
+
 .read-btn {
   background: #00a896;
   color: #fff;
   font-weight: bold;
 }
 
+.title-header {
+  margin-bottom: 16px;
+}
+
 .comic-main-title {
   font-size: 1.3rem;
-  margin: 0 0 16px 0;
+  margin: 0 0 4px 0;
   color: #fff;
   line-height: 1.4;
+}
+
+.comic-sub-title {
+  font-size: 0.95rem;
+  margin: 0;
+  color: #88888c;
+  font-weight: normal;
+  line-height: 1.3;
 }
 
 /* Tabs */
@@ -380,7 +503,7 @@ const handleStartReading = () => {
   font-weight: bold;
 }
 
-/* Tab 1: Info */
+/* Info Layout */
 .info-layout {
   display: flex;
   gap: 24px;
@@ -411,6 +534,7 @@ const handleStartReading = () => {
 .meta-row .label {
   color: #888;
   width: 80px;
+  flex-shrink: 0;
 }
 .meta-row .value.link {
   color: #007acc;
@@ -429,38 +553,50 @@ const handleStartReading = () => {
 }
 
 .tags-section {
-  margin-top: 16px;
+  margin-top: 12px;
 }
+
 .section-title {
   font-size: 0.95rem;
   color: #aaa;
-  margin-bottom: 10px;
+  margin: 0 0 10px 0;
 }
 
-.tag-cloud {
+/* 标签分组排版 */
+.grouped-tag-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
-.tag-chip {
-  display: inline-flex;
-  font-size: 0.78rem;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid #333;
-}
-.tag-ns {
-  background: #2a2a30;
-  color: #888;
-  padding: 2px 8px;
-}
-.tag-name {
-  background: rgba(0, 122, 204, 0.2);
-  color: #007acc;
-  padding: 2px 8px;
+
+.ns-group-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-/* Tab 2: Preview */
+.ns-label {
+  font-size: 0.8rem;
+  color: #77777c;
+  width: 75px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-top: 2px;
+}
+
+.ns-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.empty-tip {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+/* Preview Grid */
 .preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
@@ -474,81 +610,67 @@ const handleStartReading = () => {
   overflow: hidden;
   border: 1px solid #2a2a2a;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
+
 .preview-card img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
+
 .preview-card:hover {
   border-color: #007acc;
-  transform: scale(1.02);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
+
 .page-num {
   position: absolute;
   bottom: 4px;
   right: 4px;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.8);
   padding: 1px 6px;
   font-size: 0.7rem;
   border-radius: 3px;
+  color: #eee;
 }
 
-/* Tab 3: Comments */
-.comment-input-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.comment-input-box textarea {
-  background: #1e1e22;
-  border: 1px solid #333;
-  color: #fff;
-  padding: 10px;
-  border-radius: 6px;
-  outline: none;
-}
-
-.send-btn {
-  align-self: flex-end;
-  background: #007acc;
-  color: #fff;
-  border: none;
-  padding: 6px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
+/* Comments */
 .comments-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .comment-card {
   background: #1a1a1d;
   padding: 12px 16px;
   border-radius: 6px;
   border: 1px solid #2a2a2d;
 }
+
 .comment-header {
   display: flex;
   justify-content: space-between;
   font-size: 0.85rem;
   margin-bottom: 6px;
 }
+
 .user-name {
   color: #007acc;
   font-weight: bold;
 }
+
 .comment-time {
   color: #666;
 }
+
 .comment-body {
   margin: 0;
   font-size: 0.9rem;
   color: #ccc;
+  line-height: 1.4;
 }
 
 .add-reading-btn {
@@ -569,7 +691,6 @@ const handleStartReading = () => {
   color: #007acc;
 }
 
-/* 🟢 新增：已加入清单的高亮状态 */
 .add-reading-btn.active {
   background-color: rgba(0, 122, 204, 0.2);
   border-color: #007acc;

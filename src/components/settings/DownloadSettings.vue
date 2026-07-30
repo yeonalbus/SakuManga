@@ -1,5 +1,9 @@
 <template>
-  <div class="download-settings">
+  <!-- 当 showExtraScanPaths 为 true 时显示子组件，并在收到 back 事件时切回 -->
+  <ExtraScanPathsSettings v-if="showExtraScanPaths" @back="showExtraScanPaths = false" />
+
+  <!-- 主设置列表 -->
+  <div v-else class="download-settings">
     <div class="setting-item clickable" @click="handleSelectDownloadPath">
       <div class="item-info">
         <div class="item-title">下载路径</div>
@@ -175,10 +179,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useUI } from '@/composables/useUI'
+import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue' // 1. 引入画廊路径设置组件
 
 const { toast, modal } = useUI()
 
-// 状态声明 (按照截图默认值对齐)
+// 2. 增加界面切换的状态
+const showExtraScanPaths = ref(false)
+
+// 状态声明
 const downloadPath = ref('Z:\\Comics')
 const singleImageSavePath = ref('Z:\\Comics')
 const defaultDownloadOriginal = ref(true)
@@ -202,8 +210,9 @@ const handleResetDownloadPath = () => {
   toast.info('已长按重置下载路径')
 }
 
+// 3. 修改点击处理函数：切换为 true
 const handleExtraScanPaths = () => {
-  toast.info('打开额外的画廊扫描路径设置')
+  showExtraScanPaths.value = true
 }
 
 const handleSelectSingleImagePath = () => {
@@ -231,6 +240,7 @@ const handleRestoreDownloadTasks = async () => {
 </script>
 
 <style scoped>
+/* 样式部分完全无需修改，保持原样即可 */
 .download-settings {
   display: flex;
   flex-direction: column;

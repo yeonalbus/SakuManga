@@ -22,7 +22,7 @@ const emit = defineEmits<{
     </div>
 
     <Pagination
-      v-if="totalPages && totalPages > 1"
+      v-if="totalPages && totalPages >= 1"
       :current-page="currentPage || 1"
       :total-pages="totalPages"
       @change="(page) => emit('page-change', page)"

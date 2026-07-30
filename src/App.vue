@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ModeToggle from '@/components/ModeToggle.vue'
 import OnlineSidebar from '@/components/OnlineSidebar.vue' // 引入两个侧边栏组件
@@ -7,6 +7,14 @@ import OfflineSidebar from '@/components/OfflineSidebar.vue' // 引入两个侧�
 import TopBar from '@/components/TopBar.vue' // 引入组合好的顶栏
 import GlobalToast from '@/components/common/GlobalToast.vue'
 import GlobalModal from '@/components/common/GlobalModal.vue'
+import { useTagStore } from '@/stores/tagStore'
+
+const tagStore = useTagStore()
+
+onMounted(() => {
+  // 🚀 应用启动时异步获取翻译字典
+  tagStore.fetchTagDictionary()
+})
 
 const route = useRoute()
 

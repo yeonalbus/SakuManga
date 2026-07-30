@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { getNextComicInQueue } from '@/stores/appStore'
@@ -12,7 +12,7 @@ const { toast, modal } = useUI()
 // 1. 基础参数与基础控制
 // --------------------------------------------------
 const comicId = computed(() => (route.query.id as string) || 'online-1')
-const source = computed(() => (route.query.source as 'online' | 'offline') || 'online')
+const source = computed(() => (route.query.source as 'online' | 'offline') || 'offline')
 
 const currentPage = ref(1)
 const totalPages = ref(32)
@@ -39,23 +39,78 @@ const brightnessValue = ref(100) // 屏幕亮度 (20 - 100)
 const currentTime = ref('')
 const batteryLevel = ref('100%')
 
-// 模拟图源列表
-const pages = computed(() =>
-  Array.from(
-    { length: totalPages.value },
-    (_, i) =>
-      `https://via.placeholder.com/800x1200/121214/ffffff?text=${source.value.toUpperCase()}+P.${i + 1}`,
-  ),
-)
+const pageUrls = ref<string[]>([])
+
+const loadComicPages = async () => {
+  // 🎯 核心防刷：如果路由里根本没有 id（说明正在退出/跳转到其他页面），直接终止，绝不发请求
+  const realId = route.query.id as string
+  if (!realId) return
+
+  try {
+    const res = await fetch(`http://localhost:8080/api/v1/comics/${realId}/pages`)
+    if (res.ok) {
+      const data = await res.json()
+
+      let pageCount = 0
+      if (typeof data.total === 'number') {
+        pageCount = data.total
+      } else if (Array.isArray(data.pages)) {
+        pageCount = data.pages.length
+      } else if (Array.isArray(data)) {
+        pageCount = data.length
+      }
+
+      if (pageCount === 0) return
+
+      totalPages.value = pageCount
+      pageUrls.value = Array.from(
+        { length: pageCount },
+        (_, i) => `http://localhost:8080/api/v1/comics/${realId}/page/${i}`,
+      )
+    }
+  } catch (err) {
+    console.error('加载画廊失败:', err)
+  }
+}
+
+const handleLeftClick = () => {
+  isRTL.value ? handleNextPage() : handlePrevPage()
+}
+
+const handleRightClick = () => {
+  isRTL.value ? handlePrevPage() : handleNextPage()
+}
+
+// 🎯 优化：按双页模式扩充预加载深度 (预先加载后续 4 页)
+const preloadImages = (currentIndex: number) => {
+  // 如果是双页模式，当前屏幕已经在看 [currentIndex] 和 [currentIndex + 1]
+  // 此时预加载应该从 [currentIndex + 2] 开始；单页模式则从 +1 开始
+  const offset = isDoublePage.value && currentIndex > 0 ? 2 : 1
+
+  for (let i = 0; i < 4; i++) {
+    const nextIdx = currentIndex + offset + i
+    if (nextIdx < pageUrls.value.length) {
+      const img = new Image()
+      img.src = pageUrls.value[nextIdx]
+    }
+  }
+}
+
+// 监听当前页码与路由 ID 变化
+watch(currentPage, (newPg) => {
+  nextTick(() => {
+    preloadImages(newPg - 1)
+  })
+})
 
 // 监听路由参数变化：当自动切入下一本作品时，重置阅读器页码为第 1 页
-watch(
-  () => route.query.id,
-  () => {
-    currentPage.value = 1
-    // 如果有真实的图源接口，在这里重新请求对应 comicId 的图片列表
-  },
-)
+// watch(
+//   () => route.query.id,
+//   () => {
+//     currentPage.value = 1
+//     // 如果有真实的图源接口，在这里重新请求对应 comicId 的图片列表
+//   },
+// )
 
 // --------------------------------------------------
 // 📖 连贯读取队列调度核心
@@ -222,6 +277,64 @@ onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
   if (wakeLockSentinel) wakeLockSentinel.release()
 })
+
+// --------------------------------------------------
+// 📖 阅读历史进度持久化 (localStorage)
+// --------------------------------------------------
+const PROGRESS_STORAGE_KEY = 'saku_comic_progress'
+
+// 1. 获取全量进度 Map { [comicId]: pageNumber }
+const getProgressMap = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(PROGRESS_STORAGE_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+// 2. 保存当前作品的阅读进度
+const saveProgress = (id: string, page: number) => {
+  if (!id) return
+  const map = getProgressMap()
+  map[id] = page
+  localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(map))
+}
+
+// 3. 读取指定作品的历史进度（无记录则默认第 1 页）
+const getSavedPage = (id: string): number => {
+  const map = getProgressMap()
+  return map[id] || 1
+}
+
+// --------------------------------------------------
+// 监听与调度
+// --------------------------------------------------
+
+// 监听当前页码变化：实时触发预加载 + 保存进度
+watch(currentPage, (newPg) => {
+  if (comicId.value) {
+    saveProgress(comicId.value, newPg)
+  }
+  nextTick(() => {
+    preloadImages(newPg - 1)
+  })
+})
+
+// 🎯 核心修复：监听路由 ID 切换时，优先恢复保存的页码，而不是死板归 1
+watch(
+  () => route.query.id,
+  (newId) => {
+    if (!newId) return
+    const idStr = newId as string
+
+    // 从 localStorage 恢复历史进度
+    const lastPage = getSavedPage(idStr)
+    currentPage.value = lastPage
+
+    loadComicPages()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -257,8 +370,16 @@ onUnmounted(() => {
     </Transition>
 
     <div class="canvas-stage" @click="showControls = !showControls">
-      <div class="click-zone prev-zone" @click.stop="handlePrevPage" title="上一页"></div>
-      <div class="click-zone next-zone" @click.stop="handleNextPage" title="下一页"></div>
+      <div
+        class="click-zone prev-zone"
+        @click.stop="handleLeftClick"
+        :title="isRTL ? '下一页' : '上一页'"
+      ></div>
+      <div
+        class="click-zone next-zone"
+        @click.stop="handleRightClick"
+        :title="isRTL ? '上一页' : '下一页'"
+      ></div>
 
       <div
         class="images-wrapper"
@@ -270,7 +391,7 @@ onUnmounted(() => {
         <img
           v-for="pageIdx in visiblePageIndices"
           :key="pageIdx"
-          :src="pages[pageIdx]"
+          :src="pageUrls[pageIdx]"
           class="manga-page-img"
           :class="`fit-${pageFit}`"
           alt="Manga Page"

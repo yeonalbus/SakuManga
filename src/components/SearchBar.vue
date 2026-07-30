@@ -1,33 +1,74 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
 import { useUI } from '@/composables/useUI'
+import TagChip from '@/components/TagChip.vue'
+import type { TagItem } from '@/stores/tagStore'
 
 const router = useRouter()
 const route = useRoute()
 const { toast } = useUI()
 
-// 输入框关键词与焦点状态
 const keyword = ref('')
 const isFocused = ref(false)
 
-// 预设常用 Tag 候选词库 (E 站经典命名规范)
-const candidateTags = [
-  'female:nun',
-  'female:big breasts',
-  'female:glasses',
-  'female:sole female',
-  'male:sole male',
-  'male:shotacon',
-  'language:chinese',
-  'language:translated',
-  'artist:hiten',
-  'artist:tsukino',
-  'parody:original',
-  'full color',
-  'uncensored',
-]
+const suggestedTags = ref<TagItem[]>([])
+let suggestTimer: number | null = null
+
+// 🎯 1. 监听当前域 Store 的 keyword 变化，同步反显到搜索框输入框内（如点击 TagChip 时）
+const activeStoreKeyword = computed(() => {
+  return route.path.startsWith('/offline')
+    ? offlineSearchConfig.value.keyword
+    : onlineSearchConfig.value.keyword
+})
+
+watch(
+  activeStoreKeyword,
+  (newKw) => {
+    if (newKw !== undefined && newKw !== keyword.value) {
+      keyword.value = newKw
+    }
+  },
+  { immediate: true },
+)
+
+// 🎯 2. 重置并回归首页函数
+const resetToHome = () => {
+  const isOffline = route.path.startsWith('/offline')
+  if (isOffline) {
+    offlineSearchConfig.value.keyword = ''
+    if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
+  } else {
+    onlineSearchConfig.value.keyword = ''
+    if (!route.path.startsWith('/online/home')) router.push('/online/home')
+  }
+}
+
+// 🎯 3. 监听输入框内容：变空则重置回归首页；有字则请求热度联想
+watch(keyword, (newVal) => {
+  const q = newVal.trim()
+  if (!q) {
+    suggestedTags.value = []
+    // 当删空文字且 Store 里还有关键字时，自动回归首页
+    if (activeStoreKeyword.value !== '') {
+      resetToHome()
+    }
+    return
+  }
+
+  if (suggestTimer) clearTimeout(suggestTimer)
+  suggestTimer = window.setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/v1/tags/suggest?q=${encodeURIComponent(q)}&limit=8`)
+      if (res.ok) {
+        suggestedTags.value = await res.json()
+      }
+    } catch (e) {
+      console.error('获取标签联想失败:', e)
+    }
+  }, 150)
+})
 
 // 搜索历史记录 (持久化存在 localStorage)
 const searchHistory = ref<string[]>([])
@@ -47,32 +88,31 @@ const saveSearchHistory = () => {
   localStorage.setItem('app_search_history', JSON.stringify(searchHistory.value.slice(0, 10)))
 }
 
-// --------------------------------------------------
-// 核心逻辑：横排历史匹配 + 竖排 Tag 联想
-// --------------------------------------------------
-
-// 1. 横排历史记录（输入为空时显示全部，输入后只保留最匹配的）
 const filteredHistory = computed(() => {
   const kw = keyword.value.toLowerCase().trim()
   if (!kw) return searchHistory.value
   return searchHistory.value.filter((h) => h.toLowerCase().includes(kw))
 })
 
-// 2. 竖排 Tag 智能联想（仅当有输入内容时显示匹配项）
-const filteredTags = computed(() => {
-  const kw = keyword.value.toLowerCase().trim()
-  if (!kw) return []
-  return candidateTags.filter((tag) => tag.toLowerCase().includes(kw))
-})
-
-// 触发搜索动作
+// 触发搜索
 const triggerSearch = (queryText?: string) => {
   const finalQuery = (queryText !== undefined ? queryText : keyword.value).trim()
+
+  if (!finalQuery) {
+    resetToHome()
+    return
+  }
+
   keyword.value = finalQuery
 
+  if (!searchHistory.value.includes(finalQuery)) {
+    searchHistory.value.unshift(finalQuery)
+    saveSearchHistory()
+  }
+
+  isFocused.value = false
   const isOffline = route.path.startsWith('/offline')
 
-  // 🟢 写入对应域的 keyword，保留分类等其他 Filter 选项不变！
   if (isOffline) {
     offlineSearchConfig.value.keyword = finalQuery
     if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
@@ -82,14 +122,18 @@ const triggerSearch = (queryText?: string) => {
   }
 }
 
-// 删除单条历史
+// 清空按钮点击事件
+const handleClearInput = () => {
+  keyword.value = ''
+  resetToHome()
+}
+
 const removeHistoryItem = (item: string, e: Event) => {
   e.stopPropagation()
   searchHistory.value = searchHistory.value.filter((h) => h !== item)
   saveSearchHistory()
 }
 
-// 清空所有历史
 const clearAllHistory = (e: Event) => {
   e.stopPropagation()
   searchHistory.value = []
@@ -97,7 +141,6 @@ const clearAllHistory = (e: Event) => {
   toast.info('搜索历史已清空')
 }
 
-// 点击外部关闭 Dropdown
 const searchBarRef = ref<HTMLElement | null>(null)
 const handleOutsideClick = (e: MouseEvent) => {
   if (searchBarRef.value && !searchBarRef.value.contains(e.target as Node)) {
@@ -123,16 +166,16 @@ onUnmounted(() => {
         v-model="keyword"
         type="text"
         class="search-input"
-        placeholder="搜索标题、作者或 Tag (例如 female:nun)..."
+        placeholder="搜索标题、作者或 Tag (支持中英文联想)..."
         @focus="isFocused = true"
         @keyup.enter="triggerSearch()"
       />
-      <button v-if="keyword" class="clear-input-btn" @click="keyword = ''">✕</button>
+      <button v-if="keyword" class="clear-input-btn" @click="handleClearInput">✕</button>
       <button class="search-submit-btn" @click="triggerSearch()">搜索</button>
     </div>
 
     <div
-      v-if="isFocused && (filteredHistory.length > 0 || filteredTags.length > 0)"
+      v-if="isFocused && (filteredHistory.length > 0 || suggestedTags.length > 0)"
       class="search-dropdown"
     >
       <div v-if="filteredHistory.length > 0" class="dropdown-section">
@@ -158,17 +201,21 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="filteredTags.length > 0" class="dropdown-section">
-        <div class="section-header">🏷️ Tag 智能联想</div>
+      <div v-if="suggestedTags.length > 0" class="dropdown-section">
+        <div class="section-header">🔥 热门 Tag 推荐</div>
         <div class="vertical-tag-list">
           <div
-            v-for="tag in filteredTags"
-            :key="tag"
+            v-for="tag in suggestedTags"
+            :key="`${tag.namespace}:${tag.key}`"
             class="vertical-tag-item"
-            @click="triggerSearch(tag)"
+            @click="
+              triggerSearch(tag.namespace !== 'other' ? `${tag.namespace}:${tag.key}` : tag.key)
+            "
           >
-            <span class="tag-icon">🏷️</span>
-            <span class="tag-name">{{ tag }}</span>
+            <TagChip :tag="tag" />
+            <span v-if="tag.count" class="tag-count-badge"
+              >🔥 {{ tag.count.toLocaleString() }}</span
+            >
           </div>
         </div>
       </div>
@@ -183,7 +230,6 @@ onUnmounted(() => {
   max-width: 480px;
 }
 
-/* 输入框包装壳 */
 .input-wrapper {
   display: flex;
   align-items: center;
@@ -242,7 +288,6 @@ onUnmounted(() => {
   opacity: 0.85;
 }
 
-/* 下拉 Dropdown 容器 */
 .search-dropdown {
   position: absolute;
   top: calc(100% + 6px);
@@ -285,7 +330,6 @@ onUnmounted(() => {
   color: #ef4444;
 }
 
-/* ─── 历史记录：“圈圈”胶囊气泡（横向排布） ─── */
 .history-chips-wrapper {
   display: flex;
   flex-wrap: wrap;
@@ -300,7 +344,7 @@ onUnmounted(() => {
   border: 1px solid #3d3d42;
   color: #ccc;
   padding: 3px 10px;
-  border-radius: 16px; /* 圈圈胶囊造型 */
+  border-radius: 16px;
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -323,32 +367,30 @@ onUnmounted(() => {
   color: #ef4444;
 }
 
-/* ─── Tag 智能联想：竖向条列展示 ─── */
+/* 联想列表与热度展示 */
 .vertical-tag-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .vertical-tag-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  justify-content: space-between;
+  padding: 4px 8px;
   border-radius: 6px;
-  font-size: 0.85rem;
-  color: #007acc;
   cursor: pointer;
   transition: background-color 0.15s;
 }
 
 .vertical-tag-item:hover {
-  background-color: rgba(0, 122, 204, 0.15);
-  color: #0099ff;
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
-.tag-icon {
-  font-size: 0.8rem;
-  opacity: 0.8;
+.tag-count-badge {
+  font-size: 0.72rem;
+  color: #ff9800;
+  font-weight: 500;
 }
 </style>

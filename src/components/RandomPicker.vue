@@ -3,7 +3,12 @@ import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
-import { generateOnlineComics, generateOfflineComics } from '@/utils/mockData'
+import {
+  onlineComics,
+  offlineComics,
+  onlineSearchConfig,
+  offlineSearchConfig,
+} from '@/stores/appStore'
 import type { ComicItem } from '@/types/comic'
 
 const router = useRouter()
@@ -41,20 +46,43 @@ const hasDrawn = ref(false)
 const drawnComics = ref<ComicItem[]>([])
 
 // 🎲 抽卡核心逻辑
+// 🎲 抽卡核心逻辑
 const handleStartDraw = () => {
   isSpinning.value = true
 
-  let pool: ComicItem[] = []
-  if (scopeType.value === 'online') {
-    pool = generateOnlineComics(45)
-  } else if (scopeType.value === 'offline') {
-    pool = generateOfflineComics(30)
-  } else {
-    pool = [...generateOnlineComics(35), ...generateOfflineComics(25)]
+  let rawOnline = onlineComics.value
+  let rawOffline = offlineComics.value
+
+  // 1. 如果勾选了“继承全局筛选”，分别用在线/离线的搜索关键字过滤
+  if (useGlobalFilter.value) {
+    const onKw = (onlineSearchConfig.value.keyword || '').toLowerCase().trim()
+    if (onKw) {
+      rawOnline = rawOnline.filter(
+        (c) =>
+          c.title.toLowerCase().includes(onKw) ||
+          c.tags?.some((t) => t.toLowerCase().includes(onKw)),
+      )
+    }
+
+    const offKw = (offlineSearchConfig.value.keyword || '').toLowerCase().trim()
+    if (offKw) {
+      rawOffline = rawOffline.filter((c) => {
+        const matchTitle = c.title.toLowerCase().includes(offKw)
+        const tagsArr = Array.isArray(c.tags) ? c.tags : []
+        const matchTag = tagsArr.some((t: string) => t.toLowerCase().includes(offKw))
+        return matchTitle || matchTag
+      })
+    }
   }
 
-  if (useGlobalFilter.value) {
-    pool = pool.filter((_, idx) => idx % 2 === 0)
+  // 2. 根据选定的范围构建池子
+  let pool: ComicItem[] = []
+  if (scopeType.value === 'online') {
+    pool = rawOnline
+  } else if (scopeType.value === 'offline') {
+    pool = rawOffline
+  } else {
+    pool = [...rawOnline, ...rawOffline]
   }
 
   const requestedCount = targetCount.value
@@ -74,6 +102,7 @@ const handleStartDraw = () => {
     overflowWarning = true
   }
 
+  // 3. 洗牌并取出结果
   setTimeout(() => {
     const shuffled = [...pool].sort(() => Math.random() - 0.5)
     drawnComics.value = shuffled.slice(0, finalDrawCount)

@@ -3,7 +3,8 @@ import { ref, computed } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic } from '@/types/comic'
-import { addHistory } from '@/stores/appStore' // 🟢 引入历史记录函数
+import { addHistory } from '@/stores/appStore'
+import TagChip from '@/components/TagChip.vue'
 
 interface RankedComicItem extends ComicItem {
   rank?: number
@@ -17,14 +18,14 @@ const props = defineProps<{
 
 const router = useRouter()
 
-// 🟢 核心交互状态：是否展开 Tag 面板 (点击封面图切换)
+// 核心交互状态：是否展开 Tag 面板 (点击封面图切换)
 const showTags = ref(false)
 
 const toggleTags = () => {
   showTags.value = !showTags.value
 }
 
-// 当前生效的展示模式 (默认为全局 viewMode，可被 prop 覆盖)
+// 当前生效的展示模式
 const currentMode = computed(() => props.mode || viewMode.value)
 
 // --------------------------------------------------
@@ -69,28 +70,70 @@ const onlineComic = computed(() => {
 })
 
 // --------------------------------------------------
-// 3. 点击卡片主体（封面图除外）跳转详情页
+// 3. 点击卡片主体跳转详情页
 // --------------------------------------------------
 const handleCardClick = () => {
   if (!props.comic || !props.comic.id) return
   addHistory(props.comic)
+
   if (props.comic.source === 'online') {
-    router.push(`/online/detail?id=${props.comic.id}`)
+    // 🟢 在线模式：传递 id (GID) 和 token
+    const token = onlineComic.value?.token || ''
+    router.push({
+      path: '/online/detail',
+      query: { id: props.comic.id, token },
+    })
   } else {
     router.push(`/offline/detail?id=${props.comic.id}`)
+  }
+}
+
+// 统一解析 Tags，确保永远返回 string[] 数组
+const normalizedTags = computed<string[]>(() => {
+  if (Array.isArray(props.comic.tags)) {
+    return props.comic.tags
+  }
+  if (typeof props.comic.tags === 'string') {
+    try {
+      const parsed = JSON.parse(props.comic.tags)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      return [props.comic.tags]
+    }
+  }
+  return []
+})
+
+// 封面加载失败时的默认占位图
+const defaultCover =
+  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%2355555a" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
+
+const handleImgError = (e: Event) => {
+  const target = e.target as HTMLImageElement
+  if (target) {
+    target.src = defaultCover
   }
 }
 </script>
 
 <template>
   <div class="item-card" :class="[currentMode, size || 'normal']" @click="handleCardClick">
+    <!-- 🪪 名片模式 (Compact) -->
     <template v-if="currentMode === 'compact'">
       <div
         class="compact-thumb-box"
         @click.stop="toggleTags"
         :title="showTags ? '点击收起 Tag' : '点击查看完整 Tag 列表'"
       >
-        <img :src="comic.coverUrl" :alt="comic.title" class="thumb-img" loading="lazy" />
+        <!-- 🟢 加上 referrerpolicy="no-referrer" 防止封面防盗链报错 -->
+        <img
+          :src="comic.coverUrl"
+          :alt="comic.title"
+          class="thumb-img"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          @error="handleImgError"
+        />
 
         <span v-if="comic.rank" class="rank-badge" :class="{ 'top-3': comic.rank <= 3 }">
           #{{ comic.rank }}
@@ -122,9 +165,9 @@ const handleCardClick = () => {
 
             <span v-if="comic.rating" class="rating-text">⭐ {{ comic.rating }}</span>
 
-            <span class="pages-text">{{ comic.pageCount || 0 }} 页</span>
+            <span v-if="comic.pageCount" class="pages-text">{{ comic.pageCount }} 页</span>
 
-            <span class="date-text">{{ comic.updatedAt }}</span>
+            <span v-if="comic.updatedAt" class="date-text">{{ comic.updatedAt }}</span>
           </div>
 
           <div class="status-row">
@@ -134,20 +177,25 @@ const handleCardClick = () => {
 
         <div v-else class="compact-tags-panel" @click.stop>
           <div class="tags-scroll-container">
-            <span v-for="tag in comic.tags" :key="tag" class="tag-chip">
-              {{ tag }}
-            </span>
-            <span v-if="!comic.tags || comic.tags.length === 0" class="empty-tag-text">
-              暂无标签
-            </span>
+            <TagChip v-for="(tag, idx) in normalizedTags" :key="`${tag}-${idx}`" :tag="tag" />
+            <span v-if="normalizedTags.length === 0" class="empty-tag-text"> 暂无标签 </span>
           </div>
         </div>
       </div>
     </template>
 
+    <!-- 🎴 大卡片模式 (Card Mode) -->
     <template v-else>
       <div class="card-cover-wrapper">
-        <img :src="comic.coverUrl" :alt="comic.title" class="cover-img" loading="lazy" />
+        <!-- 🟢 防盗链保护 -->
+        <img
+          :src="comic.coverUrl"
+          :alt="comic.title"
+          class="cover-img"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          @error="handleImgError"
+        />
         <span class="card-cat-badge" :style="{ backgroundColor: getCategoryColor(comic.category) }">
           {{ comic.category || 'Manga' }}
         </span>
@@ -158,15 +206,20 @@ const handleCardClick = () => {
         >
           ★
         </span>
-        <span class="card-pages-badge">{{ comic.pageCount || 0 }}P</span>
+
+        <!-- 🟢 补齐下载状态标志 -->
+        <span v-if="comic.isDownloaded" class="card-downloaded-badge">✓ 已下载</span>
+        <span v-if="comic.pageCount" class="card-pages-badge">{{ comic.pageCount }}P</span>
       </div>
 
       <div class="card-info-footer">
         <h4 class="card-title" :title="comic.title">{{ comic.title }}</h4>
         <div class="card-tags-row">
-          <span v-for="tag in (comic.tags || []).slice(0, 3)" :key="tag" class="card-tag">
-            {{ tag }}
-          </span>
+          <TagChip
+            v-for="tag in normalizedTags.slice(0, 3)"
+            :key="typeof tag === 'string' ? tag : tag.key"
+            :tag="tag"
+          />
         </div>
         <div class="card-bottom-meta">
           <span class="rating">⭐ {{ comic.rating || '5.0' }}</span>
@@ -196,18 +249,15 @@ const handleCardClick = () => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* ============================================================== */
-/* 🪪 EHViewer 经典名片模式 (Compact) */
-/* ============================================================== */
+/* 名片模式 (Compact) */
 .item-card.compact {
   display: flex;
-  height: 115px; /* 固定标准名片高度 */
+  height: 115px;
   padding: 8px;
   gap: 12px;
   box-sizing: border-box;
 }
 
-/* 1. 左侧缩略图容器 */
 .compact-thumb-box {
   position: relative;
   width: 80px;
@@ -246,7 +296,6 @@ const handleCardClick = () => {
   background-color: rgba(0, 0, 0, 0.85);
 }
 
-/* 封面上的 Tag 开关浮层提示 */
 .tag-indicator {
   position: absolute;
   bottom: 4px;
@@ -264,13 +313,12 @@ const handleCardClick = () => {
   color: #ffffff;
 }
 
-/* 2. 右侧主体内容区 */
 .compact-main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-width: 0; /* 允许 flex 子项缩小以截断文本 */
+  min-width: 0;
 }
 
 .compact-title {
@@ -285,7 +333,6 @@ const handleCardClick = () => {
   overflow: hidden;
 }
 
-/* A. 常态视图面板 */
 .compact-normal-panel {
   display: flex;
   flex-direction: column;
@@ -349,7 +396,6 @@ const handleCardClick = () => {
   border-radius: 4px;
 }
 
-/* B. 展开态：Tag 滚动面板 */
 .compact-tags-panel {
   flex: 1;
   margin-top: 4px;
@@ -365,7 +411,6 @@ const handleCardClick = () => {
   padding-right: 4px;
 }
 
-/* 细体滚动条 */
 .tags-scroll-container::-webkit-scrollbar {
   width: 4px;
 }
@@ -374,23 +419,12 @@ const handleCardClick = () => {
   border-radius: 2px;
 }
 
-.tag-chip {
-  background-color: #26262a;
-  color: #a0a0a5;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: 1px solid #333338;
-}
-
 .empty-tag-text {
   font-size: 11px;
   color: #55555a;
 }
 
-/* ============================================================== */
-/* 🎴 大卡片模式 (Card Mode) */
-/* ============================================================== */
+/* 大卡片模式 (Card Mode) */
 .item-card.card {
   display: flex;
   flex-direction: column;
@@ -437,6 +471,19 @@ const handleCardClick = () => {
   justify-content: center;
 }
 
+.card-downloaded-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  color: #4caf50;
+  background-color: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .card-pages-badge {
   position: absolute;
   bottom: 6px;
@@ -473,14 +520,6 @@ const handleCardClick = () => {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-}
-
-.card-tag {
-  background-color: #26262a;
-  color: #88888c;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
 }
 
 .card-bottom-meta {

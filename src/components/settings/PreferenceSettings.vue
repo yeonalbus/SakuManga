@@ -12,33 +12,78 @@
       </select>
     </div>
 
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启标签中文翻译</div>
-        <div class="item-subtext">版本: {{ tagCNVersion }}</div>
+    <div class="setting-item column-layout">
+      <div class="main-row">
+        <div class="item-info">
+          <div class="item-title">开启标签中文翻译</div>
+          <div class="item-subtext">版本: {{ tagCNVersion }}</div>
+        </div>
+        <div class="item-actions">
+          <button
+            class="icon-action-btn"
+            :class="{ spinning: transProgress.status === 'downloading' }"
+            title="检查更新"
+            @click="handleRefreshTagTranslation"
+          >
+            🔄
+          </button>
+          <label class="toggle-switch">
+            <input type="checkbox" v-model="enableTagCNTranslation" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
-      <div class="item-actions">
-        <button class="icon-action-btn" title="检查更新" @click="handleRefreshTagTranslation">
-          🔄
-        </button>
-        <label class="toggle-switch">
-          <input type="checkbox" v-model="enableTagCNTranslation" />
-          <span class="slider"></span>
-        </label>
+
+      <!-- 🎯 动态进度条 -->
+      <div v-if="transProgress.status === 'downloading'" class="progress-box">
+        <div class="progress-bar-bg">
+          <div
+            class="progress-bar-fill"
+            :style="{ width: transProgress.progress.toFixed(1) + '%' }"
+          ></div>
+        </div>
+        <span class="progress-text"
+          >{{ transProgress.progress.toFixed(1) }}% ({{ formatSize(transProgress.downloaded) }} /
+          {{ formatSize(transProgress.total) }})</span
+        >
       </div>
     </div>
 
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">标签补全排序规则</div>
-        <div class="item-subtext">版本: {{ tagSortVersion }}</div>
+    <!-- 2. 标签排序规则项 -->
+    <div class="setting-item column-layout">
+      <div class="main-row">
+        <div class="item-info">
+          <div class="item-title">标签补全排序规则</div>
+          <div class="item-subtext">版本: {{ tagSortVersion }}</div>
+        </div>
+        <div class="item-actions">
+          <button
+            class="icon-action-btn"
+            :class="{ spinning: sortProgress.status === 'downloading' }"
+            title="检查更新"
+            @click="handleRefreshTagSort"
+          >
+            🔄
+          </button>
+          <label class="toggle-switch">
+            <input type="checkbox" v-model="enableTagSortRules" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
-      <div class="item-actions">
-        <button class="icon-action-btn" title="检查更新" @click="handleRefreshTagSort">🔄</button>
-        <label class="toggle-switch">
-          <input type="checkbox" v-model="enableTagSortRules" />
-          <span class="slider"></span>
-        </label>
+
+      <!-- 🎯 动态进度条 -->
+      <div v-if="sortProgress.status === 'downloading'" class="progress-box">
+        <div class="progress-bar-bg">
+          <div
+            class="progress-bar-fill"
+            :style="{ width: sortProgress.progress.toFixed(1) + '%' }"
+          ></div>
+        </div>
+        <span class="progress-text"
+          >{{ sortProgress.progress.toFixed(1) }}% ({{ formatSize(sortProgress.downloaded) }} /
+          {{ formatSize(sortProgress.total) }})</span
+        >
       </div>
     </div>
 
@@ -242,19 +287,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 
 const { toast, modal } = useUI()
+const API_BASE = 'http://localhost:8080/api/v1'
 
-// 各项设置状态与默认初始值 (完全还原截图)
+// 各项设置状态与默认初始值
 const language = ref('zh-CN')
 
 const enableTagCNTranslation = ref(true)
-const tagCNVersion = ref('2026-07-29T16:16:04.000Z')
+const tagCNVersion = ref('未加载')
 
 const enableTagSortRules = ref(true)
-const tagSortVersion = ref('v2026.07.29-14')
+const tagSortVersion = ref('未加载')
+
+// 进度状态定义
+interface ProgressData {
+  status: 'idle' | 'downloading' | 'success' | 'error'
+  progress: number
+  downloaded: number
+  total: number
+  errorMsg?: string
+}
+
+const transProgress = ref<ProgressData>({ status: 'idle', progress: 0, downloaded: 0, total: 0 })
+const sortProgress = ref<ProgressData>({ status: 'idle', progress: 0, downloaded: 0, total: 0 })
+
+// 🎯 1. 增加上一次状态记录，用于防重弹窗
+const prevTransStatus = ref<string>('idle')
+const prevSortStatus = ref<string>('idle')
+
+let timer: number | null = null
+
+const formatSize = (bytes: number) => {
+  if (!bytes) return '0 B'
+  const mb = bytes / (1024 * 1024)
+  return `${mb.toFixed(2)} MB`
+}
 
 const defaultStartupMenu = ref('hot')
 const hideScrollToTopBtn = ref('scrolling_down')
@@ -274,13 +344,62 @@ const showDawnEvent = ref(true)
 const showHVEvent = ref(true)
 const useBuiltinBlocklist = ref(true)
 
-// 刷新与动作处理
-const handleRefreshTagTranslation = () => {
-  toast.info('正在检查并同步标签中文翻译数据库...')
+// 轮询下载进度
+const pollProgress = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/tags/progress`)
+    if (!res.ok) return
+
+    const data = await res.json()
+    transProgress.value = data.transProgress
+    sortProgress.value = data.sortProgress
+
+    // 🎯 2. 只有当状态从 downloading 改变时，才触发 1 次 Toast
+    if (prevTransStatus.value === 'downloading') {
+      if (transProgress.value.status === 'success') {
+        toast.success('标签翻译数据库更新完成！')
+        fetchTagEngineStatus()
+      } else if (transProgress.value.status === 'error') {
+        toast.error(`翻译库更新失败: ${transProgress.value.errorMsg || '网络超时'}`)
+      }
+    }
+    prevTransStatus.value = transProgress.value.status // 更新旧状态
+
+    if (prevSortStatus.value === 'downloading') {
+      if (sortProgress.value.status === 'success') {
+        toast.success('标签排序规则更新完成！')
+        fetchTagEngineStatus()
+      } else if (sortProgress.value.status === 'error') {
+        toast.error(`排序库更新失败: ${sortProgress.value.errorMsg || '网络超时'}`)
+      }
+    }
+    prevSortStatus.value = sortProgress.value.status // 更新旧状态
+
+    // 3. 只要有一个还在下载，就继续轮询
+    if (
+      transProgress.value.status === 'downloading' ||
+      sortProgress.value.status === 'downloading'
+    ) {
+      timer = window.setTimeout(pollProgress, 500)
+    }
+  } catch (err) {
+    console.error('获取进度失败:', err)
+  }
 }
 
-const handleRefreshTagSort = () => {
-  toast.info('正在检查并同步标签补全排序规则...')
+const fetchTagEngineStatus = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/tags/status`)
+    if (res.ok) {
+      const data = await res.json()
+      enableTagCNTranslation.value = data.enableCN
+      tagCNVersion.value = data.tagCNVersion || '尚未下载'
+      enableTagSortRules.value = data.enableSort
+      tagSortVersion.value = data.tagSortVersion || '尚未下载'
+    }
+  } catch (err) {
+    console.error('获取引擎状态失败:', err)
+  }
 }
 
 const handleBlocklistInfo = async () => {
@@ -290,6 +409,43 @@ const handleBlocklistInfo = async () => {
 const handleBlockRules = () => {
   toast.info('打开高级屏蔽规则管理抽屉')
 }
+
+// 手动更新翻译库 🔄
+const handleRefreshTagTranslation = async () => {
+  toast.info('正在检查并同步标签中文翻译数据库...')
+  prevTransStatus.value = 'downloading' // 预置状态
+  try {
+    const res = await fetch(`${API_BASE}/tags/sync/translation`, { method: 'POST' })
+    if (res.ok) {
+      pollProgress()
+    }
+  } catch (err) {
+    toast.error('触发同步失败')
+  }
+}
+
+// 手动更新排序库 🔄
+const handleRefreshTagSort = async () => {
+  toast.info('正在检查并同步标签补全排序规则...')
+  prevSortStatus.value = 'downloading' // 预置状态
+  try {
+    const res = await fetch(`${API_BASE}/tags/sync/count`, { method: 'POST' })
+    if (res.ok) {
+      pollProgress()
+    }
+  } catch (err) {
+    toast.error('触发同步失败')
+  }
+}
+
+onMounted(() => {
+  fetchTagEngineStatus()
+  pollProgress() // 进页面先查一次，防止后台正好在自动更新
+})
+
+onUnmounted(() => {
+  if (timer) clearTimeout(timer)
+})
 </script>
 
 <style scoped>
@@ -453,5 +609,61 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(20px);
   background-color: #ffffff;
+}
+
+/* 增加的进度条样式 */
+.column-layout {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 10px;
+}
+
+.main-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #121214;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.progress-bar-bg {
+  flex: 1;
+  height: 6px;
+  background-color: #2a2a2e;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff7588, #ff9800);
+  transition: width 0.2s ease;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #aaa;
+  font-family: monospace;
+}
+
+/* 旋转动画 */
+.icon-action-btn.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

@@ -21,6 +21,17 @@ function loadStorage<T>(key: string, defaultValue: T): T {
 }
 
 // --------------------------------------------------
+// 0. 类型定义 (额外扫描路径)
+// --------------------------------------------------
+export interface ExtraScanPath {
+  id: string
+  path: string
+  includeSubfolders: boolean
+  lastScanned?: number
+  comicCount?: number
+}
+
+// --------------------------------------------------
 // 1. 全局视图模式 (Card / Compact)
 // --------------------------------------------------
 export const viewMode = ref<CardViewMode>(loadStorage('app_view_mode', 'card'))
@@ -84,9 +95,23 @@ watch(
   { deep: true },
 )
 
-export const offlineComics = ref<OfflineComic[]>(
-  loadStorage('app_offline_comics', generateOfflineComics(30)),
-)
+export const offlineComics = ref<OfflineComic[]>([])
+
+export const fetchOfflineComics = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/comics/offline`)
+    if (res.ok) {
+      const rawData = await res.json()
+      // 🎯 在源头把 tags 字符串解析为真正的 JS 数组
+      offlineComics.value = rawData.map((item: any) => ({
+        ...item,
+        tags: typeof item.tags === 'string' ? JSON.parse(item.tags || '[]') : item.tags || [],
+      }))
+    }
+  } catch (err) {
+    console.error('拉取离线漫画失败:', err)
+  }
+}
 
 watch(
   offlineComics,
@@ -128,7 +153,7 @@ export const rankedOfflineComics = computed(() => {
 // --------------------------------------------------
 export const createDefaultSearchConfig = (): SearchConfig => ({
   keyword: '',
-  keywords: [], // 👈 默认空队列
+  keywords: [],
   activeCategories: [
     'Doujinshi',
     'Manga',
@@ -141,13 +166,12 @@ export const createDefaultSearchConfig = (): SearchConfig => ({
     'Asian Porn',
     'Misc',
   ],
-  minRating: 1,
+  minRating: 0,
   minPages: undefined,
   maxPages: undefined,
   onlyDownloaded: false,
 })
 
-// 🟢 在线与离线隔离的独立 Config
 export const onlineSearchConfig = ref<SearchConfig>(createDefaultSearchConfig())
 export const offlineSearchConfig = ref<SearchConfig>(createDefaultSearchConfig())
 
@@ -169,7 +193,6 @@ export const setGlobalFilters = (filters: any) => {
 // --------------------------------------------------
 // 5. 悬浮阅读清单 (Reading List Queue) - 统一状态
 // --------------------------------------------------
-
 export const onlineReadingList = ref<ComicItem[]>(loadStorage('app_online_reading_list', []))
 export const offlineReadingList = ref<ComicItem[]>(loadStorage('app_offline_reading_list', []))
 
@@ -230,11 +253,11 @@ export const getNextComicInQueue = (
 }
 
 // --------------------------------------------------
-// 🎯 全局历史记录 (History) 管理
+// 6. 全局历史记录 (History) 管理
 // --------------------------------------------------
 export interface HistoryItem {
   comic: ComicItem
-  readAt: string // 阅读时间
+  readAt: string
 }
 
 export const onlineHistoryList = ref<HistoryItem[]>(loadStorage('app_online_history', []))
@@ -256,29 +279,22 @@ watch(
   { deep: true },
 )
 
-/** 🎯 核心分流记录函数：根据 comic.source 自动写入对应历史队列 */
 export const addHistory = (comic: ComicItem) => {
   if (!comic || !comic.id) return
 
-  // 1. 判断该漫画来源于 online 还是 offline
   const targetList = comic.source === 'online' ? onlineHistoryList : offlineHistoryList
-
-  // 2. 排重（过滤掉该列表中已存在的同 ID 记录）
   targetList.value = targetList.value.filter((item) => item.comic.id !== comic.id)
 
-  // 3. 将最新浏览的作品压入对应列表的最前面（最新浏览置顶）
   targetList.value.unshift({
     comic,
     readAt: new Date().toLocaleString(),
   })
 
-  // 4. 最多保留 50 条历史记录
   if (targetList.value.length > 50) {
     targetList.value.pop()
   }
 }
 
-/** 🎯 清空指定来源的历史记录 */
 export const clearHistory = (source: 'online' | 'offline') => {
   if (source === 'online') {
     onlineHistoryList.value = []
@@ -286,3 +302,132 @@ export const clearHistory = (source: 'online' | 'offline') => {
     offlineHistoryList.value = []
   }
 }
+
+// --------------------------------------------------
+// 7. 额外的画廊扫描路径管理 (对齐 Go 后端 API)
+// --------------------------------------------------
+const API_BASE = 'http://localhost:8080/api/v1'
+
+export const scanPaths = ref<ExtraScanPath[]>([])
+
+/** 从 Go 后端拉取所有扫描路径 */
+export const fetchScanPaths = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/scan-paths`)
+    if (res.ok) {
+      scanPaths.value = await res.json()
+    }
+  } catch (err) {
+    console.error('连接 Go 后端失败，请检查 backend 服务是否启动:', err)
+  }
+}
+
+/** 添加新路径 */
+export const addScanPath = async (path: string): Promise<boolean> => {
+  try {
+    const res = await fetch(`${API_BASE}/scan-paths`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path.trim() }),
+    })
+    if (res.ok) {
+      const newPath = await res.json()
+      scanPaths.value.push(newPath)
+      return true
+    }
+  } catch (err) {
+    console.error('添加路径失败:', err)
+  }
+  return false
+}
+
+/** 切换是否包含子文件夹 */
+export const toggleSubfolders = async (id: string, includeSubfolders: boolean) => {
+  const item = scanPaths.value.find((p) => p.id === id)
+  if (item) {
+    item.includeSubfolders = includeSubfolders
+    try {
+      await fetch(`${API_BASE}/scan-paths/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeSubfolders }),
+      })
+    } catch (err) {
+      console.error('更新子文件夹状态失败:', err)
+    }
+  }
+}
+
+/** 移除指定路径 */
+export const removeScanPath = async (id: string) => {
+  scanPaths.value = scanPaths.value.filter((p) => p.id !== id)
+  try {
+    await fetch(`${API_BASE}/scan-paths/${id}`, {
+      method: 'DELETE',
+    })
+  } catch (err) {
+    console.error('删除路径失败:', err)
+  }
+}
+
+/** 触发指定路径的后端的扫描 */
+export const updateScanPathStats = async (id: string) => {
+  try {
+    const res = await fetch(`${API_BASE}/scan-paths/${id}/scan`, {
+      method: 'POST',
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const item = scanPaths.value.find((p) => p.id === id)
+      if (item) {
+        item.lastScanned = data.lastScanned
+        item.comicCount = data.comicCount
+      }
+    }
+  } catch (err) {
+    console.error('触发扫描失败:', err)
+  }
+}
+
+// --------------------------------------------------
+// 🎯 统一导出 useAppStore Hook，确保组件解构正常
+// --------------------------------------------------
+export function useAppStore() {
+  return {
+    viewMode,
+    toggleViewMode,
+    bookshelves,
+    addBookshelf,
+    removeBookshelf,
+    onlineComics,
+    offlineComics,
+    computedBookshelves,
+    recordComicClick,
+    rankedOfflineComics,
+    onlineSearchConfig,
+    offlineSearchConfig,
+    resetSearchConfig,
+    globalFilters,
+    setGlobalFilters,
+    onlineReadingList,
+    offlineReadingList,
+    toggleReadingList,
+    clearReadingList,
+    getNextComicInQueue,
+    onlineHistoryList,
+    offlineHistoryList,
+    addHistory,
+    clearHistory,
+    // 扫描路径 API
+    scanPaths,
+    fetchScanPaths,
+    addScanPath,
+    toggleSubfolders,
+    removeScanPath,
+    updateScanPathStats,
+  }
+}
+
+// --------------------------------------------------
+// 在线历史记录
+// --------------------------------------------------

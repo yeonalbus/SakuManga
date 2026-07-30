@@ -1,34 +1,70 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-// 🎯 核心引入：读取 bookshelves 以及离线清单响应状态与切换函数
 import { bookshelves, offlineReadingList, toggleReadingList } from '@/stores/appStore'
 import type { OfflineComic } from '@/types/comic'
 import { recordComicClick } from '@/stores/appStore'
+// 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
+import TagChip from '@/components/TagChip.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
 
-// 1. 模拟本地离线本子详情数据
 const comic = ref<OfflineComic>({
-  id: (route.query.id as string) || 'offline-201',
-  title: '📖 [本地扫描] 深度学习资料包作品 Vol.01',
-  coverUrl: 'https://via.placeholder.com/300x400/222225/cccccc?text=Offline+Doc',
+  id: (route.query.id as string) || '',
+  title: '加载中...',
+  coverUrl: '',
   source: 'offline',
-  category: 'Doujinshi', // 👈 补全分类字段
-  tags: ['female:nun', 'language:chinese', 'artist:hiten', 'full color', '高清解压'],
-  rating: 4.2,
-  pageCount: 142,
-  updatedAt: '2026-07-28 20:15',
-  localPath: 'D:/Comics/Collection_2026/Vol_01.zip',
-  fileSize: 184549376,
-  readCount: 18,
-  needsUpdate: false,
+  category: 'Local',
+  tags: [],
+  rating: 0,
+  pageCount: 0,
+  updatedAt: '',
+  localPath: '',
+  fileSize: 0,
+  readCount: 0,
 })
 
-// 分类颜色的映射表 (对齐 E 站经典分类色彩)
+// 向 Go 后端拉取单本漫画真实数据
+const fetchComicDetail = async () => {
+  const comicId = route.query.id as string
+  if (!comicId) return
+
+  try {
+    const res = await fetch(`http://localhost:8080/api/v1/comics/${comicId}`)
+    if (res.ok) {
+      const data = await res.json()
+      let parsedTags: string[] = []
+      if (typeof data.tags === 'string') {
+        try {
+          parsedTags = JSON.parse(data.tags)
+        } catch {
+          parsedTags = []
+        }
+      } else if (Array.isArray(data.tags)) {
+        parsedTags = data.tags
+      }
+
+      comic.value = {
+        ...data,
+        tags: parsedTags,
+      }
+      myLocalRating.value = comic.value.rating || 0
+    } else {
+      toast.error('未找到该漫画详情')
+    }
+  } catch (err) {
+    console.error('获取漫画详情失败:', err)
+    toast.error('连接后端失败')
+  }
+}
+
+onMounted(() => {
+  fetchComicDetail()
+})
+
 const getCategoryColor = (cat?: string) => {
   switch (cat) {
     case 'Doujinshi':
@@ -46,15 +82,10 @@ const getCategoryColor = (cat?: string) => {
   }
 }
 
-// --------------------------------------------------
-// 📑 本地阅读清单状态响应
-// --------------------------------------------------
-// 动态判断当前本地作品是否在离线清单中
 const isInReadingList = computed(() =>
   offlineReadingList.value.some((item) => item.id === comic.value.id),
 )
 
-// 切换加入 / 移除本地清单
 const handleAddToReadingList = () => {
   toggleReadingList(comic.value)
   if (isInReadingList.value) {
@@ -64,9 +95,6 @@ const handleAddToReadingList = () => {
   }
 }
 
-// --------------------------------------------------
-// 其他函数保持不变
-// --------------------------------------------------
 const handleBack = () => {
   if (window.history.length > 1) {
     router.back()
@@ -140,14 +168,8 @@ const isComicInShelf = (shelfId: string) => {
 
 const handleStartReading = () => {
   if (!comic.value || !comic.value.id) return
-
-  // 1) 触发 Store 中的全局数据自增（写回 LocalStorage，更新排行榜）
   recordComicClick(comic.value.id)
-
-  // 2) 实时更新当前页面组件的 readCount，让 UI 上的 "(已读 X 次)" 瞬间刷新
   comic.value.readCount = (comic.value.readCount || 0) + 1
-
-  // 3) 正式跳转进入阅读器
   router.push(`/reader?id=${comic.value.id}&source=offline`)
 }
 </script>
@@ -157,7 +179,6 @@ const handleStartReading = () => {
     <div class="top-bar">
       <button class="back-btn" @click="handleBack">‹ 返回</button>
       <div class="right-actions">
-        <!-- 🟢 动态本地阅读清单按钮 -->
         <button
           class="add-reading-btn"
           :class="{ active: isInReadingList }"
@@ -211,13 +232,14 @@ const handleStartReading = () => {
             <button class="add-tag-btn" @click="handleAddTag">➕ 添加 Tag</button>
           </div>
 
+          <!-- 🎯 替换为 TagChip 组件 + 独立删除按钮组合 -->
           <div class="tags-cloud">
-            <span v-for="(tag, idx) in comic.tags" :key="tag" class="tag-chip">
-              <span class="tag-text">{{ tag }}</span>
-              <span class="remove-tag" title="删除此标签" @click.stop="handleRemoveTag(idx)"
-                >✕</span
-              >
-            </span>
+            <div v-for="(tag, idx) in comic.tags" :key="`${tag}-${idx}`" class="detail-tag-item">
+              <TagChip :tag="tag" />
+              <span class="remove-tag" title="删除此标签" @click.stop="handleRemoveTag(idx)">
+                ✕
+              </span>
+            </div>
 
             <span v-if="!comic.tags || comic.tags.length === 0" class="empty-tag-tip">
               暂无标签，点击右上方按钮添加...
@@ -278,7 +300,7 @@ const handleStartReading = () => {
 
 .top-bar {
   display: flex;
-  justify-content: space-between; /* 两端对齐：左边放返回，右边放按钮组 */
+  justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
 }
@@ -332,7 +354,6 @@ const handleStartReading = () => {
   color: #fff;
 }
 
-/* 打分 */
 .rating-box {
   display: flex;
   align-items: center;
@@ -361,7 +382,6 @@ const handleStartReading = () => {
   font-size: 0.85rem;
 }
 
-/* 基础卡片 */
 .info-card {
   background: #1a1a1d;
   border: 1px solid #2a2a2d;
@@ -382,7 +402,6 @@ const handleStartReading = () => {
   margin: 0;
 }
 
-/* Tag 标签云样式 */
 .add-tag-btn {
   background: transparent;
   border: 1px dashed #007acc;
@@ -397,30 +416,28 @@ const handleStartReading = () => {
   background: rgba(0, 122, 204, 0.2);
 }
 
+/* 🎯 标签云与单项卡片包裹层 */
 .tags-cloud {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.tag-chip {
+.detail-tag-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(0, 122, 204, 0.15);
-  color: #007acc;
-  border: 1px solid rgba(0, 122, 204, 0.3);
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.8rem;
+  gap: 4px;
+  background-color: #242428;
+  padding-right: 6px;
+  border-radius: 4px;
 }
 
 .remove-tag {
   font-size: 0.75rem;
-  color: #888;
+  color: #777;
   cursor: pointer;
-  border-radius: 50%;
   padding: 0 2px;
+  transition: color 0.15s;
 }
 .remove-tag:hover {
   color: #ef4444;
@@ -432,7 +449,6 @@ const handleStartReading = () => {
   font-style: italic;
 }
 
-/* 文件属性网格 */
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -480,7 +496,6 @@ const handleStartReading = () => {
   margin-left: 6px;
 }
 
-/* 书架勾选列表 */
 .bookshelves-list {
   display: flex;
   flex-wrap: wrap;
@@ -514,7 +529,7 @@ const handleStartReading = () => {
 .right-actions {
   display: flex;
   align-items: center;
-  gap: 12px; /* 📑 加入清单 和 📖 继续阅读 之间的间距 */
+  gap: 12px;
 }
 
 .add-reading-btn {
@@ -535,7 +550,6 @@ const handleStartReading = () => {
   color: #007acc;
 }
 
-/* 🟢 新增：已加入本地清单的高亮状态 */
 .add-reading-btn.active {
   background-color: rgba(0, 122, 204, 0.2);
   border-color: #007acc;
@@ -543,12 +557,10 @@ const handleStartReading = () => {
   font-weight: bold;
 }
 
-/* 按钮通用基础微调 */
 .read-btn {
   flex-shrink: 0;
 }
 
-/* 分类 Badge 样式 */
 .category-wrapper {
   margin-bottom: 8px;
 }

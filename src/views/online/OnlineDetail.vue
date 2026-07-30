@@ -53,7 +53,7 @@ const fetchDetail = async () => {
   isLoading.value = true
   try {
     const res = await fetch(
-      `http://localhost:8080/api/v1/comics/online/detail?id=${gid}&token=${token}`,
+      `http://localhost:8081/api/v1/comics/online/detail?id=${gid}&token=${token}`,
     )
     const data = await res.json()
 
@@ -152,7 +152,7 @@ const handleSelectFavorite = async () => {
     const idx = parseInt(chosenIndex, 10)
     if (!isNaN(idx) && idx >= 0 && idx <= 9) {
       try {
-        const res = await fetch('http://localhost:8080/api/v1/comics/online/favorite', {
+        const res = await fetch('http://localhost:8081/api/v1/comics/online/favorite', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -188,7 +188,7 @@ const handleRemoveFavorite = async () => {
   if (!confirm) return
 
   try {
-    const res = await fetch('http://localhost:8080/api/v1/comics/online/favorite', {
+    const res = await fetch('http://localhost:8081/api/v1/comics/online/favorite', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

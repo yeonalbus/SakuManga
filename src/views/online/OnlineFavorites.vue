@@ -31,7 +31,7 @@ const fetchFavData = async () => {
   isLoading.value = true
   try {
     const res = await fetch(
-      `http://localhost:8080/api/v1/comics/online/favorites?favcat=${activeFav.value}&page=${currentPage.value}`,
+      `http://localhost:8081/api/v1/comics/online/favorites?favcat=${activeFav.value}&page=${currentPage.value}`,
     )
     const data = await res.json()
 

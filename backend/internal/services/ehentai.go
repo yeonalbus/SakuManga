@@ -375,7 +375,7 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		rawCoverURL := extractCoverURL(s)
 		proxiedCoverURL := ""
 		if rawCoverURL != "" {
-			proxiedCoverURL = "http://localhost:8080/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
+			proxiedCoverURL = "http://localhost:8081/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
 		}
 
 		// 2. 提取分类
@@ -632,7 +632,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	rawCover := extractCoverURL(doc.Find("#gd1"))
 	proxiedCover := ""
 	if rawCover != "" {
-		proxiedCover = "http://localhost:8080/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCover)
+		proxiedCover = "http://localhost:8081/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCover)
 	}
 
 	uploader := strings.TrimSpace(doc.Find("#gdn").Text())
@@ -707,7 +707,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 		previewLinks.Each(func(_ int, s *goquery.Selection) {
 			rawURL := extractPreviewImage(s)
 			if rawURL != "" {
-				proxiedURL := "http://localhost:8080/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawURL)
+				proxiedURL := "http://localhost:8081/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawURL)
 				previewPages = append(previewPages, PreviewPageDTO{
 					PageIndex: pageIdx,
 					ImageURL:  proxiedURL,
@@ -850,7 +850,7 @@ func (s *EHService) FetchPopularList(account *models.AccountSetting) ([]OnlineCo
 		rawCoverURL := extractCoverURL(s)
 		proxiedCoverURL := ""
 		if rawCoverURL != "" {
-			proxiedCoverURL = "http://localhost:8080/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
+			proxiedCoverURL = "http://localhost:8081/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
 		}
 
 		category := strings.TrimSpace(s.Find(".cs, .cn").First().Text())

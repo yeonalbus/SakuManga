@@ -108,7 +108,7 @@ const form = reactive<EAccountConfig>({
 // 2. 从后端加载已有账户配置
 const loadAccountSettings = async () => {
   try {
-    const res = await fetch('http://localhost:8080/api/v1/account/settings')
+    const res = await fetch('http://localhost:8081/api/v1/account/settings')
     const json = await res.json()
 
     if (json.isLoggedIn && json.data) {
@@ -158,7 +158,7 @@ const handleSaveCookies = async () => {
   }
 
   try {
-    const res = await fetch('http://localhost:8080/api/v1/account/settings', {
+    const res = await fetch('http://localhost:8081/api/v1/account/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -190,7 +190,7 @@ const handleLogout = async () => {
   if (!confirmed) return
 
   try {
-    await fetch('http://localhost:8080/api/v1/account/settings', {
+    await fetch('http://localhost:8081/api/v1/account/settings', {
       method: 'DELETE',
     })
     toast.success('已成功清除凭证！')

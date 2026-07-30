@@ -12,7 +12,7 @@ const isLoading = ref(true)
 const fetchPopularComics = async () => {
   isLoading.value = true
   try {
-    const res = await fetch('http://localhost:8080/api/v1/comics/online/popular')
+    const res = await fetch('http://localhost:8081/api/v1/comics/online/popular')
     const data = await res.json()
 
     if (res.ok) {

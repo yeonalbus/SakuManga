@@ -306,7 +306,7 @@ export const clearHistory = (source: 'online' | 'offline') => {
 // --------------------------------------------------
 // 7. 额外的画廊扫描路径管理 (对齐 Go 后端 API)
 // --------------------------------------------------
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = 'http://localhost:8081/api/v1'
 
 export const scanPaths = ref<ExtraScanPath[]>([])
 

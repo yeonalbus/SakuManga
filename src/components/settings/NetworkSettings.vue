@@ -75,7 +75,7 @@ import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 
 const { toast, modal } = useUI()
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = 'http://localhost:8081/api/v1'
 
 // 响应式状态绑定
 const domainFronting = ref(false)

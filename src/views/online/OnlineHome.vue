@@ -25,7 +25,7 @@ const fetchComics = async () => {
       cfg.activeCategories.forEach((cat) => query.append('categories', cat))
     }
 
-    const res = await fetch(`http://localhost:8080/api/v1/comics/online?${query.toString()}`)
+    const res = await fetch(`http://localhost:8081/api/v1/comics/online?${query.toString()}`)
     const data = await res.json()
 
     if (res.ok) {

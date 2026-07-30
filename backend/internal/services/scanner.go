@@ -65,7 +65,7 @@ func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) 
 		}
 	
 		comicID := generateID(localPath)
-		coverURL := "http://localhost:8080/api/v1/comics/" + comicID + "/cover"
+		coverURL := "http://localhost:8081/api/v1/comics/" + comicID + "/cover"
 	
 		comic := models.OfflineComic{
 			ID:           comicID,

@@ -33,7 +33,7 @@ const fetchComicDetail = async () => {
   if (!comicId) return
 
   try {
-    const res = await fetch(`http://localhost:8080/api/v1/comics/${comicId}`)
+    const res = await fetch(`http://localhost:8081/api/v1/comics/${comicId}`)
     if (res.ok) {
       const data = await res.json()
       let parsedTags: string[] = []

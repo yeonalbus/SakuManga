@@ -5,6 +5,7 @@ import { useUI } from '@/composables/useUI'
 // 🎯 核心引入：读取 bookshelves 以及离线清单响应状态与切换函数
 import { bookshelves, offlineReadingList, toggleReadingList } from '@/stores/appStore'
 import type { OfflineComic } from '@/types/comic'
+import { recordComicClick } from '@/stores/appStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +17,7 @@ const comic = ref<OfflineComic>({
   title: '📖 [本地扫描] 深度学习资料包作品 Vol.01',
   coverUrl: 'https://via.placeholder.com/300x400/222225/cccccc?text=Offline+Doc',
   source: 'offline',
+  category: 'Doujinshi', // 👈 补全分类字段
   tags: ['female:nun', 'language:chinese', 'artist:hiten', 'full color', '高清解压'],
   rating: 4.2,
   pageCount: 142,
@@ -25,6 +27,24 @@ const comic = ref<OfflineComic>({
   readCount: 18,
   needsUpdate: false,
 })
+
+// 分类颜色的映射表 (对齐 E 站经典分类色彩)
+const getCategoryColor = (cat?: string) => {
+  switch (cat) {
+    case 'Doujinshi':
+      return '#ff7588'
+    case 'Manga':
+      return '#ff9800'
+    case 'Artist CG':
+      return '#e91e63'
+    case 'Game CG':
+      return '#4caf50'
+    case 'Non-H':
+      return '#2196f3'
+    default:
+      return '#9e9e9e'
+  }
+}
 
 // --------------------------------------------------
 // 📑 本地阅读清单状态响应
@@ -119,13 +139,16 @@ const isComicInShelf = (shelfId: string) => {
 }
 
 const handleStartReading = () => {
-  router.push({
-    path: '/reader',
-    query: {
-      id: comic.value.id,
-      source: 'offline',
-    },
-  })
+  if (!comic.value || !comic.value.id) return
+
+  // 1) 触发 Store 中的全局数据自增（写回 LocalStorage，更新排行榜）
+  recordComicClick(comic.value.id)
+
+  // 2) 实时更新当前页面组件的 readCount，让 UI 上的 "(已读 X 次)" 瞬间刷新
+  comic.value.readCount = (comic.value.readCount || 0) + 1
+
+  // 3) 正式跳转进入阅读器
+  router.push(`/reader?id=${comic.value.id}&source=offline`)
 }
 </script>
 
@@ -144,7 +167,7 @@ const handleStartReading = () => {
         </button>
 
         <button class="read-btn" @click="handleStartReading">
-          📖 继续阅读 (已读 {{ comic.readCount }} 次)
+          📖 继续阅读 (已读 {{ comic.readCount || 0 }} 次)
         </button>
       </div>
     </div>
@@ -155,6 +178,15 @@ const handleStartReading = () => {
       </div>
 
       <div class="right-panel">
+        <div v-if="comic.category" class="category-wrapper">
+          <span
+            class="category-badge"
+            :style="{ backgroundColor: getCategoryColor(comic.category) }"
+          >
+            {{ comic.category }}
+          </span>
+        </div>
+
         <h1 class="title">{{ comic.title }}</h1>
 
         <div class="rating-box">
@@ -514,5 +546,22 @@ const handleStartReading = () => {
 /* 按钮通用基础微调 */
 .read-btn {
   flex-shrink: 0;
+}
+
+/* 分类 Badge 样式 */
+.category-wrapper {
+  margin-bottom: 8px;
+}
+
+.category-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 </style>

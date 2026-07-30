@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
 import { useUI } from '@/composables/useUI'
 
 const router = useRouter()
+const route = useRoute()
 const { toast } = useUI()
 
 // 输入框关键词与焦点状态
@@ -66,27 +68,18 @@ const filteredTags = computed(() => {
 // 触发搜索动作
 const triggerSearch = (queryText?: string) => {
   const finalQuery = (queryText !== undefined ? queryText : keyword.value).trim()
-  if (!finalQuery) {
-    toast.warning('请输入搜索关键词或 Tag')
-    return
-  }
-
   keyword.value = finalQuery
-  isFocused.value = false
 
-  // 记录到历史（排重并置顶）
-  searchHistory.value = [finalQuery, ...searchHistory.value.filter((h) => h !== finalQuery)].slice(
-    0,
-    10,
-  )
-  saveSearchHistory()
+  const isOffline = route.path.startsWith('/offline')
 
-  toast.info(`正在搜索：「${finalQuery}」`)
-
-  router.push({
-    path: '/online/home',
-    query: { q: finalQuery },
-  })
+  // 🟢 写入对应域的 keyword，保留分类等其他 Filter 选项不变！
+  if (isOffline) {
+    offlineSearchConfig.value.keyword = finalQuery
+    if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
+  } else {
+    onlineSearchConfig.value.keyword = finalQuery
+    if (!route.path.startsWith('/online/home')) router.push('/online/home')
+  }
 }
 
 // 删除单条历史

@@ -1,41 +1,56 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import RandomPicker from './RandomPicker.vue'
 import FilterDrawer from './FilterDrawer.vue'
 import SearchBar from './SearchBar.vue'
 import ReadingList from './ReadingList.vue'
 import { useUI } from '@/composables/useUI'
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
 
+const route = useRoute()
 const { toast } = useUI()
-
-// 1. 控制筛选抽屉显隐的响应式变量
 const isFilterOpen = ref(false)
 
-// 2. 处理筛选应用逻辑
+// 🟢 1. 动态感知当前是在线还是离线模块
+const currentScope = computed<'online' | 'offline'>(() => {
+  return route.path.startsWith('/offline') ? 'offline' : 'online'
+})
+
+// 🟢 2. 拿到当前生效的 SearchConfig 对象
+const activeSearchConfig = computed(() => {
+  return currentScope.value === 'offline' ? offlineSearchConfig.value : onlineSearchConfig.value
+})
+
+// 🟢 3. 保存筛选设置到对应的域中，不互相串味
 const handleApplyFilters = (filters: any) => {
-  console.log('应用筛选条件：', filters)
-  toast.success('筛选条件已生效')
-  // 这里后续可将 filters 写入 store 或触发全局列表刷新
+  if (currentScope.value === 'offline') {
+    Object.assign(offlineSearchConfig.value, filters)
+  } else {
+    Object.assign(onlineSearchConfig.value, filters)
+  }
+  toast.success(`[${currentScope.value === 'offline' ? '离线' : '在线'}] 筛选条件已生效`)
 }
 </script>
 
 <template>
   <header class="top-bar">
-    <!-- 1. 随机抽卡 -->
     <RandomPicker />
 
-    <!-- 2. 筛选按钮 + 抽屉组件 -->
     <button class="filter-trigger-btn" @click="isFilterOpen = true">
       <span>⚙️ 筛选</span>
     </button>
-    <FilterDrawer v-model:visible="isFilterOpen" @apply="handleApplyFilters" />
 
-    <!-- 3. 搜索栏 (自适应拉伸占满剩余空间) -->
+    <FilterDrawer
+      v-model:visible="isFilterOpen"
+      :config="activeSearchConfig"
+      @apply="handleApplyFilters"
+    />
+
     <div class="search-wrapper">
       <SearchBar />
     </div>
 
-    <!-- 4. 离线/在线阅读书架或清单 -->
     <ReadingList />
   </header>
 </template>

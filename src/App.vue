@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { viewMode, toggleViewMode } from '@/stores/viewMode'
 import ModeToggle from '@/components/ModeToggle.vue'
 import OnlineSidebar from '@/components/OnlineSidebar.vue' // 引入两个侧边栏组件
 import OfflineSidebar from '@/components/OfflineSidebar.vue' // 引入两个侧边栏组件
@@ -54,11 +53,6 @@ watch(
           <span class="group-title">⚙️ 系统</span>
           <router-link to="/downloads">下载列表</router-link>
           <router-link to="/settings">系统设置</router-link>
-          <!-- 临时放在侧边栏底部的视图切换控制块 -->
-          <span class="group-title">🛠️ 临时控制</span>
-          <button class="temp-toggle-btn" @click="toggleViewMode">
-            当前模式：{{ viewMode === 'card' ? '🎴 卡片' : '🪪 名片' }}
-          </button>
         </div>
       </nav>
     </aside>

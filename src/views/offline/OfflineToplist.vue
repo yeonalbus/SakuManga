@@ -1,24 +1,37 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ItemCard from '@/components/ItemCard.vue'
-import { generateOfflineComics } from '@/utils/mockData'
+// 🟢 1. 从 appStore 引入真实的全局离线漫画数据
+import { offlineComics } from '@/stores/appStore'
 import type { OfflineComic } from '@/types/comic'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
 }
 
-// 使用 mockData 工厂生成 25 条带阅读次数的本地高频榜单数据
-const allItems: RankedOfflineComic[] = generateOfflineComics(25).map((comic, i) => ({
-  ...comic,
-  id: `offline-rank-${i + 1}`,
-  title: `📖 [高频阅读] ${comic.title.replace(/^📖\s*\[本地扫描\]\s*/, '')}`,
-  readCount: 520 - i * 19,
-  rank: i + 1,
-}))
+// 🟢 2. 核心计算属性：根据点击/阅读次数（clickCount 或 readCount）降序排列并生成 TOP 25
+const rankedComics = computed<RankedOfflineComic[]>(() => {
+  const sorted = [...offlineComics.value].sort((a, b) => {
+    const countA = a.readCount || a.clickCount || 0
+    const countB = b.readCount || b.clickCount || 0
+    return countB - countA
+  })
 
-const topThree = computed(() => allItems.slice(0, 3))
-const restItems = computed(() => allItems.slice(3, 25))
+  // 截取前 25 名，并自动打上 1 ~ 25 名的 rank 标签
+  return sorted.slice(0, 25).map((comic, index) => ({
+    ...comic,
+    rank: index + 1,
+  }))
+})
+
+// 🟢 3. 动态派生前三名与剩余榜单
+const topThree = computed(() => rankedComics.value.slice(0, 3))
+const restItems = computed(() => rankedComics.value.slice(3, 25))
+
+// 辅助展示函数：获取漫画的实际阅读/点击次数
+const getComicReadCount = (item: OfflineComic) => {
+  return item.readCount || item.clickCount || 0
+}
 </script>
 
 <template>
@@ -29,28 +42,28 @@ const restItems = computed(() => allItems.slice(3, 25))
       <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
         <div class="podium-crown">🥈 NO.2</div>
         <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" />
-        <div class="read-count">{{ topThree[1].readCount }} 次阅读</div>
+        <div class="read-count">{{ getComicReadCount(topThree[1]) }} 次阅读</div>
       </div>
 
       <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
-        <div class="podium-crown gold">👑 NO.1 最爱本子</div>
-        <ItemCard :comic="topThree[0]" :rank="1" size="top1" mode="card" />
-        <div class="read-count gold-text">{{ topThree[0].readCount }} 次阅读</div>
+        <div class="podium-crown crown-gold">👑 NO.1</div>
+        <ItemCard :comic="topThree[0]" :rank="1" size="large" mode="card" />
+        <div class="read-count gold-text">{{ getComicReadCount(topThree[0]) }} 次阅读</div>
       </div>
 
       <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
         <div class="podium-crown">🥉 NO.3</div>
         <ItemCard :comic="topThree[2]" :rank="3" size="large" mode="card" />
-        <div class="read-count">{{ topThree[2].readCount }} 次阅读</div>
+        <div class="read-count">{{ getComicReadCount(topThree[2]) }} 次阅读</div>
       </div>
     </div>
 
-    <div class="rest-section">
+    <div v-if="restItems.length > 0" class="rest-section">
       <h3 class="section-subtitle">第 4 - 25 名</h3>
       <div class="card-grid">
         <div v-for="item in restItems" :key="item.id" class="grid-item-wrapper">
           <ItemCard :comic="item" :rank="item.rank" mode="card" />
-          <div class="sub-read-count">{{ item.readCount }} 次阅读</div>
+          <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
         </div>
       </div>
     </div>
@@ -95,12 +108,12 @@ const restItems = computed(() => allItems.slice(3, 25))
 
 .podium-crown {
   font-size: 0.85rem;
-  font-weight: bold;
+  font-weight: 600;
   color: #aaa;
   margin-bottom: 8px;
 }
 
-.podium-crown.gold {
+.crown-gold {
   color: #ffd700;
   font-size: 1rem;
 }
@@ -113,13 +126,19 @@ const restItems = computed(() => allItems.slice(3, 25))
 
 .gold-text {
   color: #ffd700;
-  font-weight: bold;
+  font-weight: 600;
+}
+
+.rest-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .section-subtitle {
-  font-size: 0.95rem;
-  color: #888;
-  margin-bottom: 12px;
+  font-size: 1.1rem;
+  color: #bbb;
+  margin: 0;
 }
 
 .card-grid {
@@ -128,10 +147,15 @@ const restItems = computed(() => allItems.slice(3, 25))
   gap: 16px;
 }
 
+.grid-item-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .sub-read-count {
-  font-size: 0.75rem;
-  color: #666;
-  text-align: right;
-  margin-top: 4px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #777;
 }
 </style>

@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
 import { generateOnlineComics, generateOfflineComics } from '@/utils/mockData'
 import type { ComicItem } from '@/types/comic'
 
 const router = useRouter()
+const route = useRoute()
 const { toast } = useUI()
 
 // 1. 弹窗显隐控制
 const isModalOpen = ref(false)
+
+watch(
+  () => route.fullPath,
+  () => {
+    isModalOpen.value = false
+  },
+)
 
 // 2. 数量控制逻辑
 const selectedCountOption = ref<1 | 4 | 8 | 'custom'>(1)

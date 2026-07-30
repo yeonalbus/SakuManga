@@ -1,62 +1,75 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch } from 'vue'
+import type { SearchConfig } from '@/types/comic'
 
 const props = defineProps<{
   visible: boolean
+  config?: SearchConfig
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', val: boolean): void
-  (e: 'apply', filters: typeof filterState): void
+  (e: 'apply', filters: Partial<SearchConfig>): void
 }>()
 
-// 1. E 站 10 大分类及其经典代表色
 interface CategoryConfig {
   key: string
   label: string
   color: string
 }
 
+// 🟢 1. 分类列表定义 (与数据源 100% 一致)
 const categories: CategoryConfig[] = [
-  { key: 'doujinshi', label: 'Doujinshi', color: '#e53935' }, // 红色
-  { key: 'manga', label: 'Manga', color: '#f57c00' }, // 橙色
-  { key: 'imageSet', label: 'Image Set', color: '#3949ab' }, // 蓝色
-  { key: 'gameCg', label: 'Game CG', color: '#2e7d32' }, // 绿色
-  { key: 'artistCg', label: 'Artist CG', color: '#cddc39' }, // 黄绿
-  { key: 'cosplay', label: 'Cosplay', color: '#8e24aa' }, // 紫色
-  { key: 'nonH', label: 'Non-H', color: '#424242' }, // 深灰
-  { key: 'asianPorn', label: 'Asian Porn', color: '#d81b60' }, // 粉红
-  { key: 'western', label: 'Western', color: '#00e676' }, // 亮绿
-  { key: 'misc', label: 'Misc', color: '#757575' }, // 灰色
+  { key: 'Doujinshi', label: 'Doujinshi', color: '#e53935' },
+  { key: 'Manga', label: 'Manga', color: '#f57c00' },
+  { key: 'Image Set', label: 'Image Set', color: '#3949ab' },
+  { key: 'Game CG', label: 'Game CG', color: '#2e7d32' },
+  { key: 'Artist CG', label: 'Artist CG', color: '#cddc39' },
+  { key: 'Cosplay', label: 'Cosplay', color: '#8e24aa' },
+  { key: 'Non-H', label: 'Non-H', color: '#424242' },
+  { key: 'Asian Porn', label: 'Asian Porn', color: '#d81b60' },
+  { key: 'Western', label: 'Western', color: '#00e676' },
+  { key: 'Misc', label: 'Misc', color: '#757575' },
 ]
 
-// 2. 响应式筛选状态表单（与 EhViewer 参数一一对应）
+// 🟢 2. 抽屉内部响应式状态
 const filterState = reactive({
-  // 选中的分类 (默认全选，或部分选中)
-  activeCategories: new Set<string>([
-    'doujinshi',
-    'manga',
-    'imageSet',
-    'gameCg',
-    'artistCg',
-    'cosplay',
-    'asianPorn',
-    'western',
-    'misc',
-  ]),
-  keyword: '',
-  language: 'Chinese',
+  keywords: [] as string[],
+  activeCategories: new Set<string>(categories.map((c) => c.key)),
+  minRating: 1,
+  minPages: undefined as number | undefined,
+  maxPages: undefined as number | undefined,
+  onlyDownloaded: false,
+  language: 'All',
   onlyRemoved: false,
   onlyTorrents: false,
-  minPages: null as number | null,
-  maxPages: null as number | null,
-  minRating: 1,
   disableLangFilter: false,
   disableUploaderFilter: false,
   disableTagFilter: false,
 })
 
-// 切换分类勾选
+// 关键词输入框的临时响应式变量
+const inputKeyword = ref('')
+
+// 🟢 3. 打开抽屉时回填当前域的 Config
+watch(
+  () => props.visible,
+  (isOpen) => {
+    if (isOpen && props.config) {
+      filterState.keywords = [...(props.config.keywords || [])]
+      filterState.activeCategories = new Set(
+        props.config.activeCategories || categories.map((c) => c.key),
+      )
+      filterState.minRating = props.config.minRating || 1
+      filterState.minPages = props.config.minPages
+      filterState.maxPages = props.config.maxPages
+      filterState.onlyDownloaded = !!props.config.onlyDownloaded
+    }
+  },
+  { immediate: true },
+)
+
+// 切换分类选中状态
 const toggleCategory = (key: string) => {
   if (filterState.activeCategories.has(key)) {
     filterState.activeCategories.delete(key)
@@ -65,53 +78,75 @@ const toggleCategory = (key: string) => {
   }
 }
 
-// 重置所有筛选参数
-const handleReset = () => {
-  filterState.activeCategories = new Set(categories.map((c) => c.key))
-  filterState.keyword = ''
-  filterState.language = 'Chinese'
-  filterState.onlyRemoved = false
-  filterState.onlyTorrents = false
-  filterState.minPages = null
-  filterState.maxPages = null
-  filterState.minRating = 1
-  filterState.disableLangFilter = false
-  filterState.disableUploaderFilter = false
-  filterState.disableTagFilter = false
+// 🟢 4. 键盘 Enter 事件逻辑：有字压入队列，框为空按 Enter 则清空队列
+const handleKeydownEnter = () => {
+  const text = inputKeyword.value.trim()
+  if (text) {
+    if (!filterState.keywords.includes(text)) {
+      filterState.keywords.push(text)
+    }
+    inputKeyword.value = ''
+  } else {
+    filterState.keywords = []
+  }
 }
 
-// 确认应用筛选
-const handleApply = () => {
-  emit('apply', { ...filterState })
-  emit('update:visible', false)
+// 🟢 5. 移除单个关键词
+const removeKeyword = (index: number) => {
+  filterState.keywords.splice(index, 1)
 }
 
 // 关闭抽屉
 const handleClose = () => {
   emit('update:visible', false)
 }
+
+// 重置抽屉
+const handleReset = () => {
+  inputKeyword.value = ''
+  filterState.keywords = []
+  filterState.activeCategories = new Set(categories.map((c) => c.key))
+  filterState.minRating = 1
+  filterState.minPages = undefined
+  filterState.maxPages = undefined
+  filterState.onlyDownloaded = false
+  filterState.language = 'All'
+  filterState.onlyRemoved = false
+  filterState.onlyTorrents = false
+  filterState.disableLangFilter = false
+  filterState.disableUploaderFilter = false
+  filterState.disableTagFilter = false
+}
+
+// 应用筛选条件并通知外部处理
+const handleApply = () => {
+  emit('apply', {
+    keywords: [...filterState.keywords],
+    activeCategories: Array.from(filterState.activeCategories),
+    minRating: filterState.minRating,
+    minPages: filterState.minPages,
+    maxPages: filterState.maxPages,
+    onlyDownloaded: filterState.onlyDownloaded,
+  })
+  handleClose()
+}
 </script>
 
 <template>
   <Teleport to="body">
-    <!-- 1. 暗色遮罩背景 -->
     <Transition name="fade">
       <div v-if="visible" class="filter-backdrop" @click="handleClose"></div>
     </Transition>
 
-    <!-- 2. 筛选抽屉面板 -->
     <Transition name="slide">
       <div v-if="visible" class="filter-drawer">
-        <!-- 顶栏：重置、标题与确认 -->
         <div class="drawer-header">
           <button class="icon-btn" title="重置筛选" @click="handleReset">🔄</button>
           <h2 class="drawer-title">筛选</h2>
           <button class="icon-btn apply-btn" title="完成" @click="handleApply">✓</button>
         </div>
 
-        <!-- 滚动主内容区 -->
         <div class="drawer-body">
-          <!-- A. E 站 10 色分类 2 行 5 列网格切块 -->
           <div class="category-grid">
             <button
               v-for="cat in categories"
@@ -128,18 +163,37 @@ const handleClose = () => {
             </button>
           </div>
 
-          <!-- B. 关键词输入框 -->
           <div class="form-group">
-            <label class="input-label">关键词</label>
+            <label class="input-label">
+              关键词过滤队列
+              <span class="tip-text">(Enter 压入，框为空按 Enter 清空)</span>
+            </label>
+
+            <div
+              v-if="filterState.keywords && filterState.keywords.length > 0"
+              class="keyword-chips-wrapper"
+            >
+              <span
+                v-for="(kw, index) in filterState.keywords"
+                :key="kw + index"
+                class="filter-kw-chip"
+              >
+                <span class="kw-text">{{ kw }}</span>
+                <span class="remove-x" title="删除此关键词" @click.stop="removeKeyword(index)">
+                  ✕
+                </span>
+              </span>
+            </div>
+
             <input
-              v-model="filterState.keyword"
+              v-model="inputKeyword"
               type="text"
               class="dark-input"
-              placeholder="输入追加筛选关键词..."
+              placeholder="输入关键词后按 Enter 压入队列..."
+              @keydown.enter.prevent="handleKeydownEnter"
             />
           </div>
 
-          <!-- C. 语言下拉选择器 -->
           <div class="form-row">
             <span class="row-label">语言</span>
             <select v-model="filterState.language" class="dark-select">
@@ -150,7 +204,6 @@ const handleClose = () => {
             </select>
           </div>
 
-          <!-- D. 仅搜索移除了的画廊 (开关) -->
           <div class="form-row">
             <span class="row-label">仅搜索移除了的画廊</span>
             <label class="toggle-switch">
@@ -159,7 +212,6 @@ const handleClose = () => {
             </label>
           </div>
 
-          <!-- E. 只显示有种子的画廊 (开关) -->
           <div class="form-row">
             <span class="row-label">只显示有种子的画廊</span>
             <label class="toggle-switch">
@@ -168,9 +220,8 @@ const handleClose = () => {
             </label>
           </div>
 
-          <!-- F. 页数范围范围框 -->
           <div class="form-row">
-            <span class="row-label">页数范围 ❓</span>
+            <span class="row-label">页数范围</span>
             <div class="page-range-box">
               <input
                 v-model.number="filterState.minPages"
@@ -188,7 +239,6 @@ const handleClose = () => {
             </div>
           </div>
 
-          <!-- G. 最低评分下拉框 -->
           <div class="form-row">
             <span class="row-label">最低评分</span>
             <select v-model="filterState.minRating" class="dark-select mini">
@@ -200,7 +250,6 @@ const handleClose = () => {
             </select>
           </div>
 
-          <!-- H. 过滤器开关三连 -->
           <div class="form-row">
             <span class="row-label">禁用语言过滤</span>
             <label class="toggle-switch">
@@ -291,7 +340,7 @@ const handleClose = () => {
   color: #10b981;
 }
 
-/* 滚动区 */
+/* 滚动主区 */
 .drawer-body {
   flex: 1;
   overflow-y: auto;
@@ -301,7 +350,7 @@ const handleClose = () => {
   gap: 20px;
 }
 
-/* 10 色分类网格 (2 列等宽) */
+/* 分类网格 */
 .category-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -324,7 +373,7 @@ const handleClose = () => {
   opacity: 0.5;
 }
 
-/* 表单与输入框 */
+/* 表单组 */
 .form-group {
   display: flex;
   flex-direction: column;
@@ -334,6 +383,49 @@ const handleClose = () => {
 .input-label {
   font-size: 0.85rem;
   color: #888;
+}
+
+.tip-text {
+  font-size: 0.72rem;
+  color: #66666c;
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+/* 多关键词队列气泡盒 */
+.keyword-chips-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 6px;
+  background-color: #1a1a1d;
+  border-radius: 6px;
+  border: 1px dashed #3a3a3d;
+}
+
+.filter-kw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #2b2b30;
+  border: 1px solid #44444a;
+  color: #ff7588;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.remove-x {
+  color: #88888c;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.remove-x:hover {
+  color: #ffffff;
 }
 
 .dark-input {
@@ -351,7 +443,7 @@ const handleClose = () => {
   border-bottom-color: #007acc;
 }
 
-/* 行打布与下拉框 */
+/* 表单行 */
 .form-row {
   display: flex;
   justify-content: space-between;
@@ -374,7 +466,6 @@ const handleClose = () => {
   width: 80px;
 }
 
-/* 页数范围输入 */
 .page-range-box {
   display: flex;
   align-items: center;
@@ -398,7 +489,7 @@ const handleClose = () => {
   color: #888;
 }
 
-/* 开关 Toggle Switch 样式 (经典紫色风格) */
+/* 开关 Toggle Switch */
 .toggle-switch {
   position: relative;
   display: inline-block;
@@ -436,12 +527,13 @@ const handleClose = () => {
 input:checked + .slider {
   background-color: rgba(124, 77, 255, 0.3);
 }
+
 input:checked + .slider:before {
   transform: translateX(20px);
-  background-color: #7c4dff; /* 经典 EhViewer 紫色活开关 */
+  background-color: #7c4dff;
 }
 
-/* 动画效果 */
+/* 动画过渡 */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.25s;

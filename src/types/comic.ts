@@ -23,6 +23,7 @@ export interface BaseComic {
   pageCount?: number // 总页数
   updatedAt: string // 更新/扫描时间
   isDownloaded?: boolean // 是否已下载到本地（全局绿标）
+  clickCount?: number // 👈 新增：记录点击/阅读总次数（用于排行榜排序）
 }
 
 /** 在线漫画特有属性 (如 E-Hentai 收藏、热门等) */
@@ -38,6 +39,7 @@ export interface OnlineComic extends BaseComic {
 /** 本地离线漫画特有属性 (如 本地书架、书目维护等) */
 export interface OfflineComic extends BaseComic {
   source: 'offline'
+  category?: string
   localPath: string // 本地存储绝对/相对路径
   fileSize?: number // 文件大小 (bytes)
   readCount?: number // 本地阅读次数 (用于 OfflineToplist)
@@ -108,4 +110,17 @@ export interface PaginationState {
   pageSize: number
   totalItems: number
   totalPages: number
+}
+
+// --------------------------------------------------
+// 🎯 搜索与筛选大一统配置契约 (参考 JHentai/E-Hentai)
+// --------------------------------------------------
+export interface SearchConfig {
+  keyword: string // 搜索关键词 (来自于 SearchBar)
+  keywords: string[] // 👈 筛选抽屉内部的“多关键词过滤队列”
+  activeCategories: string[] // 允许展示的分类列表 (如 ['Doujinshi', 'Manga'])
+  minRating: number // 最低评分要求 (1 ~ 5)
+  minPages?: number // 最少页数
+  maxPages?: number // 最多页数
+  onlyDownloaded?: boolean // 是否仅看已下载作品
 }

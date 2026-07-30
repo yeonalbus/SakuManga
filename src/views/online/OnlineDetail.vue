@@ -5,6 +5,7 @@ import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 // 🎯 核心引入：读取全局在线清单与切换函数
 import { onlineReadingList, toggleReadingList } from '@/stores/appStore'
+import { addHistory, recordComicClick } from '@/stores/appStore'
 
 const route = useRoute()
 const router = useRouter()

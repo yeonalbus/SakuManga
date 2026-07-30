@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic } from '@/types/comic'
+import { addHistory } from '@/stores/appStore' // 🟢 引入历史记录函数
 
 interface RankedComicItem extends ComicItem {
   rank?: number
@@ -16,129 +17,161 @@ const props = defineProps<{
 
 const router = useRouter()
 
+// 🟢 核心交互状态：是否展开 Tag 面板 (点击封面图切换)
+const showTags = ref(false)
+
+const toggleTags = () => {
+  showTags.value = !showTags.value
+}
+
+// 当前生效的展示模式 (默认为全局 viewMode，可被 prop 覆盖)
 const currentMode = computed(() => props.mode || viewMode.value)
 
 // --------------------------------------------------
-// 卡片点击跳转函数
+// 1. 分类 (Category) 经典 E 站调色盘映射
+// --------------------------------------------------
+const categoryColors: Record<string, string> = {
+  Doujinshi: '#ff7588',
+  Manga: '#ff9800',
+  'Artist CG': '#e91e63',
+  'Game CG': '#4caf50',
+  Western: '#8bc34a',
+  'Non-H': '#2196f3',
+  'Image Set': '#3f51b5',
+  Cosplay: '#9c27b0',
+  'Asian Porn': '#9e9e9e',
+  Misc: '#607d8b',
+}
+
+const getCategoryColor = (cat?: string) => {
+  if (!cat) return '#607d8b'
+  return categoryColors[cat] || '#607d8b'
+}
+
+// --------------------------------------------------
+// 2. 经典 Fav 0 ~ 9 调色盘 (在线收藏夹)
+// --------------------------------------------------
+const favColors: Record<number, string> = {
+  0: '#7f7f7f',
+  1: '#f00000',
+  2: '#ff7800',
+  3: '#cbb000',
+  4: '#00a000',
+  5: '#00a0c0',
+  6: '#0000f0',
+  7: '#a000a0',
+  8: '#505050',
+  9: '#000000',
+}
+
+const onlineComic = computed(() => {
+  return props.comic.source === 'online' ? (props.comic as OnlineComic) : null
+})
+
+// --------------------------------------------------
+// 3. 点击卡片主体（封面图除外）跳转详情页
 // --------------------------------------------------
 const handleCardClick = () => {
   if (!props.comic || !props.comic.id) return
-
-  // 根据 source 自动区分跳转至在线还是离线详情页，并携带 id 参数
+  addHistory(props.comic)
   if (props.comic.source === 'online') {
     router.push(`/online/detail?id=${props.comic.id}`)
   } else {
     router.push(`/offline/detail?id=${props.comic.id}`)
   }
 }
-
-// --------------------------------------------------
-// 1. E-Hentai 经典 Fav 0 ~ Fav 9 10 色调色盘
-// --------------------------------------------------
-const favColors: Record<number, string> = {
-  0: '#7f7f7f', // Fav 0: 灰色/深灰 (深色模式下用 7f7f7f)
-  1: '#f00000', // Fav 1: 红色
-  2: '#ff7800', // Fav 2: 橙色
-  3: '#f0d000', // Fav 3: 黄色
-  4: '#00a000', // Fav 4: 绿色
-  5: '#98e020', // Fav 5: 浅绿
-  6: '#00a0a0', // Fav 6: 青色
-  7: '#0000f0', // Fav 7: 蓝色
-  8: '#a000a0', // Fav 8: 紫色
-  9: '#f000a0', // Fav 9: 粉色
-}
-
-// 计算当前画框颜色（只有 isFavorite 为 true 且有 favIndex 时触发）
-const favoriteBorderColor = computed(() => {
-  const onlineComic = props.comic as OnlineComic
-  if (onlineComic.isFavorite && onlineComic.favIndex !== undefined) {
-    return favColors[onlineComic.favIndex] || '#007acc'
-  }
-  return null
-})
-
-// 显示标签截断
-const displayTags = computed(() => props.comic.tags?.slice(0, 4) || [])
 </script>
 
 <template>
-  <div
-    v-if="comic"
-    class="item-card"
-    :class="[
-      currentMode,
-      size || 'normal',
-      { 'has-rank': comic.rank, 'is-fav': favoriteBorderColor },
-    ]"
-    :style="
-      favoriteBorderColor
-        ? { borderColor: favoriteBorderColor, boxShadow: `0 0 8px ${favoriteBorderColor}40` }
-        : {}
-    "
-    @click="handleCardClick"
-  >
-    <div v-if="comic.rank" class="rank-badge" :class="`rank-${comic.rank}`">
-      {{ comic.rank }}
-    </div>
-
+  <div class="item-card" :class="[currentMode, size || 'normal']" @click="handleCardClick">
     <template v-if="currentMode === 'compact'">
-      <div class="compact-cover">
-        <img :src="comic.coverUrl" :alt="comic.title" class="cover-img" />
+      <div
+        class="compact-thumb-box"
+        @click.stop="toggleTags"
+        :title="showTags ? '点击收起 Tag' : '点击查看完整 Tag 列表'"
+      >
+        <img :src="comic.coverUrl" :alt="comic.title" class="thumb-img" loading="lazy" />
+
+        <span v-if="comic.rank" class="rank-badge" :class="{ 'top-3': comic.rank <= 3 }">
+          #{{ comic.rank }}
+        </span>
+
+        <span class="tag-indicator" :class="{ active: showTags }">
+          {{ showTags ? '▲ 隐' : '🏷️ Tag' }}
+        </span>
       </div>
 
-      <div class="compact-info">
-        <h4 class="info-title" :title="comic.title">
-          {{ comic.title || '未命名作品' }}
+      <div class="compact-main-content">
+        <h4 class="compact-title" :title="comic.title">
+          {{ comic.title }}
         </h4>
 
-        <div class="info-meta-line">
-          <span v-if="comic.rating" class="rating">⭐ {{ comic.rating }}</span>
-          <span v-if="comic.source === 'online'" class="uploader">{{
-            (comic as OnlineComic).uploader || '匿名'
-          }}</span>
-          <span v-if="comic.pageCount" class="pages">{{ comic.pageCount }}P</span>
+        <div v-if="!showTags" class="compact-normal-panel">
+          <div class="meta-row">
+            <span class="cat-badge" :style="{ backgroundColor: getCategoryColor(comic.category) }">
+              {{ comic.category || (comic.source === 'online' ? 'Doujinshi' : 'Local') }}
+            </span>
+
+            <span
+              v-if="onlineComic?.isFavorite && onlineComic.favIndex !== undefined"
+              class="fav-dot"
+              :style="{ backgroundColor: favColors[onlineComic.favIndex] || '#7f7f7f' }"
+            >
+              ★
+            </span>
+
+            <span v-if="comic.rating" class="rating-text">⭐ {{ comic.rating }}</span>
+
+            <span class="pages-text">{{ comic.pageCount || 0 }} 页</span>
+
+            <span class="date-text">{{ comic.updatedAt }}</span>
+          </div>
+
+          <div class="status-row">
+            <span v-if="comic.isDownloaded" class="downloaded-badge"> ✓ 已下载 </span>
+          </div>
         </div>
 
-        <div class="info-tags-area">
-          <span v-for="tag in displayTags" :key="tag" class="tag-pill">{{ tag }}</span>
-          <span v-if="comic.tags && comic.tags.length > 4" class="tag-more">...</span>
-
-          <span v-if="comic.isDownloaded" class="downloaded-badge compact-dl"> ✓ 已下载 </span>
+        <div v-else class="compact-tags-panel" @click.stop>
+          <div class="tags-scroll-container">
+            <span v-for="tag in comic.tags" :key="tag" class="tag-chip">
+              {{ tag }}
+            </span>
+            <span v-if="!comic.tags || comic.tags.length === 0" class="empty-tag-text">
+              暂无标签
+            </span>
+          </div>
         </div>
-      </div>
-
-      <div class="compact-side-meta">
-        <span class="side-date">{{ comic.updatedAt || '--' }}</span>
-        <span
-          v-if="comic.source === 'online' && (comic as OnlineComic).category"
-          class="side-category"
-        >
-          {{ (comic as OnlineComic).category }}
-        </span>
       </div>
     </template>
 
-    <template v-if="currentMode === 'card'">
+    <template v-else>
       <div class="card-cover-wrapper">
-        <img :src="comic.coverUrl" :alt="comic.title" class="cover-img" />
-
-        <span v-if="comic.isDownloaded" class="downloaded-badge card-dl"> ✓ 已下载 </span>
-
-        <span v-if="comic.pageCount" class="floating-pages">{{ comic.pageCount }}P</span>
+        <img :src="comic.coverUrl" :alt="comic.title" class="cover-img" loading="lazy" />
+        <span class="card-cat-badge" :style="{ backgroundColor: getCategoryColor(comic.category) }">
+          {{ comic.category || 'Manga' }}
+        </span>
+        <span
+          v-if="onlineComic?.isFavorite && onlineComic.favIndex !== undefined"
+          class="card-fav-badge"
+          :style="{ backgroundColor: favColors[onlineComic.favIndex] || '#7f7f7f' }"
+        >
+          ★
+        </span>
+        <span class="card-pages-badge">{{ comic.pageCount || 0 }}P</span>
       </div>
 
       <div class="card-info-footer">
-        <h4 class="info-title" :title="comic.title">
-          {{ comic.title || '未命名作品' }}
-        </h4>
-
-        <div class="info-meta-line">
-          <span v-if="comic.rating" class="rating">⭐ {{ comic.rating }}</span>
-          <span
-            v-if="comic.source === 'online' && (comic as OnlineComic).category"
-            class="category-text"
-          >
-            {{ (comic as OnlineComic).category }}
+        <h4 class="card-title" :title="comic.title">{{ comic.title }}</h4>
+        <div class="card-tags-row">
+          <span v-for="tag in (comic.tags || []).slice(0, 3)" :key="tag" class="card-tag">
+            {{ tag }}
+          </span>
+        </div>
+        <div class="card-bottom-meta">
+          <span class="rating">⭐ {{ comic.rating || '5.0' }}</span>
+          <span class="source-tag" :class="comic.source">
+            {{ comic.source === 'online' ? '在线' : '本地' }}
           </span>
         </div>
       </div>
@@ -147,21 +180,229 @@ const displayTags = computed(() => props.comic.tags?.slice(0, 4) || [])
 </template>
 
 <style scoped>
-/* ─── 基础卡片 ─── */
 .item-card {
-  position: relative;
-  background-color: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  border-radius: 6px;
-  overflow: hidden;
+  background-color: #1a1a1e;
+  border: 1px solid #26262a;
+  border-radius: 8px;
   cursor: pointer;
   user-select: none;
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .item-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 122, 204, 0.3);
+  background-color: #222226;
+  border-color: #38383e;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================================== */
+/* 🪪 EHViewer 经典名片模式 (Compact) */
+/* ============================================================== */
+.item-card.compact {
+  display: flex;
+  height: 115px; /* 固定标准名片高度 */
+  padding: 8px;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+/* 1. 左侧缩略图容器 */
+.compact-thumb-box {
+  position: relative;
+  width: 80px;
+  height: 100%;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: #121214;
+}
+
+.thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.compact-thumb-box:hover .thumb-img {
+  transform: scale(1.05);
+}
+
+.rank-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #a0a0a5;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.rank-badge.top-3 {
+  color: #ffd700;
+  background-color: rgba(0, 0, 0, 0.85);
+}
+
+/* 封面上的 Tag 开关浮层提示 */
+.tag-indicator {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #d0d0d0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+.tag-indicator.active {
+  background-color: #ff7588;
+  color: #ffffff;
+}
+
+/* 2. 右侧主体内容区 */
+.compact-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0; /* 允许 flex 子项缩小以截断文本 */
+}
+
+.compact-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A. 常态视图面板 */
+.compact-normal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #88888c;
+  flex-wrap: wrap;
+}
+
+.cat-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.fav-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 9px;
+}
+
+.rating-text {
+  color: #ffb74d;
+}
+
+.pages-text,
+.date-text {
+  color: #77777c;
+  font-size: 11px;
+}
+
+.status-row {
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.downloaded-badge {
+  display: inline-block;
+  color: #4caf50;
+  background-color: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* B. 展开态：Tag 滚动面板 */
+.compact-tags-panel {
+  flex: 1;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.tags-scroll-container {
+  max-height: 52px;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+/* 细体滚动条 */
+.tags-scroll-container::-webkit-scrollbar {
+  width: 4px;
+}
+.tags-scroll-container::-webkit-scrollbar-thumb {
+  background-color: #38383e;
+  border-radius: 2px;
+}
+
+.tag-chip {
+  background-color: #26262a;
+  color: #a0a0a5;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #333338;
+}
+
+.empty-tag-text {
+  font-size: 11px;
+  color: #55555a;
+}
+
+/* ============================================================== */
+/* 🎴 大卡片模式 (Card Mode) */
+/* ============================================================== */
+.item-card.card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.card-cover-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background-color: #121214;
+  overflow: hidden;
 }
 
 .cover-img {
@@ -170,161 +411,57 @@ const displayTags = computed(() => props.comic.tags?.slice(0, 4) || [])
   object-fit: cover;
 }
 
-/* ─── 绿色「已下载」标签 ─── */
-.downloaded-badge {
-  background-color: #10b981; /* 经典 Emerald 绿 */
-  color: #ffffff;
-  font-weight: bold;
+.card-cat-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
   border-radius: 4px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
-/* 卡片右上角浮标 */
-.downloaded-badge.card-dl {
+.card-fav-badge {
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 0.7rem;
-  padding: 3px 6px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
-  z-index: 2;
-}
-
-/* 名片标签末端标 */
-.downloaded-badge.compact-dl {
-  font-size: 0.68rem;
-  padding: 2px 6px;
-  margin-left: 4px;
-}
-
-/* ─── 1. 名片布局 (compact) ─── */
-.item-card.compact {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 8px;
-  gap: 12px;
-  height: 105px; /* 👈 调大高度 */
-}
-
-.compact-cover {
-  width: 70px;
-  height: 100%;
-  border-radius: 4px;
-  overflow: hidden;
-  flex-shrink: 0;
-  background-color: #222;
-}
-
-.compact-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  height: 100%;
-  overflow: hidden;
-}
-
-.compact-info .info-title {
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: #fff;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.info-meta-line {
-  display: flex;
-  gap: 10px;
-  font-size: 0.75rem;
-  color: #888;
-}
-
-.rating {
-  color: #ffc107;
-}
-
-.info-tags-area {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 10px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  max-height: 26px;
-  overflow: hidden;
+  justify-content: center;
 }
 
-.tag-pill {
-  font-size: 0.7rem;
-  padding: 1px 6px;
-  border-radius: 12px;
-  background-color: rgba(0, 122, 204, 0.12);
-  color: #007acc;
-  border: 1px solid rgba(0, 122, 204, 0.25);
-  white-space: nowrap;
-}
-
-.compact-side-meta {
-  width: 90px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-end;
-  height: 100%;
-  font-size: 0.75rem;
-  color: #666;
-  flex-shrink: 0;
-  border-left: 1px solid #2a2a2a;
-  padding-left: 10px;
-}
-
-.side-category {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background-color: #2a2a2d;
-  color: #aaa;
-}
-
-/* ─── 2. 卡片布局 (card) ─── */
-.item-card.card {
-  display: flex;
-  flex-direction: column;
-}
-
-.card-cover-wrapper {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 3 / 4;
-  background-color: #222;
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.floating-pages {
+.card-pages-badge {
   position: absolute;
   bottom: 6px;
   right: 6px;
   background-color: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 0.7rem;
-  padding: 1px 6px;
-  border-radius: 4px;
+  color: #ffffff;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
 .card-info-footer {
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  flex: 1;
 }
 
-.card-info-footer .info-title {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: #fff;
+.card-title {
   margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -332,42 +469,34 @@ const displayTags = computed(() => props.comic.tags?.slice(0, 4) || [])
   line-height: 1.3;
 }
 
-.category-text {
-  color: #888;
-}
-
-/* ─── 排行角标 ─── */
-.rank-badge {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  width: 22px;
-  height: 22px;
-  background: rgba(0, 0, 0, 0.85);
-  border-radius: 4px;
-  color: #fff;
+.card-tags-row {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  font-weight: bold;
-  z-index: 3;
-  border: 1px solid #444;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
-.rank-badge.rank-1 {
-  background-color: #ffd700;
-  color: #000;
-  border-color: #ffd700;
+.card-tag {
+  background-color: #26262a;
+  color: #88888c;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
-.rank-badge.rank-2 {
-  background-color: #c0c0c0;
-  color: #000;
-  border-color: #c0c0c0;
+
+.card-bottom-meta {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #66666c;
 }
-.rank-badge.rank-3 {
-  background-color: #b08d57;
-  color: #000;
-  border-color: #b08d57;
+
+.source-tag.online {
+  color: #a891e3;
+}
+
+.source-tag.offline {
+  color: #ff7588;
 }
 </style>

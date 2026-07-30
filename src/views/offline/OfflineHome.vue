@@ -1,32 +1,78 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
-import { generateOfflineComics } from '@/utils/mockData'
-import type { OfflineComic } from '@/types/comic'
+// 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
+import { offlineComics, offlineSearchConfig } from '@/stores/appStore'
 
-// 1. 生成 192 条本地离线作品数据（刚好 8 页，每页 24 条）
-const allOfflineComics = ref<OfflineComic[]>(generateOfflineComics(192))
+const route = useRoute()
 
-// 2. 分页控制逻辑
-const pageSize = 24
+// 🟢 2. 核心过滤管道：兼顾 URL 中的 ?q= 搜索词 与 TopBar 传进来的离线筛选配置 (求交集)
+const filteredComics = computed(() => {
+  const cfg = offlineSearchConfig.value
+  const searchBarKw = (cfg.keyword || '').toLowerCase().trim()
+
+  return offlineComics.value.filter((comic) => {
+    // 关卡 1：顶栏 SearchBar 的主搜索词匹配
+    if (searchBarKw) {
+      const matchTitle = comic.title.toLowerCase().includes(searchBarKw)
+      const matchTag = comic.tags?.some((t) => t.toLowerCase().includes(searchBarKw))
+      if (!matchTitle && !matchTag) return false
+    }
+
+    // 🟢 关卡 2：筛选抽屉中的“多关键词队列”过滤 (必须同时匹配队列里的每一个词)
+    if (cfg.keywords && cfg.keywords.length > 0) {
+      const allMatched = cfg.keywords.every((filterKw) => {
+        const lowerKw = filterKw.toLowerCase()
+        const matchTitle = comic.title.toLowerCase().includes(lowerKw)
+        const matchTag = comic.tags?.some((t) => t.toLowerCase().includes(lowerKw))
+        return matchTitle || matchTag
+      })
+
+      if (!allMatched) return false // 只要有一个词不满足，就过滤掉
+    }
+
+    // 关卡 3：分类匹配
+    if (cfg.activeCategories && cfg.activeCategories.length > 0) {
+      if (comic.category && !cfg.activeCategories.includes(comic.category)) {
+        return false
+      }
+    }
+
+    // 关卡 4：最低评分与页数范围...
+    if (cfg.minRating && (comic.rating || 0) < cfg.minRating) return false
+
+    return true
+  })
+})
+// 🟢 3. 分页控制逻辑
 const currentPage = ref(1)
+const pageSize = 24
 
-const totalPages = computed(() => Math.ceil(allOfflineComics.value.length / pageSize))
+// 当搜索词 (route.query.q) 或 离线筛选条件 (offlineSearchConfig) 发生变化时，自动跳回第 1 页
+watch(
+  [() => route.query.q, offlineSearchConfig],
+  () => {
+    currentPage.value = 1
+  },
+  { deep: true },
+)
 
-// 动态计算当前页切片
+const totalPages = computed(() => Math.ceil(filteredComics.value.length / pageSize) || 1)
+
 const currentPageItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  return allOfflineComics.value.slice(start, start + pageSize)
+  return filteredComics.value.slice(start, start + pageSize)
 })
 
-const handlePageChange = (page: number) => {
-  currentPage.value = page
+const handlePageChange = (newPage: number) => {
+  currentPage.value = newPage
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 </script>
 
 <template>
-  <div class="page-wrapper">
+  <div class="offline-home-view">
     <GridContainer
       :items="currentPageItems"
       :current-page="currentPage"
@@ -37,7 +83,7 @@ const handlePageChange = (page: number) => {
 </template>
 
 <style scoped>
-.page-wrapper {
+.offline-home-view {
   padding: 20px;
   min-height: 100%;
 }

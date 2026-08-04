@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, toggleReadingList, addHistory } from '@/stores/appStore'
+import { http } from '@/utils/request'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,9 +14,15 @@ const { toast, modal } = useUI()
 const activeTab = ref<'info' | 'preview' | 'comments'>('info')
 const isLoading = ref(true)
 
+// 🟢 新增：预览图分页状态控制
+const currentPreviewPage = ref(0) // 初始由 detail 接口获取 p=0
+const maxPreviewPage = ref(1) // 从后端返回获取总预览页数
+const isLoadingMorePreviews = ref(false)
+
 // 详情页扩展数据模型
 interface GalleryDetail extends OnlineComic {
   subTitle?: string
+  maxPreviewPage?: number
   previewPages: { pageIndex: number; url: string }[]
   comments: { id: number; user: string; date: string; content: string }[]
 }
@@ -40,44 +47,84 @@ const comic = ref<GalleryDetail>({
   comments: [],
 })
 
-// 1. 获取画廊真实详情
+// 1. 获取画廊真实详情 (仅抓取 p=0 基础元数据与初始预览图)
 const fetchDetail = async () => {
   const gid = route.query.id as string
   const token = route.query.token as string
 
   if (!gid || !token) {
     toast.error('画廊 ID 或 Token 参数缺失！')
+    isLoading.value = false
     return
   }
 
   isLoading.value = true
   try {
-    const res = await fetch(
-      `http://localhost:8081/api/v1/comics/online/detail?id=${gid}&token=${token}`,
-    )
-    const data = await res.json()
+    const data = await http('/comics/online/detail', {
+      params: { id: gid, token },
+    })
 
-    if (res.ok) {
-      comic.value = {
-        ...data,
-        isFavorite: !!data.isFavorite, // 强转为 boolean
-        favIndex: data.favIndex ?? 0, // 使用 ?? 空值合并运算符，避免 0 被当作 false
-        tags: data.tags || [],
-        previewPages: data.previewPages || [],
-        comments: data.comments || [],
-      }
-      addHistory(comic.value)
-    } else {
-      toast.error(data.error || '获取详情失败')
+    // 🟢 关键修补：把后端返回的 PreviewPageDTO (imageUrl) 规范化映射为前端需要的 url
+    const formattedInitialPreviews = (data.previewPages || []).map((item: any) => ({
+      pageIndex: item.pageIndex,
+      url: item.imageUrl || item.url || '',
+    }))
+
+    comic.value = {
+      ...data,
+      isFavorite: !!data.isFavorite,
+      favIndex: data.favIndex ?? 0,
+      tags: data.tags || [],
+      previewPages: formattedInitialPreviews, // 👈 使用映射后的预览图列表
+      comments: data.comments || [],
     }
-  } catch (err) {
-    toast.error('网络连接失败')
+
+    maxPreviewPage.value = data.maxPreviewPage || 1
+    currentPreviewPage.value = 0
+
+    addHistory(comic.value)
+  } catch (err: any) {
+    toast.error(err.message || '获取画廊详情失败')
   } finally {
     isLoading.value = false
   }
 }
 
-// 2. 标签按 Namespace 智能分组 (画廊标准排版)
+// 🟢 2. 新增：增量请求下一页预览图
+const handleLoadMorePreviews = async () => {
+  if (isLoadingMorePreviews.value || currentPreviewPage.value >= maxPreviewPage.value - 1) return
+
+  isLoadingMorePreviews.value = true
+  const nextPage = currentPreviewPage.value + 1
+
+  try {
+    const newPreviews = await http<any[]>('/comics/online/previews', {
+      params: {
+        id: comic.value.id,
+        token: comic.value.token,
+        page: nextPage,
+      },
+    })
+
+    if (Array.isArray(newPreviews) && newPreviews.length > 0) {
+      const baseIndex = comic.value.previewPages.length
+      // 🟢 兼容字段映射：同时适配 imageUrl 和 url
+      const formattedPreviews = newPreviews.map((item, idx) => ({
+        pageIndex: baseIndex + idx + 1,
+        url: item.imageUrl || item.url || '',
+      }))
+
+      comic.value.previewPages.push(...formattedPreviews)
+      currentPreviewPage.value = nextPage
+    }
+  } catch (err: any) {
+    toast.error(err.message || '加载更多切片失败')
+  } finally {
+    isLoadingMorePreviews.value = false
+  }
+}
+
+// 3. 标签按 Namespace 智能分组 (画廊标准排版)
 const groupedTags = computed(() => {
   const groups: Record<string, string[]> = {}
   for (const tag of comic.value.tags || []) {
@@ -93,7 +140,7 @@ const groupedTags = computed(() => {
   return groups
 })
 
-// 3. 阅读清单与动作响应
+// 4. 阅读清单与动作响应
 const isInReadingList = computed(() =>
   onlineReadingList.value.some((item) => item.id === comic.value.id),
 )
@@ -141,7 +188,7 @@ const handleStartReading = (targetPage: number = 1) => {
   })
 }
 
-// 🟢 1. 点击选择收藏夹 (0 ~ 9)
+// 点击选择收藏夹 (0 ~ 9)
 const handleSelectFavorite = async () => {
   const chosenIndex = await modal.prompt(
     '请选择收藏夹 (输入 0 ~ 9)：',
@@ -152,9 +199,8 @@ const handleSelectFavorite = async () => {
     const idx = parseInt(chosenIndex, 10)
     if (!isNaN(idx) && idx >= 0 && idx <= 9) {
       try {
-        const res = await fetch('http://localhost:8081/api/v1/comics/online/favorite', {
+        await http('/comics/online/favorite', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             gid: comic.value.id,
             token: comic.value.token,
@@ -163,16 +209,11 @@ const handleSelectFavorite = async () => {
           }),
         })
 
-        if (res.ok) {
-          comic.value.isFavorite = true
-          comic.value.favIndex = idx
-          toast.success(`已成功存入 Favorite ${idx}`)
-        } else {
-          const errData = await res.json()
-          toast.error(errData.error || '设置收藏失败')
-        }
-      } catch {
-        toast.error('网络请求失败')
+        comic.value.isFavorite = true
+        comic.value.favIndex = idx
+        toast.success(`已成功存入 Favorite ${idx}`)
+      } catch (err: any) {
+        toast.error(err.message || '设置收藏失败')
       }
     } else {
       toast.error('请输入 0 到 9 之间的数字')
@@ -180,7 +221,7 @@ const handleSelectFavorite = async () => {
   }
 }
 
-// 🟢 2. 长按取消收藏
+// 取消收藏
 const handleRemoveFavorite = async () => {
   if (!comic.value.isFavorite) return
 
@@ -188,44 +229,43 @@ const handleRemoveFavorite = async () => {
   if (!confirm) return
 
   try {
-    const res = await fetch('http://localhost:8081/api/v1/comics/online/favorite', {
+    await http('/comics/online/favorite', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         gid: comic.value.id,
         token: comic.value.token,
       }),
     })
 
-    if (res.ok) {
-      comic.value.isFavorite = false
-      toast.success('已从收藏夹移除')
-    } else {
-      const errData = await res.json()
-      toast.error(errData.error || '取消收藏失败')
-    }
-  } catch {
-    toast.error('网络请求失败')
+    comic.value.isFavorite = false
+    toast.success('已从收藏夹移除')
+  } catch (err: any) {
+    toast.error(err.message || '取消收藏失败')
   }
 }
 
-// 🟢 3. 长按判定逻辑
+// 长按判定逻辑与定时器清理
 let pressTimer: number | null = null
 let isLongPress = false
 
+const clearPressTimer = () => {
+  if (pressTimer !== null) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
+
 const handlePressStart = () => {
+  clearPressTimer()
   isLongPress = false
   pressTimer = window.setTimeout(() => {
     isLongPress = true
     handleRemoveFavorite()
-  }, 700) // 长按超过 700ms 识别为取消收藏
+  }, 700)
 }
 
 const handlePressEnd = () => {
-  if (pressTimer) {
-    clearTimeout(pressTimer)
-    pressTimer = null
-  }
+  clearPressTimer()
 }
 
 const handleFavClick = () => {
@@ -238,6 +278,10 @@ const handleFavClick = () => {
 
 onMounted(() => {
   fetchDetail()
+})
+
+onUnmounted(() => {
+  clearPressTimer()
 })
 </script>
 
@@ -270,6 +314,7 @@ onMounted(() => {
             @mouseleave="handlePressEnd"
             @touchstart="handlePressStart"
             @touchend="handlePressEnd"
+            @contextmenu.prevent
             @click="handleFavClick"
           >
             ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
@@ -301,7 +346,7 @@ onMounted(() => {
           :class="{ active: activeTab === 'preview' }"
           @click="activeTab = 'preview'"
         >
-          🖼️ 预览切片 ({{ comic.previewPages?.length || 0 }}P)
+          🖼️ 预览切片 (已载 {{ comic.previewPages?.length || 0 }} / 共 {{ comic.pageCount || 0 }}P)
         </button>
         <button
           class="tab-item"
@@ -360,15 +405,32 @@ onMounted(() => {
 
       <!-- Tab 2: 预览切片 -->
       <div v-if="activeTab === 'preview'" class="tab-content preview-tab">
-        <div v-if="comic.previewPages?.length" class="preview-grid">
-          <div
-            v-for="page in comic.previewPages"
-            :key="page.pageIndex"
-            class="preview-card"
-            @click="handleStartReading(page.pageIndex)"
-          >
-            <img :src="page.url" loading="lazy" referrerpolicy="no-referrer" />
-            <span class="page-num">P{{ page.pageIndex }}</span>
+        <div v-if="comic.previewPages?.length" class="preview-container">
+          <div class="preview-grid">
+            <div
+              v-for="page in comic.previewPages"
+              :key="page.pageIndex"
+              class="preview-card"
+              @click="handleStartReading(page.pageIndex)"
+            >
+              <img :src="page.url" loading="lazy" referrerpolicy="no-referrer" />
+              <span class="page-num">P{{ page.pageIndex }}</span>
+            </div>
+          </div>
+
+          <!-- 🟢 点击加载更多预览图按钮 -->
+          <div v-if="currentPreviewPage < maxPreviewPage - 1" class="load-more-box">
+            <button
+              class="load-more-btn"
+              :disabled="isLoadingMorePreviews"
+              @click="handleLoadMorePreviews"
+            >
+              {{
+                isLoadingMorePreviews
+                  ? '正在拉取切片...'
+                  : `点击加载更多预览图 (已加载 ${comic.previewPages.length} / 共 ${comic.pageCount} 页)`
+              }}
+            </button>
           </div>
         </div>
         <div v-else class="empty-box">暂无预览切片数据</div>
@@ -597,6 +659,12 @@ onMounted(() => {
 }
 
 /* Preview Grid */
+.preview-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
@@ -634,6 +702,36 @@ onMounted(() => {
   font-size: 0.7rem;
   border-radius: 3px;
   color: #eee;
+}
+
+/* 🟢 加载更多按钮样式 */
+.load-more-box {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 24px;
+}
+
+.load-more-btn {
+  background: #202024;
+  border: 1px solid #333338;
+  color: #007acc;
+  padding: 10px 28px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background-color: #28282e;
+  border-color: #007acc;
+  box-shadow: 0 2px 8px rgba(0, 122, 204, 0.2);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Comments */

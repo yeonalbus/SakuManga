@@ -52,8 +52,10 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"comics":      comics,
 		"totalPages":  result.TotalPages,
-		"currentPage": result.CurrentPage, // 补全当前页码返回
-		"next":        result.Next, // 🟢 吐给前端
+		"currentPage": result.CurrentPage,
+		"next":        result.Next,    // 向下游标
+		"prev":        result.Prev,    // 🟢 补上：向上游标 (解决“顶不动”的关键)
+		"hasMore":     result.HasMore, // 🟢 补上：是否有更多标记
 	})
 }
 

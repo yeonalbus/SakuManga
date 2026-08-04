@@ -20,6 +20,7 @@ type OnlineComicResult struct {
 	Comics      []OnlineComicDTO `json:"comics"`
 	TotalPages  int              `json:"totalPages"`
 	CurrentPage int              `json:"currentPage"`
+	Next        string           `json:"next,omitempty"`
 }
 
 type OnlineComicDTO struct {

@@ -101,7 +101,7 @@ func GetGlobalProxy() string {
 
 func getHTTPClient() *http.Client {
 	proxyStr := GetGlobalProxy()
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{Timeout: 30 * time.Minute}
 
 	if proxyStr != "" {
 		if u, err := url.Parse(proxyStr); err == nil {

@@ -50,8 +50,10 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 	comics := services.AttachFavoriteStates(h.db, result.Comics)
 
 	c.JSON(http.StatusOK, gin.H{
-		"comics":     comics,
-		"totalPages": result.TotalPages,
+		"comics":      comics,
+		"totalPages":  result.TotalPages,
+		"currentPage": result.CurrentPage, // 补全当前页码返回
+		"next":        result.Next, // 🟢 吐给前端
 	})
 }
 

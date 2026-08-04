@@ -53,9 +53,30 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 
 	// 发起请求
 	req, _ := http.NewRequest("GET", reqURL.String(), nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	// 🟢 1. 强制在请求完成后关闭连接，避免使用已失效的 TCP 连线池导致 EOF
+	req.Close = true
+
+	// 🟢 2. 补全完整的伪装浏览器请求头
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := client.Do(req)
+	if err == nil && resp != nil {
+		fmt.Printf("[EH-DEBUG] 发出的请求 URL: %s\n", reqURL.String())
+		fmt.Printf("[EH-DEBUG] 最终响应的 URL: %s\n", resp.Request.URL.String())
+	}
+	if err != nil && strings.Contains(err.Error(), "EOF") {
+		// 遇到 EOF 重新创建一次请求重试
+		reqRetry, _ := http.NewRequest("GET", reqURL.String(), nil)
+		reqRetry.Close = true
+		reqRetry.Header = req.Header
+		resp, err = client.Do(reqRetry)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("请求 E 站失败: %v", err)
 	}
@@ -160,10 +181,24 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 
 	totalPages := parseTotalPagesByCount(doc)
 
+	// 提取 Ex 站底部的 Next 游标（节点 ID 为 dnext）
+	nextCursor := ""
+	if dnext := doc.Find("#dnext"); dnext.Length() > 0 {
+		if href, ok := dnext.Attr("href"); ok {
+			if u, err := url.Parse(href); err == nil {
+				nextCursor = u.Query().Get("next")
+				if nextCursor == "" {
+					nextCursor = u.Query().Get("from")
+				}
+			}
+		}
+	}
+
 	return &OnlineComicResult{
 		Comics:      comics,
 		TotalPages:  totalPages,
 		CurrentPage: params.Page,
+		Next:        nextCursor, // 🟢 赋值返回
 	}, nil
 }
 

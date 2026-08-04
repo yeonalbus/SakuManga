@@ -10,17 +10,21 @@ func NewEHService() *EHService {
 // SearchParams 前端发来的搜索请求参数
 type SearchParams struct {
 	Keyword          string   `form:"keyword"`
-	Page             int      `form:"page"` // 1-based，前端第 1 页对应 E 站 p=0
-	Next             string   `form:"next"` // 支持传递 GID 游标 (可选)
+	Page             int      `form:"page"`      // 仅线下/兼容保留 (1-based)
+	Next             string   `form:"next"`      // 下一页 GID 游标 (loadMore)
+	Prev             string   `form:"prev"`      // 上一页 GID 游标 (loadBefore)
+	Seek             string   `form:"seek"`      // 按日期跳转 (格式如 "2023-05-20" 或 Unix 时间戳)
 	ActiveCategories []string `form:"categories"`
 }
 
 // OnlineComicResult 抓取结果与分页信息
 type OnlineComicResult struct {
 	Comics      []OnlineComicDTO `json:"comics"`
-	TotalPages  int              `json:"totalPages"`
-	CurrentPage int              `json:"currentPage"`
-	Next        string           `json:"next,omitempty"`
+	TotalPages  int              `json:"totalPages,omitempty"`  // 线上模式可不返回
+	CurrentPage int              `json:"currentPage,omitempty"` // 线上模式可不返回
+	Next        string           `json:"next,omitempty"`        // 下页游标锚点 GID
+	Prev        string           `json:"prev,omitempty"`        // 上页游标锚点 GID
+	HasMore     bool             `json:"hasMore"`               // 是否还能继续下滑加载
 }
 
 type OnlineComicDTO struct {

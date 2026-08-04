@@ -25,6 +25,7 @@ export interface BaseComic {
   readCount?: number // 统一：阅读/点击总次数 (替代混淆的 clickCount)
   updatedAt: string // 更新/扫描时间
   isDownloaded?: boolean // 是否已下载到本地（全局绿标）
+  rank?: number // 榜单/热门排名序号（可选）
 }
 
 /** 在线漫画特有属性 (如 E-Hentai 收藏、热门等) */
@@ -98,27 +99,41 @@ export interface HistoryRecord {
 // 5. 搜索、筛选与分页大一统契约
 // ==========================================
 
-/** 分页控件接口（配合 Pagination.vue） */
-export interface PaginationState {
+/** 线下模式：标准数字页码状态 */
+export interface OfflinePaginationState {
   currentPage: number
   pageSize: number
   totalItems: number
   totalPages: number
 }
 
+/** 线上模式：游标/流式加载状态 */
+export interface OnlineCursorState {
+  nextGid?: string // 加载下一页的游标锚点
+  prevGid?: string // 加载上一页的游标锚点
+  seek?: string // 按日期跳转的时间标识 (DateTime ISO 字符串)
+  hasMore: boolean // 是否有更多数据
+  isLoading: boolean // 是否处于加载中（用于触发 Loading 态）
+}
+
 /**
- * 搜索与筛选统一配置契约 (整合原 FilterParams 与 SearchConfig)
- * 供 FilterBar / SearchBar / Drawer 使用
+ * 搜索与筛选统一配置契约 (扩展游标与页码参数)
  */
 export interface FilterParams {
-  keyword?: string // 搜索框输入的文本
-  tags?: string[] // 选中的标签列表
-  categories?: string[] // 选中的分类列表 (支持多选，统一命名为复数)
-  source?: ComicSource // 来源限定
-  minRating?: number // 最低评分要求 (1 ~ 5)
-  minPages?: number // 最少页数
-  maxPages?: number // 最多页数
-  onlyDownloaded?: boolean // 是否仅看已下载作品
-  sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount' // 排序字段 (准确对齐 BaseComic)
-  sortOrder?: 'asc' | 'desc' // 排序顺序
+  keyword?: string
+  tags?: string[]
+  categories?: string[]
+  source?: ComicSource
+  minRating?: number
+  minPages?: number
+  maxPages?: number
+  onlyDownloaded?: boolean
+  sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount'
+  sortOrder?: 'asc' | 'desc'
+
+  // ─── 线上游标与线下页码入参 ───
+  page?: number // 线下页码
+  next?: string // 线上向下游标
+  prev?: string // 线上向上游标
+  seek?: string // 线上按日期跳转 (YYYY-MM-DD)
 }

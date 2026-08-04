@@ -32,15 +32,19 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		q.Set("f_search", params.Keyword)
 	}
 
-	// 2. 翻页逻辑兼容：优先处理游标 next，其次处理页码 p
+	// 2. 游标与日期跳转优先级逻辑
 	if params.Next != "" {
+		// 向下滑动：向下游标
 		q.Set("next", params.Next)
-	} else {
-		ehPage := params.Page - 1
-		if ehPage < 0 {
-			ehPage = 0
-		}
-		q.Set("p", strconv.Itoa(ehPage))
+	} else if params.Prev != "" {
+		// 向上滑动：向上游标
+		q.Set("prev", params.Prev)
+	} else if params.Seek != "" {
+		// 按日期跳转：填入 seek 参数 (YYYY-MM-DD)
+		q.Set("seek", params.Seek)
+	} else if params.Page > 1 {
+		// 兜底兼容传统页码
+		q.Set("p", strconv.Itoa(params.Page-1))
 	}
 
 	// 3. 分类掩码
@@ -53,25 +57,15 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 
 	// 发起请求
 	req, _ := http.NewRequest("GET", reqURL.String(), nil)
-
-	// 🟢 1. 强制在请求完成后关闭连接，避免使用已失效的 TCP 连线池导致 EOF
 	req.Close = true
 
-	// 🟢 2. 补全完整的伪装浏览器请求头
+	// 补全伪装浏览器请求头
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("Sec-Fetch-Dest", "document")
-	req.Header.Set("Sec-Fetch-Mode", "navigate")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := client.Do(req)
-	if err == nil && resp != nil {
-		fmt.Printf("[EH-DEBUG] 发出的请求 URL: %s\n", reqURL.String())
-		fmt.Printf("[EH-DEBUG] 最终响应的 URL: %s\n", resp.Request.URL.String())
-	}
 	if err != nil && strings.Contains(err.Error(), "EOF") {
-		// 遇到 EOF 重新创建一次请求重试
 		reqRetry, _ := http.NewRequest("GET", reqURL.String(), nil)
 		reqRetry.Close = true
 		reqRetry.Header = req.Header
@@ -93,6 +87,7 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 
 	var comics []OnlineComicDTO
 
+	// 解析画廊卡片
 	doc.Find("table.itg tr, div.gl1t, div.gl2t, div.gl1e, div.gl2e").Each(func(i int, s *goquery.Selection) {
 		linkNode := s.Find("a[href*='/g/']").First()
 		href, exists := linkNode.Attr("href")
@@ -181,7 +176,7 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 
 	totalPages := parseTotalPagesByCount(doc)
 
-	// 提取 Ex 站底部的 Next 游标（节点 ID 为 dnext）
+	// 🟢 提取 Next 游标 (节点 ID 为 #dnext)
 	nextCursor := ""
 	if dnext := doc.Find("#dnext"); dnext.Length() > 0 {
 		if href, ok := dnext.Attr("href"); ok {
@@ -194,14 +189,30 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		}
 	}
 
+	// 🟢 提取 Prev 游标 (节点 ID 为 #dprev)
+	prevCursor := ""
+	if dprev := doc.Find("#dprev"); dprev.Length() > 0 {
+		if href, ok := dprev.Attr("href"); ok {
+			if u, err := url.Parse(href); err == nil {
+				prevCursor = u.Query().Get("prev")
+				if prevCursor == "" {
+					prevCursor = u.Query().Get("from")
+				}
+			}
+		}
+	}
+
 	return &OnlineComicResult{
 		Comics:      comics,
 		TotalPages:  totalPages,
 		CurrentPage: params.Page,
-		Next:        nextCursor, // 🟢 赋值返回
+		Next:        nextCursor,
+		Prev:        prevCursor,
+		HasMore:     nextCursor != "", // 如果 Next 游标不为空，则认为还有下一页
 	}, nil
 }
 
+// FetchPopularList 维持原样...
 func (s *EHService) FetchPopularList(account *models.AccountSetting) ([]OnlineComicDTO, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {

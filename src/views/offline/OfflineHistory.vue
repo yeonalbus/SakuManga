@@ -1,10 +1,27 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { offlineHistoryList, clearHistory } from '@/stores/appStore'
 import GridContainer from '@/components/GridContainer.vue'
+import Pagination from '@/components/Pagination.vue'
 
 // 动态提取离线浏览过的漫画列表
 const comics = computed(() => offlineHistoryList.value.map((item) => item.comic))
+
+// 分页逻辑
+const currentPage = ref(1)
+const pageSize = 24
+
+const totalPages = computed(() => Math.ceil(comics.value.length / pageSize) || 1)
+
+const currentPageItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return comics.value.slice(start, start + pageSize)
+})
+
+const handlePageChange = (newPage: number) => {
+  currentPage.value = newPage
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
 
 const handleClear = () => {
   clearHistory('offline')
@@ -20,7 +37,18 @@ const handleClear = () => {
       </button>
     </div>
 
-    <GridContainer v-if="comics.length > 0" :items="comics" />
+    <GridContainer v-if="comics.length > 0" :items="currentPageItems">
+      <!-- 通过 #footer 插槽挂载数字分页组件 -->
+      <template #footer>
+        <Pagination
+          v-if="totalPages >= 1"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          @change="handlePageChange"
+        />
+      </template>
+    </GridContainer>
+
     <div v-else class="empty-tip">暂无本地浏览记录</div>
   </div>
 </template>

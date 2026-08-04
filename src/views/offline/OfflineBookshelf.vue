@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 // 🟢 1. 从 appStore 引入全局响应式数据 offlineComics 与 computedBookshelves
 import { offlineComics, computedBookshelves } from '@/stores/appStore'
 import GridContainer from '@/components/GridContainer.vue'
+import Pagination from '@/components/PagiNation.vue' // 👈 引入页码组件
 
 const route = useRoute()
 
@@ -68,12 +69,17 @@ const handlePageChange = (page: number) => {
       </div>
     </div>
 
-    <GridContainer
-      :items="currentPageItems"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      @page-change="handlePageChange"
-    />
+    <!-- 使用 #footer 插槽挂载页码组件 -->
+    <GridContainer :items="currentPageItems">
+      <template #footer>
+        <Pagination
+          v-if="totalPages >= 1"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          @change="handlePageChange"
+        />
+      </template>
+    </GridContainer>
   </div>
 </template>
 

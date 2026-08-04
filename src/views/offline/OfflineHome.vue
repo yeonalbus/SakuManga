@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
+import Pagination from '@/components/Pagination.vue'
 // 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
 import { offlineComics, offlineSearchConfig, fetchOfflineComics } from '@/stores/appStore'
 
@@ -60,6 +61,7 @@ const filteredComics = computed(() => {
     return true
   })
 })
+
 // 🟢 3. 分页控制逻辑
 const currentPage = ref(1)
 const pageSize = 24
@@ -88,12 +90,17 @@ const handlePageChange = (newPage: number) => {
 
 <template>
   <div class="offline-home-view">
-    <GridContainer
-      :items="currentPageItems"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      @page-change="handlePageChange"
-    />
+    <GridContainer :items="currentPageItems">
+      <!-- 通过 #footer 插槽挂载数字分页组件 -->
+      <template #footer>
+        <Pagination
+          v-if="totalPages >= 1"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          @change="handlePageChange"
+        />
+      </template>
+    </GridContainer>
   </div>
 </template>
 

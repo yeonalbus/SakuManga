@@ -1,32 +1,29 @@
 <script setup lang="ts">
 import { viewMode } from '@/stores/viewMode'
-import type { ComicItem } from '@/types/comic' // 1. 引入统一数据类型
+import type { ComicItem } from '@/types/comic'
 import ItemCard from './ItemCard.vue'
-import Pagination from './PagiNation.vue' // 2. 统一组件命名拼写
 
 defineProps<{
-  items: ComicItem[] // 3. 严格约束列表输入为 ComicItem[]
-  currentPage?: number
-  totalPages?: number
-}>()
-
-const emit = defineEmits<{
-  (e: 'page-change', page: number): void
+  items: ComicItem[]
 }>()
 </script>
 
 <template>
   <div class="grid-container-wrapper">
+    <!-- 🟢 1. 顶部扩展插槽（向上加载更多 / 较新内容） -->
+    <div v-if="$slots.header" class="grid-header">
+      <slot name="header" />
+    </div>
+
+    <!-- 2. 网格主体 -->
     <div class="card-grid" :class="viewMode">
       <ItemCard v-for="item in items" :key="item.id" :comic="item" />
     </div>
 
-    <Pagination
-      v-if="totalPages && totalPages >= 1"
-      :current-page="currentPage || 1"
-      :total-pages="totalPages"
-      @change="(page) => emit('page-change', page)"
-    />
+    <!-- 3. 底部扩展插槽 -->
+    <div v-if="$slots.footer" class="grid-footer">
+      <slot name="footer" />
+    </div>
   </div>
 </template>
 
@@ -45,14 +42,22 @@ const emit = defineEmits<{
   flex: 1;
 }
 
-/* ─── 1. 卡片模式 (card)：4 列网格 ─── */
+/* 卡片模式 (card)：4 列网格 */
 .card-grid.card {
   grid-template-columns: repeat(4, 1fr);
 }
 
-/* ─── 2. 名片模式 (compact)：2 列网格 ─── */
+/* 名片模式 (compact)：2 列网格 */
 .card-grid.compact {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+}
+
+.grid-header,
+.grid-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
 }
 </style>

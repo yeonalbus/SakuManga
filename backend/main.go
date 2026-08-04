@@ -27,9 +27,10 @@ func Cors() gin.HandlerFunc {
 func main() {
 	// 1. 初始化数据库
 	database.InitDB()
-	
-	// 👈 注意：这里将原先未定义的 db 替换为 database.DB
-	// (如果你的 database 包使用的是 database.GetDB()，请替换为 database.GetDB().AutoMigrate(...))
+
+	// 启动时加载 config.json 中的代理配置
+	services.InitProxyConfig()
+
 	database.DB.AutoMigrate(&models.AccountSetting{})
 
 	// 2. 初始化 Router
@@ -44,7 +45,7 @@ func main() {
 
 	var account models.AccountSetting
 	database.DB.First(&account, 1)
-	toplistService.StartScheduler(&account) // 👈 启动 0 点定时器
+	toplistService.StartScheduler(&account)
 
 	onlineHandler := handlers.NewOnlineComicHandler(database.DB, ehService)
 	toplistHandler := handlers.NewToplistHandler(database.DB, toplistService)
@@ -75,10 +76,10 @@ func main() {
 		api.GET("/tags/suggest", handlers.QueryTagSuggestions)
 		api.GET("/tags/progress", handlers.GetTagProgress)
 		api.GET("/tags/dictionary", handlers.GetTagDictionary)
-		
-		// 代理
-		api.GET("/network/proxy", handlers.GetProxyConfig)
-		api.POST("/network/proxy", handlers.SetProxyConfig)
+
+		// 🟢 统一代理配置接口 (使用我们重构的 services 联动 handler)
+		api.GET("/network/proxy", handlers.GetProxyHandler)
+		api.POST("/network/proxy", handlers.SetProxyHandler)
 
 		// E站账户
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
@@ -90,11 +91,13 @@ func main() {
 		api.GET("/comics/cover-proxy", onlineHandler.ProxyCover)
 		api.GET("/comics/online/popular", onlineHandler.GetOnlinePopular)
 		api.GET("/comics/online/detail", onlineHandler.GetOnlineComicDetail)
+		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)
 		api.GET("/comics/online/toplist", toplistHandler.GetToplist)
 		api.GET("/comics/online/favorites", favHandler.GetOnlineFavorites)
 		api.POST("/comics/online/favorite", favHandler.AddFavorite)
-    	api.DELETE("/comics/online/favorite", favHandler.RemoveFavorite)
+		api.DELETE("/comics/online/favorite", favHandler.RemoveFavorite)
 	}
 
-	r.Run(":8081")
+	// 显式指定监听双栈 / IPv4 0.0.0.0
+	r.Run("0.0.0.0:8081")
 }

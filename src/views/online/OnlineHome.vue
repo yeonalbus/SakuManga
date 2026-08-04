@@ -1,87 +1,63 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { watch, onMounted } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
+import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
+import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬浮球
+import { useOnlineStore } from '@/stores/onlineStore'
 import { onlineSearchConfig } from '@/stores/appStore'
-import type { OnlineComic } from '@/types/comic'
-import { http } from '@/utils/request'
 
-const comics = ref<OnlineComic[]>([])
-const currentPage = ref(1)
-const totalPages = ref(1)
-const isLoading = ref(false)
-const nextCursor = ref('')
+const onlineStore = useOnlineStore()
 
-// 发起后端请求获取数据
-const fetchComics = async () => {
-  isLoading.value = true
-  try {
-    const cfg = onlineSearchConfig.value
-
-    // 1. 构建 GET 查询参数
-    const query = new URLSearchParams({
-      page: currentPage.value.toString(),
-      keyword: cfg.keyword || '',
-    })
-
-    // 🟢 如果存在 next 游标则带上
-    if (nextCursor.value) {
-      query.append('next', nextCursor.value)
-    }
-
-    if (cfg.activeCategories && cfg.activeCategories.length > 0) {
-      cfg.activeCategories.forEach((cat) => query.append('categories', cat))
-    }
-
-    // 🟢 2. 修正：调用正确的 /comics/online 接口，并把 query 参数拼接上去
-    const data = await http<{ comics: OnlineComic[]; totalPages: number; currentPage: number }>(
-      `/comics/online?${query.toString()}`,
-    )
-
-    comics.value = data.comics || []
-    totalPages.value = data.totalPages || 1
-    nextCursor.value = data.next || '' // 🟢 保存下一页游标
-    if (data.currentPage) {
-      currentPage.value = data.currentPage
-    }
-  } catch (err) {
-    console.error('网络请求失败:', err)
-  } finally {
-    isLoading.value = false
-  }
+const initSearch = () => {
+  const cfg = onlineSearchConfig.value
+  onlineStore.fetchInitial({
+    keyword: cfg.keyword || '',
+    categories: cfg.activeCategories,
+  })
 }
 
-// 筛选条件变动时重置到第 1 页
 watch(
   onlineSearchConfig,
   () => {
-    currentPage.value = 1
-    fetchComics()
+    initSearch()
   },
   { deep: true },
 )
 
-// 响应来自 GridContainer -> Pagination 的切页事件
-const handlePageChange = (newPage: number) => {
-  currentPage.value = newPage
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-  fetchComics()
-}
-
 onMounted(() => {
-  fetchComics()
+  initSearch()
 })
 </script>
 
 <template>
   <div class="online-home-view">
-    <div v-if="isLoading" class="loading-state">加载中...</div>
-    <GridContainer
-      v-else
-      :items="comics"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      @page-change="handlePageChange"
-    />
+    <GridContainer :items="onlineStore.comics">
+      <!-- 🟢 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
+      <template #header>
+        <div v-if="onlineStore.prevGid" class="top-load-bar">
+          <button
+            class="pill-btn"
+            :disabled="onlineStore.isLoading"
+            @click="onlineStore.loadBefore"
+          >
+            ⬆️ {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
+          </button>
+        </div>
+      </template>
+
+      <!-- 2. 底部插槽：向下滑动流式加载 -->
+      <template #footer>
+        <OnlineLoadBar
+          :is-loading="onlineStore.isLoading"
+          :has-more="onlineStore.hasMore"
+          :error="onlineStore.error"
+          @load-more="onlineStore.loadMore"
+        />
+      </template>
+    </GridContainer>
+
+    <!-- 右下角悬浮操作球 -->
+    <FloatingToolbar @refresh="initSearch" @seek-change="(date) => onlineStore.seekToDate(date)" />
   </div>
 </template>
 
@@ -91,11 +67,28 @@ onMounted(() => {
   min-height: 100%;
 }
 
-.loading-state {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 300px;
-  color: #888;
+.top-load-bar {
+  padding: 8px 0;
+}
+
+.pill-btn {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #3a3a3a;
+  border-radius: 20px;
+  padding: 6px 18px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-btn:hover:not(:disabled) {
+  border-color: #00a896;
+  color: #fff;
+}
+
+.pill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

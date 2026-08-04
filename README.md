@@ -30,43 +30,25 @@
 
 # 项目结构图
 ```
-src/
-├── assets/ # 静态资源 (CSS / 图片)
-├── components/ # 可复用小组件 (卡片、弹窗、顶栏等)
-│ ├── FilterBar.vue # 筛选组件
-│ ├── GridContainer.vue # 卡片排列控制组件
-│ ├── ItemCard.vue # 卡片样式（卡片/名片）切换组件
-│ ├── ModeToggle.vue # 控制卡片切换组件
-│ ├── OfflineSidebar.vue # 离线边栏组件
-│ ├── OnlineSidebar.vue # 在线边栏组件
-│ ├── PagiNation.vue # 翻页控件（目前没测试效果）
-│ ├── RandomPicker.vue # 随机抽卡组件
-│ ├── ReadingList.vue # 阅读清单组件
-│ ├── SearchBar.vue # 搜索栏组件
-│ └── TopBar.vue # 顶栏组件（包含搜索栏，筛选，随机抽卡和阅读清单）
-├── views/ # 各个大页面
-│ ├── online/ # 在线模块页面
-│ │ ├── OnlineFavorites.vue # Ehentai收藏页面
-│ │ ├── OnlineHistory.vue # 在线历史记录
-│ │ ├── OnlineHome.vue # 在线首页
-│ │ ├── OnlineHot.vue # 在线热门
-│ │ ├── OnlineSub.vue # 在线订阅
-│ │ └── OnlineTop.vue # 在线排行榜
-│ ├── offline/ # 离线模块页面
-│ │ ├── OfflineBookcase.vue # 本地书架
-│ │ ├── OfflineHistory.vue # 本地历史记录
-│ │ ├── OfflineHome.vue # 本地首页
-│ │ ├── OfflineMaintain.vue # 本地书目维护
-│ │ ├── OfflineToplist.vue # 本地阅读次数最多排行榜
-│ │ └── OfflineUpdate.vue # 本地书目更新
-│ ├── DownloadsView.vue # 下载界面
-│ ├── NotFound.vue # 跳转页面错误占位符
-│ └── SettingsView.vue # 设置界面
-├── router/ # 路由配置
-│ └── index.js # 路由表
-├── stores/
-│ ├── counter.ts # 忘了
-│ └── viewMode.ts # 卡片模式切换
-├── App.vue # 应用主外壳
-└── main.js # 项目入口文件
+SakuHentai/
+├── backend/                # Go 后端服务
+│   ├── config.json         # 服务配置文件
+│   ├── internal/           # 核心业务逻辑 (路由、控制层、服务层)
+│   ├── main.go             # 后端程序入口
+│   └── manga.db            # SQLite 本地数据库
+├── src/                    # Vue 3 前端核心源码
+│   ├── api/                # Axios/Fetch 接口封装
+│   ├── components/         # 可复用的 UI 通用组件
+│   ├── composables/        # Vue 组合式函数 (Hooks)
+│   ├── router/             # 路由配置 (Vue Router)
+│   ├── stores/             # 全局状态管理 (Pinia)
+│   ├── views/              # 页面级组件 (各路由对应页面)
+│   ├── App.vue             # 根组件
+│   └── main.ts             # 前端入口文件
+├── 学习笔记/                # 个人开发过程中的语法与功能总结（已弃用）
+├── 计划书/                  # 前端开发排期与规划文档（已弃用）
+├── vite.config.ts          # Vite 构建与代理配置
+├── package.json            # 前端项目依赖与脚本
+├── go.mod                  # Go 模块依赖
+└── README.md               # 项目说明文档
 ```

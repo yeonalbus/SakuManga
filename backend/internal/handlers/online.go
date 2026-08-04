@@ -3,6 +3,7 @@ package handlers
 import (
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -126,13 +127,13 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 			FavCat: *detail.FavIndex,
 		}
 		h.db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "gid"}},
+			Columns:   []clause.Column{{Name: "g_id"}}, // 🟢 gid -> g_id
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&favState)
 	} else {
-		// 如果网页解析没找到（比如 E 站改版），再去查 SQLite 本地库保底
+		// 2. 修改 Where 条件中的列名
 		var favState models.FavoriteState
-		if err := h.db.Where("gid = ? AND fav_cat >= 0", gid).First(&favState).Error; err == nil {
+		if err := h.db.Where("g_id = ? AND fav_cat >= 0", gid).First(&favState).Error; err == nil { // 🟢 gid = ? -> g_id = ?
 			detail.IsFavorite = true
 			detail.FavIndex = &favState.FavCat
 		}
@@ -160,4 +161,38 @@ func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"comics": comics,
 	})
+}
+
+// GetOnlineComicPreviews 独立获取指定页码的预览图列表 (用于前端点击“加载更多”)
+func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
+	gid := c.Query("id")
+	token := c.Query("token")
+	pageStr := c.DefaultQuery("page", "1") // 默认抓第 1 页 (对应 E 站的 p=1)
+
+	if gid == "" || token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失，必需传递 id (GID) 和 token"})
+		return
+	}
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "页码格式不正确"})
+		return
+	}
+
+	// 校验 E 站账户凭证
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		return
+	}
+
+	// 调用 Service 层刚刚写好的 FetchGalleryPreviews
+	previews, err := h.ehService.FetchGalleryPreviews(&account, gid, token, page)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, previews)
 }

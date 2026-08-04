@@ -2,19 +2,22 @@
 import { ref, computed } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
-import type { ComicItem, OnlineComic } from '@/types/comic'
+import type { ComicItem, OnlineComic, CardViewMode } from '@/types/comic'
 import { addHistory } from '@/stores/appStore'
 import TagChip from '@/components/TagChip.vue'
 
-interface RankedComicItem extends ComicItem {
-  rank?: number
-}
-
-const props = defineProps<{
-  comic: RankedComicItem
-  mode?: 'card' | 'compact'
-  size?: 'large' | 'normal' | 'small'
-}>()
+// 恢复 const props 变量定义，并补回 mode 与 size
+const props = withDefaults(
+  defineProps<{
+    comic: ComicItem
+    mode?: CardViewMode
+    size?: 'large' | 'normal' | 'small'
+  }>(),
+  {
+    mode: 'card',
+    size: 'normal',
+  },
+)
 
 const router = useRouter()
 
@@ -215,11 +218,7 @@ const handleImgError = (e: Event) => {
       <div class="card-info-footer">
         <h4 class="card-title" :title="comic.title">{{ comic.title }}</h4>
         <div class="card-tags-row">
-          <TagChip
-            v-for="tag in normalizedTags.slice(0, 3)"
-            :key="typeof tag === 'string' ? tag : tag.key"
-            :tag="tag"
-          />
+          <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />
         </div>
         <div class="card-bottom-meta">
           <span class="rating">⭐ {{ comic.rating || '5.0' }}</span>

@@ -63,6 +63,11 @@ export type ComicItem = OnlineComic | OfflineComic
 export interface ComicPage {
   pageIndex: number
   imageUrl: string
+  isSprite?: boolean
+  offsetX?: number
+  offsetY?: number
+  width?: number
+  height?: number
 }
 
 export interface Chapter {

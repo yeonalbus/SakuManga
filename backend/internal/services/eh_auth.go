@@ -45,18 +45,22 @@ func (s *EHService) BuildClient(setting *models.AccountSetting) (*http.Client, e
 	for _, domainStr := range domains {
 		u, _ := url.Parse(domainStr)
 		cookies := []*http.Cookie{
-			{Name: "ipb_member_id", Value: setting.IPBMemberID, Path: "/", Domain: u.Host},
-			{Name: "ipb_pass_hash", Value: setting.IPBPassHash, Path: "/", Domain: u.Host},
+			{Name: "ipb_member_id", Value: setting.IPBMemberID, Path: "/"},
+			{Name: "ipb_pass_hash", Value: setting.IPBPassHash, Path: "/"},
+			// 🟢 直接注入 CookieJar，跟随所有重定向与后续请求
+			{Name: "inline_set", Value: "ts_l", Path: "/"},
 		}
 		if setting.Igneous != "" {
-			cookies = append(cookies, &http.Cookie{Name: "igneous", Value: setting.Igneous, Path: "/", Domain: u.Host})
+			cookies = append(cookies, &http.Cookie{Name: "igneous", Value: setting.Igneous, Path: "/"})
 		}
+
+		// 不传 Domain，由 cookiejar 根据 URL u 自动绑定作用域
 		jar.SetCookies(u, cookies)
 	}
 
 	client := &http.Client{
 		Jar:       jar,
-		Timeout:   20 * time.Second, // 放宽超时时间到 20 秒
+		Timeout:   20 * time.Second,
 		Transport: buildTransport(),
 	}
 

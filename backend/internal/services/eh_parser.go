@@ -2,6 +2,7 @@ package services
 
 import (
 	"log"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,7 +36,10 @@ func isValidCoverURL(u string) bool {
 	if u == "" {
 		return false
 	}
-	if strings.Contains(u, "clear.ad.png") || strings.Contains(u, "blank.gif") {
+	// 🟢 过滤 clear.png，防止在意外降级到 gdtm 时误判透明占位图
+	if strings.Contains(u, "clear.ad.png") || 
+	   strings.Contains(u, "clear.png") || 
+	   strings.Contains(u, "blank.gif") {
 		return false
 	}
 	return true
@@ -119,38 +123,74 @@ func parseTotalPagesByCount(doc *goquery.Document) int {
 	return 1
 }
 
-// 用于匹配 style="background: url('https://...') ..." 中的图片链接
-var cssURLRegex = regexp.MustCompile(`url\(['"]?(.*?)['"]?\)`)
+var (
+	cssBgUrlRegex   = regexp.MustCompile(`url\(['"]?(.*?)['"]?\)`)
+	// 🟢 兼容形如 "-100px 0", "-100px 0px", "-100px -130px" 的情况
+	cssOffsetRegex  = regexp.MustCompile(`-(\d+)px\s+-?(\d+)(?:px)?`)
+	cssWidthRegex   = regexp.MustCompile(`width:\s*(\d+)px`)
+	cssHeightRegex  = regexp.MustCompile(`height:\s*(\d+)px`)
+)
 
-// extractPreviewImage 兼容提取：大图优先抓 img src，小图兜底抓 style url()
-func extractPreviewImage(s *goquery.Selection) string {
-	// 1. 优先抓取 <img> 的 src 或 data-src (大图 gdtl 模式)
-	if img := s.Find("img"); img.Length() > 0 {
-		if src, ok := img.Attr("src"); ok && isValidCoverURL(src) {
-			return src
+// parsePreviewTile 统一解析入口：自动识别 gdtl (大图) 与 gdtm (雪碧图)
+func parsePreviewTile(s *goquery.Selection, index int, baseURL string) (PreviewPageDTO, bool) {
+	dto := PreviewPageDTO{
+		PageIndex: index,
+		IsSprite:  false,
+	}
+
+	// 1. 优先提取 <img> 标签的 src (gdtl 大图模式)
+	imgNode := s.Find("img")
+	if imgNode.Length() > 0 {
+		src, _ := imgNode.Attr("src")
+		if dataSrc, ok := imgNode.Attr("data-src"); ok && dataSrc != "" {
+			src = dataSrc
 		}
-		if dataSrc, ok := img.Attr("data-src"); ok && isValidCoverURL(dataSrc) {
-			return dataSrc
+		// 校验非透明占位图 (clear.png)
+		if isValidCoverURL(src) {
+			if strings.HasPrefix(src, "/") {
+				src = baseURL + src
+			}
+			dto.ImageURL = "/api/v1/comics/cover-proxy?url=" + url.QueryEscape(src)
+			return dto, true
 		}
 	}
 
-	// 2. 若当前节点本身就是 img
-	if s.Is("img") {
-		if src, ok := s.Attr("src"); ok && isValidCoverURL(src) {
-			return src
+	// 2. <img> 无效时，解析节点内联 style 属性 (gdtm 雪碧图模式)
+	style, _ := s.Attr("style")
+	if style == "" {
+		style, _ = s.Find("div[style]").Attr("style")
+	}
+
+	if style != "" {
+		if urlMatches := cssBgUrlRegex.FindStringSubmatch(style); len(urlMatches) > 1 {
+			rawURL := urlMatches[1]
+			if strings.HasPrefix(rawURL, "/") {
+				rawURL = baseURL + rawURL
+			}
+			dto.ImageURL = "/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawURL)
+
+			// 解析 X/Y 轴偏移量 (例如 style 中的 -200px 0)
+			if offsetMatches := cssOffsetRegex.FindStringSubmatch(style); len(offsetMatches) > 1 {
+				dto.IsSprite = true
+				dto.OffsetX, _ = strconv.Atoi(offsetMatches[1])
+				if len(offsetMatches) > 2 {
+					dto.OffsetY, _ = strconv.Atoi(offsetMatches[2])
+				}
+			}
+
+			// 解析单张预览图的剪裁宽高 (E 站默认小图通常为 100x130)
+			dto.Width = 100
+			dto.Height = 130
+			if wMatches := cssWidthRegex.FindStringSubmatch(style); len(wMatches) > 1 {
+				dto.Width, _ = strconv.Atoi(wMatches[1])
+			}
+			if hMatches := cssHeightRegex.FindStringSubmatch(style); len(hMatches) > 1 {
+				dto.Height, _ = strconv.Atoi(hMatches[1])
+			}
+
+			return dto, true
 		}
 	}
 
-	// 3. 兜底提取 inline style 中的 background: url(...)
-	style, exists := s.Attr("style")
-	if !exists {
-		style, exists = s.Find("div[style]").Attr("style")
-	}
-	if exists {
-		if matches := cssURLRegex.FindStringSubmatch(style); len(matches) > 1 {
-			return matches[1]
-		}
-	}
-
-	return ""
+	return dto, false
 }

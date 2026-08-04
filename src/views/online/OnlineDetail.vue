@@ -19,11 +19,21 @@ const currentPreviewPage = ref(0) // 初始由 detail 接口获取 p=0
 const maxPreviewPage = ref(1) // 从后端返回获取总预览页数
 const isLoadingMorePreviews = ref(false)
 
+interface PreviewPageItem {
+  pageIndex: number
+  url: string
+  isSprite?: boolean
+  offsetX?: number
+  offsetY?: number
+  width?: number
+  height?: number
+}
+
 // 详情页扩展数据模型
 interface GalleryDetail extends OnlineComic {
   subTitle?: string
   maxPreviewPage?: number
-  previewPages: { pageIndex: number; url: string }[]
+  previewPages: PreviewPageItem[] // 👈 使用新的接口类型
   comments: { id: number; user: string; date: string; content: string }[]
 }
 
@@ -64,10 +74,16 @@ const fetchDetail = async () => {
       params: { id: gid, token },
     })
 
-    // 🟢 关键修补：把后端返回的 PreviewPageDTO (imageUrl) 规范化映射为前端需要的 url
+    // 1. fetchDetail 内部的映射：
     const formattedInitialPreviews = (data.previewPages || []).map((item: any) => ({
       pageIndex: item.pageIndex,
       url: item.imageUrl || item.url || '',
+      // 🟢 追加雪碧图字段透传
+      isSprite: !!item.isSprite,
+      offsetX: item.offsetX || 0,
+      offsetY: item.offsetY || 0,
+      width: item.width || 100,
+      height: item.height || 130,
     }))
 
     comic.value = {
@@ -80,7 +96,7 @@ const fetchDetail = async () => {
     }
 
     maxPreviewPage.value = data.maxPreviewPage || 1
-    currentPreviewPage.value = 0
+    currentPreviewPage.value = 1
 
     addHistory(comic.value)
   } catch (err: any) {
@@ -92,7 +108,7 @@ const fetchDetail = async () => {
 
 // 🟢 2. 新增：增量请求下一页预览图
 const handleLoadMorePreviews = async () => {
-  if (isLoadingMorePreviews.value || currentPreviewPage.value >= maxPreviewPage.value - 1) return
+  if (isLoadingMorePreviews.value || currentPreviewPage.value >= maxPreviewPage.value) return
 
   isLoadingMorePreviews.value = true
   const nextPage = currentPreviewPage.value + 1
@@ -108,10 +124,16 @@ const handleLoadMorePreviews = async () => {
 
     if (Array.isArray(newPreviews) && newPreviews.length > 0) {
       const baseIndex = comic.value.previewPages.length
-      // 🟢 兼容字段映射：同时适配 imageUrl 和 url
+      // 2. handleLoadMorePreviews 内部的映射：
       const formattedPreviews = newPreviews.map((item, idx) => ({
         pageIndex: baseIndex + idx + 1,
         url: item.imageUrl || item.url || '',
+        // 🟢 追加雪碧图字段透传
+        isSprite: !!item.isSprite,
+        offsetX: item.offsetX || 0,
+        offsetY: item.offsetY || 0,
+        width: item.width || 100,
+        height: item.height || 130,
       }))
 
       comic.value.previewPages.push(...formattedPreviews)
@@ -413,13 +435,33 @@ onUnmounted(() => {
               class="preview-card"
               @click="handleStartReading(page.pageIndex)"
             >
-              <img :src="page.url" loading="lazy" referrerpolicy="no-referrer" />
+              <!-- 🟢 模式 1：普通独立大图 (gdtl) -->
+              <img
+                v-if="!page.isSprite"
+                :src="page.url"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              />
+
+              <!-- 🟢 模式 2：CSS 雪碧图切片 (gdtm) -->
+              <div
+                v-else
+                class="sprite-crop"
+                :style="{
+                  width: `${page.width || 100}px`,
+                  height: `${page.height || 130}px`,
+                  backgroundImage: `url(${page.url})`,
+                  backgroundPosition: `-${page.offsetX || 0}px -${page.offsetY || 0}px`,
+                  backgroundRepeat: 'no-repeat',
+                }"
+              ></div>
+
               <span class="page-num">P{{ page.pageIndex }}</span>
             </div>
           </div>
 
           <!-- 🟢 点击加载更多预览图按钮 -->
-          <div v-if="currentPreviewPage < maxPreviewPage - 1" class="load-more-box">
+          <div v-if="currentPreviewPage < maxPreviewPage" class="load-more-box">
             <button
               class="load-more-btn"
               :disabled="isLoadingMorePreviews"
@@ -679,12 +721,24 @@ onUnmounted(() => {
   border: 1px solid #2a2a2a;
   cursor: pointer;
   transition: all 0.2s ease;
+
+  /* 🟢 新增：弹性布局，保证雪碧图切片块居中对齐 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #121214;
 }
 
 .preview-card img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 🟢 新增：雪碧图切片容器 */
+.sprite-crop {
+  flex-shrink: 0;
+  border-radius: 2px;
 }
 
 .preview-card:hover {

@@ -29,7 +29,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	previewPages := make([]PreviewPageDTO, 0)
 	comments := make([]CommentDTO, 0)
 
-	detailURL := fmt.Sprintf("%s/g/%s/%s/?p=0&inline_set=ts_l", baseURL, gid, token)
+	detailURL := fmt.Sprintf("%s/g/%s/%s/?p=0", baseURL, gid, token)
 	req, _ := http.NewRequest("GET", detailURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	
@@ -42,6 +42,14 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	// 🟢 校验当前解析页面究竟是大图模式还是小图模式
+	if doc.Find(".gdtm").Length() > 0 {
+		log.Printf("[EH-WARN] 警告：画廊 [%s] 依然处于 gdtm (CSS雪花图) 模式，请检查 CookiePersist 是否生效！", gid)
+	}
+	if doc.Find(".gdtl").Length() == 0 {
+		log.Printf("[EH-WARN] 画廊 [%s] 仍处于 gdtm (小图模式)，请检查 CookiePersist 是否生效", gid)
+	}
+
 	resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("解析 HTML 失败")
@@ -119,22 +127,16 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 
 	// 🟢 2. 仅解析第一页（p=0）的预览图切片，彻底剔除原本的 for 循环
 	pageIdx := 1
-	previewLinks := doc.Find("#gdt a[href*='/s/']")
-	if previewLinks.Length() == 0 {
-		previewLinks = doc.Find("#gdt > div")
-	}
-
-	previewLinks.Each(func(_ int, s *goquery.Selection) {
-		rawURL := extractPreviewImage(s)
-		if rawURL != "" {
-			proxiedURL := "/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawURL)
-			previewPages = append(previewPages, PreviewPageDTO{
-				PageIndex: pageIdx,
-				ImageURL:  proxiedURL,
-			})
+	doc.Find("#gdt > div, #gdt > a").Each(func(_ int, s *goquery.Selection) {
+		if dto, ok := parsePreviewTile(s, pageIdx, baseURL); ok {
+			previewPages = append(previewPages, dto)
 			pageIdx++
 		}
 	})
+	// previewLinks := doc.Find("#gdt a[href*='/s/']")
+	// if previewLinks.Length() == 0 {
+	// 	previewLinks = doc.Find("#gdt > div")
+	// 
 
 	// 计算总预览页数
 	maxPreviewPage := 1
@@ -189,7 +191,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}, nil
 }
 
-// 🟢 4. 新增：独立的分页预览图抓取接口 (用于后续加载更多)
+// FetchGalleryPreviews 抓取指定页码 (p=0, p=1...) 的预览图切片
 func (s *EHService) FetchGalleryPreviews(account *models.AccountSetting, gid, token string, page int) ([]PreviewPageDTO, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {
@@ -201,13 +203,16 @@ func (s *EHService) FetchGalleryPreviews(account *models.AccountSetting, gid, to
 		baseURL = "https://exhentai.org"
 	}
 
-	// E-Hentai 的 p 参数是 0 索引的 (p=1 对应第 2 页预览图)
-	previewURL := fmt.Sprintf("%s/g/%s/%s/?p=%d&inline_set=ts_l", baseURL, gid, token, page)
+	// 1. 处理页码对齐：E 站 URL 的 p 参数是 0-based 索引 (p=0 对应第 1 页, p=1 对应第 2 页)
+	// 如果前端传入的 page 是从 1 开始的，这里转换为 ehPage = page - 1
+	ehPage := page
+	if ehPage > 0 {
+		ehPage = page - 1
+	}
+
+	previewURL := fmt.Sprintf("%s/g/%s/%s/?p=%d", baseURL, gid, token, ehPage)
 	req, _ := http.NewRequest("GET", previewURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	
-	// 🟢 关键：同样加上 inline_set=ts_l Cookie
-	req.AddCookie(&http.Cookie{Name: "inline_set", Value: "ts_l"})
 
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
@@ -221,26 +226,17 @@ func (s *EHService) FetchGalleryPreviews(account *models.AccountSetting, gid, to
 	}
 
 	previewPages := make([]PreviewPageDTO, 0)
-	previewLinks := doc.Find("#gdt a[href*='/s/']")
-	if previewLinks.Length() == 0 {
-		previewLinks = doc.Find("#gdt > div")
-	}
 
-	previewLinks.Each(func(i int, s *goquery.Selection) {
-		rawURL := extractPreviewImage(s)
-		if rawURL != "" {
-			// 如果相对路径补全域名 (兼容某些特殊情况)
-			if strings.HasPrefix(rawURL, "/") {
-				rawURL = baseURL + rawURL
-			}
-	
-			proxiedURL := "/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawURL)
-			previewPages = append(previewPages, PreviewPageDTO{
-				PageIndex: i + 1,
-				ImageURL:  proxiedURL,
-			})
+	// 2. 遍历 #gdt 下的元素，统一使用 parsePreviewTile 解析 (兼容 gdtl 大图与 gdtm 雪碧图)
+	itemIdx := 1
+	doc.Find("#gdt > div, #gdt > a").Each(func(_ int, s *goquery.Selection) {
+		if dto, ok := parsePreviewTile(s, itemIdx, baseURL); ok {
+			previewPages = append(previewPages, dto)
+			itemIdx++
 		}
 	})
+
+	log.Printf("[EH-PREVIEW-DEBUG] 画廊 [%s] 第 %d 页预览图抓取成功 | 包含切片: %d 张", gid, page, len(previewPages))
 
 	return previewPages, nil
 }

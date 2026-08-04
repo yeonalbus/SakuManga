@@ -62,7 +62,12 @@ type GalleryDetailResult struct {
 
 type PreviewPageDTO struct {
 	PageIndex int    `json:"pageIndex"` // 第几页 (1-based)
-	ImageURL  string `json:"url"`       // 代理后的缩略图地址
+	ImageURL  string `json:"url"`       // 图片/雪碧图地址
+	IsSprite  bool   `json:"isSprite"`  // 是否为 CSS 雪碧图
+	OffsetX   int    `json:"offsetX"`   // X 轴偏移量 (px)
+	OffsetY   int    `json:"offsetY"`   // Y 轴偏移量 (px)
+	Width     int    `json:"width"`     // 单张切片宽度 (px)
+	Height    int    `json:"height"`    // 单张切片高度 (px)
 }
 
 type CommentDTO struct {

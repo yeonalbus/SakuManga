@@ -3,6 +3,7 @@ import { ref, watch, onMounted } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import { onlineSearchConfig } from '@/stores/appStore'
 import type { OnlineComic } from '@/types/comic'
+import { http } from '@/utils/request'
 
 const comics = ref<OnlineComic[]>([])
 const currentPage = ref(1)
@@ -15,7 +16,7 @@ const fetchComics = async () => {
   try {
     const cfg = onlineSearchConfig.value
 
-    // 构建 GET 查询参数
+    // 1. 构建 GET 查询参数
     const query = new URLSearchParams({
       page: currentPage.value.toString(),
       keyword: cfg.keyword || '',
@@ -25,15 +26,13 @@ const fetchComics = async () => {
       cfg.activeCategories.forEach((cat) => query.append('categories', cat))
     }
 
-    const res = await fetch(`http://localhost:8081/api/v1/comics/online?${query.toString()}`)
-    const data = await res.json()
+    // 🟢 2. 修正：调用正确的 /comics/online 接口，并把 query 参数拼接上去
+    const data = await http<{ comics: OnlineComic[]; totalPages: number }>(
+      `/comics/online?${query.toString()}`,
+    )
 
-    if (res.ok) {
-      comics.value = data.comics || []
-      totalPages.value = data.totalPages || 1
-    } else {
-      console.error(data.error || '获取在线漫画失败')
-    }
+    comics.value = data.comics || []
+    totalPages.value = data.totalPages || 1
   } catch (err) {
     console.error('网络请求失败:', err)
   } finally {

@@ -7,6 +7,7 @@ import type { OfflineComic } from '@/types/comic'
 import { recordComicClick } from '@/stores/appStore'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
+import { http } from '@/utils/request'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,28 +34,26 @@ const fetchComicDetail = async () => {
   if (!comicId) return
 
   try {
-    const res = await fetch(`http://localhost:8081/api/v1/comics/${comicId}`)
-    if (res.ok) {
-      const data = await res.json()
-      let parsedTags: string[] = []
-      if (typeof data.tags === 'string') {
-        try {
-          parsedTags = JSON.parse(data.tags)
-        } catch {
-          parsedTags = []
-        }
-      } else if (Array.isArray(data.tags)) {
-        parsedTags = data.tags
-      }
+    // 🟢 1. 使用 http 请求，省去 /api/v1 前缀和 res.json()
+    const data = await http(`/comics/${comicId}`)
 
-      comic.value = {
-        ...data,
-        tags: parsedTags,
+    // 🟢 2. 解析 tags 数组逻辑保持不变
+    let parsedTags: string[] = []
+    if (typeof data.tags === 'string') {
+      try {
+        parsedTags = JSON.parse(data.tags)
+      } catch {
+        parsedTags = []
       }
-      myLocalRating.value = comic.value.rating || 0
-    } else {
-      toast.error('未找到该漫画详情')
+    } else if (Array.isArray(data.tags)) {
+      parsedTags = data.tags
     }
+
+    comic.value = {
+      ...data,
+      tags: parsedTags,
+    }
+    myLocalRating.value = comic.value.rating || 0
   } catch (err) {
     console.error('获取漫画详情失败:', err)
     toast.error('连接后端失败')

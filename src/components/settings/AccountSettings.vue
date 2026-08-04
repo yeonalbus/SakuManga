@@ -75,8 +75,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast, modal } = useUI()
 
@@ -108,8 +109,7 @@ const form = reactive<EAccountConfig>({
 // 2. 从后端加载已有账户配置
 const loadAccountSettings = async () => {
   try {
-    const res = await fetch('http://localhost:8081/api/v1/account/settings')
-    const json = await res.json()
+    const json = await http('/account/settings')
 
     if (json.isLoggedIn && json.data) {
       isLoggedIn.value = true
@@ -158,7 +158,7 @@ const handleSaveCookies = async () => {
   }
 
   try {
-    const res = await fetch('http://localhost:8081/api/v1/account/settings', {
+    const res = await fetch('/api/v1/account/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -190,7 +190,7 @@ const handleLogout = async () => {
   if (!confirmed) return
 
   try {
-    await fetch('http://localhost:8081/api/v1/account/settings', {
+    await fetch('/api/v1/account/settings', {
       method: 'DELETE',
     })
     toast.success('已成功清除凭证！')

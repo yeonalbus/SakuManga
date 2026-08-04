@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import ItemCard from '@/components/ItemCard.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 interface RankedOnlineComic extends OnlineComic {
   score: number
@@ -17,14 +18,11 @@ const isLoading = ref(true)
 const fetchToplist = async () => {
   isLoading.value = true
   try {
-    const res = await fetch('http://localhost:8081/api/v1/comics/online/toplist')
-    const data = await res.json()
+    // 🟢 将泛型改为 RankedOnlineComic[] 数组类型
+    const data = await http<{ comics: RankedOnlineComic[] }>('/comics/online/toplist')
 
-    if (res.ok) {
-      allItems.value = data.comics || []
-    } else {
-      toast.error(data.error || '获取排行榜失败')
-    }
+    // 这样 data.comics 的类型就带上了 rank 和 score 属性，完美匹配 allItems.value
+    allItems.value = data.comics || []
   } catch (err) {
     toast.error('网络连接失败')
     console.error(err)

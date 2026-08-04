@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast } = useUI()
 const hotComics = ref<OnlineComic[]>([])
@@ -12,14 +13,8 @@ const isLoading = ref(true)
 const fetchPopularComics = async () => {
   isLoading.value = true
   try {
-    const res = await fetch('http://localhost:8081/api/v1/comics/online/popular')
-    const data = await res.json()
-
-    if (res.ok) {
-      hotComics.value = data.comics || []
-    } else {
-      toast.error(data.error || '获取热门失败')
-    }
+    const data = await http<{ comics: OnlineComic[] }>('/comics/online/popular')
+    hotComics.value = data.comics || []
   } catch (err) {
     toast.error('网络连接失败')
     console.error(err)

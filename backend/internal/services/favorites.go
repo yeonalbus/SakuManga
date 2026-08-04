@@ -84,7 +84,7 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 		rawCoverURL := extractCoverURL(sel)
 		proxiedCoverURL := ""
 		if rawCoverURL != "" {
-			proxiedCoverURL = "http://localhost:8081/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
+			proxiedCoverURL = "/api/v1/comics/cover-proxy?url=" + url.QueryEscape(rawCoverURL)
 		}
 
 		category := strings.TrimSpace(sel.Find(".cs, .cn").First().Text())

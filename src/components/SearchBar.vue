@@ -5,6 +5,7 @@ import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
 import { useUI } from '@/composables/useUI'
 import TagChip from '@/components/TagChip.vue'
 import type { TagItem } from '@/stores/tagStore'
+import { http } from '@/utils/request'
 
 const router = useRouter()
 const route = useRoute()
@@ -60,10 +61,8 @@ watch(keyword, (newVal) => {
   if (suggestTimer) clearTimeout(suggestTimer)
   suggestTimer = window.setTimeout(async () => {
     try {
-      const res = await fetch(`/api/v1/tags/suggest?q=${encodeURIComponent(q)}&limit=8`)
-      if (res.ok) {
-        suggestedTags.value = await res.json()
-      }
+      const res = await http<{ proxy: string }>('/network/proxy')
+      suggestedTags.value = await res.json()
     } catch (e) {
       console.error('获取标签联想失败:', e)
     }

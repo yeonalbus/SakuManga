@@ -289,9 +289,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast, modal } = useUI()
-const API_BASE = 'http://localhost:8081/api/v1'
 
 // 各项设置状态与默认初始值
 const language = ref('zh-CN')
@@ -347,10 +347,12 @@ const useBuiltinBlocklist = ref(true)
 // 轮询下载进度
 const pollProgress = async () => {
   try {
-    const res = await fetch(`${API_BASE}/tags/progress`)
-    if (!res.ok) return
+    // 🟢 接口改回 /tags/progress，并定义正确的数据类型
+    const data = await http<{
+      transProgress: { status: string; errorMsg?: string }
+      sortProgress: { status: string; errorMsg?: string }
+    }>('/tags/progress')
 
-    const data = await res.json()
     transProgress.value = data.transProgress
     sortProgress.value = data.sortProgress
 
@@ -387,16 +389,21 @@ const pollProgress = async () => {
   }
 }
 
+// 2. 获取标签引擎状态
 const fetchTagEngineStatus = async () => {
   try {
-    const res = await fetch(`${API_BASE}/tags/status`)
-    if (res.ok) {
-      const data = await res.json()
-      enableTagCNTranslation.value = data.enableCN
-      tagCNVersion.value = data.tagCNVersion || '尚未下载'
-      enableTagSortRules.value = data.enableSort
-      tagSortVersion.value = data.tagSortVersion || '尚未下载'
-    }
+    // 🟢 使用 http 替换原生的 fetch，去掉了 API_BASE 和 res.ok/res.json()
+    const data = await http<{
+      enableCN: boolean
+      tagCNVersion?: string
+      enableSort: boolean
+      tagSortVersion?: string
+    }>('/tags/status')
+
+    enableTagCNTranslation.value = data.enableCN
+    tagCNVersion.value = data.tagCNVersion || '尚未下载'
+    enableTagSortRules.value = data.enableSort
+    tagSortVersion.value = data.tagSortVersion || '尚未下载'
   } catch (err) {
     console.error('获取引擎状态失败:', err)
   }

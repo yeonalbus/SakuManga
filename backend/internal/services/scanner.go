@@ -1,12 +1,12 @@
 package services
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"SakuHentai/internal/database"
 	"SakuHentai/internal/models"
-	"os"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -65,7 +65,7 @@ func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) 
 		}
 	
 		comicID := generateID(localPath)
-		coverURL := "http://localhost:8081/api/v1/comics/" + comicID + "/cover"
+		coverURL := "/api/v1/comics/" + comicID + "/cover"
 	
 		comic := models.OfflineComic{
 			ID:           comicID,

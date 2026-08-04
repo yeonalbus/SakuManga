@@ -73,9 +73,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast, modal } = useUI()
-const API_BASE = 'http://localhost:8081/api/v1'
 
 // 响应式状态绑定
 const domainFronting = ref(false)
@@ -88,11 +88,8 @@ const receiveTimeout = ref(6000)
 // 获取后端当前设置的代理
 const fetchProxyConfig = async () => {
   try {
-    const res = await fetch(`${API_BASE}/network/proxy`)
-    if (res.ok) {
-      const data = await res.json()
-      proxyAddress.value = data.proxy || ''
-    }
+    const data = await http<{ proxy: string }>('/network/proxy')
+    proxyAddress.value = data.proxy || ''
   } catch (err) {
     console.error('获取代理配置失败:', err)
   }
@@ -109,21 +106,19 @@ const handleProxySetting = async () => {
   if (input !== null) {
     const newProxy = input.trim()
     try {
-      const res = await fetch(`${API_BASE}/network/proxy`, {
+      // 🟢 使用 http 发起 POST 请求
+      await http('/network/proxy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ proxy: newProxy }),
       })
 
-      const data = await res.json()
-      if (res.ok) {
-        proxyAddress.value = newProxy
-        toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为直连模式')
-      } else {
-        toast.error(data.error || '设置失败')
-      }
-    } catch (err) {
-      toast.error('连接后端失败')
+      // 能走到这一步，说明后端响应了 200 OK（设置成功）
+      proxyAddress.value = newProxy
+      toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为直连模式')
+    } catch (err: any) {
+      // 🔴 无论是网络连不上，还是后端返回了 400 错误（如“无效的代理格式”），
+      // http 都会自动把后端的报错文字放入 err.message 中
+      toast.error(err.message || '设置失败')
     }
   }
 }

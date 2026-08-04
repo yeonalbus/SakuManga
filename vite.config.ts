@@ -6,7 +6,6 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      // 🎯 修复：使用 fileURLToPath 将 @ 映射到 src 目录
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
@@ -16,7 +15,7 @@ export default defineConfig({
     proxy: {
       // 🎯 转发后端接口代理
       '/api': {
-        target: 'http://localhost:8081',
+        target: 'http://127.0.0.1:8081', // 👈 关键点：将 localhost 改为 127.0.0.1，解决 ECONNREFUSED
         changeOrigin: true,
       },
     },

@@ -7,7 +7,7 @@ import type {
   OfflineComic,
   SearchConfig,
 } from '@/types/comic'
-import { generateOnlineComics, generateOfflineComics } from '@/utils/mockData'
+import { generateOnlineComics } from '@/utils/mockData'
 
 // 辅助函数：从 localStorage 安全读取 JSON 数据
 function loadStorage<T>(key: string, defaultValue: T): T {
@@ -185,8 +185,8 @@ export const resetSearchConfig = (scope: 'online' | 'offline') => {
 }
 
 // 🟢 兼容导出 (防止旧组件引入 globalFilters 导致语法报错)
-export const globalFilters = ref<any>(null)
-export const setGlobalFilters = (filters: any) => {
+export const globalFilters = ref<unknown>(null)
+export const setGlobalFilters = (filters: unknown) => {
   globalFilters.value = filters
 }
 
@@ -306,7 +306,7 @@ export const clearHistory = (source: 'online' | 'offline') => {
 // --------------------------------------------------
 // 7. 额外的画廊扫描路径管理 (对齐 Go 后端 API)
 // --------------------------------------------------
-const API_BASE = 'http://localhost:8081/api/v1'
+const API_BASE = '/api/v1'
 
 export const scanPaths = ref<ExtraScanPath[]>([])
 

@@ -47,27 +47,24 @@ const loadComicPages = async () => {
   if (!realId) return
 
   try {
-    const res = await fetch(`http://localhost:8081/api/v1/comics/${realId}/pages`)
-    if (res.ok) {
-      const data = await res.json()
+    const data = await http<{ proxy: string }>('/network/proxy')
 
-      let pageCount = 0
-      if (typeof data.total === 'number') {
-        pageCount = data.total
-      } else if (Array.isArray(data.pages)) {
-        pageCount = data.pages.length
-      } else if (Array.isArray(data)) {
-        pageCount = data.length
-      }
-
-      if (pageCount === 0) return
-
-      totalPages.value = pageCount
-      pageUrls.value = Array.from(
-        { length: pageCount },
-        (_, i) => `http://localhost:8081/api/v1/comics/${realId}/page/${i}`,
-      )
+    let pageCount = 0
+    if (typeof data.total === 'number') {
+      pageCount = data.total
+    } else if (Array.isArray(data.pages)) {
+      pageCount = data.pages.length
+    } else if (Array.isArray(data)) {
+      pageCount = data.length
     }
+
+    if (pageCount === 0) return
+
+    totalPages.value = pageCount
+    pageUrls.value = Array.from(
+      { length: pageCount },
+      (_, i) => `/api/v1/comics/${realId}/page/${i}`,
+    )
   } catch (err) {
     console.error('加载画廊失败:', err)
   }

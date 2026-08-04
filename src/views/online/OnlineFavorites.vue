@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast } = useUI()
 
@@ -30,17 +31,12 @@ const favColors = [
 const fetchFavData = async () => {
   isLoading.value = true
   try {
-    const res = await fetch(
-      `http://localhost:8081/api/v1/comics/online/favorites?favcat=${activeFav.value}&page=${currentPage.value}`,
+    const data = await http<{ comics: OnlineComic[]; totalPages: number }>(
+      `/comics/online/favorites?page=${currentPage.value}`,
     )
-    const data = await res.json()
 
-    if (res.ok) {
-      favComicList.value = data.comics || []
-      totalPages.value = data.totalPages || 1
-    } else {
-      toast.error(data.error || '获取收藏夹失败')
-    }
+    favComicList.value = data.comics || []
+    totalPages.value = data.totalPages || 1
   } catch (err) {
     toast.error('网络连接失败')
     console.error(err)

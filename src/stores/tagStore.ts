@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { http } from '@/utils/request'
 
 export interface TagItem {
   namespace: string
@@ -16,18 +17,19 @@ export const useTagStore = defineStore('tag', () => {
   // 初始化时从后端拉取完整翻译字典
   const fetchTagDictionary = async () => {
     try {
-      const res = await fetch('/api/v1/tags/dictionary')
-      if (res.ok) {
-        const data: TagItem[] = await res.json()
-        const map = new Map<string, TagItem>()
-        data.forEach((item) => {
-          const ns = (item.namespace || 'other').toLowerCase()
-          const k = item.key.toLowerCase().replace(/_/g, ' ')
-          map.set(`${ns}:${k}`, item)
-        })
-        tagMap.value = map
-        isLoaded.value = true
-      }
+      // 🟢 1. 修正接口路径为 /tags/dictionary，泛型声明为 TagItem[] 数组类型
+      const data = await http<TagItem[]>('/tags/dictionary')
+
+      // 🟢 2. 标签转 Map 的逻辑原封不动保留
+      const map = new Map<string, TagItem>()
+      data.forEach((item) => {
+        const ns = (item.namespace || 'other').toLowerCase()
+        const k = item.key.toLowerCase().replace(/_/g, ' ')
+        map.set(`${ns}:${k}`, item)
+      })
+
+      tagMap.value = map
+      isLoaded.value = true
     } catch (err) {
       console.error('加载标签字典失败:', err)
     }

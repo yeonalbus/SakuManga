@@ -19,18 +19,18 @@ export interface BaseComic {
   coverUrl: string // 封面图 (本地路径或远程 URL)
   source: ComicSource // 标识来源
   tags: string[] // 标签列表
+  category?: string // 分类 (提至基类：Doujinshi, Manga 等)
   rating?: number // 评分/星级
-  pageCount?: number // 总页数
+  pageCount?: number // 总页数 (统一命名为 pageCount)
+  readCount?: number // 统一：阅读/点击总次数 (替代混淆的 clickCount)
   updatedAt: string // 更新/扫描时间
   isDownloaded?: boolean // 是否已下载到本地（全局绿标）
-  clickCount?: number // 👈 新增：记录点击/阅读总次数（用于排行榜排序）
 }
 
 /** 在线漫画特有属性 (如 E-Hentai 收藏、热门等) */
 export interface OnlineComic extends BaseComic {
   source: 'online'
   token?: string // 详情页 token/key
-  category?: string // 比如 Doujinshi, Manga, Non-H 等
   uploader?: string // 上传者
   isFavorite?: boolean // 是否加入在线收藏
   favIndex?: number // 0-9，对应 E 站的 Favorite 0 ~ Favorite 9
@@ -39,11 +39,10 @@ export interface OnlineComic extends BaseComic {
 /** 本地离线漫画特有属性 (如 本地书架、书目维护等) */
 export interface OfflineComic extends BaseComic {
   source: 'offline'
-  category?: string
   localPath: string // 本地存储绝对/相对路径
   fileSize?: number // 文件大小 (bytes)
-  readCount?: number // 本地阅读次数 (用于 OfflineToplist)
-  needsUpdate?: boolean // 维护标记：是否有损坏或缺失页面
+  hasError?: boolean // 修正语义：标记是否有损坏或缺失页面 (原 needsUpdate)
+  bookshelfId?: string // 关联的离线书架 ID
 }
 
 /** 本地书架定义 */
@@ -75,36 +74,26 @@ export interface Chapter {
 }
 
 // ==========================================
-// 4. 用户交互与状态 (阅读清单、历史记录)
+// 4. 用户交互与状态 (阅读历史)
 // ==========================================
 
 /** 历史记录项 (用于 OnlineHistory / OfflineHistory / ReadingList) */
 export interface HistoryRecord {
   comicId: string
   source: ComicSource
-  comicTitle: string
+  title: string // 保持与 BaseComic.title 一致，去除冗余前缀
   coverUrl: string
   lastChapterTitle?: string
   lastPageIndex: number // 上次看到第几页
-  totalPageCount: number // 总页数
+  pageCount: number // 统一使用 pageCount，避免与 totalPageCount 混淆
   lastReadAt: string // 最后阅读时间戳
 }
 
 // ==========================================
-// 5. 组件筛选与分页契约 (供 FilterBar / SearchBar / PagiNation 使用)
+// 5. 搜索、筛选与分页大一统契约
 // ==========================================
 
-/** 顶栏与筛选栏的过滤参数 */
-export interface FilterParams {
-  keyword?: string // SearchBar 输入内容
-  tags?: string[] // 选中的标签
-  category?: string // 分类筛选
-  source?: ComicSource // 模块限定
-  sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount' // 排序字段
-  sortOrder?: 'asc' | 'desc'
-}
-
-/** 分页控件接口（配合 PagiNation.vue） */
+/** 分页控件接口（配合 Pagination.vue） */
 export interface PaginationState {
   currentPage: number
   pageSize: number
@@ -112,15 +101,19 @@ export interface PaginationState {
   totalPages: number
 }
 
-// --------------------------------------------------
-// 🎯 搜索与筛选大一统配置契约 (参考 JHentai/E-Hentai)
-// --------------------------------------------------
-export interface SearchConfig {
-  keyword: string // 搜索关键词 (来自于 SearchBar)
-  keywords: string[] // 👈 筛选抽屉内部的“多关键词过滤队列”
-  activeCategories: string[] // 允许展示的分类列表 (如 ['Doujinshi', 'Manga'])
-  minRating: number // 最低评分要求 (1 ~ 5)
+/**
+ * 搜索与筛选统一配置契约 (整合原 FilterParams 与 SearchConfig)
+ * 供 FilterBar / SearchBar / Drawer 使用
+ */
+export interface FilterParams {
+  keyword?: string // 搜索框输入的文本
+  tags?: string[] // 选中的标签列表
+  categories?: string[] // 选中的分类列表 (支持多选，统一命名为复数)
+  source?: ComicSource // 来源限定
+  minRating?: number // 最低评分要求 (1 ~ 5)
   minPages?: number // 最少页数
   maxPages?: number // 最多页数
   onlyDownloaded?: boolean // 是否仅看已下载作品
+  sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount' // 排序字段 (准确对齐 BaseComic)
+  sortOrder?: 'asc' | 'desc' // 排序顺序
 }

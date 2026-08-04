@@ -155,16 +155,32 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	favLink := doc.Find("#favoritelink")
 	if favLink.Length() > 0 {
 		favText := strings.TrimSpace(favLink.Text())
-		if strings.Contains(favText, "Favorited") {
+
+		// 🟢 关键修复：只要文本不包含 "Add to Favorites" 且非空，说明已经加入收藏
+		if favText != "" && !strings.Contains(favText, "Add to Favorites") {
 			isFav = true
 			defaultIdx := 0
 			favIdx = &defaultIdx
 
-			for idx := 0; idx <= 9; idx++ {
-				if strings.Contains(favText, fmt.Sprintf("Favorite %d", idx)) {
-					i := idx
-					favIdx = &i
-					break
+			// 1. 特殊情况：E 站默认 Favorite 0 的名称为 "Favorites"
+			if favText == "Favorites" {
+				i := 0
+				favIdx = &i
+			} else {
+				// 2. 匹配 "Favorite 0" ~ "Favorite 9"
+				for idx := 0; idx <= 9; idx++ {
+					if strings.Contains(favText, fmt.Sprintf("Favorite %d", idx)) {
+						i := idx
+						favIdx = &i
+						break
+					}
+				}
+			}
+
+			// 🟢 3. 颜色样式兜底：解析 inline style 里的颜色（E 站给每个 Fav 赋予了专属 color）
+			if styleAttr, ok := favLink.Attr("style"); ok {
+				if colorIdx := parseFavColorStyle(styleAttr); colorIdx >= 0 {
+					favIdx = &colorIdx
 				}
 			}
 		}
@@ -189,6 +205,35 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 		FavIndex:       favIdx,
 		MaxPreviewPage: maxPreviewPage, // 💡 可以在 DTO 中新增此字段，方便前端感知总页数
 	}, nil
+}
+
+// parseFavColorStyle 根据 #favoritelink 的 inline style 颜色识别 0 ~ 9 收藏夹
+func parseFavColorStyle(style string) int {
+	style = strings.ToLower(style)
+	// E 站经典 0~9 收藏夹颜色映射
+	colors := map[string]int{
+		"#7f7f7f": 0, // Fav 0 (灰色)
+		"#f00000": 1, // Fav 1 (红色)
+		"#ff7800": 2, // Fav 2 (橙色)
+		"#f0d000": 3, // Fav 3 (黄/金)
+		"#cbb000": 3,
+		"#00a000": 4, // Fav 4 (绿色)
+		"#98e020": 5, // Fav 5 (浅绿/青)
+		"#00a0c0": 5,
+		"#00a0a0": 6, // Fav 6 (蓝色)
+		"#0000f0": 6,
+		"#a000a0": 7, // Fav 7 (紫色)
+		"#505050": 8, // Fav 8 (深灰)
+		"#f000a0": 9, // Fav 9 (粉红)
+		"#000000": 9,
+	}
+
+	for hexColor, cat := range colors {
+		if strings.Contains(style, hexColor) {
+			return cat
+		}
+	}
+	return -1
 }
 
 // FetchGalleryPreviews 抓取指定页码 (p=0, p=1...) 的预览图切片

@@ -119,24 +119,21 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		return
 	}
 
-	// 🟢【自动同步】：如果 E 站网页解析出该画廊已收藏，顺手更新到 SQLite 本地库
+	// 🟢 1. 如果 E 站网页端成功解析出了收藏状态，同步刷新到 SQLite 本地库
 	if detail.IsFavorite && detail.FavIndex != nil {
 		favState := models.FavoriteState{
 			GID:    gid,
 			Token:  token,
 			FavCat: *detail.FavIndex,
 		}
+		// 🟢 统一列名为 gid（避免 g_id 导致的 SQL 查询失败）
 		h.db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "g_id"}}, // 🟢 gid -> g_id
+			Columns:   []clause.Column{{Name: "g_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&favState)
 	} else {
-		// 2. 修改 Where 条件中的列名
-		var favState models.FavoriteState
-		if err := h.db.Where("g_id = ? AND fav_cat >= 0", gid).First(&favState).Error; err == nil { // 🟢 gid = ? -> g_id = ?
-			detail.IsFavorite = true
-			detail.FavIndex = &favState.FavCat
-		}
+		// 🟢 2. 如果网页端未解析出（如 selector 未匹配），使用 SQLite 中的本地数据兜底
+		detail = services.AttachDetailFavoriteState(h.db, detail)
 	}
 
 	c.JSON(http.StatusOK, detail)

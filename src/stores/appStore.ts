@@ -418,6 +418,7 @@ export function useAppStore() {
     offlineHistoryList,
     addHistory,
     clearHistory,
+    updateOnlineFavoriteState,
     // 扫描路径 API
     scanPaths,
     fetchScanPaths,
@@ -431,3 +432,30 @@ export function useAppStore() {
 // --------------------------------------------------
 // 在线历史记录
 // --------------------------------------------------
+
+// --------------------------------------------------
+// 🎯 8. 跨页面状态同步 (收藏状态联动)
+// --------------------------------------------------
+/** 全局同步更新指定在线画廊的收藏状态 (主列表、阅读清单、历史记录) */
+export const updateOnlineFavoriteState = (gid: string, isFavorite: boolean, favIndex?: number) => {
+  // 1. 同步更新在线主列表 (onlineComics)
+  const itemInList = onlineComics.value.find((c) => c.id === gid)
+  if (itemInList) {
+    itemInList.isFavorite = isFavorite
+    itemInList.favIndex = favIndex
+  }
+
+  // 2. 同步更新在线阅读清单 (onlineReadingList)
+  const itemInQueue = onlineReadingList.value.find((c) => c.id === gid)
+  if (itemInQueue && itemInQueue.source === 'online') {
+    ;(itemInQueue as OnlineComic).isFavorite = isFavorite
+    ;(itemInQueue as OnlineComic).favIndex = favIndex
+  }
+
+  // 3. 同步更新在线历史记录 (onlineHistoryList)
+  const itemInHistory = onlineHistoryList.value.find((h) => h.comic.id === gid)
+  if (itemInHistory && itemInHistory.comic.source === 'online') {
+    ;(itemInHistory.comic as OnlineComic).isFavorite = isFavorite
+    ;(itemInHistory.comic as OnlineComic).favIndex = favIndex
+  }
+}

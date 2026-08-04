@@ -26,6 +26,7 @@ func NewFavoritesService(ehService *EHService) *FavoritesService {
 // 🟢 修复：添加 db *gorm.DB 参数，以便落盘 SQLite
 func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, page int) (*OnlineComicResult, error) {
 	client, err := s.ehService.BuildClient(account)
+	currentFav := favCat
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 			Category:     category,
 			Rating:       rating,
 			IsFavorite:   true,
-			FavIndex:     &favCat,
+			FavIndex:     &currentFav,
 			IsDownloaded: false,
 		})
 	})
@@ -127,7 +128,7 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 			})
 		}
 		db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "gid"}},
+			Columns:   []clause.Column{{Name: "g_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&batchFavs)
 	}
@@ -175,7 +176,7 @@ func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetti
 		FavCat: favCat,
 	}
 	db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "gid"}},
+		Columns:   []clause.Column{{Name: "g_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 	}).Create(&favState)
 
@@ -216,7 +217,7 @@ func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSe
 	return nil
 }
 
-// AttachFavoriteStates 挂载 SQLite 中的本地收藏状态
+// AttachFavoriteStates 挂载 SQLite 中的本地收藏状态 (仅补充，绝不误杀原状态)
 func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO {
 	if len(comics) == 0 {
 		return comics
@@ -228,7 +229,7 @@ func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 	}
 
 	var favs []models.FavoriteState
-	db.Where("gid IN ? AND fav_cat >= 0", gids).Find(&favs)
+	db.Where("g_id IN ? AND fav_cat >= 0", gids).Find(&favs)
 
 	favMap := make(map[string]int)
 	for _, f := range favs {
@@ -238,12 +239,30 @@ func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 	for i := range comics {
 		if cat, exists := favMap[comics[i].ID]; exists {
 			comics[i].IsFavorite = true
-			comics[i].FavIndex = &cat
-		} else {
-			comics[i].IsFavorite = false
-			comics[i].FavIndex = nil
+			
+			// 🟢 修复指针共享：重新分配独立的内存地址
+			idx := cat
+			comics[i].FavIndex = &idx
 		}
+		// 🟢 关键修复：如果 SQLite 里没有，保持 HTML 解析原样！严禁强行改为 false！
 	}
 
 	return comics
+}
+
+// 🟢 新增：专为详情页 (GalleryDetailResult) 提供本地 SQLite 状态挂载
+func AttachDetailFavoriteState(db *gorm.DB, detail *GalleryDetailResult) *GalleryDetailResult {
+	if detail == nil || detail.ID == "" {
+		return detail
+	}
+
+	var fav models.FavoriteState
+	err := db.Where("g_id = ? AND fav_cat >= 0", detail.ID).First(&fav).Error
+	if err == nil {
+		detail.IsFavorite = true
+		idx := fav.FavCat
+		detail.FavIndex = &idx
+	}
+
+	return detail
 }

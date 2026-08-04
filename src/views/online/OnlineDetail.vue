@@ -4,7 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
-import { onlineReadingList, toggleReadingList, addHistory } from '@/stores/appStore'
+import {
+  onlineReadingList,
+  toggleReadingList,
+  addHistory,
+  updateOnlineFavoriteState,
+} from '@/stores/appStore'
 import { http } from '@/utils/request'
 
 const route = useRoute()
@@ -231,8 +236,14 @@ const handleSelectFavorite = async () => {
           }),
         })
 
+        // 🟢 1. 更新当前详情页的局部响应式状态
         comic.value.isFavorite = true
         comic.value.favIndex = idx
+
+        // 🟢 刷新历史记录并通知 store 联动更新列表与清单里的项
+        addHistory(comic.value)
+        updateOnlineFavoriteState(comic.value.id, true, idx)
+
         toast.success(`已成功存入 Favorite ${idx}`)
       } catch (err: any) {
         toast.error(err.message || '设置收藏失败')
@@ -259,7 +270,14 @@ const handleRemoveFavorite = async () => {
       }),
     })
 
+    // 🟢 1. 重置局部状态
     comic.value.isFavorite = false
+    comic.value.favIndex = undefined
+
+    // 🟢 2. 重新调用 addHistory 覆盖缓存，确保历史记录/阅读清单里的红心同步熄灭
+    addHistory(comic.value)
+    updateOnlineFavoriteState(comic.value.id, false)
+
     toast.success('已从收藏夹移除')
   } catch (err: any) {
     toast.error(err.message || '取消收藏失败')

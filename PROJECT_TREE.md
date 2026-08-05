@@ -8,7 +8,7 @@
 
 ```
 SakuHentai/
-├── backend/                        # Go 后端（Gin + GORM + SQLite）
+├── backend/                        # Go 后端（Gin + GORM + SQLite，含内嵌前端 webui/）
 ├── src/                            # Vue 3 前端（Vite + Pinia + Vue Router）
 ├── public/                         # 静态资源（favicon 等）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
@@ -20,6 +20,9 @@ SakuHentai/
 ├── package.json                    # 前端依赖与脚本（type-check / lint / dev / build）
 ├── vite.config.ts                  # Vite 构建与代理配置
 ├── eslint.config.ts / .oxlintrc.json / .prettierrc.json   # 代码规范配置
+├── build-release.bat               # 一键打包单 exe（前端构建 → 拷贝 dist → go build）
+├── dist/                           # Vite 构建产物（已 gitignore，供后端内嵌使用）
+├── SakuHentai.exe                  # 打包产物（已 gitignore，双击运行即托盘）
 └── PROJECT_TREE.md                 # 本文件
 ```
 
@@ -146,10 +149,15 @@ src/
 
 ```
 backend/
-├── main.go                         # 启动入口：DB 初始化 + 代理 + TagEngine + Router + 监听
+├── main.go                         # 启动入口：--headless 双模式、切换 exe 目录、自动端口、托盘、内嵌前端
 ├── config.json                     # 运行时配置（本机代理地址等）
 ├── go.mod / go.sum                 # Go 模块依赖
 ├── manga.db                        # SQLite 数据库文件（运行时生成，勿入库）
+│
+├── webui/                          # 内嵌前端（单 exe 打包）
+│   ├── embed.go                    # go:embed all:dist + SPA 回退静态服务（/api 404 不吞错）
+│   ├── favicon.ico                 # 前端图标副本
+│   └── dist/                       # Vite 构建产物（build-release.bat 生成，含占位 index.html）
 │
 ├── cmd_debug/                      # 调试用命令行工具（独立 main）
 │   ├── main.go                     # 调试入口
@@ -179,6 +187,10 @@ backend/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
     ├── router/
     │   └── router.go               # 全部 API 路由注册（/api/v1 分组：公开/登录/管理员）
+    ├── tray/                       # 系统托盘（Windows）
+    │   ├── tray_windows.go         # systray：打开界面/退出程序（go:build windows）
+    │   ├── tray_other.go           # 非 Windows 空实现（headless，go:build !windows）
+    │   └── icon.ico                # 托盘图标
     ├── handlers/                   # HTTP 处理器（薄层，参数解析 + 调用 services）
     │   ├── auth.go                 # 登录/登出/当前用户（auth/me）
     │   ├── account.go              # 账户设置（E 站凭证）
@@ -282,14 +294,17 @@ backend/
 
 ### 构建 / 校验
 
-| 命令         | 位置                                       |
-| ------------ | ------------------------------------------ |
-| 前端类型检查 | `npm run type-check`（vue-tsc）            |
-| 前端 Lint    | `npm run lint`（oxlint + eslint）          |
-| 前端构建     | `npm run build`（type-check + vite build） |
-| 后端编译     | `cd backend && go build ./...`             |
-| 后端测试     | `cd backend && go test ./...`              |
-| 后端运行     | `cd backend && go run .`                   |
+| 命令           | 位置                                                               |
+| -------------- | ------------------------------------------------------------------ |
+| 前端类型检查   | `npm run type-check`（vue-tsc）                                    |
+| 前端 Lint      | `npm run lint`（oxlint + eslint）                                  |
+| 前端构建       | `npm run build`（type-check + vite build）                         |
+| 后端编译       | `cd backend && go build ./...`                                     |
+| 后端测试       | `cd backend && go test ./...`                                      |
+| 后端运行       | `cd backend && go run .`                                           |
+| 单 exe 打包    | `build-release.bat`（根目录生成 SakuHentai.exe，双击即托盘运行）   |
+| 纯后端运行     | `SakuHentai.exe --headless`（NAS/无界面环境）                      |
+| Linux 交叉编译 | `cd backend && set GOOS=linux & set GOARCH=amd64 & go build ./...` |
 
 ---
 
@@ -303,5 +318,9 @@ backend/
 
 ## 六、发布注意（v0.1）
 
-- `backend/manga.db`（SQLite 数据库）、`backend/config.json`（含本机代理地址）、`backend/data/*`（标签词典缓存）均为**运行时数据**，当前已被 git 追踪；发布打包/开源前建议加入 `.gitignore` 并 `git rm --cached`。
+- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘）。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
+- **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
+- **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
+- `backend/manga.db`、`backend/data/*` 为**运行时数据**，已加入 `.gitignore` 并 `git rm --cached`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。
+- `backend/webui/dist/` 需保留在 git：占位 `index.html` 保证 `go build` 无需前端即可编译；正式打包由 `build-release.bat` 覆盖为真实产物（`//go:embed` 依赖此目录）。
 - `cmd_debug/` 为调试工具，不影响主程序；如需精简发布产物可从 `go build` 目标中排除。

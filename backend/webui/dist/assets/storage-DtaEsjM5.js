@@ -1,0 +1,1 @@
+function e(e,t){try{let n=localStorage.getItem(e);return n?JSON.parse(n):t}catch(n){return console.error(`读取 LocalStorage [${e}] 失败`,n),t}}function t(e,t){try{localStorage.setItem(e,JSON.stringify(t))}catch(t){console.error(`写入 LocalStorage [${e}] 失败`,t)}}export{t as n,e as t};

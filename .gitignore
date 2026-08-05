@@ -9,7 +9,8 @@ lerna-debug.log*
 
 node_modules
 .DS_Store
-dist
+# 仅忽略根目录 vite 构建产物，避免影响 backend/webui/dist（go:embed 内嵌前端用）
+/dist
 dist-ssr
 coverage
 *.local
@@ -46,3 +47,6 @@ backend/data/db.raw.json.etag
 backend/data/*.csv.gz
 backend/data/*.csv.gz.etag
 backend/data/*.tmp
+
+# 单 exe 打包产物
+/SakuHentai.exe

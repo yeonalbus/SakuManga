@@ -23,7 +23,7 @@ func NewFavoritesService(ehService *EHService) *FavoritesService {
 }
 
 // FetchFavoritesList 抓取指定收藏夹分类 (0~9) 及游标的在线画廊列表
-func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, next, prev, seek, sortMode string,setting *models.EHSetting) (*OnlineComicResult, error) {
+func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, userID uint, account *models.AccountSetting, favCat int, next, prev, seek, sortMode string, setting *models.EHSetting) (*OnlineComicResult, error) {
 	client, err := s.ehService.BuildClient(account)
 	currentFav := favCat
 	if err != nil {
@@ -127,13 +127,14 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 		var batchFavs []models.FavoriteState
 		for _, c := range comics {
 			batchFavs = append(batchFavs, models.FavoriteState{
+				UserID: userID,
 				GID:    c.ID,
 				Token:  c.Token,
 				FavCat: favCat,
 			})
 		}
 		db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "g_id"}},
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "g_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&batchFavs)
 	}
@@ -219,7 +220,7 @@ func isBoundaryCursor(cursor string) bool {
 }
 
 // AddFavorite 添加/修改在线收藏
-func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string, favCat int, note string,setting *models.EHSetting) error {
+func (s *FavoritesService) AddFavorite(db *gorm.DB, userID uint, account *models.AccountSetting, gid, token string, favCat int, note string, setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
@@ -245,12 +246,13 @@ func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetti
 	defer resp.Body.Close()
 
 	favState := models.FavoriteState{
+		UserID: userID,
 		GID:    gid,
 		Token:  token,
 		FavCat: favCat,
 	}
 	db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "g_id"}},
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "g_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 	}).Create(&favState)
 
@@ -258,7 +260,7 @@ func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetti
 }
 
 // RemoveFavorite 取消在线收藏
-func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string,setting *models.EHSetting) error {
+func (s *FavoritesService) RemoveFavorite(db *gorm.DB, userID uint, account *models.AccountSetting, gid, token string, setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
@@ -283,13 +285,13 @@ func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSe
 	}
 	defer resp.Body.Close()
 
-	db.Where("g_id = ?", gid).Delete(&models.FavoriteState{})
+	db.Where("user_id = ? AND g_id = ?", userID, gid).Delete(&models.FavoriteState{})
 
 	return nil
 }
 
 // AttachFavoriteStates 挂载 SQLite 中的本地收藏状态 (仅补充，绝不误杀原状态)
-func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO {
+func AttachFavoriteStates(db *gorm.DB, userID uint, comics []OnlineComicDTO) []OnlineComicDTO {
 	if len(comics) == 0 {
 		return comics
 	}
@@ -300,7 +302,7 @@ func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 	}
 
 	var favs []models.FavoriteState
-	db.Where("g_id IN ? AND fav_cat >= 0", gids).Find(&favs)
+	db.Where("user_id = ? AND g_id IN ? AND fav_cat >= 0", userID, gids).Find(&favs)
 
 	favMap := make(map[string]int)
 	for _, f := range favs {
@@ -322,13 +324,13 @@ func AttachFavoriteStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 }
 
 // 🟢 新增：专为详情页 (GalleryDetailResult) 提供本地 SQLite 状态挂载
-func AttachDetailFavoriteState(db *gorm.DB, detail *GalleryDetailResult) *GalleryDetailResult {
+func AttachDetailFavoriteState(db *gorm.DB, userID uint, detail *GalleryDetailResult) *GalleryDetailResult {
 	if detail == nil || detail.ID == "" {
 		return detail
 	}
 
 	var fav models.FavoriteState
-	err := db.Where("g_id = ? AND fav_cat >= 0", detail.ID).First(&fav).Error
+	err := db.Where("user_id = ? AND g_id = ? AND fav_cat >= 0", userID, detail.ID).First(&fav).Error
 	if err == nil {
 		detail.IsFavorite = true
 		idx := fav.FavCat
@@ -339,7 +341,7 @@ func AttachDetailFavoriteState(db *gorm.DB, detail *GalleryDetailResult) *Galler
 }
 
 // ChangeFavoriteSortOrder 独立触发 E 站排序状态切换，并保存返回的 Cookie
-func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, account *models.AccountSetting, sortMode string,setting *models.EHSetting) error {
+func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, userID uint, account *models.AccountSetting, sortMode string, setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
@@ -370,7 +372,7 @@ func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, account *models.
 			if cookie.Name == "sk" && cookie.Value != "" {
 				// 更新到本地账号模型并落盘 SQLite
 				account.SK = cookie.Value
-				db.Model(account).Update("sk", cookie.Value)
+				db.Model(&models.User{}).Where("id = ?", userID).Update("sk", cookie.Value)
 				break
 			}
 		}

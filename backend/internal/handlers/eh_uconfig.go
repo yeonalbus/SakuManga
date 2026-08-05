@@ -12,9 +12,9 @@ import (
 
 // GetUConfig 读取 E 站 uconfig.php 配置（含 profile 列表与全部分组字段）
 func (h *EHSettingHandler) GetUConfig(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先在账号设置中绑定 E 站账号"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先在账号设置中绑定 E 站账号"})
 		return
 	}
 
@@ -34,9 +34,9 @@ func (h *EHSettingHandler) GetUConfig(c *gin.Context) {
 //	profileName: action 为 rename/create 时需要的名字
 //	fields:      配置字段 name→value
 func (h *EHSettingHandler) SaveUConfig(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先在账号设置中绑定 E 站账号"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先在账号设置中绑定 E 站账号"})
 		return
 	}
 

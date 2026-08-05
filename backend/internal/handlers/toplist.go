@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 )
@@ -24,10 +25,13 @@ func NewToplistHandler(db *gorm.DB, toplistService *services.ToplistService) *To
 
 // GetToplist 读取内存排行榜缓存，并自动挂载本地 SQLite 收藏状态
 func (h *ToplistHandler) GetToplist(c *gin.Context) {
-	var account models.AccountSetting
-	_ = h.db.First(&account, 1)
+	// 榜单对所有登录用户开放；未绑定凭证时以空账号读缓存（无收藏状态）
+	account := middleware.CurrentAccount(c)
+	if account == nil {
+		account = &models.AccountSetting{}
+	}
 
-	list := h.toplistService.GetCachedToplist(&account)
+	list := h.toplistService.GetCachedToplist(account)
 
 	// 🟢 比对 SQLite 本地数据库，挂载收藏状态
 	if len(list) > 0 {
@@ -35,7 +39,7 @@ func (h *ToplistHandler) GetToplist(c *gin.Context) {
 		for i, item := range list {
 			baseComics[i] = item.OnlineComicDTO
 		}
-		baseComics = services.AttachFavoriteStates(h.db, baseComics)
+		baseComics = services.AttachFavoriteStates(h.db, account.ID, baseComics)
 		for i := range list {
 			list[i].OnlineComicDTO = baseComics[i]
 		}

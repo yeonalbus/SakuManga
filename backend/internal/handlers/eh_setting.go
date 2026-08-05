@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 )
@@ -25,14 +26,14 @@ func NewEHSettingHandler(db *gorm.DB, ehService *services.EHService) *EHSettingH
 // 内部辅助：EHSetting 单例 / 默认 Profile / 生效配置同步
 // ============================================================
 
-// getOrCreateEHSettings 确保 EHSetting 单例存在
-func (h *EHSettingHandler) getOrCreateEHSettings() *models.EHSetting {
+// getOrCreateEHSettings 确保当前用户的 EHSetting 存在（每用户一条）
+func (h *EHSettingHandler) getOrCreateEHSettings(userID uint) *models.EHSetting {
 	var setting models.EHSetting
-	if err := h.db.First(&setting, 1).Error; err != nil {
+	if err := h.db.Where("user_id = ?", userID).First(&setting).Error; err != nil {
 		setting = models.EHSetting{
-			ID:             1,
-			Site:           "e-hentai",
-			PreferRedirect: true,
+			UserID:          userID,
+			Site:            "e-hentai",
+			PreferRedirect:  true,
 			SelectedProfile: "",
 		}
 		h.db.Create(&setting)
@@ -41,9 +42,9 @@ func (h *EHSettingHandler) getOrCreateEHSettings() *models.EHSetting {
 }
 
 // ensureDefaultProfile 无任何 Profile 时创建默认档并选中
-func (h *EHSettingHandler) ensureDefaultProfile() error {
+func (h *EHSettingHandler) ensureDefaultProfile(userID uint) error {
 	var count int64
-	if err := h.db.Model(&models.EHProfile{}).Count(&count).Error; err != nil {
+	if err := h.db.Model(&models.EHProfile{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -51,6 +52,7 @@ func (h *EHSettingHandler) ensureDefaultProfile() error {
 	}
 
 	profile := models.EHProfile{
+		UserID:         userID,
 		Name:           "默认",
 		IsDefault:      true,
 		Site:           "e-hentai",
@@ -63,7 +65,7 @@ func (h *EHSettingHandler) ensureDefaultProfile() error {
 		return err
 	}
 
-	setting := h.getOrCreateEHSettings()
+	setting := h.getOrCreateEHSettings(userID)
 	setting.SelectedProfile = strconv.FormatUint(uint64(profile.ID), 10)
 	setting.Site = profile.Site
 	setting.PreferRedirect = profile.PreferRedirect
@@ -72,30 +74,30 @@ func (h *EHSettingHandler) ensureDefaultProfile() error {
 }
 
 // getActiveProfile 返回当前选中的 Profile（不存在时回退默认）
-func (h *EHSettingHandler) getActiveProfile() (*models.EHProfile, error) {
-	setting := h.getOrCreateEHSettings()
+func (h *EHSettingHandler) getActiveProfile(userID uint) (*models.EHProfile, error) {
+	setting := h.getOrCreateEHSettings(userID)
 
 	if setting.SelectedProfile != "" {
 		var profile models.EHProfile
-		if err := h.db.First(&profile, setting.SelectedProfile).Error; err == nil {
+		if err := h.db.Where("user_id = ? AND id = ?", userID, setting.SelectedProfile).First(&profile).Error; err == nil {
 			return &profile, nil
 		}
 	}
 
 	var profile models.EHProfile
-	if err := h.db.Where("is_default = ?", true).First(&profile).Error; err == nil {
+	if err := h.db.Where("user_id = ? AND is_default = ?", userID, true).First(&profile).Error; err == nil {
 		return &profile, nil
 	}
 	// 无默认档时取第一条
-	if err := h.db.Order("id asc").First(&profile).Error; err == nil {
+	if err := h.db.Where("user_id = ?", userID).Order("id asc").First(&profile).Error; err == nil {
 		return &profile, nil
 	}
 	return nil, gorm.ErrRecordNotFound
 }
 
 // syncEHSetting 将 Profile 的站点配置同步到 EHSetting 生效快照
-func (h *EHSettingHandler) syncEHSetting(profile *models.EHProfile) error {
-	setting := h.getOrCreateEHSettings()
+func (h *EHSettingHandler) syncEHSetting(userID uint, profile *models.EHProfile) error {
+	setting := h.getOrCreateEHSettings(userID)
 	setting.Site = profile.Site
 	setting.PreferRedirect = profile.PreferRedirect
 	setting.SelectedProfile = strconv.FormatUint(uint64(profile.ID), 10)
@@ -103,13 +105,13 @@ func (h *EHSettingHandler) syncEHSetting(profile *models.EHProfile) error {
 	return h.db.Save(setting).Error
 }
 
-// requireAccount 校验已绑定 E 站账号
-func (h *EHSettingHandler) requireAccount() (*models.AccountSetting, *models.EHSetting, bool) {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+// requireAccount 校验当前登录用户已绑定 E 站账号
+func (h *EHSettingHandler) requireAccount(c *gin.Context) (*models.AccountSetting, *models.EHSetting, bool) {
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
 		return nil, nil, false
 	}
-	return &account, h.getOrCreateEHSettings(), true
+	return account, h.getOrCreateEHSettings(account.ID), true
 }
 
 // ============================================================
@@ -118,11 +120,18 @@ func (h *EHSettingHandler) requireAccount() (*models.AccountSetting, *models.EHS
 
 // GetEHSettings 获取当前生效配置 + 选中 Profile 名称
 func (h *EHSettingHandler) GetEHSettings(c *gin.Context) {
-	_ = h.ensureDefaultProfile()
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID := user.ID
 
-	setting := h.getOrCreateEHSettings()
+	_ = h.ensureDefaultProfile(userID)
+
+	setting := h.getOrCreateEHSettings(userID)
 	profileName := ""
-	if profile, err := h.getActiveProfile(); err == nil {
+	if profile, err := h.getActiveProfile(userID); err == nil {
 		profileName = profile.Name
 	}
 
@@ -148,7 +157,13 @@ func (h *EHSettingHandler) SaveEHSettings(c *gin.Context) {
 		return
 	}
 
-	setting := h.getOrCreateEHSettings()
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	setting := h.getOrCreateEHSettings(user.ID)
 	if req.Site != nil {
 		setting.Site = *req.Site
 	}
@@ -170,15 +185,22 @@ func (h *EHSettingHandler) SaveEHSettings(c *gin.Context) {
 
 // GetProfiles 列出全部 Profile
 func (h *EHSettingHandler) GetProfiles(c *gin.Context) {
-	_ = h.ensureDefaultProfile()
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID := user.ID
+
+	_ = h.ensureDefaultProfile(userID)
 
 	var profiles []models.EHProfile
-	if err := h.db.Order("is_default desc, id asc").Find(&profiles).Error; err != nil {
+	if err := h.db.Where("user_id = ?", userID).Order("is_default desc, id asc").Find(&profiles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取 Profile 列表失败"})
 		return
 	}
 
-	setting := h.getOrCreateEHSettings()
+	setting := h.getOrCreateEHSettings(userID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"profiles":       profiles,
@@ -188,7 +210,14 @@ func (h *EHSettingHandler) GetProfiles(c *gin.Context) {
 
 // CreateProfile 新建 Profile，可按 select 字段决定是否立即切换使用
 func (h *EHSettingHandler) CreateProfile(c *gin.Context) {
-	_ = h.ensureDefaultProfile()
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID := user.ID
+
+	_ = h.ensureDefaultProfile(userID)
 
 	var req struct {
 		Name           string `json:"name" binding:"required"`
@@ -205,6 +234,7 @@ func (h *EHSettingHandler) CreateProfile(c *gin.Context) {
 	}
 
 	profile := models.EHProfile{
+		UserID:         userID,
 		Name:           req.Name,
 		Site:           req.Site,
 		PreferRedirect: true,
@@ -235,14 +265,14 @@ func (h *EHSettingHandler) CreateProfile(c *gin.Context) {
 
 	// 第一个 Profile 自动设为默认
 	var count int64
-	h.db.Model(&models.EHProfile{}).Count(&count)
+	h.db.Model(&models.EHProfile{}).Where("user_id = ?", userID).Count(&count)
 	if count == 1 {
 		profile.IsDefault = true
 		h.db.Save(&profile)
 	}
 
 	if req.Select {
-		_ = h.syncEHSetting(&profile)
+		_ = h.syncEHSetting(userID, &profile)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Profile 已创建", "data": profile})
@@ -250,9 +280,15 @@ func (h *EHSettingHandler) CreateProfile(c *gin.Context) {
 
 // UpdateProfile 更新指定 Profile 的站点配置并保存
 func (h *EHSettingHandler) UpdateProfile(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
 	id := c.Param("id")
 	var profile models.EHProfile
-	if err := h.db.First(&profile, id).Error; err != nil {
+	if err := h.db.Where("user_id = ? AND id = ?", user.ID, id).First(&profile).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Profile 不存在"})
 		return
 	}
@@ -296,7 +332,7 @@ func (h *EHSettingHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	// 若是当前选中的 Profile，同步生效快照
-	setting := h.getOrCreateEHSettings()
+	setting := h.getOrCreateEHSettings(user.ID)
 	if setting.SelectedProfile == strconv.FormatUint(uint64(profile.ID), 10) {
 		setting.Site = profile.Site
 		setting.PreferRedirect = profile.PreferRedirect
@@ -309,9 +345,15 @@ func (h *EHSettingHandler) UpdateProfile(c *gin.Context) {
 
 // DeleteProfile 删除指定 Profile（默认与当前使用的不可删除）
 func (h *EHSettingHandler) DeleteProfile(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
 	id := c.Param("id")
 	var profile models.EHProfile
-	if err := h.db.First(&profile, id).Error; err != nil {
+	if err := h.db.Where("user_id = ? AND id = ?", user.ID, id).First(&profile).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Profile 不存在"})
 		return
 	}
@@ -321,7 +363,7 @@ func (h *EHSettingHandler) DeleteProfile(c *gin.Context) {
 		return
 	}
 
-	setting := h.getOrCreateEHSettings()
+	setting := h.getOrCreateEHSettings(user.ID)
 	if setting.SelectedProfile == strconv.FormatUint(uint64(profile.ID), 10) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不能删除当前正在使用的 Profile，请先切换"})
 		return
@@ -337,14 +379,20 @@ func (h *EHSettingHandler) DeleteProfile(c *gin.Context) {
 
 // SelectProfile 切换当前使用的 Profile
 func (h *EHSettingHandler) SelectProfile(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
 	id := c.Param("id")
 	var profile models.EHProfile
-	if err := h.db.First(&profile, id).Error; err != nil {
+	if err := h.db.Where("user_id = ? AND id = ?", user.ID, id).First(&profile).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Profile 不存在"})
 		return
 	}
 
-	if err := h.syncEHSetting(&profile); err != nil {
+	if err := h.syncEHSetting(user.ID, &profile); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "切换 Profile 失败"})
 		return
 	}
@@ -358,9 +406,9 @@ func (h *EHSettingHandler) SelectProfile(c *gin.Context) {
 
 // GetEHUserStatus 实时读取图片配额与资产（GP / Credits / Hath）
 func (h *EHSettingHandler) GetEHUserStatus(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -380,9 +428,9 @@ func (h *EHSettingHandler) GetEHUserStatus(c *gin.Context) {
 // GetMyTags 从 E 站 mytags 页读取关注与隐藏的标签。
 // 可选 query 参数 tagset 指定要读取的 Tagset ID（省略或 <=1 为默认集 #1）。
 func (h *EHSettingHandler) GetMyTags(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -398,9 +446,9 @@ func (h *EHSettingHandler) GetMyTags(c *gin.Context) {
 
 // AddMyTag 上传添加一个关注/隐藏标签到 E 站
 func (h *EHSettingHandler) AddMyTag(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -424,9 +472,9 @@ func (h *EHSettingHandler) AddMyTag(c *gin.Context) {
 
 // RemoveMyTag 从 E 站移除一个关注/隐藏标签
 func (h *EHSettingHandler) RemoveMyTag(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -450,9 +498,9 @@ func (h *EHSettingHandler) RemoveMyTag(c *gin.Context) {
 
 // CreateMyTagset 在 E 站新建一个 Tagset
 func (h *EHSettingHandler) CreateMyTagset(c *gin.Context) {
-	account, setting, ok := h.requireAccount()
+	account, setting, ok := h.requireAccount(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 

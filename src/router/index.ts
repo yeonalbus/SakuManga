@@ -1,8 +1,14 @@
 //配置路由表
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { TOKEN_KEY } from '@/config/api'
 
 //显式声明 : RouteRecordRaw[]
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/LoginView.vue'),
+  },
   {
     path: '/',
     redirect: '/online/home',
@@ -68,6 +74,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/offline/OfflineHistory.vue'),
   },
   {
+    path: '/member-history',
+    name: 'MemberHistory',
+    component: () => import('@/views/MemberHistory.vue'),
+  },
+  {
     path: '/downloads',
     name: 'Downloads',
     component: () => import('@/views/DownloadsView.vue'),
@@ -108,6 +119,20 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+// 全局登录守卫：未登录只能访问 /login；已登录访问 /login 时重定向到主界面
+router.beforeEach((to) => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const isLoginPage = to.path === '/login'
+  if (!token && !isLoginPage) {
+    // 记录目标地址，登录成功后跳回
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (token && isLoginPage) {
+    return { path: '/online/home' }
+  }
+  return true
 })
 
 export default router

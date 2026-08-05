@@ -34,6 +34,7 @@ const (
 // DownloadTask 下载任务（对应数据库 download_tasks 表）
 type DownloadTask struct {
 	ID          string             `gorm:"primaryKey" json:"id"`             // 唯一 ID（毫秒时间戳 + 随机字节）
+	UserID      uint               `gorm:"index" json:"userId"`              // 发起者（执行用其 E 站账号）
 	GID         string             `gorm:"index" json:"gid"`                 // 画廊 GID
 	Token       string             `json:"token"`                            // 画廊 Token
 	Title       string             `json:"title"`                            // 画廊标题

@@ -6,7 +6,7 @@ package router
 
 import (
 	"SakuHentai/internal/handlers"
-	"SakuHentai/internal/models"
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -21,12 +21,18 @@ import (
 //   - ehService: E-Hentai 抓取服务（被账号/EH 设置/在线画廊等多个领域复用）
 //
 // 说明: 内部会根据需要创建 Toplist/Favorites 等服务与对应 Handler，
-// 并在启动时装载默认账号以驱动榜单定时调度器。
+// 并在启动时装载 admin 账号以驱动榜单定时调度器。
 func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	// ─── 1. 初始化各领域 Handler / Service ───
+	authService := services.NewAuthService(db)
+	authHandler := handlers.NewAuthHandler(db, authService)
+	userHandler := handlers.NewUserHandler(db)
+	serverHandler := handlers.NewServerHandler(db)
+
 	accountHandler := handlers.NewAccountHandler(db, ehService)
 	ehSettingHandler := handlers.NewEHSettingHandler(db, ehService)
 	onlineHandler := handlers.NewOnlineComicHandler(db, ehService)
+	libraryHandler := handlers.NewLibraryHandler(db)
 
 	// 下载任务管理器：启动 worker 池并按设置恢复未完成任务
 	downloadManager := services.NewDownloadManager(db, ehService)
@@ -42,17 +48,29 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	services.StartTagMaintainScheduler(db, tagMaintainService)
 	tagMaintainHandler := handlers.NewTagMaintainHandler(db, tagMaintainService)
 
-	// 读取默认账号（id=1）并启动榜单定时调度器
-	var account models.AccountSetting
-	db.First(&account, 1)
-	toplistService.StartScheduler(&account)
+	// 装载 admin 账号并启动榜单定时调度器（后台维护任务固定用 admin）
+	toplistService.StartScheduler(services.LoadAdminAccount(db))
 
 	toplistHandler := handlers.NewToplistHandler(db, toplistService)
 	favHandler := handlers.NewFavoritesHandler(db, favService)
 
-	// ─── 2. 注册 /api/v1 分组路由 ───
-	api := r.Group("/api/v1")
+	// ─── 2. 公开路由（无需登录）───
+	public := r.Group("/api/v1")
 	{
+		public.POST("/auth/login", authHandler.Login)
+
+		// 封面/页图代理：浏览器 <img> 媒体加载无法携带 Authorization 头，故作公开路由，
+		// 由 handler 内部做可选认证（优先当前用户凭证，未登录回退 admin 凭证代理图片）
+		public.GET("/comics/cover-proxy", onlineHandler.ProxyCover)
+	}
+
+	// ─── 3. 受保护路由（需登录）───
+	api := r.Group("/api/v1")
+	api.Use(middleware.AuthRequired(db))
+	{
+		api.POST("/auth/logout", authHandler.Logout)
+		api.GET("/auth/me", authHandler.Me)
+
 		// 路径管理
 		api.GET("/scan-paths", handlers.GetScanPaths)
 		api.POST("/scan-paths", handlers.AddScanPath)
@@ -72,24 +90,17 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/comics/:id/pages", handlers.GetComicPages)
 		api.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
 
-		// 标签 API
+		// 标签 API（只读查询开放给所有用户；数据同步为管理员）
 		api.GET("/tags/status", handlers.GetTagEngineStatus)
-		api.POST("/tags/sync/translation", handlers.SyncTagTranslation)
-		api.POST("/tags/sync/count", handlers.SyncTagCount)
 		api.GET("/tags/suggest", handlers.QueryTagSuggestions)
-		api.GET("/tags/progress", handlers.GetTagProgress)
 		api.GET("/tags/dictionary", handlers.GetTagDictionary)
 
-		// 🟢 统一代理配置接口 (使用重构的 services 联动 handler)
-		api.GET("/network/proxy", handlers.GetProxyHandler)
-		api.POST("/network/proxy", handlers.SetProxyHandler)
-
-		// E站账户与偏好设置
+		// E站账户与偏好设置（绑定当前登录用户自己的 E 站凭证）
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
 		api.POST("/account/settings", accountHandler.SaveAccountSettings)
 		api.DELETE("/account/settings", accountHandler.ClearAccountSettings)
 
-		// EH 专属站点偏好设置接口
+		// EH 专属站点偏好设置接口（按当前用户隔离）
 		api.GET("/eh/settings", ehSettingHandler.GetEHSettings)
 		api.POST("/eh/settings", ehSettingHandler.SaveEHSettings)
 
@@ -115,7 +126,6 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 在线画廊与封面代理
 		api.GET("/comics/online", onlineHandler.GetOnlineComics)
-		api.GET("/comics/cover-proxy", onlineHandler.ProxyCover)
 		api.GET("/comics/online/popular", onlineHandler.GetOnlinePopular)
 		api.GET("/comics/online/detail", onlineHandler.GetOnlineComicDetail)
 		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)
@@ -130,7 +140,31 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 订阅界面
 		api.GET("/online/watched", onlineHandler.GetWatchedComics)
 
-		// 下载任务与 GP 面板
+		// 书架（按用户隔离）
+		api.GET("/bookshelves", libraryHandler.GetBookshelves)
+		api.POST("/bookshelves", libraryHandler.CreateBookshelf)
+		api.PUT("/bookshelves/:id", libraryHandler.UpdateBookshelf)
+		api.DELETE("/bookshelves/:id", libraryHandler.DeleteBookshelf)
+		api.POST("/bookshelves/:id/comics", libraryHandler.AddComicToBookshelf)
+		api.DELETE("/bookshelves/:id/comics", libraryHandler.RemoveComicFromBookshelf)
+
+		// 历史（按用户隔离 + 上限淘汰）
+		api.GET("/history", libraryHandler.GetHistory)
+		api.POST("/history", libraryHandler.AddHistory)
+		api.DELETE("/history", libraryHandler.ClearHistory)
+		api.DELETE("/history/:id", libraryHandler.DeleteHistory)
+
+		// 个人评分（按用户隔离）
+		api.GET("/ratings", libraryHandler.GetRatings)
+		api.GET("/ratings/:comicId", libraryHandler.GetComicRating)
+		api.PUT("/ratings/:comicId", libraryHandler.SetComicRating)
+		api.DELETE("/ratings/:comicId", libraryHandler.DeleteComicRating)
+
+		// 阅读清单（每用户每来源一个队列）
+		api.GET("/reading-list", libraryHandler.GetReadingList)
+		api.PUT("/reading-list", libraryHandler.SaveReadingList)
+
+		// 下载任务与 GP 面板（许可校验在 handler 内：admin 或 allowDownload）
 		api.POST("/downloads", downloadHandler.CreateDownload)
 		api.GET("/downloads", downloadHandler.ListDownloads)
 		api.GET("/downloads/gp-info", downloadHandler.GetGPInfo)
@@ -151,14 +185,42 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
 		api.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 
-		// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 手动写回 / 进度轮询）
-		api.GET("/offline/tags/setting", tagMaintainHandler.GetSetting)
-		api.POST("/offline/tags/setting", tagMaintainHandler.SaveSetting)
-		api.POST("/offline/tags/refresh", tagMaintainHandler.RefreshTags)
-		api.POST("/offline/tags/writeback", tagMaintainHandler.Writeback)
-		api.GET("/offline/tags/progress", tagMaintainHandler.GetProgress)
+		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置）───
+		admin := api.Group("")
+		admin.Use(middleware.AdminOnly())
+		{
+			// 用户管理
+			admin.GET("/users", userHandler.ListUsers)
+			admin.POST("/users", userHandler.CreateUser)
+			admin.PUT("/users/:id", userHandler.UpdateUser)
+			admin.PUT("/users/:id/password", userHandler.ResetPassword)
+			admin.DELETE("/users/:id", userHandler.DeleteUser)
 
-		// 单本 tag 增删落库（详情页编辑）
-		api.PUT("/comics/:id/tags", tagMaintainHandler.EditComicTags)
+			// 服务器与存储配置
+			admin.GET("/server/setting", serverHandler.GetServerSetting)
+			admin.POST("/server/setting", serverHandler.SaveServerSetting)
+
+			// 统一代理配置（系统级，仅管理员）
+			admin.GET("/network/proxy", handlers.GetProxyHandler)
+			admin.POST("/network/proxy", handlers.SetProxyHandler)
+
+			// Tag 引擎数据同步（系统级，仅管理员）
+			admin.POST("/tags/sync/translation", handlers.SyncTagTranslation)
+			admin.POST("/tags/sync/count", handlers.SyncTagCount)
+			admin.GET("/tags/progress", handlers.GetTagProgress)
+
+			// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 手动写回 / 进度轮询）
+			admin.GET("/offline/tags/setting", tagMaintainHandler.GetSetting)
+			admin.POST("/offline/tags/setting", tagMaintainHandler.SaveSetting)
+			admin.POST("/offline/tags/refresh", tagMaintainHandler.RefreshTags)
+			admin.POST("/offline/tags/writeback", tagMaintainHandler.Writeback)
+			admin.GET("/offline/tags/progress", tagMaintainHandler.GetProgress)
+
+			// 单本 tag 增删落库（详情页编辑，仅管理员可改本地 Tag）
+			admin.PUT("/comics/:id/tags", tagMaintainHandler.EditComicTags)
+
+			// 管理员查看成员历史（可按 userId / source 过滤）
+			admin.GET("/admin/history", libraryHandler.AdminGetHistory)
+		}
 	}
 }

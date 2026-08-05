@@ -1,0 +1,85 @@
+// src/stores/userStore.ts
+// 登录会话管理：token 存 localStorage，登录 / 登出 / 恢复会话
+import { ref, computed } from 'vue'
+import { defineStore } from 'pinia'
+import { http } from '@/utils/request'
+import { TOKEN_KEY } from '@/config/api'
+import type { UserInfo, LoginResult } from '@/types/user'
+
+export const useUserStore = defineStore('user', () => {
+  // token 从 localStorage 初始化，页面刷新后仍保持登录状态
+  const token = ref<string>(localStorage.getItem(TOKEN_KEY) || '')
+  const user = ref<UserInfo | null>(null)
+
+  const isAuthenticated = computed(() => !!token.value)
+  const isAdmin = computed(() => user.value?.role === 'admin')
+  const isEx = computed(() => !!user.value?.isEx)
+
+  function setToken(value: string) {
+    token.value = value
+    if (value) {
+      localStorage.setItem(TOKEN_KEY, value)
+    } else {
+      localStorage.removeItem(TOKEN_KEY)
+    }
+  }
+
+  // 登录成功后写入 token 与用户信息
+  async function login(username: string, password: string): Promise<UserInfo> {
+    const data = await http<LoginResult>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    setToken(data.token)
+    user.value = data.user
+    return data.user
+  }
+
+  // 恢复会话：本地有 token 时向服务端校验并加载用户信息
+  // 返回是否恢复成功（token 失效 / 网络失败返回 false，不抛异常）
+  async function fetchMe(): Promise<boolean> {
+    if (!token.value) return false
+    try {
+      const data = await http<{ user: UserInfo }>('/auth/me')
+      user.value = data.user
+      return true
+    } catch {
+      setToken('')
+      user.value = null
+      return false
+    }
+  }
+
+  // 登出：通知服务端销毁会话并清空本地状态
+  async function logout() {
+    try {
+      if (token.value) {
+        await http<{ message: string }>('/auth/logout', { method: 'POST' })
+      }
+    } catch {
+      // 忽略登出接口异常，本地状态照常清理
+    } finally {
+      setToken('')
+      user.value = null
+    }
+  }
+
+  // 仅清空本地状态（供 401 全局处理调用）
+  function clear() {
+    setToken('')
+    user.value = null
+  }
+
+  return {
+    token,
+    user,
+    isAuthenticated,
+    isAdmin,
+    isEx,
+    login,
+    fetchMe,
+    logout,
+    clear,
+    setToken,
+  }
+})

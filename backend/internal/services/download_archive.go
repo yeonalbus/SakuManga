@@ -75,23 +75,22 @@ func (g *archiveDownloader) run() {
 	log.Printf("%s [archive-engine] 任务 %s 开始归档下载 gid=%s title=%q archiveType=%s",
 		dlLogTag, g.task.ID, g.task.GID, g.task.Title, g.task.ArchiveType)
 
-	// 1. 账号 / 设置 / 客户端
-	var account models.AccountSetting
-	if err := g.m.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+	// 1. 账号 / 设置 / 客户端（使用任务发起者的 E 站账号）
+	g.account = loadUserAccount(g.m.db, g.task.UserID)
+	if g.account.IPBMemberID == "" {
 		g.fail("未绑定 E 站账号凭证，无法下载")
 		return
 	}
-	g.account = &account
 	g.setting = g.m.GetSettings()
-	g.ehSetting = loadEHSetting(g.m.db)
+	g.ehSetting = loadEHSetting(g.m.db, g.task.UserID)
 
-	client, err := g.m.ehService.BuildClient(&account)
+	client, err := g.m.ehService.BuildClient(g.account)
 	if err != nil {
 		g.fail("构建下载客户端失败: " + err.Error())
 		return
 	}
 	g.client = client
-	g.referer = GetBaseURL(&account, g.ehSetting)
+	g.referer = GetBaseURL(g.account, g.ehSetting)
 	g.limiter = newRateLimiter(g.setting.SpeedLimitImages, g.setting.SpeedLimitInterval)
 	g.startedAt = time.Now()
 

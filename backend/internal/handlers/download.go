@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 )
@@ -24,12 +25,27 @@ func NewDownloadHandler(db *gorm.DB, ehService *services.EHService, manager *ser
 
 // requireAccount 校验 E 站账号凭证
 func (h *DownloadHandler) requireAccount(c *gin.Context) *models.AccountSetting {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return nil
 	}
-	return &account
+	return account
+}
+
+// requireDownloadPermission 校验当前用户具备下载许可（admin 或 allowDownload=true）
+// 下载任务创建/恢复/离线更新下载等写库操作均需此许可（默认关闭，由管理员在用户管理中开启）。
+func requireDownloadPermission(c *gin.Context) bool {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return false
+	}
+	if user.Role != services.RoleAdmin && !user.AllowDownload {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无下载权限，请联系管理员开启"})
+		return false
+	}
+	return true
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -38,7 +54,15 @@ func (h *DownloadHandler) requireAccount(c *gin.Context) *models.AccountSetting 
 
 // CreateDownload 创建下载任务 POST /api/v1/downloads
 func (h *DownloadHandler) CreateDownload(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
 	if h.requireAccount(c) == nil {
+		return
+	}
+	if !requireDownloadPermission(c) {
 		return
 	}
 
@@ -47,6 +71,7 @@ func (h *DownloadHandler) CreateDownload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
 		return
 	}
+	p.UserID = user.ID
 
 	task, err := h.manager.CreateTask(p)
 	if err != nil {
@@ -97,6 +122,9 @@ func (h *DownloadHandler) PauseDownload(c *gin.Context) {
 
 // ResumeDownload 恢复 POST /api/v1/downloads/:id/resume
 func (h *DownloadHandler) ResumeDownload(c *gin.Context) {
+	if !requireDownloadPermission(c) {
+		return
+	}
 	task, err := h.manager.ResumeTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -163,7 +191,7 @@ func (h *DownloadHandler) GetGPInfo(c *gin.Context) {
 		return
 	}
 
-	setting := getEHSetting(h.db)
+	setting := getEHSetting(h.db, account.ID)
 	info, err := h.manager.GetGPInfo(account, setting, gid, token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

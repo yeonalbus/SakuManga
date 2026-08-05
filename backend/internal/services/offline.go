@@ -41,11 +41,11 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 		return nil, fmt.Errorf("非法参数：db / ehService 不能为空")
 	}
 
-	var account models.AccountSetting
-	if err := db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+	account := LoadAdminAccount(db)
+	if account.IPBMemberID == "" {
 		return nil, fmt.Errorf("请先绑定并保存 E 站账户凭证")
 	}
-	ehSetting := loadEHSetting(db)
+	ehSetting := loadEHSetting(db, LoadAdminUserID(db))
 
 	var comics []models.OfflineComic
 	if err := db.Where("g_id != ''").Order("updated_at desc").Find(&comics).Error; err != nil {
@@ -68,7 +68,7 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 		}
 
 		// ── A. 联网核对在线详情 ──
-		detail, err := ehService.FetchGalleryDetail(&account, c.GID, c.Token, ehSetting)
+		detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 		if err != nil {
 			log.Printf("%s [update] 漫画 %q(gid=%s) 在线详情拉取失败（跳过）: %v", dlWarnTag, c.Title, c.GID, err)
 		} else if detail != nil && detail.PageCount > 0 && c.PageCount > 0 && detail.PageCount > c.PageCount {

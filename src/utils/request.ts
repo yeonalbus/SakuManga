@@ -1,5 +1,5 @@
 // src/utils/request.ts
-import { API_BASE } from '@/config/api'
+import { API_BASE, TOKEN_KEY } from '@/config/api'
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>
@@ -32,9 +32,13 @@ export async function http<T = unknown>(
     }
   }
 
-  // 3. 构造默认 Header
+  // 3. 构造默认 Header（自动附加 Bearer token）
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
+  }
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token) {
+    defaultHeaders['Authorization'] = `Bearer ${token}`
   }
 
   // 4. 发起请求（默认 60s 超时，防止慢接口导致无限 loading；调用方可通过 signal 覆盖）
@@ -49,6 +53,11 @@ export async function http<T = unknown>(
 
   // 5. 统一异常处理
   if (!response.ok) {
+    // 会话失效：清除本地 token 并通知应用层跳转登录页
+    if (response.status === 401) {
+      localStorage.removeItem(TOKEN_KEY)
+      window.dispatchEvent(new Event('app:unauthorized'))
+    }
     const errData = await response.json().catch(() => ({}))
     throw new Error(errData.error || `HTTP 错误 ${response.status}`)
   }

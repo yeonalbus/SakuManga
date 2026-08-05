@@ -1,10 +1,10 @@
 /**
  * 阅读历史 Store：在线/离线历史记录维护 + 收藏状态跨页面联动
- * 由原 appStore 拆分而来
+ * 持久化迁移到后端 /history API（按登录用户隔离），本地仅保留内存态（最近 50 条）。
  */
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import type { ComicItem, OnlineComic } from '@/types/comic'
-import { loadStorage } from '@/utils/storage'
+import { http } from '@/utils/request'
 import { onlineComics } from './comicStore'
 import { onlineReadingList } from './readingStore'
 
@@ -14,31 +14,78 @@ export interface HistoryItem {
   readAt: string
 }
 
-/** 在线 / 离线历史列表（持久化） */
-export const onlineHistoryList = ref<HistoryItem[]>(loadStorage('app_online_history', []))
-export const offlineHistoryList = ref<HistoryItem[]>(loadStorage('app_offline_history', []))
+/** 后端 ReadHistory 记录结构 */
+export interface HistoryRecordDTO {
+  id?: number
+  comicId: string
+  source: 'online' | 'offline'
+  comicTitle: string
+  coverUrl: string
+  lastChapterTitle?: string
+  lastPageIndex?: number
+  totalPageCount?: number
+  lastReadAt: string
+}
 
-watch(
-  onlineHistoryList,
-  (val) => {
-    localStorage.setItem('app_online_history', JSON.stringify(val))
-  },
-  { deep: true },
-)
+/** 前端保留的历史展示上限 */
+const MAX_HISTORY = 50
 
-watch(
-  offlineHistoryList,
-  (val) => {
-    localStorage.setItem('app_offline_history', JSON.stringify(val))
-  },
-  { deep: true },
-)
+/** 在线 / 离线历史列表（内存态） */
+export const onlineHistoryList = ref<HistoryItem[]>([])
+export const offlineHistoryList = ref<HistoryItem[]>([])
 
-/** 新增/覆盖历史记录（去重 + 最多保留 50 条） */
+/** 后端记录 → 前端 HistoryItem（title 与 pageCount 归一化） */
+const toHistoryItem = (r: HistoryRecordDTO): HistoryItem => ({
+  comic: {
+    id: r.comicId,
+    title: r.comicTitle,
+    coverUrl: r.coverUrl,
+    source: r.source,
+    pageCount: r.totalPageCount || undefined,
+  } as ComicItem,
+  readAt: r.lastReadAt,
+})
+
+/** 从后端加载指定来源的历史记录 */
+export const loadHistory = async (source: 'online' | 'offline') => {
+  try {
+    const data = await http<{ items: HistoryRecordDTO[]; total: number }>(
+      `/history?source=${source}&limit=${MAX_HISTORY}`,
+    )
+    const items = (data.items || []).map(toHistoryItem)
+    if (source === 'online') onlineHistoryList.value = items
+    else offlineHistoryList.value = items
+  } catch (e) {
+    console.error('加载历史失败:', e)
+  }
+}
+
+/** 向后端写入一条历史记录（upsert，后端负责上限淘汰） */
+export const syncHistory = async (source: 'online' | 'offline', comic: ComicItem) => {
+  try {
+    await http('/history', {
+      method: 'POST',
+      body: JSON.stringify({
+        comicId: comic.id,
+        source,
+        comicTitle: comic.title || '',
+        coverUrl: comic.coverUrl || '',
+        lastChapterTitle: '',
+        lastPageIndex: 0,
+        totalPageCount: comic.pageCount || 0,
+      }),
+    })
+  } catch (e) {
+    console.error('同步历史失败:', e)
+  }
+}
+
+/** 新增/覆盖历史记录（本地去重 + 后端 upsert） */
 export const addHistory = (comic: ComicItem) => {
   if (!comic || !comic.id) return
 
-  const targetList = comic.source === 'online' ? onlineHistoryList : offlineHistoryList
+  const source = comic.source === 'online' ? 'online' : 'offline'
+  const targetList = source === 'online' ? onlineHistoryList : offlineHistoryList
   targetList.value = targetList.value.filter((item) => item.comic.id !== comic.id)
 
   targetList.value.unshift({
@@ -46,18 +93,21 @@ export const addHistory = (comic: ComicItem) => {
     readAt: new Date().toLocaleString(),
   })
 
-  if (targetList.value.length > 50) {
+  if (targetList.value.length > MAX_HISTORY) {
     targetList.value.pop()
   }
+
+  syncHistory(source, comic)
 }
 
-/** 清空指定来源的历史记录 */
+/** 清空指定来源的历史记录（本地 + 后端） */
 export const clearHistory = (source: 'online' | 'offline') => {
   if (source === 'online') {
     onlineHistoryList.value = []
   } else {
     offlineHistoryList.value = []
   }
+  http(`/history?source=${source}`, { method: 'DELETE' }).catch(() => {})
 }
 
 /**

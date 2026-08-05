@@ -46,8 +46,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useUserStore } from '@/stores/userStore'
 
-// 导入全部 12 个设置子组件
+// 导入全部 11 个设置子组件
 import AccountSettings from '@/components/settings/AccountSettings.vue'
 import EHSettings from '@/components/settings/EHSettings.vue'
 import StyleSettings from '@/components/settings/StyleSettings.vue'
@@ -62,33 +63,62 @@ import AboutSettings from '@/components/settings/AboutSettings.vue'
 
 const router = useRouter()
 const route = useRoute()
-// 支持侧边栏快捷入口：/settings?tab=xxx 直达对应设置栏目
-const activeTab = ref((route.query.tab as string) || 'account')
+const userStore = useUserStore()
+
+// 全部栏目定义；adminOnly=true 的栏目（网络/下载/Tag维护/高级/安全）仅管理员可见
+const allMenuItems = [
+  { id: 'account', label: '账户', icon: '👤', title: '账户设置', adminOnly: false },
+  { id: 'eh', label: 'EH', icon: '😄', title: 'EH 网站设置', adminOnly: false },
+  { id: 'style', label: '样式', icon: '🎨', title: '样式设置', adminOnly: false },
+  { id: 'reader', label: '阅读', icon: '📖', title: '阅读设置', adminOnly: false },
+  { id: 'preference', label: '偏好', icon: '⭐', title: '偏好设置', adminOnly: false },
+  { id: 'network', label: '网络', icon: '📶', title: '网络设置', adminOnly: true },
+  { id: 'download', label: '下载', icon: '📥', title: '下载设置', adminOnly: true },
+  { id: 'tag-maintain', label: 'Tag 维护', icon: '🏷️', title: 'Tag 维护', adminOnly: true },
+  { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置', adminOnly: true },
+  { id: 'security', label: '安全', icon: '🛡️', title: '安全设置', adminOnly: true },
+  { id: 'about', label: '关于', icon: 'ℹ️', title: '关于软件', adminOnly: false },
+]
+
+// 按角色过滤菜单
+const menuItems = computed(() =>
+  allMenuItems.filter((item) => !item.adminOnly || userStore.isAdmin),
+)
+
+// 校验 tab 是否对当前角色可见
+const isTabAllowed = (tab: string) => {
+  const item = allMenuItems.find((i) => i.id === tab)
+  return !!item && (!item.adminOnly || userStore.isAdmin)
+}
+
+// 支持侧边栏快捷入口：/settings?tab=xxx 直达对应设置栏目（越权栏目回退到账户）
+const initialTab = (route.query.tab as string) || 'account'
+const activeTab = ref(isTabAllowed(initialTab) ? initialTab : 'account')
 
 // 已停留在设置页时，侧边栏再次点击同 URL（仅 query 变化）也能实时切换
 watch(
   () => route.query.tab,
   (tab) => {
-    if (tab && typeof tab === 'string') activeTab.value = tab
+    if (tab && typeof tab === 'string') {
+      activeTab.value = isTabAllowed(tab) ? tab : 'account'
+    }
   },
 )
 
-const menuItems = [
-  { id: 'account', label: '账户', icon: '👤', title: '账户设置' },
-  { id: 'eh', label: 'EH', icon: '😄', title: 'EH 网站设置' },
-  { id: 'style', label: '样式', icon: '🎨', title: '样式设置' },
-  { id: 'reader', label: '阅读', icon: '📖', title: '阅读设置' },
-  { id: 'preference', label: '偏好', icon: '⭐', title: '偏好设置' },
-  { id: 'network', label: '网络', icon: '📶', title: '网络设置' },
-  { id: 'download', label: '下载', icon: '📥', title: '下载设置' },
-  { id: 'tag-maintain', label: 'Tag 维护', icon: '🏷️', title: 'Tag 维护' },
-  { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置' },
-  { id: 'security', label: '安全', icon: '🛡️', title: '安全设置' },
-  { id: 'about', label: '关于', icon: 'ℹ️', title: '关于软件' },
-]
+// 用户信息异步加载完成后重新校验当前栏目
+// （刷新页面直达 /settings?tab=xxx 时 user 尚为 null，isAdmin 不可判定，需在此恢复/回退）
+watch(
+  () => userStore.user,
+  (u) => {
+    if (!u) return
+    if (!isTabAllowed(activeTab.value)) {
+      activeTab.value = isTabAllowed(initialTab) ? initialTab : 'account'
+    }
+  },
+)
 
 const currentTabTitle = computed(() => {
-  const current = menuItems.find((item) => item.id === activeTab.value)
+  const current = menuItems.value.find((item) => item.id === activeTab.value)
   return current ? current.title : '设置'
 })
 

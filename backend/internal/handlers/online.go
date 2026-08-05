@@ -1,15 +1,17 @@
 package handlers
 
 import (
-	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 )
@@ -24,13 +26,13 @@ func NewOnlineComicHandler(db *gorm.DB, ehService *services.EHService) *OnlineCo
 }
 
 // 获取或初始化 EHSetting 配置
-func getEHSetting(db *gorm.DB) *models.EHSetting {
+func getEHSetting(db *gorm.DB, userID uint) *models.EHSetting {
 	var setting models.EHSetting
-	// 1. 仅通过主键 ID=1 查找
-	if err := db.First(&setting, 1).Error; err != nil {
+	// 1. 按用户 ID 查找（多用户隔离）
+	if err := db.Where("user_id = ?", userID).First(&setting).Error; err != nil {
 		// 2. 只有查不到记录时，才插入默认配置
 		setting = models.EHSetting{
-			ID:             1,
+			UserID:         userID,
 			Site:           "e-hentai",
 			PreferRedirect: true,
 		}
@@ -41,9 +43,9 @@ func getEHSetting(db *gorm.DB) *models.EHSetting {
 
 // GetOnlineComics 抓取线上画廊列表 (首页 /)
 func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -57,15 +59,15 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 		params.Page = 1
 	}
 
-	ehSetting := getEHSetting(h.db)
-	result, err := h.ehService.FetchGalleryList(&account, params, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	result, err := h.ehService.FetchGalleryList(account, params, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 🟢 解构 result.Comics 并挂载本地 SQLite 收藏状态
-	comics := services.AttachFavoriteStates(h.db, result.Comics)
+	comics := services.AttachFavoriteStates(h.db, account.ID, result.Comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics":      comics,
@@ -79,9 +81,9 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 
 // 🟢 新增：GetWatchedComics 抓取线上订阅列表 (/watched)
 func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
@@ -95,16 +97,16 @@ func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
 		params.Page = 1
 	}
 
-	ehSetting := getEHSetting(h.db)
+	ehSetting := getEHSetting(h.db, account.ID)
 	// 调用 services/eh_sub.go 的 FetchWatchedList
-	result, err := h.ehService.FetchWatchedList(&account, params, ehSetting)
+	result, err := h.ehService.FetchWatchedList(account, params, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 挂载本地 SQLite 收藏状态
-	comics := services.AttachFavoriteStates(h.db, result.Comics)
+	comics := services.AttachFavoriteStates(h.db, account.ID, result.Comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics":      comics,
@@ -116,7 +118,71 @@ func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
 	})
 }
 
-// ProxyCover 代理转发 ExHentai / E-Hentai 的封面图片
+// ehImageHosts E 站图片 / CDN 域名白名单（后缀匹配），用于封面代理防 SSRF
+var ehImageHosts = []string{
+	"s.exhentai.org",
+	"exhentai.org",
+	"e-hentai.org",
+	"ehgt.org",
+	"hentai-cdn.com",
+	"hath.network",
+}
+
+// isEHImageHost 校验目标 url 的 host 是否属于 E 站图片域名白名单（防止代理任意内网/外部地址造成 SSRF）
+func isEHImageHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return false
+	}
+	for _, allowed := range ehImageHosts {
+		if host == allowed || strings.HasSuffix(host, "."+allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveProxyAccount 封面代理的可选认证解析：
+//  1. 优先解析请求携带的 token（Authorization: Bearer / query token）定位当前登录用户，
+//     使用该用户绑定的 E 站凭证（并注入 context 供后续复用）；
+//  2. 未登录 / 用户未绑定凭证时，回退使用 admin 账号的 E 站凭证；
+//  3. 两者都无凭证（IPBMemberID 为空）时返回 nil，由调用方判定 401。
+func (h *OnlineComicHandler) resolveProxyAccount(c *gin.Context) *models.AccountSetting {
+	auth := c.GetHeader("Authorization")
+	token := ""
+	if strings.HasPrefix(auth, "Bearer ") {
+		token = strings.TrimPrefix(auth, "Bearer ")
+	}
+	if token == "" {
+		token = c.Query("token")
+	}
+	if token != "" {
+		var session models.UserSession
+		if err := h.db.Where("token = ?", token).First(&session).Error; err == nil {
+			var user models.User
+			if err := h.db.First(&user, session.UserID).Error; err == nil {
+				c.Set(middleware.ContextTokenKey, token)
+				c.Set(middleware.ContextUserKey, &user)
+				return &models.AccountSetting{
+					ID:          user.ID,
+					IPBMemberID: user.IPBMemberID,
+					IPBPassHash: user.IPBPassHash,
+					Igneous:     user.Igneous,
+					SK:          user.SK,
+					IsEx:        user.IsEx,
+				}
+			}
+		}
+	}
+	// 回退：admin 账号凭证（后台固定维护账号）
+	return services.LoadAdminAccount(h.db)
+}
+
+// ProxyCover 代理转发 ExHentai / E-Hentai 的封面图片（可选认证，兼容 <img> 媒体加载）
 func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 	targetURL := c.Query("url")
 	if targetURL == "" {
@@ -124,13 +190,19 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil {
-		c.Status(http.StatusUnauthorized)
+	// 域名白名单校验，防止代理任意内网/外部地址（SSRF）
+	if !isEHImageHost(targetURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "仅允许代理 E 站图片域名"})
 		return
 	}
 
-	client, err := h.ehService.BuildClient(&account)
+	account := h.resolveProxyAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	client, err := h.ehService.BuildClient(account)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
@@ -168,14 +240,14 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	ehSetting := getEHSetting(h.db)
-	detail, err := h.ehService.FetchGalleryDetail(&account, gid, token, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	detail, err := h.ehService.FetchGalleryDetail(account, gid, token, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -184,17 +256,18 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 	// 1. 如果 E 站网页端成功解析出了收藏状态，同步刷新到 SQLite 本地库
 	if detail.IsFavorite && detail.FavIndex != nil {
 		favState := models.FavoriteState{
+			UserID: account.ID,
 			GID:    gid,
 			Token:  token,
 			FavCat: *detail.FavIndex,
 		}
 		h.db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "g_id"}},
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "g_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&favState)
 	} else {
 		// 2. 如果网页端未解析出，使用 SQLite 中的本地数据兜底
-		detail = services.AttachDetailFavoriteState(h.db, detail)
+		detail = services.AttachDetailFavoriteState(h.db, account.ID, detail)
 	}
 
 	c.JSON(http.StatusOK, detail)
@@ -202,20 +275,20 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 
 // GetOnlinePopular 获取线上热门画廊列表
 func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	ehSetting := getEHSetting(h.db)
-	comics, err := h.ehService.FetchPopularList(&account, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	comics, err := h.ehService.FetchPopularList(account, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	comics = services.AttachFavoriteStates(h.db, comics)
+	comics = services.AttachFavoriteStates(h.db, account.ID, comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics": comics,
@@ -239,14 +312,14 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	ehSetting := getEHSetting(h.db)
-	previews, err := h.ehService.FetchGalleryPreviews(&account, gid, token, page, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	previews, err := h.ehService.FetchGalleryPreviews(account, gid, token, page, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -265,14 +338,14 @@ func (h *OnlineComicHandler) GetOnlineComicPages(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	ehSetting := getEHSetting(h.db)
-	result, err := h.ehService.FetchOnlinePageUrls(&account, gid, token, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	result, err := h.ehService.FetchOnlinePageUrls(account, gid, token, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -298,14 +371,14 @@ func (h *OnlineComicHandler) GetOnlinePageByIndex(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	ehSetting := getEHSetting(h.db)
-	url, total, err := h.ehService.FetchOnlinePageURL(&account, gid, token, ehSetting, page)
+	ehSetting := getEHSetting(h.db, account.ID)
+	url, total, err := h.ehService.FetchOnlinePageURL(account, gid, token, ehSetting, page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -314,20 +387,4 @@ func (h *OnlineComicHandler) GetOnlinePageByIndex(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"index": page, "url": url, "total": total})
 }
 
-// 辅助方法：同时获取账号凭证与 EH 设置
-func (h *OnlineComicHandler) getAccountAndSetting() (*models.AccountSetting, *models.EHSetting, error) {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		return nil, nil, errors.New("请先绑定并保存 E 站账户凭证")
-	}
-
-	var setting models.EHSetting
-	h.db.FirstOrCreate(&setting, models.EHSetting{
-		ID:             1,
-		Site:           "e-hentai",
-		PreferRedirect: true,
-	})
-
-	return &account, &setting, nil
-}
 

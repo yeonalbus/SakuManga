@@ -2,10 +2,11 @@ package models
 
 import "time"
 
-// EHSetting E站站点偏好与交互配置（对应数据库 eh_settings 表，单例 ID=1）
+// EHSetting E站站点偏好与交互配置（多用户下每用户一条，取代全局单例）
 // 其中 Site / PreferRedirect 为“当前生效”的配置快照，始终与所选 Profile 保持同步
 type EHSetting struct {
-	ID              uint      `gorm:"primaryKey;default:1" json:"id"`       // 固定 ID=1 保证单例
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	UserID          uint      `gorm:"index" json:"userId"`                  // 归属用户
 	Site            string    `gorm:"default:'e-hentai'" json:"site"`       // "e-hentai" | "exhentai"
 	PreferRedirect  bool      `gorm:"default:true" json:"preferRedirect"`   // 优先重定向至表站
 	SelectedProfile string    `gorm:"default:''" json:"selectedProfile"`    // 当前选中的 Profile ID（字符串形式）
@@ -15,6 +16,7 @@ type EHSetting struct {
 // EHProfile 合并后的“站点设置 Profile”：把 E 站浏览预设与站点配置组织为可切换/保存的预设档
 type EHProfile struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	UserID         uint      `gorm:"index" json:"userId"`                      // 归属用户
 	Name           string    `gorm:"not null" json:"name"`                     // 预设名称
 	IsDefault      bool      `gorm:"default:false" json:"isDefault"`           // 是否为默认预设（不可删除）
 	Site           string    `gorm:"default:'e-hentai'" json:"site"`           // "e-hentai" | "exhentai"

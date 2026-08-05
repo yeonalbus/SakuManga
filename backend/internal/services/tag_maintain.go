@@ -255,12 +255,12 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 	start := time.Now()
 	result := &TagRefreshResult{}
 
-	var account models.AccountSetting
-	if err := s.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+	account := LoadAdminAccount(s.db)
+	if account.IPBMemberID == "" {
 		s.setProgress(TagMaintainProgress{Status: "error", Type: "refresh", Message: "请先绑定并保存 E 站账户凭证"})
 		return nil, fmt.Errorf("请先绑定并保存 E 站账户凭证")
 	}
-	ehSetting := loadEHSetting(s.db)
+	ehSetting := loadEHSetting(s.db, LoadAdminUserID(s.db))
 
 	var comics []models.OfflineComic
 	if err := s.db.Where("g_id != ''").Find(&comics).Error; err != nil {
@@ -285,7 +285,7 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 			continue
 		}
 
-		detail, err := s.ehService.FetchGalleryDetail(&account, c.GID, c.Token, ehSetting)
+		detail, err := s.ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 		if err != nil || detail == nil {
 			log.Printf("%s [tagm] 漫画 %q(gid=%s) 详情拉取失败（跳过）: %v", dlWarnTag, c.Title, c.GID, err)
 			result.Skipped++

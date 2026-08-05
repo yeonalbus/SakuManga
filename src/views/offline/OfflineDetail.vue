@@ -2,8 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { bookshelves } from '@/stores/bookshelfStore'
+import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/bookshelfStore'
 import { offlineReadingList, toggleReadingList } from '@/stores/readingStore'
+import { getMyRating, setMyRating } from '@/stores/ratingStore'
 import { fetchOfflineComics, recordComicClick, deleteOfflineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
@@ -93,7 +94,7 @@ const fetchComicDetail = async () => {
       source: 'offline',
       tags: parsedTags,
     }
-    myLocalRating.value = comic.value.rating || 0
+    myLocalRating.value = getMyRating(comicId)
     // 三态展示辅助数据
     tagRaws.value = data.tagRaws || []
     tagSources.value = data.tagSources || []
@@ -160,10 +161,11 @@ const formattedSize = computed(() => {
   return `${mb.toFixed(1)} MB`
 })
 
-const myLocalRating = ref(comic.value.rating || 0)
+const myLocalRating = ref(0)
 const setRating = (star: number) => {
   myLocalRating.value = star
   comic.value.rating = star
+  setMyRating(comic.value.id, star)
   toast.success(`个人打分更新为 ${star} 星`)
 }
 
@@ -209,20 +211,17 @@ const handleRemoveTag = async (index: number) => {
   }
 }
 
-const toggleShelfCheck = (shelfId: string) => {
+const toggleShelfCheck = async (shelfId: string) => {
   const shelf = bookshelves.value.find((s) => s.id === shelfId)
   if (!shelf) return
 
-  if (!shelf.comicIds) shelf.comicIds = []
-  const idx = shelf.comicIds.indexOf(comic.value.id)
+  const inShelf = (shelf.comicIds || []).includes(comic.value.id)
 
-  if (idx >= 0) {
-    shelf.comicIds.splice(idx, 1)
-    shelf.count = Math.max(0, shelf.count - 1)
+  if (inShelf) {
+    await removeComicFromShelf(shelfId, comic.value.id)
     toast.info(`从书架「${shelf.name}」中移出`)
   } else {
-    shelf.comicIds.push(comic.value.id)
-    shelf.count++
+    await addComicToShelf(shelfId, comic.value.id)
     toast.success(`已加入书架「${shelf.name}」`)
   }
 }

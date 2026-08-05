@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/models"
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/services"
 )
 
@@ -20,9 +20,15 @@ func NewAccountHandler(db *gorm.DB, ehService *services.EHService) *AccountHandl
 	return &AccountHandler{db: db, ehService: ehService}
 }
 
+// GetAccountSettings 返回当前登录用户的 E 站凭证状态
 func (h *AccountHandler) GetAccountSettings(c *gin.Context) {
-	var setting models.AccountSetting
-	if err := h.db.First(&setting, 1).Error; err != nil {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	if user.IPBMemberID == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"isLoggedIn": false,
 			"data":       nil,
@@ -33,16 +39,23 @@ func (h *AccountHandler) GetAccountSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"isLoggedIn": true,
 		"data": gin.H{
-			"ipb_member_id": setting.IPBMemberID,
-			"igneous":       setting.Igneous,
-			"sk":            setting.SK,
-			"isEx":          setting.IsEx,
-			"updatedAt":     setting.UpdatedAt,
+			"ipb_member_id": user.IPBMemberID,
+			"igneous":       user.Igneous,
+			"sk":            user.SK,
+			"isEx":          user.IsEx,
+			"updatedAt":     user.UpdatedAt,
 		},
 	})
 }
 
+// SaveAccountSettings 校验并保存当前登录用户的 E 站凭证到 User 表
 func (h *AccountHandler) SaveAccountSettings(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
 	var req struct {
 		IPBMemberID string `json:"ipb_member_id" binding:"required"`
 		IPBPassHash string `json:"ipb_pass_hash" binding:"required"`
@@ -55,26 +68,27 @@ func (h *AccountHandler) SaveAccountSettings(c *gin.Context) {
 		return
 	}
 
-	setting := models.AccountSetting{
-		ID:          1,
-		IPBMemberID: req.IPBMemberID,
-		IPBPassHash: req.IPBPassHash,
-		Igneous:     req.Igneous,
-		SK:          req.SK,
-		UpdatedAt:   time.Now(),
-	}
+	account := middleware.CurrentAccount(c)
+	account.IPBMemberID = req.IPBMemberID
+	account.IPBPassHash = req.IPBPassHash
+	account.Igneous = req.Igneous
+	account.SK = req.SK
 
 	// 校验并尝试自动抓取 igneous
-	isEx, err := h.ehService.VerifyAccount(&setting)
+	isEx, err := h.ehService.VerifyAccount(account)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	setting.IsEx = isEx
-
-	// 存入数据库（包含自动填充的 Igneous）
-	if err := h.db.Save(&setting).Error; err != nil {
+	// 写回当前用户的 User 记录
+	user.IPBMemberID = account.IPBMemberID
+	user.IPBPassHash = account.IPBPassHash
+	user.Igneous = account.Igneous
+	user.SK = account.SK
+	user.IsEx = isEx
+	user.UpdatedAt = time.Now()
+	if err := h.db.Save(user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存凭证到数据库失败"})
 		return
 	}
@@ -83,14 +97,31 @@ func (h *AccountHandler) SaveAccountSettings(c *gin.Context) {
 		"message": "凭证校验并保存成功",
 		"isEx":    isEx,
 		"data": gin.H{
-			"ipb_member_id": setting.IPBMemberID,
-			"igneous":       setting.Igneous, // 返回给前端自动填充的 igneous
-			"isEx":          setting.IsEx,
+			"ipb_member_id": user.IPBMemberID,
+			"igneous":       user.Igneous, // 返回给前端自动填充的 igneous
+			"isEx":          user.IsEx,
 		},
 	})
 }
 
+// ClearAccountSettings 清除当前登录用户的 E 站凭证
 func (h *AccountHandler) ClearAccountSettings(c *gin.Context) {
-	h.db.Delete(&models.AccountSetting{}, 1)
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	user.IPBMemberID = ""
+	user.IPBPassHash = ""
+	user.Igneous = ""
+	user.SK = ""
+	user.IsEx = false
+	user.UpdatedAt = time.Now()
+	if err := h.db.Save(user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "清除凭证失败"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "凭证已清除"})
 }

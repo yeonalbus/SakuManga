@@ -19,11 +19,18 @@ func InitDB() {
 
 	DB.AutoMigrate(
 		&models.AccountSetting{},
+		&models.User{},
+		&models.UserSession{},
+		&models.ServerSetting{},
 		&models.EHSetting{},
 		&models.EHProfile{},
 		&models.ExtraScanPath{},
 		&models.OfflineComic{},
 		&models.FavoriteState{},
+		&models.Bookshelf{},
+		&models.HistoryRecord{},
+		&models.ComicRating{},
+		&models.ReadingList{},
 		&models.DownloadTask{},
 		&models.DownloadSetting{},
 		&models.TagMaintainSetting{},

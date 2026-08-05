@@ -7,7 +7,7 @@ import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import type { OnlineComic } from '@/types/comic'
 import { fetchOfflineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
-import { API_BASE } from '@/config/api'
+import { API_BASE, TOKEN_KEY } from '@/config/api'
 
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
 interface WakeLockManager {
@@ -98,6 +98,12 @@ const directionLabel = computed(() => {
   return map[readerSettings.readDirection] || readerSettings.readDirection
 })
 
+// 封面/页图代理 URL：浏览器 <img> 无法携带 Authorization 头，追加 query token 通过认证
+const coverProxyUrl = (url: string) => {
+  const token = localStorage.getItem(TOKEN_KEY) || ''
+  return `${API_BASE}/comics/cover-proxy?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`
+}
+
 // --------------------------------------------------
 // 🖼️ 页列表加载（在线 / 离线分流）
 // --------------------------------------------------
@@ -128,7 +134,7 @@ const loadComicPages = async () => {
       const proxied = Array.from({ length: total }, () => '')
       urls.forEach((u, i) => {
         if (i < total && u) {
-          proxied[i] = `${API_BASE}/comics/cover-proxy?url=${encodeURIComponent(u)}`
+          proxied[i] = coverProxyUrl(u)
         }
       })
       pageUrls.value = proxied
@@ -240,7 +246,7 @@ const ensurePageLoaded = async (idx: number) => {
       }
     }
     if (data.url) {
-      pageUrls.value[idx] = `${API_BASE}/comics/cover-proxy?url=${encodeURIComponent(data.url)}`
+      pageUrls.value[idx] = coverProxyUrl(data.url)
     }
   } catch (err) {
     // 单页就近补全失败不致命，保留占位（翻到该页时黑底 + 重试提示）

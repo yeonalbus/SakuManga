@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"SakuHentai/internal/database"
@@ -35,16 +36,24 @@ func main() {
 	// 启动标签引擎：加载本地翻译/热度数据，若缺失或非最新则自动下载（含 24 小时自动更新周期）
 	services.InitTagEngine()
 
-	database.DB.AutoMigrate(&models.AccountSetting{})
+	// 2. 确保初始管理员存在（users 表为空时创建 admin/admin123，E 站凭证置空，日志打印账密）
+	if err := services.EnsureInitialAdmin(database.DB); err != nil {
+		panic("创建初始管理员失败: " + err.Error())
+	}
 
-	// 2. 初始化 Router 并挂载中间件
+	// 3. 初始化 Router 并挂载中间件
 	r := gin.Default()
 	r.Use(Cors())
 
-	// 3. 初始化 E-Hentai 抓取服务，并注册全部 API 路由（路由配置见 internal/router）
+	// 4. 初始化 E-Hentai 抓取服务，并注册全部 API 路由（路由配置见 internal/router）
 	ehService := services.NewEHService()
 	router.RegisterRoutes(r, database.DB, ehService)
 
-	// 4. 显式指定监听双栈 / IPv4 0.0.0.0
-	r.Run("0.0.0.0:8081")
+	// 5. 读取服务器配置（监听地址 + 端口），无记录则用默认值 0.0.0.0:8081
+	var setting models.ServerSetting
+	if err := database.DB.First(&setting, 1).Error; err != nil {
+		setting = models.ServerSetting{ID: 1, BindHost: "0.0.0.0", Port: 8081, HistoryLimit: 200}
+	}
+	addr := fmt.Sprintf("%s:%d", setting.BindHost, setting.Port)
+	r.Run(addr)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 )
@@ -31,16 +32,6 @@ func NewOfflineHandler(db *gorm.DB, ehService *services.EHService, manager *serv
 	return &OfflineHandler{db: db, ehService: ehService, manager: manager}
 }
 
-// requireAccount 校验 E 站账号凭证
-func (h *OfflineHandler) requireAccount(c *gin.Context) *models.AccountSetting {
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
-		return nil
-	}
-	return &account
-}
-
 // ─────────────────────────────────────────────────────────────
 // 更新检测
 // ─────────────────────────────────────────────────────────────
@@ -48,10 +39,8 @@ func (h *OfflineHandler) requireAccount(c *gin.Context) *models.AccountSetting {
 // CheckOfflineUpdates 运行一次更新检测 POST /api/v1/offline/updates/check
 //
 // 联网逐画廊核对在线详情（限流退避内置），可能耗时较长，由前端异步调用。
+// 检测内部固定使用管理员账号（后台维护任务），用户仅作为触发入口。
 func (h *OfflineHandler) CheckOfflineUpdates(c *gin.Context) {
-	if h.requireAccount(c) == nil {
-		return
-	}
 	result, err := services.CheckUpdates(h.db, h.ehService)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -86,9 +75,10 @@ type downloadUpdateReq struct {
 
 // autoEnqueueUpdates 自动为所有待更新漫画入队下载（autoUpdateGallery=true 时调用）
 func (h *OfflineHandler) autoEnqueueUpdates(result *services.UpdateCheckResult) (enqueued, skipped int) {
+	userID := services.LoadAdminUserID(h.db)
 	for i := range result.NeedsUpdate {
 		comic := result.NeedsUpdate[i]
-		params, err := h.buildUpdateParams(&comic, "")
+		params, err := h.buildUpdateParams(&comic, "", userID)
 		if err != nil {
 			log.Printf("%s [update] 自动更新跳过漫画 %s（%s）: %v", dlWarnTag, comic.ID, comic.Title, err)
 			skipped++
@@ -106,7 +96,7 @@ func (h *OfflineHandler) autoEnqueueUpdates(result *services.UpdateCheckResult) 
 }
 
 // buildUpdateParams 根据漫画的更新信息构造下载参数（手动更新与自动更新共用同一套方案选择逻辑）
-func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverride string) (services.CreateDownloadParams, error) {
+func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverride string, userID uint) (services.CreateDownloadParams, error) {
 	// 优先使用检测到的新版 gid/token；同 gid 扩充时 token 可能已变更
 	gid := comic.NewGID
 	if gid == "" {
@@ -140,6 +130,7 @@ func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverr
 	}
 
 	return services.CreateDownloadParams{
+		UserID:           userID,
 		GID:              gid,
 		Token:            token,
 		Title:            comic.Title,
@@ -152,7 +143,12 @@ func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverr
 
 // DownloadUpdate 为需要更新的漫画启动新版下载 POST /api/v1/offline/updates/download
 func (h *OfflineHandler) DownloadUpdate(c *gin.Context) {
-	if h.requireAccount(c) == nil {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if !requireDownloadPermission(c) {
 		return
 	}
 
@@ -173,7 +169,7 @@ func (h *OfflineHandler) DownloadUpdate(c *gin.Context) {
 	}
 
 	// 构造更新下载参数（方案选择与自动更新共用同一逻辑）
-	params, err := h.buildUpdateParams(&comic, req.Mode)
+	params, err := h.buildUpdateParams(&comic, req.Mode, user.ID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -8,8 +8,10 @@ import TopBar from '@/components/TopBar.vue' // 引入组合好的顶栏
 import GlobalToast from '@/components/common/GlobalToast.vue'
 import GlobalModal from '@/components/common/GlobalModal.vue'
 import { useTagStore } from '@/stores/tagStore'
+import { useUserStore } from '@/stores/userStore'
 
 const tagStore = useTagStore()
+const userStore = useUserStore()
 
 onMounted(() => {
   // 🚀 应用启动时异步获取翻译字典
@@ -43,7 +45,7 @@ watch(
     <GlobalModal />
   </div>
 
-  <div class="app-container">
+  <div v-if="userStore.isAuthenticated" class="app-container">
     <!-- 左侧导航栏 -->
     <aside class="sidebar">
       <div class="logo-area">
@@ -80,6 +82,9 @@ watch(
       </main>
     </div>
   </div>
+
+  <!-- 未登录时仅渲染登录视图（路由守卫保证此时只会是 /login） -->
+  <router-view v-else />
 </template>
 
 <style>

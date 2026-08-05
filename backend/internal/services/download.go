@@ -42,6 +42,7 @@ type CreateDownloadParams struct {
 	Priority         int                 `json:"priority"`
 	Group            string              `json:"group"`
 	UpdateForComicID string              `json:"updateForComicId,omitempty"` // 离线更新下载：被更新漫画 ID
+	UserID           uint                `json:"userId"`                      // 任务发起者（决定执行时使用谁的 E 站凭证）
 }
 
 // DownloadListParams 下载任务列表查询参数
@@ -336,6 +337,7 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		ArchivePath:      setting.ArchivePath,
 		ExtractPath:      setting.ExtractPath,
 		UpdateForComicID: p.UpdateForComicID,
+		UserID:           p.UserID, // 任务发起者（执行时加载其 E 站凭证）
 	}
 
 	if err := m.db.Create(task).Error; err != nil {
@@ -465,13 +467,13 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 		return nil, fmt.Errorf("当前状态 %s 不允许解锁（仅 error_lock 可解锁）", task.Status)
 	}
 
-	var account models.AccountSetting
-	if err := m.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+	account := loadUserAccount(m.db, task.UserID)
+	if account.IPBMemberID == "" {
 		return nil, errors.New("未绑定 E 站账号凭证，无法校验配额")
 	}
-	ehSetting := loadEHSetting(m.db)
+	ehSetting := loadEHSetting(m.db, task.UserID)
 
-	status, err := m.ehService.FetchEHUserStatus(&account, ehSetting)
+	status, err := m.ehService.FetchEHUserStatus(account, ehSetting)
 	if err != nil {
 		log.Printf("%s 解锁任务 %s 校验配额失败: %v", dlErrTag, taskID, err)
 		return nil, errors.New("校验配额失败: " + err.Error())
@@ -829,14 +831,30 @@ func newTaskID() string {
 	return fmt.Sprintf("%d-%x", time.Now().UnixMilli(), b)
 }
 
-// loadEHSetting 读取 EHSetting 单例（不存在则创建默认值）
-func loadEHSetting(db *gorm.DB) *models.EHSetting {
+// loadEHSetting 读取指定用户的 EHSetting（多用户下每用户一条，不存在则创建默认值）
+func loadEHSetting(db *gorm.DB, userID uint) *models.EHSetting {
 	var setting models.EHSetting
-	if err := db.First(&setting, 1).Error; err != nil {
-		setting = models.EHSetting{ID: 1, Site: "e-hentai", PreferRedirect: true}
+	if err := db.Where("user_id = ?", userID).First(&setting).Error; err != nil {
+		setting = models.EHSetting{UserID: userID, Site: "e-hentai", PreferRedirect: true}
 		if err := db.Create(&setting).Error; err != nil {
 			log.Printf("%s 初始化 EHSetting 失败: %v", dlErrTag, err)
 		}
 	}
 	return &setting
+}
+
+// loadUserAccount 按用户 ID 加载其 E 站凭证，构造 AccountSetting（下载任务执行用发起者账号）
+func loadUserAccount(db *gorm.DB, userID uint) *models.AccountSetting {
+	var u models.User
+	if err := db.First(&u, userID).Error; err != nil {
+		return &models.AccountSetting{}
+	}
+	return &models.AccountSetting{
+		ID:          u.ID,
+		IPBMemberID: u.IPBMemberID,
+		IPBPassHash: u.IPBPassHash,
+		Igneous:     u.Igneous,
+		SK:          u.SK,
+		IsEx:        u.IsEx,
+	}
 }

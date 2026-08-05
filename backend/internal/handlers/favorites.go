@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/models"
+	"SakuHentai/internal/middleware"
 	"SakuHentai/internal/services"
 )
 
@@ -35,15 +35,15 @@ func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 	seek := c.Query("seek")
 	sortMode := c.DefaultQuery("sort", "favorited") // 读取排序参数
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
 	// 🟢 获取 EHSetting 并作为最后一个参数传入
-	ehSetting := getEHSetting(h.db)
-	result, err := h.favService.FetchFavoritesList(h.db, &account, favCat, next, prev, seek, sortMode, ehSetting)
+	ehSetting := getEHSetting(h.db, account.ID)
+	result, err := h.favService.FetchFavoritesList(h.db, account.ID, account, favCat, next, prev, seek, sortMode, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,15 +65,15 @@ func (h *FavoritesHandler) AddFavorite(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
 	// 🟢 获取 EHSetting 并作为最后一个参数传入
-	ehSetting := getEHSetting(h.db)
-	if err := h.favService.AddFavorite(h.db, &account, req.GID, req.Token, req.FavCat, req.Note, ehSetting); err != nil {
+	ehSetting := getEHSetting(h.db, account.ID)
+	if err := h.favService.AddFavorite(h.db, account.ID, account, req.GID, req.Token, req.FavCat, req.Note, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,15 +92,15 @@ func (h *FavoritesHandler) RemoveFavorite(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
 	// 🟢 获取 EHSetting 并作为最后一个参数传入
-	ehSetting := getEHSetting(h.db)
-	if err := h.favService.RemoveFavorite(h.db, &account, req.GID, req.Token, ehSetting); err != nil {
+	ehSetting := getEHSetting(h.db, account.ID)
+	if err := h.favService.RemoveFavorite(h.db, account.ID, account, req.GID, req.Token, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -117,15 +117,15 @@ func (h *FavoritesHandler) ChangeSortOrder(c *gin.Context) {
 		return
 	}
 
-	var account models.AccountSetting
-	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未绑定账户"})
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未绑定账户"})
 		return
 	}
 
 	// 🟢 获取 EHSetting 并作为最后一个参数传入
-	ehSetting := getEHSetting(h.db)
-	if err := h.favService.ChangeFavoriteSortOrder(h.db, &account, req.SortMode, ehSetting); err != nil {
+	ehSetting := getEHSetting(h.db, account.ID)
+	if err := h.favService.ChangeFavoriteSortOrder(h.db, account.ID, account, req.SortMode, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

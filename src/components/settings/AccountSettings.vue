@@ -1,5 +1,18 @@
 <template>
   <div class="account-settings">
+    <!-- 当前登录会话信息 -->
+    <div class="setting-row">
+      <div class="unbound-info">
+        <span class="row-label">当前登录</span>
+        <span class="sub-tip">
+          {{ userStore.user?.username }} · {{ userStore.isAdmin ? '管理员' : '成员' }}
+        </span>
+      </div>
+      <button class="action-btn" :disabled="submitting" @click="handleLogoutAccount">
+        退出登录
+      </button>
+    </div>
+
     <!-- 状态 1：未绑定账号 -->
     <template v-if="!isLoggedIn">
       <div class="setting-row unbound-card">
@@ -88,10 +101,14 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/userStore'
 
 const { toast, modal } = useUI()
+const router = useRouter()
+const userStore = useUserStore()
 
 interface EAccountConfig {
   ipb_member_id: string
@@ -241,6 +258,14 @@ const handleLogout = async () => {
   } finally {
     submitting.value = false
   }
+}
+
+// 5.5 退出当前登录会话（返回登录页）
+const handleLogoutAccount = async () => {
+  const confirmed = await modal.confirm('确定要退出登录吗？')
+  if (!confirmed) return
+  await userStore.logout()
+  router.replace('/login')
 }
 
 onMounted(() => {

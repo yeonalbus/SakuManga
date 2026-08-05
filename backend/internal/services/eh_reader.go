@@ -18,6 +18,45 @@ import (
 // E 站抓取统一浏览器 UA
 const ehReaderUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+// ErrGalleryUnavailable 表示 E 站画廊不可用（已删除 / 不可用 / 版权下架）
+type ErrGalleryUnavailable struct {
+	Kind string // "removed" 已删除/不可用；"copyright" 版权下架
+}
+
+func (e *ErrGalleryUnavailable) Error() string {
+	switch e.Kind {
+	case "copyright":
+		return "画廊因版权投诉已被 E 站下架（Copyright Violation）"
+	case "removed":
+		return "画廊已被删除或不可用（This gallery has been removed or is unavailable）"
+	default:
+		return "画廊不可用，可能已被删除或版权下架"
+	}
+}
+
+// classifyGalleryUnavailable 根据 E 站不可用页 HTML 文本识别画廊真实状态
+func classifyGalleryUnavailable(body string) *ErrGalleryUnavailable {
+	lower := strings.ToLower(body)
+	// 版权炮下架：明确提示知识产权侵权 / 被下架
+	if strings.Contains(lower, "intellectual property infringement") ||
+		strings.Contains(lower, "copyright violation") ||
+		strings.Contains(lower, "taken down") {
+		return &ErrGalleryUnavailable{Kind: "copyright"}
+	}
+	// 已删除 / 不可用：经典提示语
+	if strings.Contains(lower, "removed or is unavailable") ||
+		strings.Contains(lower, "gallery has been removed") {
+		return &ErrGalleryUnavailable{Kind: "removed"}
+	}
+	return nil
+}
+
+// readBodyLimited 读取响应体（限制大小，仅用于不可用页识别）
+func readBodyLimited(resp *http.Response) string {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+	return string(body)
+}
+
 // OnlinePagesResult 在线阅读器页列表结果
 type OnlinePagesResult struct {
 	Total int      `json:"total"`
@@ -96,6 +135,10 @@ func (s *EHService) fetchPageURLsByGDataOnce(client *http.Client, baseURL, gid, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		body := readBodyLimited(resp)
+		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+			return nil, gErr
+		}
 		return nil, fmt.Errorf("gdata 响应状态异常: %d", resp.StatusCode)
 	}
 
@@ -333,6 +376,10 @@ func (s *EHService) fetchPreviewPage(client *http.Client, baseURL, gid, token st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		body := readBodyLimited(resp)
+		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+			return nil, 0, gErr
+		}
 		return nil, 0, fmt.Errorf("预览页状态异常: %d", resp.StatusCode)
 	}
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
@@ -371,6 +418,10 @@ func (s *EHService) fetchOriginalImageURL(client *http.Client, sLink string) (st
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		body := readBodyLimited(resp)
+		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+			return "", gErr
+		}
 		return "", fmt.Errorf("页面状态异常: %d", resp.StatusCode)
 	}
 

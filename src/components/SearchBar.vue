@@ -92,12 +92,36 @@ const filteredHistory = computed(() => {
   return searchHistory.value.filter((h) => h.toLowerCase().includes(kw))
 })
 
+// 🔗 E-Hentai 直链 / 裸 gid/token 解析
+const resolveEHDetailLink = (text: string): { id: string; token: string } | null => {
+  // 画廊直链：https://exhentai.org/g/<gid>/<token>/
+  const gLink = text.match(/(?:exhentai|e-hentai)\.org\/g\/(\d{1,10})\/([0-9a-fA-F]{10})/i)
+  if (gLink) return { id: gLink[1], token: gLink[2] }
+  // 分页直链：https://exhentai.org/s/<page>/<gid>-<token>
+  const sLink = text.match(
+    /(?:exhentai|e-hentai)\.org\/s\/[0-9a-zA-Z]+\/(\d{1,10})-([0-9a-fA-F]{10})/i,
+  )
+  if (sLink) return { id: sLink[1], token: sLink[2] }
+  // 裸 gid/token 形式：2887644/32e22f8cb4
+  const bare = text.match(/^(\d{1,10})\/([0-9a-fA-F]{10})$/)
+  if (bare) return { id: bare[1], token: bare[2] }
+  return null
+}
+
 // 触发搜索
 const triggerSearch = (queryText?: string) => {
   const finalQuery = (queryText !== undefined ? queryText : keyword.value).trim()
 
   if (!finalQuery) {
     resetToHome()
+    return
+  }
+
+  // 🔗 E-Hentai 直链跳转：识别后直接进入在线画廊详情页，不作为普通搜索
+  const ehLink = resolveEHDetailLink(finalQuery)
+  if (ehLink) {
+    isFocused.value = false
+    router.push({ path: '/online/detail', query: { id: ehLink.id, token: ehLink.token } })
     return
   }
 

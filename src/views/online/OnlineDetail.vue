@@ -92,6 +92,9 @@ const comic = ref<GalleryDetail>({
   comments: [],
 })
 
+// 详情加载失败信息（如画廊已删除/不可用/版权下架），非空时展示错误态
+const detailError = ref('')
+
 // 1. 获取画廊真实详情 (仅抓取 p=0 基础元数据与初始预览图)
 const fetchDetail = async () => {
   const gid = route.query.id as string
@@ -104,6 +107,7 @@ const fetchDetail = async () => {
   }
 
   isLoading.value = true
+  detailError.value = ''
   try {
     const data = await http<OnlineDetailDTO>('/comics/online/detail', {
       params: { id: gid, token },
@@ -136,7 +140,9 @@ const fetchDetail = async () => {
 
     addHistory(comic.value)
   } catch (err: unknown) {
-    toast.error(err instanceof Error ? err.message : '获取画廊详情失败')
+    const msg = err instanceof Error ? err.message : '获取画廊详情失败'
+    detailError.value = msg
+    toast.error(msg)
   } finally {
     isLoading.value = false
   }
@@ -442,6 +448,12 @@ onUnmounted(() => {
   <div class="detail-page">
     <div v-if="isLoading" class="loading-state">加载中...</div>
 
+    <div v-else-if="detailError" class="error-state">
+      <div class="error-icon">⚠️</div>
+      <p class="error-msg">{{ detailError }}</p>
+      <button class="back-btn" @click="handleBack">‹ 返回</button>
+    </div>
+
     <template v-else>
       <div class="top-action-bar">
         <button class="back-btn" @click="handleBack">‹ 返回</button>
@@ -725,6 +737,29 @@ onUnmounted(() => {
   height: 240px;
   color: #777;
   font-size: 14px;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 300px;
+  color: #e0e0e0;
+  text-align: center;
+  padding: 24px;
+}
+.error-state .error-icon {
+  font-size: 42px;
+}
+.error-state .error-msg {
+  max-width: 560px;
+  color: #aaa;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .top-action-bar {

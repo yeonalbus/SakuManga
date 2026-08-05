@@ -338,7 +338,7 @@ const handleNextInQueue = async () => {
     if (confirmed) {
       toast.success(`自动无缝切入：《${nextComic.title}》`)
 
-      // 使用 replace 替换当前页面路由，实现优雅连贯切换
+      // 使用 push 入栈跳转，返回时可按 1→2→3 栈式回退（replace 会破坏历史栈）
       const query: Record<string, string> = {
         id: nextComic.id,
         source: nextComic.source,
@@ -346,7 +346,7 @@ const handleNextInQueue = async () => {
       if (nextComic.source === 'online') {
         query.token = (nextComic as OnlineComic).token || ''
       }
-      router.replace({ path: '/reader', query })
+      router.push({ path: '/reader', query })
     }
   } else {
     // 队列中已经没有更多本子了

@@ -79,11 +79,21 @@ const filteredComics = computed(() => {
   const cfg = offlineSearchConfig.value
   const searchBarKw = (cfg.keyword || '').toLowerCase().trim()
 
+  // f_sft 禁用 Tag 过滤的本地语义：开启后关键词只匹配标题，不再匹配 Tag
+  const matchTagEnabled = !cfg.disableTagFilter
+
+  // 语言筛选 (E 站语言过滤的本地映射)：未禁用语言过滤时按 language:xxx Tag 过滤
+  const langTag =
+    !cfg.disableLangFilter && cfg.language && cfg.language !== 'All'
+      ? `language:${cfg.language.toLowerCase()}`
+      : ''
+
   return offlineComics.value.filter((comic) => {
     // 关卡 1：顶栏 SearchBar 的主搜索词匹配
     if (searchBarKw) {
       const matchTitle = comic.title.toLowerCase().includes(searchBarKw)
-      const matchTag = comic.tags?.some((t) => t.toLowerCase().includes(searchBarKw))
+      const matchTag =
+        matchTagEnabled && comic.tags?.some((t) => t.toLowerCase().includes(searchBarKw))
       if (!matchTitle && !matchTag) return false
     }
 
@@ -92,11 +102,18 @@ const filteredComics = computed(() => {
       const allMatched = cfg.keywords.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
         const matchTitle = comic.title.toLowerCase().includes(lowerKw)
-        const matchTag = comic.tags?.some((t) => t.toLowerCase().includes(lowerKw))
+        const matchTag =
+          matchTagEnabled && comic.tags?.some((t) => t.toLowerCase().includes(lowerKw))
         return matchTitle || matchTag
       })
 
       if (!allMatched) return false // 只要有一个词不满足，就过滤掉
+    }
+
+    // 🟢 关卡 2.5：语言过滤 (仅当语言选择非 All 且未禁用语言过滤时生效)
+    if (langTag) {
+      const hasLang = comic.tags?.some((t) => t.toLowerCase() === langTag)
+      if (!hasLang) return false
     }
 
     // 关卡 3：分类匹配

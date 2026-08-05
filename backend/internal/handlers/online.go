@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,6 +40,24 @@ func getEHSetting(db *gorm.DB, userID uint) *models.EHSetting {
 		db.Create(&setting)
 	}
 	return &setting
+}
+
+// writeEHServiceError 统一把 E 站服务错误映射为 HTTP 响应：
+// 画廊不可用（已删除/版权下架）返回明确状态码（410/403）与友好提示，其余保持 500
+func writeEHServiceError(c *gin.Context, err error) {
+	var gErr *services.ErrGalleryUnavailable
+	if errors.As(err, &gErr) {
+		status := http.StatusInternalServerError
+		switch gErr.Kind {
+		case "removed":
+			status = http.StatusGone // 410 Gone：画廊已删除/不可用
+		case "copyright":
+			status = http.StatusForbidden // 403：版权下架
+		}
+		c.JSON(status, gin.H{"error": gErr.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }
 
 // GetOnlineComics 抓取线上画廊列表 (首页 /)
@@ -249,7 +268,7 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 	ehSetting := getEHSetting(h.db, account.ID)
 	detail, err := h.ehService.FetchGalleryDetail(account, gid, token, ehSetting)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeEHServiceError(c, err)
 		return
 	}
 
@@ -284,7 +303,7 @@ func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 	ehSetting := getEHSetting(h.db, account.ID)
 	comics, err := h.ehService.FetchPopularList(account, ehSetting)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeEHServiceError(c, err)
 		return
 	}
 
@@ -321,7 +340,7 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 	ehSetting := getEHSetting(h.db, account.ID)
 	previews, err := h.ehService.FetchGalleryPreviews(account, gid, token, page, ehSetting)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeEHServiceError(c, err)
 		return
 	}
 
@@ -347,7 +366,7 @@ func (h *OnlineComicHandler) GetOnlineComicPages(c *gin.Context) {
 	ehSetting := getEHSetting(h.db, account.ID)
 	result, err := h.ehService.FetchOnlinePageUrls(account, gid, token, ehSetting)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeEHServiceError(c, err)
 		return
 	}
 
@@ -380,7 +399,7 @@ func (h *OnlineComicHandler) GetOnlinePageByIndex(c *gin.Context) {
 	ehSetting := getEHSetting(h.db, account.ID)
 	url, total, err := h.ehService.FetchOnlinePageURL(account, gid, token, ehSetting, page)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeEHServiceError(c, err)
 		return
 	}
 

@@ -32,6 +32,17 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		q.Set("f_search", params.Keyword)
 	}
 
+	// 1.5 语言筛选：以 language:xxx token 并入 f_search（与禁用语言过滤互斥）
+	// E 站本身没有独立的语言参数，语言过滤通过 f_search 的 language: 命名空间实现。
+	if params.Language != "" && params.Language != "All" && !params.DisableLangFilter {
+		langToken := "language:" + strings.ToLower(params.Language)
+		if existing := q.Get("f_search"); existing != "" {
+			q.Set("f_search", existing+" "+langToken)
+		} else {
+			q.Set("f_search", langToken)
+		}
+	}
+
 	// 2. 游标与日期跳转优先级逻辑
 	if params.Next != "" {
 		// 向下滑动：向下游标
@@ -51,6 +62,27 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 	fCats := CalculateFCats(params.ActiveCategories)
 	if fCats > 0 {
 		q.Set("f_cats", strconv.Itoa(fCats))
+	}
+
+	// 4. E-Hentai 高级筛选 (advsearch=1 开启后，f_* 参数才会生效)
+	q.Set("advsearch", "1")
+	if params.OnlyRemoved {
+		q.Set("f_sh", "on") // 仅搜索移除了的画廊
+	}
+	if params.OnlyTorrents {
+		q.Set("f_sto", "on") // 只显示有种子的画廊
+	}
+	if params.MinRating != "" {
+		q.Set("f_srdd", params.MinRating) // x星
+	}
+	if params.DisableLangFilter {
+		q.Set("f_sfl", "on") // 禁用语言过滤
+	}
+	if params.DisableUploaderFilter {
+		q.Set("f_sfu", "on") // 禁用上传者过滤
+	}
+	if params.DisableTagFilter {
+		q.Set("f_sft", "on") // 禁用 Tag 过滤
 	}
 
 	// 🟢 追加随机时间戳参数，强制 E 站绕过服务器端缓存，确保首页始终返回最新列表

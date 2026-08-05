@@ -64,6 +64,13 @@ watch(
       filterState.minPages = props.config.minPages
       filterState.maxPages = props.config.maxPages
       filterState.onlyDownloaded = !!props.config.onlyDownloaded
+      // ─── E-Hentai 高级筛选回填 ───
+      filterState.language = props.config.language || 'All'
+      filterState.onlyRemoved = !!props.config.onlyRemoved
+      filterState.onlyTorrents = !!props.config.onlyTorrents
+      filterState.disableLangFilter = !!props.config.disableLangFilter
+      filterState.disableUploaderFilter = !!props.config.disableUploaderFilter
+      filterState.disableTagFilter = !!props.config.disableTagFilter
     }
   },
   { immediate: true },
@@ -127,6 +134,13 @@ const handleApply = () => {
     minPages: filterState.minPages,
     maxPages: filterState.maxPages,
     onlyDownloaded: filterState.onlyDownloaded,
+    // ─── E-Hentai 高级筛选全量透传 ───
+    language: filterState.language,
+    onlyRemoved: filterState.onlyRemoved,
+    onlyTorrents: filterState.onlyTorrents,
+    disableLangFilter: filterState.disableLangFilter,
+    disableUploaderFilter: filterState.disableUploaderFilter,
+    disableTagFilter: filterState.disableTagFilter,
   })
   handleClose()
 }

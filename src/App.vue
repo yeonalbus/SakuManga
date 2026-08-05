@@ -72,7 +72,7 @@ watch(
       <TopBar />
 
       <!-- 页面主体显示区 -->
-      <main class="main-content">
+      <main id="main-content" class="main-content">
         <router-view v-slot="{ Component }">
           <keep-alive>
             <component :is="Component" :key="$route.fullPath" />

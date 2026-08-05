@@ -25,6 +25,13 @@ export const createDefaultSearchConfig = (): SearchConfig => ({
   minPages: undefined,
   maxPages: undefined,
   onlyDownloaded: false,
+  // ─── E-Hentai 高级筛选 (f_* 参数) 默认值 ───
+  language: 'All',
+  onlyRemoved: false,
+  onlyTorrents: false,
+  disableLangFilter: false,
+  disableUploaderFilter: false,
+  disableTagFilter: false,
 })
 
 /** 在线 / 离线 搜索配置（作用域隔离） */

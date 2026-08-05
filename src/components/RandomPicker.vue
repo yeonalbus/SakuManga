@@ -3,12 +3,20 @@ import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
-import { onlineComics, offlineComics } from '@/stores/comicStore'
+import { fetchRandomComicsApi } from '@/api/comic'
 import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
-import type { ComicItem } from '@/types/comic'
+import { useModeStore } from '@/stores/modeStore'
+import type {
+  ComicItem,
+  OnlineComic,
+  OfflineComic,
+  RandomComicItem,
+  RandomComicParams,
+} from '@/types/comic'
 
 const router = useRouter()
 const route = useRoute()
+const modeStore = useModeStore()
 const { toast } = useUI()
 
 // 1. 弹窗显隐控制
@@ -41,83 +49,102 @@ const isSpinning = ref(false)
 const hasDrawn = ref(false)
 const drawnComics = ref<ComicItem[]>([])
 
-// 🎲 抽卡核心逻辑
-// 🎲 抽卡核心逻辑
-const handleStartDraw = () => {
+// 后端统一 DTO → 前端卡片渲染项
+const toComicItem = (item: RandomComicItem): ComicItem => {
+  if (item.source === 'online') {
+    return {
+      id: item.id,
+      title: item.title,
+      coverUrl: item.coverUrl,
+      source: 'online',
+      tags: item.tags ?? [],
+      category: item.category,
+      rating: item.rating,
+      pageCount: item.pageCount,
+      readCount: item.readCount,
+      updatedAt: item.updatedAt,
+      isDownloaded: item.isDownloaded,
+      token: item.token,
+      uploader: item.uploader,
+      isFavorite: item.isFavorite,
+    } as OnlineComic
+  }
+  return {
+    id: item.id,
+    title: item.title,
+    coverUrl: item.coverUrl,
+    source: 'offline',
+    tags: item.tags ?? [],
+    category: item.category,
+    rating: item.rating,
+    pageCount: item.pageCount,
+    readCount: item.readCount,
+    updatedAt: item.updatedAt,
+    isDownloaded: item.isDownloaded,
+    localPath: item.localPath ?? '',
+    fileSize: item.fileSize,
+    hasError: item.hasError,
+  } as OfflineComic
+}
+
+// 🎲 抽卡核心逻辑：对接后端 /comics/random
+const handleStartDraw = async () => {
   isSpinning.value = true
 
-  let rawOnline = onlineComics.value
-  let rawOffline = offlineComics.value
+  try {
+    // 1. 依据当前作用域继承对应的全局筛选配置
+    const config =
+      modeStore.currentMode === 'online' ? onlineSearchConfig.value : offlineSearchConfig.value
 
-  // 1. 如果勾选了“继承全局筛选”，分别用在线/离线的搜索关键字过滤
-  if (useGlobalFilter.value) {
-    const onKw = (onlineSearchConfig.value.keyword || '').toLowerCase().trim()
-    if (onKw) {
-      rawOnline = rawOnline.filter(
-        (c) =>
-          c.title.toLowerCase().includes(onKw) ||
-          c.tags?.some((t) => t.toLowerCase().includes(onKw)),
-      )
+    const params: RandomComicParams = {
+      count: targetCount.value,
+      source: scopeType.value,
     }
 
-    const offKw = (offlineSearchConfig.value.keyword || '').toLowerCase().trim()
-    if (offKw) {
-      rawOffline = rawOffline.filter((c) => {
-        const matchTitle = c.title.toLowerCase().includes(offKw)
-        const tagsArr = Array.isArray(c.tags) ? c.tags : []
-        const matchTag = tagsArr.some((t: string) => t.toLowerCase().includes(offKw))
-        return matchTitle || matchTag
-      })
+    if (useGlobalFilter.value) {
+      const kw = (config.keyword || '').trim()
+      if (kw) params.keyword = kw
+      // 分类仅在线生效（离线全库随机，避免误过滤）
+      if (scopeType.value !== 'offline' && config.activeCategories.length > 0) {
+        params.categories = [...config.activeCategories]
+      }
+      if (config.minRating > 0) params.minRating = config.minRating
+      if (config.minPages && config.minPages > 0) params.minPages = config.minPages
+      if (config.maxPages && config.maxPages > 0) params.maxPages = config.maxPages
     }
-  }
 
-  // 2. 根据选定的范围构建池子
-  let pool: ComicItem[] = []
-  if (scopeType.value === 'online') {
-    pool = rawOnline
-  } else if (scopeType.value === 'offline') {
-    pool = rawOffline
-  } else {
-    pool = [...rawOnline, ...rawOffline]
-  }
+    // 2. 调用后端随机接口（离线 SQL RANDOM + 在线随机页采样）
+    const res = await fetchRandomComicsApi(params)
 
-  const requestedCount = targetCount.value
-  const poolSize = pool.length
-
-  let finalDrawCount = requestedCount
-  let overflowWarning = false
-
-  if (poolSize === 0) {
-    toast.error('当前范围内没有符合条件的作品！')
-    isSpinning.value = false
-    return
-  }
-
-  if (requestedCount > poolSize) {
-    finalDrawCount = poolSize
-    overflowWarning = true
-  }
-
-  // 3. 洗牌并取出结果
-  setTimeout(() => {
-    const shuffled = [...pool].sort(() => Math.random() - 0.5)
-    drawnComics.value = shuffled.slice(0, finalDrawCount)
-
+    // 3. 统一映射为卡片可渲染的 ComicItem
+    drawnComics.value = res.comics.map(toComicItem)
     isSpinning.value = false
     hasDrawn.value = true
 
-    if (overflowWarning) {
-      toast.warning(`符合条件的作品仅有 ${poolSize} 本，已为你全数抽出！`)
+    if (res.warning) {
+      toast.warning(res.warning)
+    } else if (drawnComics.value.length === 0) {
+      toast.error('当前范围内没有符合条件的作品！')
+    } else if (drawnComics.value.length < targetCount.value) {
+      toast.warning(`符合条件的作品仅有 ${drawnComics.value.length} 本，已为你全数抽出！`)
     } else {
-      toast.success(`成功抽出 ${finalDrawCount} 本作品！`)
+      toast.success(`成功抽出 ${drawnComics.value.length} 本作品！`)
     }
-  }, 400)
+  } catch (err) {
+    isSpinning.value = false
+    hasDrawn.value = false
+    toast.error(err instanceof Error ? err.message : '抽卡失败，请稍后重试')
+  }
 }
 
 // 点击跳转详情页
 const handleComicClick = (comic: ComicItem) => {
   if (comic.source === 'online') {
-    router.push(`/online/detail?id=${comic.id}`)
+    // 在线模式：与 ItemCard 一致，同时传递 id (GID) 与 token
+    router.push({
+      path: '/online/detail',
+      query: { id: comic.id, token: comic.token || '' },
+    })
   } else {
     router.push(`/offline/detail?id=${comic.id}`)
   }

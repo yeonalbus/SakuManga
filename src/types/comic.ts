@@ -124,10 +124,18 @@ export interface SearchConfig {
   keyword: string // 顶栏搜索词
   keywords: string[] // 筛选抽屉中的多关键词队列
   activeCategories: string[] // 激活的分类（默认全选）
-  minRating: number // 最低评分
-  minPages?: number // 最少页数
-  maxPages?: number // 最多页数
+  minRating: number // 最低评分 (在线映射 f_srdd 星级)
+  minPages?: number // 最少页数 (仅离线生效)
+  maxPages?: number // 最多页数 (仅离线生效)
   onlyDownloaded: boolean // 是否仅显示已下载
+
+  // ─── E-Hentai 高级筛选 (f_* 参数，本地图库按语义降级应用) ───
+  language: string // 语言: All | Chinese | Japanese | English
+  onlyRemoved: boolean // f_sh=on 仅搜索移除了的画廊 (仅在线)
+  onlyTorrents: boolean // f_sto=on 只显示有种子的画廊 (仅在线)
+  disableLangFilter: boolean // f_sfl=on 禁用语言过滤 (离线=忽略语言选择)
+  disableUploaderFilter: boolean // f_sfu=on 禁用上传者过滤 (仅在线)
+  disableTagFilter: boolean // f_sft=on 禁用 Tag 过滤 (离线=关键词仅匹配标题)
 }
 
 /**
@@ -145,9 +153,60 @@ export interface FilterParams {
   sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount'
   sortOrder?: 'asc' | 'desc'
 
+  // ─── E-Hentai 高级筛选入参 ───
+  language?: string // All | Chinese | Japanese | English (在线并入 f_search)
+  onlyRemoved?: boolean // f_sh=on
+  onlyTorrents?: boolean // f_sto=on
+  disableLangFilter?: boolean // f_sfl=on
+  disableUploaderFilter?: boolean // f_sfu=on
+  disableTagFilter?: boolean // f_sft=on
+
   // ─── 线上游标与线下页码入参 ───
   page?: number // 线下页码
   next?: string // 线上向下游标
   prev?: string // 线上向上游标
   seek?: string // 线上按日期跳转 (YYYY-MM-DD)
+}
+
+// ==========================================
+// 6. 随机抽卡契约
+// ==========================================
+
+/** 随机抽卡统一返回项（在线/离线混合 DTO，兼容 BaseComic 供 ItemCard 直接渲染） */
+export interface RandomComicItem {
+  id: string
+  title: string
+  coverUrl: string
+  source: ComicSource
+  category?: string
+  rating?: number
+  tags: string[]
+  pageCount?: number
+  readCount?: number
+  updatedAt: string
+  isDownloaded?: boolean
+  token?: string
+  uploader?: string
+  isFavorite?: boolean
+  localPath?: string
+  fileSize?: number
+  hasError?: boolean
+}
+
+/** 随机抽卡入参 */
+export interface RandomComicParams {
+  count: number
+  source: 'all' | 'online' | 'offline'
+  keyword?: string
+  categories?: string[] // 仅在线生效
+  minRating?: number // 仅离线生效
+  minPages?: number // 仅离线生效
+  maxPages?: number // 仅离线生效
+}
+
+/** 随机抽卡响应 */
+export interface RandomComicResponse {
+  comics: RandomComicItem[]
+  count: number
+  warning?: string // 在线失败降级时的提示
 }

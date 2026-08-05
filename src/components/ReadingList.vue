@@ -29,7 +29,15 @@ const currentList = computed(() =>
 const handleRead = (comic: ComicItem) => {
   toast.info(`即将开启连贯阅读：${comic.title}`)
   isOpen.value = false
-  router.push(`/reader?id=${comic.id}&source=${comic.source}`)
+  const query: Record<string, string> = {
+    id: comic.id,
+    source: comic.source,
+  }
+  // 在线模式必须携带 token，否则阅读器无法拉取 E 站页图（与 OnlineDetail 一致）
+  if (comic.source === 'online') {
+    query.token = comic.token || ''
+  }
+  router.push({ path: '/reader', query })
 }
 
 // 移出清单

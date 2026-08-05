@@ -15,6 +15,15 @@ type SearchParams struct {
 	Prev             string   `form:"prev"`      // 上一页 GID 游标 (loadBefore)
 	Seek             string   `form:"seek"`      // 按日期跳转 (格式如 "2023-05-20" 或 Unix 时间戳)
 	ActiveCategories []string `form:"categories"`
+
+	// ─── E-Hentai 高级筛选 (需配合 advsearch=1 生效) ───
+	MinRating             string `form:"minRating"`               // f_srdd=星级 (如 4 / 4.5)
+	Language              string `form:"language"`                // All | Chinese | Japanese | English → 并入 f_search
+	OnlyRemoved           bool   `form:"onlyRemoved"`             // f_sh=on 仅搜索移除了的画廊
+	OnlyTorrents          bool   `form:"onlyTorrents"`            // f_sto=on 只显示有种子的画廊
+	DisableLangFilter     bool   `form:"disableLangFilter"`       // f_sfl=on 禁用语言过滤
+	DisableUploaderFilter bool   `form:"disableUploaderFilter"`   // f_sfu=on 禁用上传者过滤
+	DisableTagFilter      bool   `form:"disableTagFilter"`        // f_sft=on 禁用 Tag 过滤
 }
 
 // OnlineComicResult 抓取结果与分页信息

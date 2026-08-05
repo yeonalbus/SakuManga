@@ -10,9 +10,20 @@ const onlineStore = useOnlineStore()
 
 const initSearch = () => {
   const cfg = onlineSearchConfig.value
+  // E-Hentai 的 f_search 支持空格分隔多词（隐式 AND），因此把
+  // 顶栏主搜索词与筛选抽屉的“多关键词队列”合并为一条 f_search 字符串。
+  const kwTokens = [cfg.keyword || '', ...(cfg.keywords || [])].map((t) => t.trim()).filter(Boolean)
   onlineStore.fetchInitial({
-    keyword: cfg.keyword || '',
+    keyword: kwTokens.join(' '),
     categories: cfg.activeCategories,
+    // ─── E-Hentai 高级筛选全量下发 ───
+    minRating: cfg.minRating,
+    language: cfg.language,
+    onlyRemoved: cfg.onlyRemoved,
+    onlyTorrents: cfg.onlyTorrents,
+    disableLangFilter: cfg.disableLangFilter,
+    disableUploaderFilter: cfg.disableUploaderFilter,
+    disableTagFilter: cfg.disableTagFilter,
   })
 }
 

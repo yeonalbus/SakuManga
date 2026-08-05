@@ -1,6 +1,7 @@
 //配置路由表
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { TOKEN_KEY } from '@/config/api'
+import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMemory'
 
 //显式声明 : RouteRecordRaw[]
 const routes: RouteRecordRaw[] = [
@@ -133,6 +134,19 @@ router.beforeEach((to) => {
     return { path: '/online/home' }
   }
   return true
+})
+
+// 返回逻辑优化：离开页面时记录 .main-content 滚动位置，返回时恢复
+router.beforeEach((to, from) => {
+  const el = getMainContent()
+  if (el && from.path !== '/login') {
+    rememberScroll(from.path, el.scrollTop)
+  }
+  return true
+})
+
+router.afterEach((to) => {
+  restoreScroll(to.path)
 })
 
 export default router

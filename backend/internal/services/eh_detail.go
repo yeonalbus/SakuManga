@@ -34,8 +34,16 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	req.AddCookie(&http.Cookie{Name: "inline_set", Value: "ts_l"})
 
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
 		return nil, fmt.Errorf("获取画廊详情失败")
+	}
+	if resp.StatusCode != 200 {
+		body := readBodyLimited(resp)
+		resp.Body.Close()
+		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+			return nil, gErr
+		}
+		return nil, fmt.Errorf("获取画廊详情失败（E 站返回 %d）", resp.StatusCode)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)

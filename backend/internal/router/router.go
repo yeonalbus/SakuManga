@@ -126,6 +126,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 在线画廊与封面代理
 		api.GET("/comics/online", onlineHandler.GetOnlineComics)
+		// 🎲 随机抽卡（离线 SQL RANDOM + 在线随机页采样）
+		api.GET("/comics/random", onlineHandler.GetRandomComics)
 		api.GET("/comics/online/popular", onlineHandler.GetOnlinePopular)
 		api.GET("/comics/online/detail", onlineHandler.GetOnlineComicDetail)
 		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)

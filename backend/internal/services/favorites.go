@@ -22,9 +22,8 @@ func NewFavoritesService(ehService *EHService) *FavoritesService {
 	return &FavoritesService{ehService: ehService}
 }
 
-// FetchFavoritesList 抓取指定收藏夹分类 (0~9) 及页码的在线画廊列表
-// 🟢 修复：添加 db *gorm.DB 参数，以便落盘 SQLite
-func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, page int) (*OnlineComicResult, error) {
+// FetchFavoritesList 抓取指定收藏夹分类 (0~9) 及游标的在线画廊列表
+func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, next, prev, seek, sortMode string) (*OnlineComicResult, error) {
 	client, err := s.ehService.BuildClient(account)
 	currentFav := favCat
 	if err != nil {
@@ -36,14 +35,30 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 		baseURL = "https://exhentai.org/"
 	}
 
-	ehPage := page - 1
-	if ehPage < 0 {
-		ehPage = 0
+	reqURL, _ := url.Parse(baseURL + "favorites.php")
+	q := reqURL.Query()
+	q.Set("favcat", strconv.Itoa(favCat))
+
+	// 🟢 核心修复：只有在没有游标 (next/prev) 的初始请求时，才发送 inline_set 参数！
+	// 避免翻页时携带有冲突的排序设置导致 E 站重置 pagination DOM 结构
+	if next == "" && prev == "" && seek == "" {
+		if sortMode == "published" {
+			q.Set("inline_set", "fs_p") // 按发布时间排序
+		} else if sortMode == "favorited" {
+			q.Set("inline_set", "fs_f") // 按收藏时间排序
+		}
 	}
 
-	reqURL := fmt.Sprintf("%sfavorites.php?favcat=%d&p=%d", baseURL, favCat, ehPage)
+	if next != "" {
+		q.Set("next", next)
+	} else if prev != "" {
+		q.Set("prev", prev)
+	} else if seek != "" {
+		q.Set("seek", seek)
+	}
+	reqURL.RawQuery = q.Encode()
 
-	req, _ := http.NewRequest("GET", reqURL, nil)
+	req, _ := http.NewRequest("GET", reqURL.String(), nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 	resp, err := client.Do(req)
@@ -60,6 +75,8 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 	if err != nil {
 		return nil, fmt.Errorf("解析收藏夹 HTML 失败: %v", err)
 	}
+
+	debugPrintPaginationDOM(doc, reqURL.String())
 
 	var comics []OnlineComicDTO
 
@@ -109,15 +126,7 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 		})
 	})
 
-	totalPages := 1
-	doc.Find("table.ptd td, table.ptt td").Each(func(i int, s *goquery.Selection) {
-		text := strings.TrimSpace(s.Text())
-		if p, err := strconv.Atoi(text); err == nil && p > totalPages {
-			totalPages = p
-		}
-	})
-
-	// 🟢 落盘本地 SQLite 状态
+	// 落盘本地 SQLite 状态
 	if len(comics) > 0 {
 		var batchFavs []models.FavoriteState
 		for _, c := range comics {
@@ -133,11 +142,84 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.Accou
 		}).Create(&batchFavs)
 	}
 
+	// 全排版兼容游标解析
+	nextCursor, prevCursor := extractCursors(doc)
+
 	return &OnlineComicResult{
-		Comics:      comics,
-		TotalPages:  totalPages,
-		CurrentPage: page,
+		Comics:  comics,
+		Next:    nextCursor,
+		Prev:    prevCursor,
+		HasMore: nextCursor != "",
 	}, nil
+}
+
+// 🟢 多模式游标解析器（修复节点选择器与游标清洗逻辑）
+func extractCursors(doc *goquery.Document) (string, string) {
+	nextCursor := ""
+	prevCursor := ""
+
+	// 1. 提取 Next 游标 (优先匹配 #unext 顶部栏, #dnext 底部栏, #next 通用)
+	doc.Find("#unext, #dnext, #next").Each(func(_ int, s *goquery.Selection) {
+		if nextCursor != "" {
+			return // 已经提取到有效游标则退出
+		}
+		// 排除 span 或被禁用的节点
+		if s.Is("span") || s.HasClass("disabled") {
+			return
+		}
+		// 节点本身是 <a>，或者从其子代提取 <a>
+		aSel := s
+		if !s.Is("a") {
+			aSel = s.Find("a").First()
+		}
+		if href, ok := aSel.Attr("href"); ok {
+			if u, err := url.Parse(href); err == nil {
+				nextCursor = u.Query().Get("next")
+				if nextCursor == "" {
+					nextCursor = u.Query().Get("from")
+				}
+			}
+		}
+	})
+
+	// 2. 提取 Prev 游标 (优先匹配 #uprev 顶部栏, #dprev 底部栏, #prev 通用)
+	doc.Find("#uprev, #dprev, #prev").Each(func(_ int, s *goquery.Selection) {
+		if prevCursor != "" {
+			return // 已经提取到有效游标则退出
+		}
+		// 排除 span 或被禁用的节点
+		if s.Is("span") || s.HasClass("disabled") {
+			return
+		}
+		// 节点本身是 <a>，或者从其子代提取 <a>
+		aSel := s
+		if !s.Is("a") {
+			aSel = s.Find("a").First()
+		}
+		if href, ok := aSel.Attr("href"); ok {
+			if u, err := url.Parse(href); err == nil {
+				prevCursor = u.Query().Get("prev")
+				if prevCursor == "" {
+					prevCursor = u.Query().Get("from")
+				}
+			}
+		}
+	})
+
+	// 3. 清洗哨兵边界值 (1-0, 0-0, 0)
+	if isBoundaryCursor(nextCursor) {
+		nextCursor = ""
+	}
+	if isBoundaryCursor(prevCursor) {
+		prevCursor = ""
+	}
+
+	return nextCursor, prevCursor
+}
+
+// 辅助校验函数
+func isBoundaryCursor(cursor string) bool {
+	return cursor == "" || cursor == "1-0" || cursor == "0-0" || cursor == "0"
 }
 
 // AddFavorite 添加/修改在线收藏
@@ -265,4 +347,88 @@ func AttachDetailFavoriteState(db *gorm.DB, detail *GalleryDetailResult) *Galler
 	}
 
 	return detail
+}
+
+// ChangeFavoriteSortOrder 独立触发 E 站排序状态切换，并保存返回的 Cookie
+func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, account *models.AccountSetting, sortMode string) error {
+	client, err := s.ehService.BuildClient(account)
+	if err != nil {
+		return err
+	}
+
+	baseURL := "https://e-hentai.org/"
+	if account.IsEx {
+		baseURL = "https://exhentai.org/"
+	}
+
+	inlineSet := "fs_f" // 默认按收藏时间
+	if sortMode == "published" {
+		inlineSet = "fs_p" // 按发布时间
+	}
+
+	// 🟢 对标 JHenTai: 纯净无污染请求，不带 favcat，不带 next/prev
+	reqURL := fmt.Sprintf("%sfavorites.php?inline_set=%s", baseURL, inlineSet)
+
+	req, _ := http.NewRequest("GET", reqURL, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("切换排序请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 🟢 核心点：从 client.Jar 中提取 E 站下发的最新 Cookie (sk)
+	u, _ := url.Parse(baseURL)
+	if client.Jar != nil {
+		for _, cookie := range client.Jar.Cookies(u) {
+			if cookie.Name == "sk" && cookie.Value != "" {
+				// 更新到本地账号模型并落盘 SQLite
+				account.SK = cookie.Value
+				db.Model(account).Update("sk", cookie.Value)
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+// 🟢 Debug: 深度打印页面中的分页与游标 DOM 结构
+func debugPrintPaginationDOM(doc *goquery.Document, reqURL string) {
+	fmt.Printf("\n================ [EH Cursor Debug Start] ================\n")
+	fmt.Printf("当前请求 URL: %s\n", reqURL)
+
+	// 1. 检查 #dprev 与 #dnext 节点本身（及其父级/子级）
+	fmt.Println("\n--- [1. ID 选择器匹配情况] ---")
+	doc.Find("#dprev, #dnext, #prev, #next").Each(func(i int, s *goquery.Selection) {
+		id, _ := s.Attr("id")
+		class, _ := s.Attr("class")
+		html, _ := goquery.OuterHtml(s)
+		fmt.Printf("#%d ID: [%s] | Class: [%s] | OuterHTML: %s\n", i, id, class, strings.TrimSpace(html))
+	})
+
+	// 2. 扫描整页所有带 prev= 的 <a> 标签
+	fmt.Println("\n--- [2. 所有包含 'prev=' 的 <a> 链接] ---")
+	doc.Find("a[href*='prev=']").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		class, _ := s.Attr("class")
+		parentClass, _ := s.Parent().Attr("class")
+		text := strings.TrimSpace(s.Text())
+		fmt.Printf("Index %d | ParentClass: [%s] | SelfClass: [%s] | Text: [%s] | Href: %s\n", 
+			i, parentClass, class, text, href)
+	})
+
+	// 3. 扫描整页所有带 next= 的 <a> 标签
+	fmt.Println("\n--- [3. 所有包含 'next=' 的 <a> 链接] ---")
+	doc.Find("a[href*='next=']").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		class, _ := s.Attr("class")
+		parentClass, _ := s.Parent().Attr("class")
+		text := strings.TrimSpace(s.Text())
+		fmt.Printf("Index %d | ParentClass: [%s] | SelfClass: [%s] | Text: [%s] | Href: %s\n", 
+			i, parentClass, class, text, href)
+	})
+
+	fmt.Printf("================ [EH Cursor Debug End] ==================\n\n")
 }

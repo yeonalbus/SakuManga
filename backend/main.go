@@ -94,6 +94,7 @@ func main() {
 		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)
 		api.GET("/comics/online/toplist", toplistHandler.GetToplist)
 		api.GET("/comics/online/favorites", favHandler.GetOnlineFavorites)
+		api.POST("/comics/online/favorites/sort", favHandler.ChangeSortOrder)
 		api.POST("/comics/online/favorite", favHandler.AddFavorite)
 		api.DELETE("/comics/online/favorite", favHandler.RemoveFavorite)
 	}

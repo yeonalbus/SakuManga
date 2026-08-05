@@ -1,9 +1,22 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
+// 🟢 1. 增加控制 Props
+const props = withDefaults(
+  defineProps<{
+    showSort?: boolean // 是否显示排序按钮（仅收藏夹传 true）
+    sortMode?: 'favorited' | 'published' // 当前排序模式
+  }>(),
+  {
+    showSort: false,
+    sortMode: 'favorited',
+  },
+)
+
 const emit = defineEmits<{
   (e: 'refresh'): void
   (e: 'seek-change', date: string): void
+  (e: 'toggle-sort'): void // 🟢 触发排序切换事件
 }>()
 
 const isOpen = ref(false)
@@ -28,7 +41,12 @@ const handleRefresh = () => {
   isOpen.value = false
 }
 
-// 🟢 按下 Enter 键才触发日期跳转
+// 🟢 点击切换排序
+const handleToggleSort = () => {
+  emit('toggle-sort')
+  isOpen.value = false
+}
+
 const handleDateSubmit = () => {
   if (selectedDate.value) {
     emit('seek-change', selectedDate.value)
@@ -46,12 +64,24 @@ const handleDateSubmit = () => {
           <span class="label">回到顶部</span>
         </button>
 
+        <!-- 🟢 2. 仅在 showSort 为 true 时显示的单按钮一键切换 -->
+        <button
+          v-if="showSort"
+          class="menu-item sort-item"
+          :title="sortMode === 'favorited' ? '切换为：按发布时间排序' : '切换为：按收藏时间排序'"
+          @click="handleToggleSort"
+        >
+          <span class="icon">{{ sortMode === 'favorited' ? '⭐' : '🕒' }}</span>
+          <span class="label">
+            {{ sortMode === 'favorited' ? '按收藏时间' : '按发布时间' }}
+          </span>
+        </button>
+
         <button class="menu-item" title="刷新页面" @click="handleRefresh">
           <span class="icon">🔄</span>
           <span class="label">刷新列表</span>
         </button>
 
-        <!-- 绑定 @keyup.enter，按下回车才执行 handleDateSubmit -->
         <div class="menu-item date-item" title="选择日期后按 Enter 跳转">
           <span class="icon">📅</span>
           <input

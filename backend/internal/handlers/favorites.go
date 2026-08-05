@@ -25,17 +25,15 @@ func NewFavoritesHandler(db *gorm.DB, favService *services.FavoritesService) *Fa
 
 func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 	favCatStr := c.DefaultQuery("favcat", "0")
-	pageStr := c.DefaultQuery("page", "1")
-
 	favCat, _ := strconv.Atoi(favCatStr)
-	page, _ := strconv.Atoi(pageStr)
-
 	if favCat < 0 || favCat > 9 {
 		favCat = 0
 	}
-	if page < 1 {
-		page = 1
-	}
+
+	next := c.Query("next")
+	prev := c.Query("prev")
+	seek := c.Query("seek")
+	sortMode := c.DefaultQuery("sort", "favorited") // 🟢 读取排序参数
 
 	var account models.AccountSetting
 	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
@@ -43,8 +41,7 @@ func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 		return
 	}
 
-	// 🟢 补传 h.db
-	result, err := h.favService.FetchFavoritesList(h.db, &account, favCat, page)
+	result, err := h.favService.FetchFavoritesList(h.db, &account, favCat, next, prev, seek, sortMode)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -105,4 +102,27 @@ func (h *FavoritesHandler) RemoveFavorite(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "已从收藏夹移除"})
+}
+
+func (h *FavoritesHandler) ChangeSortOrder(c *gin.Context) {
+	var req struct {
+		SortMode string `json:"sortMode" binding:"required"` // "favorited" 或 "published"
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未绑定账户"})
+		return
+	}
+
+	if err := h.favService.ChangeFavoriteSortOrder(h.db, &account, req.SortMode); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "排序设置成功"})
 }

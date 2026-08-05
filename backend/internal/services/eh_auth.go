@@ -47,14 +47,16 @@ func (s *EHService) BuildClient(setting *models.AccountSetting) (*http.Client, e
 		cookies := []*http.Cookie{
 			{Name: "ipb_member_id", Value: setting.IPBMemberID, Path: "/"},
 			{Name: "ipb_pass_hash", Value: setting.IPBPassHash, Path: "/"},
-			// 🟢 直接注入 CookieJar，跟随所有重定向与后续请求
 			{Name: "inline_set", Value: "ts_l", Path: "/"},
 		}
 		if setting.Igneous != "" {
 			cookies = append(cookies, &http.Cookie{Name: "igneous", Value: setting.Igneous, Path: "/"})
 		}
+		// 🟢 关键补充：注入 SK Cookie，传递用户的个性化/排序状态
+		if setting.SK != "" {
+			cookies = append(cookies, &http.Cookie{Name: "sk", Value: setting.SK, Path: "/"})
+		}
 
-		// 不传 Domain，由 cookiejar 根据 URL u 自动绑定作用域
 		jar.SetCookies(u, cookies)
 	}
 

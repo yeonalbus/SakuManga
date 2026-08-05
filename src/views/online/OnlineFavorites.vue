@@ -9,39 +9,83 @@ import { http } from '@/utils/request'
 
 const { toast } = useUI()
 
-// 1. 响应式状态管理
-const activeFav = ref(0) // 当前选中的收藏夹 0 ~ 9[cite: 11]
+const activeFav = ref(0)
 const favComicList = ref<OnlineComic[]>([])
 const isLoading = ref(false)
 const hasMore = ref(true)
 const nextGid = ref<string>('')
+const prevGid = ref<string>('')
 const errorMsg = ref<string | null>(null)
 
-// E 站 10 色 Favorite 代表配色[cite: 11]
+// 🟢 排序模式: 'favorited' (按收藏时间) | 'published' (按发布时间)
+const sortMode = ref<'favorited' | 'published'>('favorited')
+
 const favColors = [
-  '#7f7f7f', // Fav 0 (灰色)[cite: 11]
-  '#f00000', // Fav 1 (红色)[cite: 11]
-  '#ff7800', // Fav 2 (橙色)[cite: 11]
-  '#f0d000', // Fav 3 (黄色)[cite: 11]
-  '#00a0a0', // Fav 4 (绿色)[cite: 11]
-  '#98e020', // Fav 5 (浅绿)[cite: 11]
-  '#00a0a0', // Fav 6 (青色)[cite: 11]
-  '#0000f0', // Fav 7 (蓝色)[cite: 11]
-  '#a000a0', // Fav 8 (紫色)[cite: 11]
-  '#f000a0', // Fav 9 (粉色)[cite: 11]
+  '#7f7f7f',
+  '#f00000',
+  '#ff7800',
+  '#f0d000',
+  '#00a0a0',
+  '#98e020',
+  '#00a0a0',
+  '#0000f0',
+  '#a000a0',
+  '#f000a0',
 ]
 
-// 2. 初始化 / 重置加载（切换分类、手动刷新或日期 Seek 时触发）
+// 🟢 1. 对标 JHenTai: handleChangeSortOrder (切换排序并完全重置)
+const handleChangeSortOrder = async (newMode: 'favorited' | 'published') => {
+  if (isLoading.value || sortMode.value === newMode) return
+
+  isLoading.value = true
+
+  try {
+    // 🟢 1. 先调用独立的后端接口触发 E 站 Session/Cookie 变更
+    await http('/comics/online/favorites/sort', {
+      method: 'POST',
+      body: JSON.stringify({ sortMode: newMode }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    sortMode.value = newMode
+    toast.success(`排序已切换为：${newMode === 'favorited' ? '按收藏时间' : '按发布时间'}`)
+
+    // 🟢 2. 对标 JHenTai: 完全重置本地状态与游标
+    favComicList.value = []
+    nextGid.value = ''
+    prevGid.value = ''
+    hasMore.value = true
+
+    // 🟢 3. 视图置顶
+    const mainEl = document.querySelector('.main-content')
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    // 🟢 4. 发起普通的收藏夹列表查询 (此时 E 站服务端已按新 Cookie 生效)
+    await fetchFavInitial()
+  } catch (err: any) {
+    toast.error('切换排序失败: ' + (err?.message || '未知错误'))
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 2. 初始化 / 全新拉取第一页
 const fetchFavInitial = async (seekDate?: string) => {
   isLoading.value = true
   errorMsg.value = null
   favComicList.value = []
   nextGid.value = ''
+  prevGid.value = ''
   hasMore.value = true
 
   try {
     const query = new URLSearchParams({
       favcat: activeFav.value.toString(),
+      sort: sortMode.value, // 🟢 明确传递当前排序模式
     })
     if (seekDate) {
       query.append('seek', seekDate)
@@ -50,12 +94,14 @@ const fetchFavInitial = async (seekDate?: string) => {
     const data = await http<{
       comics: OnlineComic[]
       next?: string
+      prev?: string
       hasMore?: boolean
     }>(`/comics/online/favorites?${query.toString()}`)
 
     favComicList.value = data.comics || []
-    nextGid.value = data.next || ''
-    hasMore.value = data.hasMore ?? !!data.next
+    nextGid.value = cleanCursor(data.next, false)
+    prevGid.value = cleanCursor(data.prev, true)
+    hasMore.value = data.hasMore ?? !!nextGid.value
   } catch (err: any) {
     errorMsg.value = err?.message || '获取收藏夹数据失败'
     toast.error('网络连接失败')
@@ -64,7 +110,7 @@ const fetchFavInitial = async (seekDate?: string) => {
   }
 }
 
-// 3. 触底追加加载更多 (Load More)
+// 3. 向下滑动加载更多 (Load More)
 const loadMoreFav = async () => {
   if (isLoading.value || !hasMore.value || !nextGid.value) return
 
@@ -75,16 +121,18 @@ const loadMoreFav = async () => {
     const query = new URLSearchParams({
       favcat: activeFav.value.toString(),
       next: nextGid.value,
+      sort: sortMode.value, // 🟢 补全 sort
     })
 
     const data = await http<{
       comics: OnlineComic[]
       next?: string
+      prev?: string
       hasMore?: boolean
     }>(`/comics/online/favorites?${query.toString()}`)
 
     favComicList.value.push(...(data.comics || []))
-    nextGid.value = data.next || ''
+    nextGid.value = cleanCursor(data.next, false)
     hasMore.value = data.hasMore ?? !!data.next
   } catch (err: any) {
     errorMsg.value = err?.message || '加载更多失败'
@@ -94,13 +142,64 @@ const loadMoreFav = async () => {
   }
 }
 
-// 4. 切换收藏夹分类时自动清空并拉取新列表
+// 4. 向上加载较新内容 (Load Before)
+const loadBeforeFav = async () => {
+  if (isLoading.value || !prevGid.value) return
+
+  isLoading.value = true
+  errorMsg.value = null
+
+  try {
+    const query = new URLSearchParams({
+      favcat: activeFav.value.toString(),
+      prev: prevGid.value,
+      sort: sortMode.value, // 🟢 补全 sort
+    })
+
+    const data = await http<{
+      comics: OnlineComic[]
+      next?: string
+      prev?: string
+      hasMore?: boolean
+    }>(`/comics/online/favorites?${query.toString()}`)
+
+    const incoming = data.comics || []
+    const existingIds = new Set(favComicList.value.map((c) => c.id))
+    const uniqueIncoming = incoming.filter((c) => !existingIds.has(c.id))
+
+    if (uniqueIncoming.length > 0) {
+      favComicList.value.unshift(...uniqueIncoming)
+    }
+
+    prevGid.value = cleanCursor(data.prev, true)
+  } catch (err: any) {
+    errorMsg.value = err?.message || '加载较新内容失败'
+    toast.error('加载较新内容失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
 watch(activeFav, () => {
+  // 切换收藏夹分类时同样重置游标
+  nextGid.value = ''
+  prevGid.value = ''
   fetchFavInitial()
 })
 
 const selectFav = (favIndex: number) => {
   activeFav.value = favIndex
+}
+
+const cleanCursor = (cursor?: string, isPrev = false): string => {
+  if (!cursor || cursor === '0-0' || cursor === '0') {
+    return ''
+  }
+  // 只有向后翻页（next）时，"1-0" 才是无效边界；向前翻页（prev）时 "1-0" 是有效游标
+  if (!isPrev && cursor === '1-0') {
+    return ''
+  }
+  return cursor
 }
 
 onMounted(() => {
@@ -110,7 +209,6 @@ onMounted(() => {
 
 <template>
   <div class="favorites-page">
-    <!-- 顶部 10 色收藏夹切换栏 -->
     <div class="fav-grid">
       <button
         v-for="i in 10"
@@ -129,8 +227,15 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 图库列表 + 底部触底加载组件 -->
     <GridContainer v-if="favComicList.length > 0" :items="favComicList">
+      <template #header>
+        <div v-if="prevGid" class="top-load-bar">
+          <button class="pill-btn" :disabled="isLoading" @click="loadBeforeFav">
+            ⬆️ {{ isLoading ? '加载中...' : '加载较新内容' }}
+          </button>
+        </div>
+      </template>
+
       <template #footer>
         <OnlineLoadBar
           :is-loading="isLoading"
@@ -141,14 +246,18 @@ onMounted(() => {
       </template>
     </GridContainer>
 
-    <!-- 首次空数据/加载状态 -->
     <div v-else-if="isLoading" class="loading-state">加载收藏夹数据中...</div>
     <div v-else class="empty-tip">该收藏夹下暂无作品</div>
 
-    <!-- 右下角悬浮控制球 -->
+    <!-- 🟢 传入 showSort、sortMode，绑定 toggle-sort 事件 -->
     <FloatingToolbar
+      :show-sort="true"
+      :sort-mode="sortMode"
       @refresh="() => fetchFavInitial()"
       @seek-change="(date) => fetchFavInitial(date)"
+      @toggle-sort="
+        () => handleChangeSortOrder(sortMode === 'favorited' ? 'published' : 'favorited')
+      "
     />
   </div>
 </template>
@@ -204,5 +313,33 @@ onMounted(() => {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* 🟢 顶部按钮栏样式 */
+.top-load-bar {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 16px;
+}
+
+.pill-btn {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #3a3a3a;
+  border-radius: 20px;
+  padding: 6px 18px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-btn:hover:not(:disabled) {
+  border-color: #00a896;
+  color: #fff;
+}
+
+.pill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

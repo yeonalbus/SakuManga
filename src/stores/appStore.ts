@@ -459,3 +459,12 @@ export const updateOnlineFavoriteState = (gid: string, isFavorite: boolean, favI
     ;(itemInHistory.comic as OnlineComic).favIndex = favIndex
   }
 }
+
+// 订阅专用的搜索/分类过滤参数
+export const subSearchConfig = ref<{
+  keyword: string
+  activeCategories: string[]
+}>({
+  keyword: '',
+  activeCategories: [],
+})

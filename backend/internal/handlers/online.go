@@ -22,7 +22,7 @@ func NewOnlineComicHandler(db *gorm.DB, ehService *services.EHService) *OnlineCo
 	return &OnlineComicHandler{db: db, ehService: ehService}
 }
 
-// GetOnlineComics 抓取线上画廊列表
+// GetOnlineComics 抓取线上画廊列表 (首页 /)
 func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 	var account models.AccountSetting
 	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
@@ -54,8 +54,46 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 		"totalPages":  result.TotalPages,
 		"currentPage": result.CurrentPage,
 		"next":        result.Next,    // 向下游标
-		"prev":        result.Prev,    // 🟢 补上：向上游标 (解决“顶不动”的关键)
-		"hasMore":     result.HasMore, // 🟢 补上：是否有更多标记
+		"prev":        result.Prev,    // 向上游标
+		"hasMore":     result.HasMore, // 是否有更多标记
+	})
+}
+
+// 🟢 新增：GetWatchedComics 抓取线上订阅列表 (/watched)
+func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		return
+	}
+
+	var params services.SearchParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法请求参数"})
+		return
+	}
+
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+
+	// 调用 services/eh_sub.go 的 FetchWatchedList
+	result, err := h.ehService.FetchWatchedList(&account, params)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 挂载本地 SQLite 收藏状态
+	comics := services.AttachFavoriteStates(h.db, result.Comics)
+
+	c.JSON(http.StatusOK, gin.H{
+		"comics":      comics,
+		"totalPages":  result.TotalPages,
+		"currentPage": result.CurrentPage,
+		"next":        result.Next,    // 向下游标
+		"prev":        result.Prev,    // 向上游标
+		"hasMore":     result.HasMore, // 是否有更多标记
 	})
 }
 
@@ -123,20 +161,19 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		return
 	}
 
-	// 🟢 1. 如果 E 站网页端成功解析出了收藏状态，同步刷新到 SQLite 本地库
+	// 1. 如果 E 站网页端成功解析出了收藏状态，同步刷新到 SQLite 本地库
 	if detail.IsFavorite && detail.FavIndex != nil {
 		favState := models.FavoriteState{
 			GID:    gid,
 			Token:  token,
 			FavCat: *detail.FavIndex,
 		}
-		// 🟢 统一列名为 gid（避免 g_id 导致的 SQL 查询失败）
 		h.db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "g_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"fav_cat", "token", "updated_at"}),
 		}).Create(&favState)
 	} else {
-		// 🟢 2. 如果网页端未解析出（如 selector 未匹配），使用 SQLite 中的本地数据兜底
+		// 2. 如果网页端未解析出，使用 SQLite 中的本地数据兜底
 		detail = services.AttachDetailFavoriteState(h.db, detail)
 	}
 
@@ -164,11 +201,11 @@ func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 	})
 }
 
-// GetOnlineComicPreviews 独立获取指定页码的预览图列表 (用于前端点击“加载更多”)
+// GetOnlineComicPreviews 独立获取指定页码的预览图列表
 func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 	gid := c.Query("id")
 	token := c.Query("token")
-	pageStr := c.DefaultQuery("page", "1") // 默认抓第 1 页 (对应 E 站的 p=1)
+	pageStr := c.DefaultQuery("page", "1")
 
 	if gid == "" || token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失，必需传递 id (GID) 和 token"})
@@ -181,14 +218,12 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 		return
 	}
 
-	// 校验 E 站账户凭证
 	var account models.AccountSetting
 	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
 		return
 	}
 
-	// 调用 Service 层刚刚写好的 FetchGalleryPreviews
 	previews, err := h.ehService.FetchGalleryPreviews(&account, gid, token, page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

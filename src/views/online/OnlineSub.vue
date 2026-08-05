@@ -1,43 +1,61 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { watch, onMounted } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
-import { generateOnlineComics } from '@/utils/mockData'
+import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
+import FloatingToolbar from '@/components/FloatingToolbar.vue'
+import { useSubStore } from '@/stores/subStore' // 🟢 对应订阅专用的 Pinia Store
+import { subSearchConfig } from '@/stores/appStore' // 🟢 对应订阅专用的搜索/分类配置
 
-// 1. 生成 120 条关注作者更新数据（刚好 5 页，每页 24 条）
-const allSubComics = ref(
-  generateOnlineComics(120).map((comic, i) => ({
-    ...comic,
-    id: `online-sub-${i + 1}`,
-    title: `📡 [订阅更新] ${comic.title.replace(/^\[Hanazono\]\s*/, '')}`,
-  })),
+const subStore = useSubStore()
+
+// 初始化/重新加载订阅数据
+const initSearch = () => {
+  const cfg = subSearchConfig.value
+  subStore.fetchInitial({
+    keyword: cfg.keyword || '',
+    categories: cfg.activeCategories,
+  })
+}
+
+// 监听订阅检索配置变更（如搜索框输入、分类勾选）
+watch(
+  subSearchConfig,
+  () => {
+    initSearch()
+  },
+  { deep: true },
 )
 
-// 2. 分页控制逻辑
-const pageSize = 24
-const currentPage = ref(1)
-
-const totalPages = computed(() => Math.ceil(allSubComics.value.length / pageSize))
-
-// 动态计算当前页数据切片
-const currentPageItems = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return allSubComics.value.slice(start, start + pageSize)
+onMounted(() => {
+  initSearch()
 })
-
-const handlePageChange = (page: number) => {
-  currentPage.value = page
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
 </script>
 
 <template>
   <div class="page-wrapper">
-    <GridContainer
-      :items="currentPageItems"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      @page-change="handlePageChange"
-    />
+    <GridContainer :items="subStore.comics">
+      <!-- 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
+      <template #header>
+        <div v-if="subStore.prevGid" class="top-load-bar">
+          <button class="pill-btn" :disabled="subStore.isLoading" @click="subStore.loadBefore">
+            ⬆️ {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
+          </button>
+        </div>
+      </template>
+
+      <!-- 2. 底部插槽：向下滑动流式加载 -->
+      <template #footer>
+        <OnlineLoadBar
+          :is-loading="subStore.isLoading"
+          :has-more="subStore.hasMore"
+          :error="subStore.error"
+          @load-more="subStore.loadMore"
+        />
+      </template>
+    </GridContainer>
+
+    <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) -->
+    <FloatingToolbar @refresh="initSearch" @seek-change="(date) => subStore.seekToDate(date)" />
   </div>
 </template>
 
@@ -45,5 +63,31 @@ const handlePageChange = (page: number) => {
 .page-wrapper {
   padding: 20px;
   min-height: 100%;
+}
+
+.top-load-bar {
+  padding: 8px 0;
+  text-align: center;
+}
+
+.pill-btn {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #3a3a3a;
+  border-radius: 20px;
+  padding: 6px 18px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-btn:hover:not(:disabled) {
+  border-color: #00a896;
+  color: #fff;
+}
+
+.pill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

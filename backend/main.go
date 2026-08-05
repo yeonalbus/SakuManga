@@ -97,6 +97,9 @@ func main() {
 		api.POST("/comics/online/favorites/sort", favHandler.ChangeSortOrder)
 		api.POST("/comics/online/favorite", favHandler.AddFavorite)
 		api.DELETE("/comics/online/favorite", favHandler.RemoveFavorite)
+
+		// 订阅界面
+		api.GET("/online/watched", onlineHandler.GetWatchedComics)
 	}
 
 	// 显式指定监听双栈 / IPv4 0.0.0.0

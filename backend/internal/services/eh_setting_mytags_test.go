@@ -1,6 +1,7 @@
 package services
 
 import (
+	"SakuHentai/internal/models"
 	"os"
 	"reflect"
 	"strings"
@@ -45,5 +46,56 @@ func TestExtractMyTagsFromSnapshot(t *testing.T) {
 	}
 	if !reflect.DeepEqual(hidden, wantHidden) {
 		t.Errorf("hidden 不匹配\n  got:  %v\n  want: %v", hidden, wantHidden)
+	}
+}
+
+// 验证 Tagset 下拉解析：快照中 #tagset_form select 只有一个
+// <option value="1" selected>Tagset #1 (8)</option>，当前选中为 1，
+// 名称 "Tagset #1"、数量 8。
+func TestExtractTagsetsFromSnapshot(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata_eh/eh_mytags.html")
+	if err != nil {
+		t.Fatalf("读取快照失败: %v", err)
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("解析快照失败: %v", err)
+	}
+
+	tagsets, current := extractTagsets(doc)
+
+	want := []models.EHTagset{{ID: 1, Name: "Tagset #1", Count: 8}}
+	if !reflect.DeepEqual(tagsets, want) {
+		t.Errorf("tagsets 不匹配\n  got:  %v\n  want: %v", tagsets, want)
+	}
+	if current != 1 {
+		t.Errorf("currentTagset 不匹配: got %d, want 1", current)
+	}
+
+	// 单独验证文本解析辅助函数
+	if name, count := parseTagsetText("Tagset #1 (8)"); name != "Tagset #1" || count != 8 {
+		t.Errorf("parseTagsetText 解析失败: (%q, %d)", name, count)
+	}
+	if name, count := parseTagsetText("Tagset #2"); name != "Tagset #2" || count != 0 {
+		t.Errorf("parseTagsetText 无数量时解析失败: (%q, %d)", name, count)
+	}
+}
+
+// 验证 mytagsURL 的 tagset 参数拼接逻辑（与原站 change_tagset JS 一致：
+// tagset<=1 不带参数，tagset>1 追加 ?tagset=N）。
+func TestMyTagsURLTagset(t *testing.T) {
+	cases := []struct {
+		tagset int
+		want   string
+	}{
+		{0, "https://exhentai.org/mytags"},
+		{1, "https://exhentai.org/mytags"},
+		{2, "https://exhentai.org/mytags?tagset=2"},
+		{7, "https://exhentai.org/mytags?tagset=7"},
+	}
+	for _, c := range cases {
+		if got := mytagsURL("https://exhentai.org/", c.tagset); got != c.want {
+			t.Errorf("mytagsURL(%d) = %q, want %q", c.tagset, got, c.want)
+		}
 	}
 }

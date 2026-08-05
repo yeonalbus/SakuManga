@@ -7,6 +7,7 @@ export interface TagItem {
   key: string
   name: string
   intro?: string
+  count?: number
 }
 
 export const useTagStore = defineStore('tag', () => {

@@ -35,8 +35,17 @@ type EHUserStatus struct {
 	AssetHath    string `json:"assetHath"`    // Hath 点数
 }
 
+// EHTagset 一个 Tagset（E 站 mytags 页顶部下拉的一个选项）
+type EHTagset struct {
+	ID    int    `json:"id"`    // Tagset 数字 ID（1 为默认集）
+	Name  string `json:"name"`  // 显示名称，如 "Tagset #1"
+	Count int    `json:"count"` // 该 Tagset 内标签数量（来自下拉文本 "(8)"）
+}
+
 // EHMyTags 我的标签（关注/隐藏），从 E 站 mytags 页实时读取
 type EHMyTags struct {
-	Watched []string `json:"watched"` // 关注的标签
-	Hidden  []string `json:"hidden"`  // 隐藏的标签
+	Watched       []string   `json:"watched"`       // 关注的标签
+	Hidden        []string   `json:"hidden"`        // 隐藏的标签
+	Tagsets       []EHTagset `json:"tagsets"`       // 全部 Tagset 列表（用于前端下拉）
+	CurrentTagset int        `json:"currentTagset"` // 当前选中的 Tagset ID（1 为默认集）
 }

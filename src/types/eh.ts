@@ -37,10 +37,28 @@ export interface EHUserStatus {
   assetHath: string
 }
 
+/** 一个 Tagset（E 站 mytags 页顶部下拉的一个选项） */
+export interface EHTagset {
+  id: number
+  name: string
+  count: number
+}
+
 /** 我的标签（关注 / 隐藏），从 E 站 mytags 页读取 */
 export interface EHMyTags {
   watched: string[]
   hidden: string[]
+  tagsets: EHTagset[]
+  currentTagset: number
+}
+
+/** /tags/suggest 联想返回的标签条目 */
+export interface TagSuggestion {
+  namespace: string
+  key: string
+  name: string
+  intro?: string
+  count: number
 }
 
 // ============================================================

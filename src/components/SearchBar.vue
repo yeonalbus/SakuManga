@@ -61,8 +61,7 @@ watch(keyword, (newVal) => {
   if (suggestTimer) clearTimeout(suggestTimer)
   suggestTimer = window.setTimeout(async () => {
     try {
-      const res = await http<{ proxy: string }>('/network/proxy')
-      suggestedTags.value = await res.json()
+      suggestedTags.value = await http<TagItem[]>('/tags/suggest', { params: { q, limit: 8 } })
     } catch (e) {
       console.error('获取标签联想失败:', e)
     }

@@ -377,7 +377,8 @@ func (h *EHSettingHandler) GetEHUserStatus(c *gin.Context) {
 // 我的标签
 // ============================================================
 
-// GetMyTags 从 E 站 mytags 页读取关注与隐藏的标签
+// GetMyTags 从 E 站 mytags 页读取关注与隐藏的标签。
+// 可选 query 参数 tagset 指定要读取的 Tagset ID（省略或 <=1 为默认集 #1）。
 func (h *EHSettingHandler) GetMyTags(c *gin.Context) {
 	account, setting, ok := h.requireAccount()
 	if !ok {
@@ -385,7 +386,8 @@ func (h *EHSettingHandler) GetMyTags(c *gin.Context) {
 		return
 	}
 
-	tags, err := h.ehService.FetchMyTags(account, setting)
+	tagset, _ := strconv.Atoi(c.Query("tagset"))
+	tags, err := h.ehService.FetchMyTags(account, setting, tagset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -405,13 +407,14 @@ func (h *EHSettingHandler) AddMyTag(c *gin.Context) {
 	var req struct {
 		Action string `json:"action" binding:"required"` // watch | hide
 		Tag    string `json:"tag" binding:"required"`
+		Tagset int    `json:"tagset"` // 目标 Tagset ID（<=1 为默认集 #1）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失：action 与 tag 为必填"})
 		return
 	}
 
-	if err := h.ehService.AddMyTag(account, setting, req.Action, req.Tag); err != nil {
+	if err := h.ehService.AddMyTag(account, setting, req.Action, req.Tag, req.Tagset); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -430,13 +433,14 @@ func (h *EHSettingHandler) RemoveMyTag(c *gin.Context) {
 	var req struct {
 		Action string `json:"action" binding:"required"` // watch | hide
 		Tag    string `json:"tag" binding:"required"`
+		Tagset int    `json:"tagset"` // 目标 Tagset ID（<=1 为默认集 #1）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失：action 与 tag 为必填"})
 		return
 	}
 
-	if err := h.ehService.RemoveMyTag(account, setting, req.Action, req.Tag); err != nil {
+	if err := h.ehService.RemoveMyTag(account, setting, req.Action, req.Tag, req.Tagset); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

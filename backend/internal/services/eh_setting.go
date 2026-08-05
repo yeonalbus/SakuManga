@@ -279,8 +279,49 @@ func extractMyTags(doc *goquery.Document) (watched, hidden []string) {
 	return watched, hidden
 }
 
-// FetchMyTags 从 E 站 mytags 页读取关注与隐藏的标签
-func (s *EHService) FetchMyTags(account *models.AccountSetting, setting *models.EHSetting) (*models.EHMyTags, error) {
+// parseTagsetText 解析 tagset 下拉选项文本，如 "Tagset #1 (8)" -> ("Tagset #1", 8)。
+// 兼容不带数量的纯名称（如 "Tagset #2"）。
+func parseTagsetText(text string) (string, int) {
+	text = strings.TrimSpace(text)
+	count := 0
+	if idx := strings.LastIndex(text, "("); idx != -1 && strings.HasSuffix(text, ")") {
+		if c, err := strconv.Atoi(strings.TrimSpace(text[idx+1 : len(text)-1])); err == nil {
+			count = c
+			text = strings.TrimSpace(text[:idx])
+		}
+	}
+	return text, count
+}
+
+// extractTagsets 从 mytags 页解析 Tagset 下拉列表（#tagset_form select option），
+// 并返回当前选中的 Tagset ID。选项 value 为数字 ID，文本形如 "Tagset #1 (8)"。
+// 无下拉（旧版/异常）时返回空列表，current=0。
+func extractTagsets(doc *goquery.Document) (tagsets []models.EHTagset, current int) {
+	doc.Find("#tagset_form select option").Each(func(_ int, s *goquery.Selection) {
+		valStr, _ := s.Attr("value")
+		id, _ := strconv.Atoi(valStr)
+		name, count := parseTagsetText(s.Text())
+		if _, selected := s.Attr("selected"); selected {
+			current = id
+		}
+		tagsets = append(tagsets, models.EHTagset{ID: id, Name: name, Count: count})
+	})
+	return tagsets, current
+}
+
+// mytagsURL 生成 mytags 页 URL。与原站 change_tagset JS 逻辑一致：
+// tagset<=1（默认集 #1）时不带 URL 参数，tagset>1 时追加 ?tagset=N。
+func mytagsURL(baseURL string, tagset int) string {
+	u := baseURL + "mytags"
+	if tagset > 1 {
+		u += "?tagset=" + strconv.Itoa(tagset)
+	}
+	return u
+}
+
+// FetchMyTags 从 E 站 mytags 页读取关注与隐藏的标签。
+// tagset 指定要读取的 Tagset ID（<=1 表示默认集 #1）。
+func (s *EHService) FetchMyTags(account *models.AccountSetting, setting *models.EHSetting, tagset int) (*models.EHMyTags, error) {
 	if account == nil || account.IPBMemberID == "" || account.IPBPassHash == "" {
 		return nil, errors.New("未绑定 E 站账号或 Cookie 无效，无法读取我的标签")
 	}
@@ -291,7 +332,7 @@ func (s *EHService) FetchMyTags(account *models.AccountSetting, setting *models.
 	}
 
 	baseURL := GetBaseURL(account, setting)
-	html, err := s.fetchHTML(client, baseURL+"mytags")
+	html, err := s.fetchHTML(client, mytagsURL(baseURL, tagset))
 	if err != nil {
 		return nil, err
 	}
@@ -302,22 +343,26 @@ func (s *EHService) FetchMyTags(account *models.AccountSetting, setting *models.
 	}
 
 	watched, hidden := extractMyTags(doc)
+	tagsets, current := extractTagsets(doc)
 	return &models.EHMyTags{
-		Watched: watched,
-		Hidden:  hidden,
+		Watched:       watched,
+		Hidden:        hidden,
+		Tagsets:       tagsets,
+		CurrentTagset: current,
 	}, nil
 }
 
 // postMyTagsForm 以表单方式 POST 到 mytags 页（新版表单机制，JS 中
 // do_usertags_post / do_tagset_post 均为提交 hidden action + 各字段）。
-func (s *EHService) postMyTagsForm(client *http.Client, baseURL string, form url.Values) error {
-	req, _ := http.NewRequest("POST", baseURL+"mytags", strings.NewReader(form.Encode()))
+// postURL 为完整目标 URL（含可选的 ?tagset=N）。
+func (s *EHService) postMyTagsForm(client *http.Client, postURL string, form url.Values) error {
+	req, _ := http.NewRequest("POST", postURL, strings.NewReader(form.Encode()))
 	req.Close = true
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("Referer", baseURL+"mytags")
+	req.Header.Set("Referer", postURL)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -337,7 +382,7 @@ func (s *EHService) postMyTagsForm(client *http.Client, baseURL string, form url
 // do_usertags_post("add")，提交 hidden usertag_action=add 与新增行字段
 // tagname_new / tagwatch_new(勾选=on) / taghide_new(勾选=on) / tagweight_new。
 // 旧版 watchadd/watchsub 参数已废弃，不再使用。
-func (s *EHService) AddMyTag(account *models.AccountSetting, setting *models.EHSetting, action, tag string) error {
+func (s *EHService) AddMyTag(account *models.AccountSetting, setting *models.EHSetting, action, tag string, tagset int) error {
 	if action != "watch" && action != "hide" {
 		return errors.New("action 参数仅支持 watch / hide")
 	}
@@ -361,7 +406,7 @@ func (s *EHService) AddMyTag(account *models.AccountSetting, setting *models.EHS
 	}
 	form.Set("tagweight_new", "10")
 
-	return s.postMyTagsForm(client, baseURL, form)
+	return s.postMyTagsForm(client, mytagsURL(baseURL, tagset), form)
 }
 
 // findMyTagRowID 在 mytags 页中查找指定标签（tagpreview 的 title 全名，
@@ -393,7 +438,7 @@ func findMyTagRowID(doc *goquery.Document, tag string) string {
 // 批量删除（JS do_usertags_mass）：提交 hidden usertag_action=mass +
 // usertag_target=0 + modify_usertags[]=<数字ID>。因此先抓取 mytags 页，
 // 解析出标签对应的数字 ID 后再提交。
-func (s *EHService) RemoveMyTag(account *models.AccountSetting, setting *models.EHSetting, action, tag string) error {
+func (s *EHService) RemoveMyTag(account *models.AccountSetting, setting *models.EHSetting, action, tag string, tagset int) error {
 	if account == nil || account.IPBMemberID == "" || account.IPBPassHash == "" {
 		return errors.New("未绑定 E 站账号或 Cookie 无效")
 	}
@@ -405,8 +450,9 @@ func (s *EHService) RemoveMyTag(account *models.AccountSetting, setting *models.
 
 	baseURL := GetBaseURL(account, setting)
 
-	// 先抓取 mytags 页解析标签的数字 ID
-	html, err := s.fetchHTML(client, baseURL+"mytags")
+	// 先抓取指定 Tagset 下的 mytags 页，解析标签的数字 ID
+	urlStr := mytagsURL(baseURL, tagset)
+	html, err := s.fetchHTML(client, urlStr)
 	if err != nil {
 		return fmt.Errorf("读取我的标签页失败: %v", err)
 	}
@@ -424,7 +470,7 @@ func (s *EHService) RemoveMyTag(account *models.AccountSetting, setting *models.
 	form.Set("usertag_target", "0")
 	form.Add("modify_usertags[]", tagID)
 
-	return s.postMyTagsForm(client, baseURL, form)
+	return s.postMyTagsForm(client, urlStr, form)
 }
 
 // CreateMyTagset 在 E 站新建一个 Tagset。
@@ -452,5 +498,5 @@ func (s *EHService) CreateMyTagset(account *models.AccountSetting, setting *mode
 	form.Set("tagset_action", "create")
 	form.Set("tagset_name", name)
 
-	return s.postMyTagsForm(client, baseURL, form)
+	return s.postMyTagsForm(client, mytagsURL(baseURL, 0), form)
 }

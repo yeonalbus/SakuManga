@@ -242,7 +242,7 @@ func main() {
 	}
 
 	// 调用真实服务解析 mytags，验证修复后的 FetchMyTags
-	if mt, err := svc.FetchMyTags(&account, &setting); err != nil {
+	if mt, err := svc.FetchMyTags(&account, &setting, 0); err != nil {
 		fmt.Printf("FetchMyTags 失败: %v\n", err)
 	} else {
 		fmt.Printf("FetchMyTags 结果 => Watched: %v | Hidden: %v\n", mt.Watched, mt.Hidden)

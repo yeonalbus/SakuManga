@@ -13,11 +13,28 @@
       隐藏标签（Hide）用于过滤不感兴趣的内容。新增/移除操作会实时上传至 E 站。
     </p>
 
-    <!-- Tagset 管理：新建 Tagset -->
+    <!-- Tagset 管理：切换当前 Tagset + 新建 Tagset -->
     <section class="tag-section">
       <div class="section-header">
         <span class="section-title">Tagset 管理</span>
       </div>
+
+      <div class="tagset-row">
+        <label class="tagset-label" for="tagset-select">当前 Tagset：</label>
+        <select
+          id="tagset-select"
+          v-model.number="currentTagset"
+          class="tagset-select"
+          :disabled="loading || tagsetList.length === 0"
+          @change="switchTagset"
+        >
+          <option v-for="ts in tagsetList" :key="ts.id" :value="ts.id">
+            {{ ts.name }}（{{ ts.count }}）
+          </option>
+        </select>
+        <span class="tagset-hint">切换后重新读取该 Tagset 下的标签</span>
+      </div>
+
       <div class="add-row">
         <input
           v-model="tagsetInput"
@@ -67,12 +84,27 @@
       <div v-else-if="!loading" class="empty-hint">暂无关注的标签</div>
 
       <div class="add-row">
-        <input
-          v-model="watchInput"
-          class="tag-input"
-          placeholder="输入标签名，如 artist:xxx"
-          @keyup.enter="addTag(actionWatch)"
-        />
+        <div class="suggest-wrap">
+          <input
+            v-model="watchInput"
+            class="tag-input"
+            placeholder="输入标签名，如 artist:xxx（支持联想）"
+            @keyup.enter="addTag(actionWatch)"
+            @focus="refreshWatchSuggestions"
+            @blur="closeWatchSuggestions"
+          />
+          <div v-if="watchSuggestions.length" class="tag-suggest-dropdown">
+            <div
+              v-for="s in watchSuggestions"
+              :key="`${s.namespace}:${s.key}`"
+              class="suggest-item"
+              @mousedown.prevent="pickSuggestion(actionWatch, s)"
+            >
+              <span class="suggest-text">{{ s.namespace }}:{{ s.key }}</span>
+              <span v-if="s.count" class="suggest-count">🔥 {{ s.count.toLocaleString() }}</span>
+            </div>
+          </div>
+        </div>
         <button
           class="action-btn primary"
           :disabled="!!submitting || !watchInput.trim()"
@@ -111,12 +143,27 @@
       <div v-else-if="!loading" class="empty-hint">暂无隐藏的标签</div>
 
       <div class="add-row">
-        <input
-          v-model="hideInput"
-          class="tag-input"
-          placeholder="输入标签名，如 language:chinese"
-          @keyup.enter="addTag(actionHide)"
-        />
+        <div class="suggest-wrap">
+          <input
+            v-model="hideInput"
+            class="tag-input"
+            placeholder="输入标签名，如 language:chinese（支持联想）"
+            @keyup.enter="addTag(actionHide)"
+            @focus="refreshHideSuggestions"
+            @blur="closeHideSuggestions"
+          />
+          <div v-if="hideSuggestions.length" class="tag-suggest-dropdown">
+            <div
+              v-for="s in hideSuggestions"
+              :key="`${s.namespace}:${s.key}`"
+              class="suggest-item"
+              @mousedown.prevent="pickSuggestion(actionHide, s)"
+            >
+              <span class="suggest-text">{{ s.namespace }}:{{ s.key }}</span>
+              <span v-if="s.count" class="suggest-count">🔥 {{ s.count.toLocaleString() }}</span>
+            </div>
+          </div>
+        </div>
         <button
           class="action-btn primary"
           :disabled="!!submitting || !hideInput.trim()"
@@ -130,10 +177,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
-import type { EHMyTags } from '@/types/eh'
+import type { EHMyTags, EHTagset, TagSuggestion } from '@/types/eh'
 
 defineEmits<{ (e: 'back'): void }>()
 
@@ -155,14 +202,28 @@ const hideInput = ref('')
 const tagsetInput = ref('')
 const creatingTagset = ref(false)
 
+// Tagset 列表与当前选中的 Tagset ID
+const tagsetList = ref<EHTagset[]>([])
+const currentTagset = ref(0)
+
+// 标签联想（复用后端 /tags/suggest 的 tagname_count.csv 热度库）
+const watchSuggestions = ref<TagSuggestion[]>([])
+const hideSuggestions = ref<TagSuggestion[]>([])
+let watchTimer: number | null = null
+let hideTimer: number | null = null
+
 const errorMessage = (err: unknown) => (err as Error)?.message || '操作失败'
 
 const load = async () => {
   loading.value = true
   try {
-    const res = await http<EHMyTags>('/eh/mytags')
+    const params: Record<string, string | number> = {}
+    if (currentTagset.value > 0) params.tagset = currentTagset.value
+    const res = await http<EHMyTags>('/eh/mytags', { params })
     watched.value = res.watched || []
     hidden.value = res.hidden || []
+    tagsetList.value = res.tagsets || []
+    if (res.currentTagset !== undefined) currentTagset.value = res.currentTagset
     isLoggedIn.value = true
   } catch (err) {
     isLoggedIn.value = false
@@ -171,6 +232,11 @@ const load = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 切换 Tagset 后重新读取该集下的标签
+const switchTagset = () => {
+  load()
 }
 
 const addTag = async (action: 'watch' | 'hide') => {
@@ -182,15 +248,17 @@ const addTag = async (action: 'watch' | 'hide') => {
   try {
     await http('/eh/mytags', {
       method: 'POST',
-      body: JSON.stringify({ action, tag }),
+      body: JSON.stringify({ action, tag, tagset: currentTagset.value }),
     })
     toast.success(action === actionWatch ? `已关注标签: ${tag}` : `已隐藏标签: ${tag}`)
     if (action === actionWatch) {
       watched.value.push(tag)
       watchInput.value = ''
+      watchSuggestions.value = []
     } else {
       hidden.value.push(tag)
       hideInput.value = ''
+      hideSuggestions.value = []
     }
   } catch (err) {
     toast.error(errorMessage(err))
@@ -205,7 +273,7 @@ const removeTag = async (action: 'watch' | 'hide', tag: string) => {
   try {
     await http('/eh/mytags/remove', {
       method: 'POST',
-      body: JSON.stringify({ action, tag }),
+      body: JSON.stringify({ action, tag, tagset: currentTagset.value }),
     })
     toast.success(action === actionWatch ? `已取消关注: ${tag}` : `已取消隐藏: ${tag}`)
     if (action === actionWatch) {
@@ -233,12 +301,77 @@ const createTagset = async () => {
     })
     toast.success(`Tagset 已创建: ${name}`)
     tagsetInput.value = ''
+    // 刷新 Tagset 列表（新建的 Tagset 默认未选中，标签仍归属当前集）
+    await load()
   } catch (err) {
     toast.error(errorMessage(err))
     console.error(err)
   } finally {
     creatingTagset.value = false
   }
+}
+
+// ===================== 标签联想补全（/tags/suggest 热度库） =====================
+const fetchSuggestions = async (q: string): Promise<TagSuggestion[]> => {
+  const kw = q.trim()
+  if (!kw) return []
+  try {
+    return await http<TagSuggestion[]>('/tags/suggest', { params: { q: kw, limit: 8 } })
+  } catch (e) {
+    console.error('标签联想失败:', e)
+    return []
+  }
+}
+
+// 输入内容变化时防抖请求联想
+watch(watchInput, (val) => {
+  if (watchTimer) clearTimeout(watchTimer)
+  watchTimer = window.setTimeout(async () => {
+    watchSuggestions.value = await fetchSuggestions(val)
+  }, 200)
+})
+
+watch(hideInput, (val) => {
+  if (hideTimer) clearTimeout(hideTimer)
+  hideTimer = window.setTimeout(async () => {
+    hideSuggestions.value = await fetchSuggestions(val)
+  }, 200)
+})
+
+// 输入框获得焦点时立即刷新联想
+const refreshWatchSuggestions = async () => {
+  if (watchTimer) clearTimeout(watchTimer)
+  watchSuggestions.value = await fetchSuggestions(watchInput.value)
+}
+
+const refreshHideSuggestions = async () => {
+  if (hideTimer) clearTimeout(hideTimer)
+  hideSuggestions.value = await fetchSuggestions(hideInput.value)
+}
+
+// 选中联想项：填入完整 "namespace:key"（含 other: 前缀，与 E 站页面 title 一致）
+const pickSuggestion = (action: 'watch' | 'hide', tag: TagSuggestion) => {
+  const text = `${tag.namespace}:${tag.key}`
+  if (action === actionWatch) {
+    watchInput.value = text
+    watchSuggestions.value = []
+  } else {
+    hideInput.value = text
+    hideSuggestions.value = []
+  }
+}
+
+// 失焦时延迟关闭下拉（留出点击联想项的时间）
+const closeWatchSuggestions = () => {
+  window.setTimeout(() => {
+    watchSuggestions.value = []
+  }, 150)
+}
+
+const closeHideSuggestions = () => {
+  window.setTimeout(() => {
+    hideSuggestions.value = []
+  }, 150)
 }
 
 onMounted(load)
@@ -352,6 +485,45 @@ onMounted(load)
   border-radius: 10px;
 }
 
+.tagset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tagset-label {
+  font-size: 13px;
+  color: #a0a0a5;
+  white-space: nowrap;
+}
+
+.tagset-select {
+  background: #1f1f24;
+  border: 1px solid #36363a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  cursor: pointer;
+  max-width: 260px;
+}
+
+.tagset-select:focus {
+  border-color: #ff7588;
+}
+
+.tagset-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tagset-hint {
+  font-size: 12px;
+  color: #6a6a70;
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -460,5 +632,60 @@ onMounted(load)
 
 .action-btn.primary:hover:not(:disabled) {
   background: #f06477;
+}
+
+/* ============ 标签联想下拉 ============ */
+.suggest-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.suggest-wrap .tag-input {
+  width: 100%;
+  flex: none;
+}
+
+.tag-suggest-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #222226;
+  border: 1px solid #3a3a40;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+}
+
+.suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e0e0e0;
+  transition: background-color 0.15s;
+}
+
+.suggest-item:hover {
+  background-color: #2e2e34;
+}
+
+.suggest-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #ffb86c;
 }
 </style>

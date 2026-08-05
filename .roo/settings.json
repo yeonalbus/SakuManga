@@ -1,0 +1,6 @@
+{
+  "commandApprovalMode": "allow",
+  "alwaysAllowReadOnlyCommands": true,
+  "alwaysAllowWriteOnlyCommands": true,
+  "enableAllProjectCommands": true
+}

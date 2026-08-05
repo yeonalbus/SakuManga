@@ -4,7 +4,7 @@
       <div class="item-info">
         <div class="item-title">主题模式</div>
       </div>
-      <select v-model="themeMode" class="setting-select">
+      <select v-model="styleSettings.themeMode" class="setting-select">
         <option value="system">跟随系统</option>
         <option value="dark">暗黑模式</option>
         <option value="light">亮色模式</option>
@@ -38,6 +38,7 @@
     <div class="setting-item clickable" @click="handleThemeColor">
       <div class="item-info">
         <div class="item-title">主题颜色</div>
+        <div class="item-subtext">自定义强调色（开发中）</div>
       </div>
       <span class="arrow-icon">›</span>
     </div>
@@ -46,7 +47,7 @@
       <div class="item-info">
         <div class="item-title">画廊列表样式(全局)</div>
       </div>
-      <select v-model="globalGalleryStyle" class="setting-select">
+      <select v-model="styleSettings.globalGalleryStyle" class="setting-select">
         <option value="card">卡片</option>
         <option value="compact">名片</option>
       </select>
@@ -63,7 +64,7 @@
       <div class="item-info">
         <div class="item-title">下载页网格布局列数(分组)</div>
       </div>
-      <select v-model="downloadGroupCols" class="setting-select">
+      <select v-model="styleSettings.downloadGroupCols" class="setting-select">
         <option value="auto">自动</option>
         <option value="2">2 列</option>
         <option value="3">3 列</option>
@@ -75,7 +76,7 @@
       <div class="item-info">
         <div class="item-title">下载页网格布局列数(画廊)</div>
       </div>
-      <select v-model="downloadGalleryCols" class="setting-select">
+      <select v-model="styleSettings.downloadGalleryCols" class="setting-select">
         <option value="auto">自动</option>
         <option value="3">3 列</option>
         <option value="4">4 列</option>
@@ -87,7 +88,7 @@
       <div class="item-info">
         <div class="item-title">详情页缩略图列数</div>
       </div>
-      <select v-model="detailThumbCols" class="setting-select">
+      <select v-model="styleSettings.detailThumbCols" class="setting-select">
         <option value="auto">自动</option>
         <option value="4">4 列</option>
         <option value="6">6 列</option>
@@ -102,7 +103,7 @@
       </div>
       <div class="switch-control">
         <label class="toggle-switch">
-          <input type="checkbox" v-model="moveCoverToRight" />
+          <input type="checkbox" v-model="styleSettings.moveCoverToRight" />
           <span class="slider"></span>
         </label>
       </div>
@@ -113,37 +114,32 @@
         <div class="item-title">布局模式</div>
         <div class="item-subtext">双列带侧栏，支持键盘操作</div>
       </div>
-      <select v-model="layoutMode" class="setting-select">
+      <select v-model="styleSettings.layoutMode" class="setting-select">
         <option value="desktop">桌面模式</option>
         <option value="mobile">移动模式</option>
       </select>
+    </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { viewMode, toggleViewMode } from '@/stores/viewMode'
+import { styleSettings, resetStyleSettings } from '@/stores/styleSettings'
 
 const { toast } = useUI()
 
-// 设置项响应式绑定
-const themeMode = ref('system')
-const globalGalleryStyle = ref('card')
-const downloadGroupCols = ref('auto')
-const downloadGalleryCols = ref('auto')
-const detailThumbCols = ref('auto')
-const moveCoverToRight = ref(false)
-const layoutMode = ref('desktop')
-
 // 交互调取
 const handleThemeColor = () => {
-  toast.info('打开主题颜色选择器')
+  toast.info('主题颜色自定义功能开发中，敬请期待')
 }
 
 const handlePageGalleryStyle = () => {
-  toast.info('设置独立页面的列表样式')
+  toast.info('独立页面的列表样式当前跟随「全局」设置')
 }
 
 const setViewMode = (targetMode: 'card' | 'compact') => {
@@ -151,6 +147,12 @@ const setViewMode = (targetMode: 'card' | 'compact') => {
     toggleViewMode()
     toast.info(`已切换显示样式为：${targetMode === 'card' ? '卡片' : '名片'}`)
   }
+}
+
+// 恢复默认样式设置
+const handleReset = () => {
+  resetStyleSettings()
+  toast.success('已恢复默认样式设置')
 }
 </script>
 
@@ -307,5 +309,27 @@ input:checked + .slider:before {
   color: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   font-weight: 600;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

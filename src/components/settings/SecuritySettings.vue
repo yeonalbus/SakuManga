@@ -5,7 +5,7 @@
         <div class="item-title">开启密码认证</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="enablePasswordAuth" />
+        <input type="checkbox" v-model="securitySettings.enablePasswordAuth" />
         <span class="slider"></span>
       </label>
     </div>
@@ -15,18 +15,27 @@
         <div class="item-title">开启生物认证</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="enableBiometricAuth" />
+        <input type="checkbox" v-model="securitySettings.enableBiometricAuth" />
         <span class="slider"></span>
       </label>
+    </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useUI } from '@/composables/useUI'
+import { securitySettings, resetSecuritySettings } from '@/stores/securitySettings'
 
-const enablePasswordAuth = ref(false)
-const enableBiometricAuth = ref(false)
+const { toast } = useUI()
+
+const handleReset = () => {
+  resetSecuritySettings()
+  toast.success('已恢复默认安全设置')
+}
 </script>
 
 <style scoped>
@@ -103,5 +112,27 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(20px);
   background-color: #ffffff;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

@@ -40,7 +40,17 @@ type OfflineComic struct {
 	LocalPath   string `gorm:"uniqueIndex" json:"localPath"` // 本地存储绝对路径 (Z:\Comics\xxx)
 	FileSize    int64  `json:"fileSize"`              // 文件大小 (Bytes)
 	ReadCount   int    `gorm:"default:0" json:"readCount"`   // 本地阅读次数
-	NeedsUpdate bool   `gorm:"default:false" json:"needsUpdate"` // 损坏/缺失标记
+	NeedsUpdate bool   `gorm:"default:false" json:"needsUpdate"` // 需要更新（检测到新版本）
+
+	// ── E 站下载/更新关联字段（扫描/更新/查重用）──
+	GID        string `gorm:"index" json:"gid,omitempty"`        // E 站画廊 GID（来自 metadata/ametadata）
+	Token      string `json:"token,omitempty"`                   // E 站画廊 Token
+	ParentGID  string `gorm:"index" json:"parentGID,omitempty"`  // 父画廊 GID（本画廊是某画廊的更新版）
+	FileHash   string `gorm:"index" json:"fileHash,omitempty"`   // 归档文件 hash（完全相同查重）
+	SourceMode string `json:"sourceMode,omitempty"`              // gallery | archive（下载来源）
+	NewGID     string `json:"newGID,omitempty"`                  // 检测到的新版本 GID
+	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token
+	UpdateNote string `json:"updateNote,omitempty"`              // 更新提示文案
 }
 
 // Bookshelf 本地书架

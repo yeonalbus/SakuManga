@@ -24,5 +24,7 @@ func InitDB() {
 		&models.ExtraScanPath{},
 		&models.OfflineComic{},
 		&models.FavoriteState{},
+		&models.DownloadTask{},
+		&models.DownloadSetting{},
 	)
 }

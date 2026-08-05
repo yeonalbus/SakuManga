@@ -6,6 +6,7 @@ import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState } from '@/stores/historyStore'
+import { downloadSettings } from '@/stores/downloadSettings'
 import { http } from '@/utils/request'
 
 const route = useRoute()
@@ -245,6 +246,88 @@ const handleStartReading = (targetPage: number = 1) => {
   })
 }
 
+// 6. 下载功能：GP 面板 + 创建下载任务
+const showDownloadPanel = ref(false)
+const isLoadingGP = ref(false)
+const isCreatingTask = ref(false)
+
+// 后端 DownloadGPInfo / ArchiveInfo 返回结构
+interface ArchiveOptionDTO {
+  label: string
+  name: string
+  cost: string
+  size: string
+}
+interface ArchiveInfoDTO {
+  gid: string
+  token: string
+  options: ArchiveOptionDTO[]
+  sizeBytes?: number
+}
+interface GPInfoDTO {
+  gp: string
+  credits: string
+  hath: string
+  quotaUsed: number
+  quotaMax: number
+  archive?: ArchiveInfoDTO
+}
+
+const gpInfo = ref<GPInfoDTO | null>(null)
+const selectedMode = ref<'gallery' | 'archive'>('archive')
+const selectedArchiveType = ref<'original' | 'resample'>('original')
+
+// 归档方案展示（原图/压缩图）
+const archiveOptions = computed(() => gpInfo.value?.archive?.options || [])
+
+const handleOpenDownloadPanel = async () => {
+  showDownloadPanel.value = true
+  selectedMode.value = downloadSettings.autoUpdateScheme === 'gallery' ? 'gallery' : 'archive'
+  selectedArchiveType.value = downloadSettings.defaultDownloadOriginal ? 'original' : 'resample'
+  await fetchGPInfo()
+}
+
+const fetchGPInfo = async () => {
+  isLoadingGP.value = true
+  try {
+    gpInfo.value = await http<GPInfoDTO>('/downloads/gp-info', {
+      params: { gid: comic.value.id, token: comic.value.token },
+    })
+  } catch (err: unknown) {
+    gpInfo.value = null
+    toast.error(err instanceof Error ? err.message : '获取 GP 面板信息失败')
+  } finally {
+    isLoadingGP.value = false
+  }
+}
+
+const closeDownloadPanel = () => {
+  showDownloadPanel.value = false
+}
+
+const handleStartDownload = async () => {
+  isCreatingTask.value = true
+  try {
+    await http('/downloads', {
+      method: 'POST',
+      body: JSON.stringify({
+        gid: comic.value.id,
+        token: comic.value.token,
+        title: comic.value.title,
+        coverUrl: comic.value.coverUrl,
+        mode: selectedMode.value,
+        archiveType: selectedMode.value === 'archive' ? selectedArchiveType.value : '',
+      }),
+    })
+    toast.success('下载任务已创建，可在「下载」页面查看进度')
+    showDownloadPanel.value = false
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '创建下载任务失败')
+  } finally {
+    isCreatingTask.value = false
+  }
+}
+
 // 点击选择收藏夹 (0 ~ 9)
 const handleSelectFavorite = async () => {
   const chosenIndex = await modal.prompt(
@@ -391,6 +474,8 @@ onUnmounted(() => {
           </button>
 
           <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
+
+          <button class="action-btn download-btn" @click="handleOpenDownloadPanel">⬇️ 下载</button>
         </div>
       </div>
 
@@ -540,6 +625,87 @@ onUnmounted(() => {
         <div v-else class="empty-box">该画廊暂无社区评论</div>
       </div>
     </template>
+
+    <!-- ⬇️ 下载面板（GP 信息 + 方案选择） -->
+    <div v-if="showDownloadPanel" class="download-mask" @click.self="closeDownloadPanel">
+      <div class="download-panel">
+        <div class="panel-header">
+          <span class="panel-title">⬇️ 下载《{{ comic.title }}》</span>
+          <button class="panel-close" @click="closeDownloadPanel">✕</button>
+        </div>
+
+        <div class="panel-body">
+          <!-- GP / Credits / Hath 余额 -->
+          <div v-if="gpInfo" class="gp-summary">
+            <div class="gp-item">
+              <span class="gp-label">GP</span>
+              <span class="gp-value">{{ gpInfo.gp }}</span>
+            </div>
+            <div class="gp-item">
+              <span class="gp-label">Credits</span>
+              <span class="gp-value">{{ gpInfo.credits }}</span>
+            </div>
+            <div class="gp-item">
+              <span class="gp-label">H@H</span>
+              <span class="gp-value">{{ gpInfo.hath }}</span>
+            </div>
+            <div class="gp-item">
+              <span class="gp-label">配额</span>
+              <span class="gp-value">{{ gpInfo.quotaUsed }}/{{ gpInfo.quotaMax }}</span>
+            </div>
+          </div>
+          <div v-else-if="isLoadingGP" class="gp-loading">正在读取 GP 面板信息...</div>
+          <div v-else class="gp-loading">GP 面板信息获取失败，可尝试重新打开</div>
+
+          <!-- 方案选择 -->
+          <div class="mode-select">
+            <button
+              class="mode-btn"
+              :class="{ active: selectedMode === 'archive' }"
+              @click="selectedMode = 'archive'"
+            >
+              🗜️ 归档下载（H@H）
+            </button>
+            <button
+              class="mode-btn"
+              :class="{ active: selectedMode === 'gallery' }"
+              @click="selectedMode = 'gallery'"
+            >
+              🖼️ 画廊下载（逐图）
+            </button>
+          </div>
+
+          <!-- 归档方案（原图/压缩图）报价 -->
+          <div v-if="selectedMode === 'archive'" class="archive-options">
+            <div
+              v-for="opt in archiveOptions"
+              :key="opt.label"
+              class="archive-opt"
+              :class="{ active: selectedArchiveType === opt.label }"
+              @click="selectedArchiveType = opt.label as 'original' | 'resample'"
+            >
+              <span class="opt-name">{{ opt.name }}</span>
+              <span class="opt-cost">{{ opt.cost }}</span>
+              <span class="opt-size">{{ opt.size }}</span>
+            </div>
+            <div v-if="!archiveOptions.length" class="archive-empty">
+              未获取到归档方案（可能 H@H 未就绪），归档下载将在任务执行时重新解析
+            </div>
+          </div>
+
+          <div v-if="selectedMode === 'gallery'" class="gallery-hint">
+            📄 画廊下载将逐张保存 {{ comic.pageCount || 0 }} 页图片到压缩包/解压目录
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="cancel-btn" @click="closeDownloadPanel">取消</button>
+          <button class="start-btn" :disabled="isCreatingTask" @click="handleStartDownload">
+            {{ isCreatingTask ? '创建中...' : '开始下载' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -896,5 +1062,226 @@ onUnmounted(() => {
   border-color: #007acc;
   color: #007acc;
   font-weight: bold;
+}
+
+/* 下载按钮 */
+.download-btn {
+  background: #242428;
+  color: #ff7588;
+  border: 1px solid #ff7588;
+}
+.download-btn:hover {
+  background: rgba(255, 117, 136, 0.15);
+}
+
+/* ⬇️ 下载面板 */
+.download-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.download-panel {
+  width: 420px;
+  max-width: 92vw;
+  background: #1a1a1e;
+  border: 1px solid #2a2a2d;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+.panel-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.panel-close:hover {
+  color: #fff;
+}
+
+.panel-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.gp-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: #141417;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.gp-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.gp-label {
+  font-size: 0.72rem;
+  color: #77777c;
+}
+
+.gp-value {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.gp-loading {
+  font-size: 0.85rem;
+  color: #888;
+  padding: 8px 0;
+}
+
+.mode-select {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mode-btn {
+  background: #242428;
+  border: 1px solid #3a3a3d;
+  color: #aaa;
+  padding: 10px 8px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  border-color: #ff7588;
+  color: #ff7588;
+  background: rgba(255, 117, 136, 0.1);
+  font-weight: 600;
+}
+
+.archive-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.archive-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #141417;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.archive-opt.active {
+  border-color: #ff7588;
+  background: rgba(255, 117, 136, 0.08);
+}
+
+.opt-name {
+  font-size: 0.88rem;
+  color: #fff;
+  font-weight: 500;
+  flex: 1;
+}
+
+.opt-cost {
+  font-size: 0.8rem;
+  color: #ffc107;
+}
+
+.opt-size {
+  font-size: 0.8rem;
+  color: #88888c;
+}
+
+.archive-empty {
+  font-size: 0.8rem;
+  color: #77777c;
+  padding: 6px 0;
+}
+
+.gallery-hint {
+  font-size: 0.82rem;
+  color: #88888c;
+  line-height: 1.4;
+}
+
+.panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #2a2a2d;
+}
+
+.cancel-btn {
+  background: transparent;
+  border: 1px solid #3a3a3d;
+  color: #aaa;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  color: #fff;
+  border-color: #555;
+}
+
+.start-btn {
+  background: #ff7588;
+  border: none;
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.start-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.start-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

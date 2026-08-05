@@ -6,7 +6,7 @@
         <div class="item-subtext">需要重启</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="enableLogs" />
+        <input type="checkbox" v-model="advancedSettings.enableLogs" />
         <span class="slider"></span>
       </label>
     </div>
@@ -17,7 +17,7 @@
         <div class="item-subtext">需要重启</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="recordAllLogs" />
+        <input type="checkbox" v-model="advancedSettings.recordAllLogs" />
         <span class="slider"></span>
       </label>
     </div>
@@ -64,7 +64,7 @@
         <div class="item-title">启动应用时检查更新</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="checkUpdatesOnStartup" />
+        <input type="checkbox" v-model="advancedSettings.checkUpdatesOnStartup" />
         <span class="slider"></span>
       </label>
     </div>
@@ -74,7 +74,7 @@
         <div class="item-title">检测剪切板中的画廊链接</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="detectClipboardLinks" />
+        <input type="checkbox" v-model="advancedSettings.detectClipboardLinks" />
         <span class="slider"></span>
       </label>
     </div>
@@ -84,7 +84,7 @@
         <div class="item-title">无图模式</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="noImageMode" />
+        <input type="checkbox" v-model="advancedSettings.noImageMode" />
         <span class="slider"></span>
       </label>
     </div>
@@ -102,23 +102,23 @@
       </div>
       <span class="arrow-icon">›</span>
     </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { advancedSettings, resetAdvancedSettings } from '@/stores/advancedSettings'
 
 const { toast, modal } = useUI()
 
-// 状态声明 (按照截图默认值对齐)
-const enableLogs = ref(true)
-const recordAllLogs = ref(false)
+// 运行时显示状态（非持久化设置）
 const logSize = ref('6.25MB')
 const imageCacheSize = ref('535.14KB')
-const checkUpdatesOnStartup = ref(true)
-const detectClipboardLinks = ref(true)
-const noImageMode = ref(false)
 
 // 交互调取
 const handleViewLogs = () => {
@@ -158,6 +158,11 @@ const handleImportData = () => {
 
 const handleExportData = () => {
   toast.success('全量配置与离线数据已成功导出！')
+}
+
+const handleReset = () => {
+  resetAdvancedSettings()
+  toast.success('已恢复默认高级设置')
 }
 </script>
 
@@ -263,5 +268,27 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(20px);
   background-color: #ffffff;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

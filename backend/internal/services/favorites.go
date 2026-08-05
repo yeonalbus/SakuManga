@@ -283,7 +283,7 @@ func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSe
 	}
 	defer resp.Body.Close()
 
-	db.Where("gid = ?", gid).Delete(&models.FavoriteState{})
+	db.Where("g_id = ?", gid).Delete(&models.FavoriteState{})
 
 	return nil
 }

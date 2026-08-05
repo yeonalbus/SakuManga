@@ -57,6 +57,17 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}
 	subTitle := strings.TrimSpace(doc.Find("#gn").Text())
 
+	// 父画廊解析：详情页底部 "Parent gallery" 链接形如 <a id="parent_0" href="/g/1234567/abcdef/">…
+	parentGID := ""
+	doc.Find("a[id^='parent_']").Each(func(_ int, a *goquery.Selection) {
+		if parentGID != "" {
+			return
+		}
+		if href, exists := a.Attr("href"); exists {
+			parentGID = extractParentGID(href)
+		}
+	})
+
 	rawCover := extractCoverURL(doc.Find("#gd1"))
 	proxiedCover := ""
 	if rawCover != "" {
@@ -186,6 +197,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	return &GalleryDetailResult{
 		ID:             gid,
 		Token:          token,
+		ParentGID:      parentGID,
 		Title:          title,
 		SubTitle:       subTitle,
 		CoverURL:       proxiedCover,
@@ -231,6 +243,21 @@ func parseFavColorStyle(style string) int {
 		}
 	}
 	return -1
+}
+
+// extractParentGID 从 /g/{gid}/{token}/ 形式的 href 中提取父画廊 gid
+func extractParentGID(href string) string {
+	const prefix = "/g/"
+	idx := strings.Index(href, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := href[idx+len(prefix):]
+	end := strings.Index(rest, "/")
+	if end <= 0 {
+		return ""
+	}
+	return rest[:end]
 }
 
 // FetchGalleryPreviews 抓取指定页码 (p=0, p=1...) 的预览图切片

@@ -8,17 +8,31 @@
         </div>
       </div>
       <div class="input-inline">
-        <input type="number" v-model="maxAnimationGalleries" class="setting-input" />
+        <input
+          type="number"
+          v-model="performanceSettings.maxAnimationGalleries"
+          class="setting-input"
+        />
         <span class="check-mark">✓</span>
       </div>
+    </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useUI } from '@/composables/useUI'
+import { performanceSettings, resetPerformanceSettings } from '@/stores/performanceSettings'
 
-const maxAnimationGalleries = ref(30)
+const { toast } = useUI()
+
+const handleReset = () => {
+  resetPerformanceSettings()
+  toast.success('已恢复默认性能设置')
+}
 </script>
 
 <style scoped>
@@ -81,5 +95,27 @@ const maxAnimationGalleries = ref(30)
   color: #a0a0a5;
   font-size: 14px;
   margin-left: 4px;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

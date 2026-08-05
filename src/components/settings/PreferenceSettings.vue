@@ -4,7 +4,7 @@
       <div class="item-info">
         <div class="item-title">语言</div>
       </div>
-      <select v-model="language" class="setting-select">
+      <select v-model="preferenceSettings.language" class="setting-select">
         <option value="zh-CN">简体中文</option>
         <option value="zh-TW">繁體中文</option>
         <option value="en-US">English</option>
@@ -91,7 +91,7 @@
       <div class="item-info">
         <div class="item-title">启动时默认菜单</div>
       </div>
-      <select v-model="defaultStartupMenu" class="setting-select">
+      <select v-model="preferenceSettings.defaultStartupMenu" class="setting-select">
         <option value="hot">热门</option>
         <option value="home">首页</option>
         <option value="sub">订阅</option>
@@ -103,7 +103,7 @@
       <div class="item-info">
         <div class="item-title">隐藏快速回顶按钮</div>
       </div>
-      <select v-model="hideScrollToTopBtn" class="setting-select">
+      <select v-model="preferenceSettings.hideScrollToTopBtn" class="setting-select">
         <option value="scrolling_down">向下滚动时</option>
         <option value="always">总是隐藏</option>
         <option value="never">从不隐藏</option>
@@ -116,7 +116,7 @@
         <div class="item-subtext">预先加载未显示在页面上的画廊的封面</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="preloadGalleryCover" />
+        <input type="checkbox" v-model="preferenceSettings.preloadGalleryCover" />
         <span class="slider"></span>
       </label>
     </div>
@@ -127,7 +127,7 @@
         <div class="item-subtext">需要重启</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="allowLeftSwipeBack" />
+        <input type="checkbox" v-model="preferenceSettings.allowLeftSwipeBack" />
         <span class="slider"></span>
       </label>
     </div>
@@ -138,7 +138,7 @@
         <div class="item-subtext">同时显示原标题和日文标题（如果可用）</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showAllGalleryTitles" />
+        <input type="checkbox" v-model="preferenceSettings.showAllGalleryTitles" />
         <span class="slider"></span>
       </label>
     </div>
@@ -149,7 +149,7 @@
         <div class="item-subtext">包括可信、存疑与错误三种状态</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showTagVoteStatus" />
+        <input type="checkbox" v-model="preferenceSettings.showTagVoteStatus" />
         <span class="slider"></span>
       </label>
     </div>
@@ -159,7 +159,7 @@
         <div class="item-title">显示画廊评论</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showGalleryComments" />
+        <input type="checkbox" v-model="preferenceSettings.showGalleryComments" />
         <span class="slider"></span>
       </label>
     </div>
@@ -172,7 +172,7 @@
         </div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showAllGalleryComments" />
+        <input type="checkbox" v-model="preferenceSettings.showAllGalleryComments" />
         <span class="slider"></span>
       </label>
     </div>
@@ -183,7 +183,7 @@
         <div class="item-subtext">默认直接收藏，长按重新选择</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="useDefaultFavorite" />
+        <input type="checkbox" v-model="preferenceSettings.useDefaultFavorite" />
         <span class="slider"></span>
       </label>
     </div>
@@ -194,7 +194,7 @@
         <div class="item-subtext">默认直接关注，长按重新选择</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="useDefaultTagSet" />
+        <input type="checkbox" v-model="preferenceSettings.useDefaultTagSet" />
         <span class="slider"></span>
       </label>
     </div>
@@ -205,7 +205,7 @@
         <div class="item-subtext">F11手动切换全屏</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="startInFullscreen" />
+        <input type="checkbox" v-model="preferenceSettings.startInFullscreen" />
         <span class="slider"></span>
       </label>
     </div>
@@ -215,7 +215,7 @@
         <div class="item-title">搜索选项继承</div>
         <div class="item-subtext">搜索时使用上一次搜索选项</div>
       </div>
-      <select v-model="searchOptionsInherit" class="setting-select">
+      <select v-model="preferenceSettings.searchOptionsInherit" class="setting-select">
         <option value="all">继承全部</option>
         <option value="category_only">仅继承分类</option>
         <option value="none">不继承</option>
@@ -227,7 +227,7 @@
         <div class="item-title">标签数据中直接显示R18G图片</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showR18GTagImages" />
+        <input type="checkbox" v-model="preferenceSettings.showR18GTagImages" />
         <span class="slider"></span>
       </label>
     </div>
@@ -237,7 +237,7 @@
         <div class="item-title">画廊时间使用UTC展示</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showTimeInUTC" />
+        <input type="checkbox" v-model="preferenceSettings.showTimeInUTC" />
         <span class="slider"></span>
       </label>
     </div>
@@ -247,7 +247,7 @@
         <div class="item-title">展示黎明之事件</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showDawnEvent" />
+        <input type="checkbox" v-model="preferenceSettings.showDawnEvent" />
         <span class="slider"></span>
       </label>
     </div>
@@ -257,7 +257,7 @@
         <div class="item-title">展示HV遭遇战事件</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="showHVEvent" />
+        <input type="checkbox" v-model="preferenceSettings.showHVEvent" />
         <span class="slider"></span>
       </label>
     </div>
@@ -270,7 +270,7 @@
       <div class="item-actions">
         <button class="info-btn" title="查看说明" @click="handleBlocklistInfo">?</button>
         <label class="toggle-switch">
-          <input type="checkbox" v-model="useBuiltinBlocklist" />
+          <input type="checkbox" v-model="preferenceSettings.useBuiltinBlocklist" />
           <span class="slider"></span>
         </label>
       </div>
@@ -283,6 +283,10 @@
       </div>
       <span class="arrow-icon">›</span>
     </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
+    </div>
   </div>
 </template>
 
@@ -290,12 +294,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { preferenceSettings, resetPreferenceSettings } from '@/stores/preferenceSettings'
 
 const { toast, modal } = useUI()
 
-// 各项设置状态与默认初始值
-const language = ref('zh-CN')
-
+// ── 后端控制项：标签中文翻译 / 排序规则（走 /tags API）──
 const enableTagCNTranslation = ref(true)
 const tagCNVersion = ref('未加载')
 
@@ -325,24 +328,6 @@ const formatSize = (bytes: number) => {
   const mb = bytes / (1024 * 1024)
   return `${mb.toFixed(2)} MB`
 }
-
-const defaultStartupMenu = ref('hot')
-const hideScrollToTopBtn = ref('scrolling_down')
-const preloadGalleryCover = ref(true)
-const allowLeftSwipeBack = ref(true)
-const showAllGalleryTitles = ref(true)
-const showTagVoteStatus = ref(false)
-const showGalleryComments = ref(true)
-const showAllGalleryComments = ref(false)
-const useDefaultFavorite = ref(true)
-const useDefaultTagSet = ref(true)
-const startInFullscreen = ref(false)
-const searchOptionsInherit = ref('all')
-const showR18GTagImages = ref(true)
-const showTimeInUTC = ref(true)
-const showDawnEvent = ref(true)
-const showHVEvent = ref(true)
-const useBuiltinBlocklist = ref(true)
 
 // 轮询下载进度
 const pollProgress = async () => {
@@ -441,6 +426,12 @@ const handleRefreshTagSort = async () => {
   } catch {
     toast.error('触发同步失败')
   }
+}
+
+// 恢复默认偏好设置
+const handleReset = () => {
+  resetPreferenceSettings()
+  toast.success('已恢复默认偏好设置')
 }
 
 onMounted(() => {
@@ -670,5 +661,27 @@ input:checked + .slider:before {
   to {
     transform: rotate(360deg);
   }
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

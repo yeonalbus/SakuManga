@@ -28,6 +28,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	ehSettingHandler := handlers.NewEHSettingHandler(db, ehService)
 	onlineHandler := handlers.NewOnlineComicHandler(db, ehService)
 
+	// 下载任务管理器：启动 worker 池并按设置恢复未完成任务
+	downloadManager := services.NewDownloadManager(db, ehService)
+	downloadManager.Start()
+	downloadHandler := handlers.NewDownloadHandler(db, ehService, downloadManager)
+	offlineHandler := handlers.NewOfflineHandler(db, ehService, downloadManager)
+
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
 
@@ -115,5 +121,26 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 订阅界面
 		api.GET("/online/watched", onlineHandler.GetWatchedComics)
+
+		// 下载任务与 GP 面板
+		api.POST("/downloads", downloadHandler.CreateDownload)
+		api.GET("/downloads", downloadHandler.ListDownloads)
+		api.GET("/downloads/gp-info", downloadHandler.GetGPInfo)
+		api.GET("/downloads/settings", downloadHandler.GetDownloadSettings)
+		api.POST("/downloads/settings", downloadHandler.SaveDownloadSettings)
+		api.POST("/downloads/restore", downloadHandler.RestoreDownloads)
+		api.GET("/downloads/:id", downloadHandler.GetDownload)
+		api.POST("/downloads/:id/pause", downloadHandler.PauseDownload)
+		api.POST("/downloads/:id/resume", downloadHandler.ResumeDownload)
+		api.POST("/downloads/:id/cancel", downloadHandler.CancelDownload)
+		api.POST("/downloads/:id/retry", downloadHandler.RetryDownload)
+		api.POST("/downloads/:id/unlock", downloadHandler.UnlockDownload)
+
+		// 离线更新检测 + 维护查重
+		api.POST("/offline/updates/check", offlineHandler.CheckOfflineUpdates)
+		api.GET("/offline/updates", offlineHandler.ListOfflineUpdates)
+		api.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
+		api.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
+		api.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 	}
 }

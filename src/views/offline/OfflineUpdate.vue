@@ -1,42 +1,569 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import GridContainer from '@/components/GridContainer.vue'
-import type { OfflineComic } from '@/types/comic'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
-const currentPage = ref(1)
-const totalPages = ref(2)
+const router = useRouter()
+const { toast } = useUI()
 
-// GridContainer 的 items 需要完整的 ComicItem 结构，这里补齐必要字段
-const items = ref<OfflineComic[]>(
-  Array.from({ length: 24 }, (_, i) => ({
-    id: `offline-up-${i + 1}`,
-    title: `🔄 本地检测到有新话/增补的作品 #${i + 1}`,
-    coverUrl: '',
-    source: 'offline' as const,
-    tags: [],
-    updatedAt: '2026-07-28',
-    localPath: '',
-  })),
-)
-
-const handlePageChange = (page: number) => {
-  currentPage.value = page
+// 后端 GET /offline/updates 返回的离线漫画 DTO（含更新标记字段）
+interface OfflineComicDTO {
+  id: string
+  title: string
+  coverUrl: string
+  category?: string
+  pageCount?: number
+  updatedAt: string
+  localPath?: string
+  fileSize?: number
+  needsUpdate?: boolean
+  gid?: string
+  newGID?: string
+  newToken?: string
+  updateNote?: string
+  sourceMode?: string
 }
+
+interface UpdateListResponse {
+  items: OfflineComicDTO[]
+  total: number
+}
+
+interface CheckResult {
+  checked: number
+  needsUpdate: OfflineComicDTO[]
+  parentFound: number
+}
+
+const updates = ref<OfflineComicDTO[]>([])
+const total = ref(0)
+const isLoading = ref(false)
+const isChecking = ref(false)
+const downloadingId = ref('')
+// 每个漫画的下载方案覆盖：''(按设置) | archive | gallery
+const modeFor = ref<Record<string, string>>({})
+
+const fetchUpdates = async () => {
+  isLoading.value = true
+  try {
+    const data = await http<UpdateListResponse>('/offline/updates')
+    updates.value = data.items || []
+    total.value = data.total || 0
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '获取更新列表失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 联网核对全部离线画廊（每个画廊约 1.2s，耗时较长 → 用 20 分钟超时）
+const runCheck = async () => {
+  if (isChecking.value) return
+  isChecking.value = true
+  toast.info('正在联网核对离线画廊更新...（每个画廊约 1.2 秒，请耐心等待）')
+  try {
+    const result = await http<CheckResult>('/offline/updates/check', {
+      method: 'POST',
+      signal: AbortSignal.timeout(20 * 60 * 1000),
+    })
+    const found = result.needsUpdate?.length || 0
+    toast.success(
+      `检测完成：核对 ${result.checked} 个画廊，发现 ${found} 个需要更新` +
+        (result.parentFound > 0 ? `（父画廊关系发现 ${result.parentFound} 个）` : ''),
+    )
+    await fetchUpdates()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '更新检测失败（可能未绑定 E 站账户或网络异常）')
+  } finally {
+    isChecking.value = false
+  }
+}
+
+const startDownload = async (comic: OfflineComicDTO) => {
+  if (downloadingId.value) return
+  downloadingId.value = comic.id
+  try {
+    await http<{ task: unknown }>('/offline/updates/download', {
+      method: 'POST',
+      body: JSON.stringify({
+        comicId: comic.id,
+        mode: modeFor.value[comic.id] || undefined,
+      }),
+    })
+    toast.success(`《${comic.title}》新版已加入下载队列 📥`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '加入下载队列失败')
+  } finally {
+    downloadingId.value = ''
+  }
+}
+
+const goDownloads = () => {
+  router.push('/downloads')
+}
+
+const formatBytes = (bytes?: number) => {
+  if (!bytes || bytes <= 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let v = bytes
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+
+const formatDate = (iso?: string) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+const coverFailed = ref<Record<string, boolean>>({})
+const onCoverError = (id: string) => {
+  coverFailed.value[id] = true
+}
+
+const isDownloading = computed(() => downloadingId.value !== '')
+
+onMounted(fetchUpdates)
 </script>
 
 <template>
-  <div class="page-wrapper">
-    <GridContainer
-      :items="items"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      @page-change="handlePageChange"
-    />
+  <div class="update-page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">🔄 离线更新检测</h2>
+        <p class="subtitle">
+          联网核对每个离线画廊的在线详情，发现新增页数或更新版（父画廊关系）时标记为「需要更新」
+        </p>
+      </div>
+      <div class="header-actions">
+        <button class="link-btn" :disabled="isLoading" @click="fetchUpdates">⟳ 刷新列表</button>
+        <button class="link-btn" @click="goDownloads">📥 前往下载列表</button>
+        <button class="check-btn" :disabled="isChecking" @click="runCheck">
+          {{ isChecking ? '⏳ 检测中...' : '🔍 开始检测' }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="isChecking" class="checking-banner">
+      <span class="spinner"></span>
+      <div>
+        <p class="checking-title">正在联网核对离线画廊更新</p>
+        <p class="checking-sub">
+          请求间隔约 1.2 秒以规避 E 站限流，画廊较多时可能需要数分钟，请勿关闭页面。
+        </p>
+      </div>
+    </div>
+
+    <div v-if="isLoading" class="empty-box">
+      <span class="spinner"></span>
+      <p>加载中...</p>
+    </div>
+
+    <div v-else-if="updates.length === 0" class="empty-box">
+      <span class="icon">✅</span>
+      <p class="empty-title">暂无需要更新的漫画</p>
+      <p class="empty-sub">
+        点击「开始检测」联网核对所有离线画廊，有新增页数或更新版时会出现在这里。
+      </p>
+    </div>
+
+    <div v-else class="update-list">
+      <div class="summary-bar">
+        <span
+          >共 <b class="highlight">{{ total }}</b> 个漫画需要更新</span
+        >
+      </div>
+
+      <div v-for="comic in updates" :key="comic.id" class="update-card">
+        <div class="cover-box">
+          <img
+            v-if="comic.coverUrl && !coverFailed[comic.id]"
+            :src="comic.coverUrl"
+            :alt="comic.title"
+            loading="lazy"
+            @error="onCoverError(comic.id)"
+          />
+          <span v-else class="cover-fallback">🔄</span>
+        </div>
+
+        <div class="card-main">
+          <div class="card-top">
+            <h3 class="card-title">{{ comic.title }}</h3>
+            <span class="mode-chip">{{
+              comic.sourceMode === 'gallery' ? '📁 画廊' : '🗜️ 归档'
+            }}</span>
+          </div>
+
+          <div class="card-tags">
+            <span v-if="comic.category" class="cat-chip">{{ comic.category }}</span>
+            <span class="meta-text">📄 {{ comic.pageCount || 0 }} 页</span>
+            <span class="meta-text">💾 {{ formatBytes(comic.fileSize) }}</span>
+            <span class="meta-text">🕒 {{ formatDate(comic.updatedAt) }}</span>
+          </div>
+
+          <div class="update-note">
+            <span class="note-icon">⚠️</span>
+            <span>{{ comic.updateNote || '检测到新版本' }}</span>
+          </div>
+
+          <div v-if="comic.newGID" class="new-gid">
+            <span class="new-gid-label">新版 GID</span>
+            <code>{{ comic.newGID }}</code>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <label class="mode-label" for="mode">下载方案</label>
+          <select
+            :id="`mode-${comic.id}`"
+            v-model="modeFor[comic.id]"
+            class="mode-select"
+            :disabled="isDownloading"
+          >
+            <option value="">按设置（默认）</option>
+            <option value="archive">🗜️ 归档（H@H）</option>
+            <option value="gallery">📁 画廊（逐图）</option>
+          </select>
+          <button class="download-btn" :disabled="isDownloading" @click="startDownload(comic)">
+            {{ downloadingId === comic.id ? '⏳ 加入中...' : '⬇️ 下载新版' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page-wrapper {
+.update-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #2a2a2d;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.3rem;
+  color: #fff;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: #888;
+  margin: 4px 0 0 0;
+  max-width: 640px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.link-btn {
+  background: transparent;
+  border: 1px solid #3a3a3f;
+  color: #aaa;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.link-btn:hover {
+  border-color: #007acc;
+  color: #007acc;
+}
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.check-btn {
+  background: #007acc;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.check-btn:hover {
+  opacity: 0.85;
+}
+.check-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checking-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background-color: #14283a;
+  border: 1px solid #007acc;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.checking-title {
+  color: #fff;
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+.checking-sub {
+  color: #9bb6c8;
+  margin: 3px 0 0 0;
+  font-size: 0.78rem;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #007acc;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  color: #888;
+  text-align: center;
+}
+.empty-box .icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+.empty-title {
+  color: #ccc;
+  font-size: 1rem;
+  margin: 0;
+}
+.empty-sub {
+  font-size: 0.82rem;
+  margin: 6px 0 0 0;
+  max-width: 420px;
+}
+
+.update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.summary-bar {
+  font-size: 0.85rem;
+  color: #aaa;
+}
+.highlight {
+  color: #ff7588;
+}
+
+.update-card {
+  display: flex;
+  gap: 16px;
+  background-color: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  padding: 14px;
+  align-items: flex-start;
+}
+
+.cover-box {
+  width: 64px;
+  height: 90px;
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: #242428;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cover-box img {
+  width: 100%;
   height: 100%;
+  object-fit: cover;
+}
+.cover-fallback {
+  font-size: 1.6rem;
+}
+
+.card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card-title {
+  font-size: 0.95rem;
+  color: #fff;
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.mode-chip {
+  font-size: 0.7rem;
+  color: #9bb6c8;
+  background-color: #14283a;
+  border: 1px solid #007acc;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.card-tags {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cat-chip {
+  font-size: 0.72rem;
+  color: #ff7588;
+  border: 1px solid #5a2a33;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+.meta-text {
+  font-size: 0.76rem;
+  color: #888;
+}
+
+.update-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #f59e0b;
+  background-color: #2a2414;
+  border: 1px solid #5a4a1a;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.note-icon {
+  flex-shrink: 0;
+}
+
+.new-gid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: #888;
+}
+.new-gid-label {
+  flex-shrink: 0;
+}
+.new-gid code {
+  font-family: Consolas, monospace;
+  color: #007acc;
+  background-color: #0f202e;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 150px;
+}
+.mode-label {
+  font-size: 0.7rem;
+  color: #888;
+}
+.mode-select {
+  background-color: #242428;
+  border: 1px solid #3a3a3f;
+  color: #ddd;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+}
+.mode-select:focus {
+  border-color: #007acc;
+}
+.mode-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.download-btn {
+  background-color: #ff7588;
+  border: none;
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.download-btn:hover {
+  opacity: 0.85;
+}
+.download-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .update-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .card-actions {
+    width: 100%;
+  }
 }
 </style>

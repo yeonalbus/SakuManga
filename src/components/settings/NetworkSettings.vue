@@ -6,7 +6,7 @@
         <div class="item-subtext">绕过SNI封锁</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="domainFronting" />
+        <input type="checkbox" v-model="networkSettings.domainFronting" />
         <span class="slider"></span>
       </label>
     </div>
@@ -25,7 +25,7 @@
         <div class="item-title">页面缓存时间</div>
         <div class="item-subtext">你可以通过刷新页面来更新缓存</div>
       </div>
-      <select v-model="pageCacheTime" class="setting-select">
+      <select v-model="networkSettings.pageCacheTime" class="setting-select">
         <option value="1d">1d</option>
         <option value="3d">3d</option>
         <option value="7d">7d</option>
@@ -38,7 +38,7 @@
         <div class="item-title">图片缓存时间</div>
         <div class="item-subtext">App启动时会自动清除过期的图片缓存</div>
       </div>
-      <select v-model="imageCacheTime" class="setting-select">
+      <select v-model="networkSettings.imageCacheTime" class="setting-select">
         <option value="7d">7d</option>
         <option value="15d">15d</option>
         <option value="30d">30d</option>
@@ -51,7 +51,7 @@
         <div class="item-title">建立连接超时时间</div>
       </div>
       <div class="input-inline">
-        <input type="number" v-model="connectTimeout" class="setting-input wider" />
+        <input type="number" v-model="networkSettings.connectTimeout" class="setting-input wider" />
         <span class="unit">ms</span>
         <span class="check-mark">✓</span>
       </div>
@@ -62,10 +62,14 @@
         <div class="item-title">接收数据超时时间</div>
       </div>
       <div class="input-inline">
-        <input type="number" v-model="receiveTimeout" class="setting-input wider" />
+        <input type="number" v-model="networkSettings.receiveTimeout" class="setting-input wider" />
         <span class="unit">ms</span>
         <span class="check-mark">✓</span>
       </div>
+    </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
@@ -74,16 +78,12 @@
 import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { networkSettings, resetNetworkSettings } from '@/stores/networkSettings'
 
 const { toast, modal } = useUI()
 
-// 响应式状态绑定
-const domainFronting = ref(false)
+// 代理地址来自后端 API（/network/proxy），不存入本地 store
 const proxyAddress = ref('')
-const pageCacheTime = ref('3d')
-const imageCacheTime = ref('30d')
-const connectTimeout = ref(6000)
-const receiveTimeout = ref(6000)
 
 // 获取后端当前设置的代理
 const fetchProxyConfig = async () => {
@@ -121,6 +121,11 @@ const handleProxySetting = async () => {
       toast.error(err instanceof Error ? err.message : '设置失败')
     }
   }
+}
+
+const handleReset = () => {
+  resetNetworkSettings()
+  toast.success('已恢复默认网络设置')
 }
 
 onMounted(() => {
@@ -281,5 +286,27 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(20px);
   background-color: #ffffff;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

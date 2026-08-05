@@ -83,6 +83,25 @@ watch(
 </template>
 
 <style>
+/* 全局主题 CSS 变量：通过 <html data-theme> 切换（见 main.ts applyTheme） */
+:root {
+  --app-bg: #121212;
+  --app-fg: #e0e0e0;
+  --app-surface: #1a1a1a;
+  --app-surface-hover: #2a2a2a;
+  --app-border: #2a2a2a;
+  --app-accent: #007acc;
+}
+
+:root[data-theme='light'] {
+  --app-bg: #f5f5f7;
+  --app-fg: #1c1c1e;
+  --app-surface: #ffffff;
+  --app-surface-hover: #ececef;
+  --app-border: #e2e2e6;
+  --app-accent: #0066b8;
+}
+
 /* 全局基础重置 */
 * {
   box-sizing: border-box;
@@ -90,8 +109,8 @@ watch(
   padding: 0;
 }
 body {
-  background-color: #121212;
-  color: #e0e0e0;
+  background-color: var(--app-bg);
+  color: var(--app-fg);
   font-family:
     system-ui,
     -apple-system,
@@ -108,8 +127,8 @@ body {
 /* 侧边栏样式 */
 .sidebar {
   width: 240px;
-  background-color: #1a1a1a;
-  border-right: 1px solid #2a2a2a;
+  background-color: var(--app-surface);
+  border-right: 1px solid var(--app-border);
   display: flex;
   flex-direction: column;
   padding: 20px 10px;
@@ -128,7 +147,7 @@ body {
 .logo {
   font-size: 1.1rem;
   font-weight: bold;
-  color: #007acc;
+  color: var(--app-accent);
 }
 
 .nav-group {
@@ -174,8 +193,8 @@ body {
 /* 顶部操作栏 */
 .top-bar {
   height: 56px;
-  background-color: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  background-color: var(--app-surface);
+  border-bottom: 1px solid var(--app-border);
   display: flex;
   align-items: center;
   padding: 0 20px;

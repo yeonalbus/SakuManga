@@ -46,23 +46,24 @@ type OnlineComicDTO struct {
 }
 
 type GalleryDetailResult struct {
-	ID           string           `json:"id"`
-	Token        string           `json:"token"`
-	Title        string           `json:"title"`    // 主标题 (日文/原名)
-	SubTitle     string           `json:"subTitle"` // 副标题 (英文/译名)
-	CoverURL     string           `json:"coverUrl"`
-	Source       string           `json:"source"` // "online"
-	Category     string           `json:"category"`
-	Uploader     string           `json:"uploader"`
-	Rating       float64          `json:"rating"`
-	PageCount    int              `json:"pageCount"`
-	UpdatedAt    string           `json:"updatedAt"`
-	Tags         []string         `json:"tags"`         // 格式: ["female:big breasts", "artist:okuma"]
-	PreviewPages []PreviewPageDTO `json:"previewPages"` // 预览切片列表
-	Comments     []CommentDTO     `json:"comments"`     // 社区评论列表
-	IsFavorite   bool             `json:"isFavorite"`
-	FavIndex     *int             `json:"favIndex"`
-	MaxPreviewPage int            `json:"maxPreviewPage"`
+	ID             string           `json:"id"`
+	Token          string           `json:"token"`
+	ParentGID      string           `json:"parentGID,omitempty"` // 父画廊 gid（更新检测用）
+	Title          string           `json:"title"`               // 主标题 (日文/原名)
+	SubTitle       string           `json:"subTitle"`            // 副标题 (英文/译名)
+	CoverURL       string           `json:"coverUrl"`
+	Source         string           `json:"source"` // "online"
+	Category       string           `json:"category"`
+	Uploader       string           `json:"uploader"`
+	Rating         float64          `json:"rating"`
+	PageCount      int              `json:"pageCount"`
+	UpdatedAt      string           `json:"updatedAt"`
+	Tags           []string         `json:"tags"`         // 格式: ["female:big breasts", "artist:okuma"]
+	PreviewPages   []PreviewPageDTO `json:"previewPages"` // 预览切片列表
+	Comments       []CommentDTO     `json:"comments"`     // 社区评论列表
+	IsFavorite     bool             `json:"isFavorite"`
+	FavIndex       *int             `json:"favIndex"`
+	MaxPreviewPage int              `json:"maxPreviewPage"`
 }
 
 type PreviewPageDTO struct {

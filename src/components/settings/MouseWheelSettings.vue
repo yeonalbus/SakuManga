@@ -5,17 +5,32 @@
         <div class="item-title">鼠标滚轮速度</div>
       </div>
       <div class="input-inline">
-        <input type="number" step="0.1" v-model="wheelSpeed" class="setting-input" />
+        <input
+          type="number"
+          step="0.1"
+          v-model="mouseWheelSettings.wheelSpeed"
+          class="setting-input"
+        />
         <span class="check-mark">✓</span>
       </div>
+    </div>
+
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useUI } from '@/composables/useUI'
+import { mouseWheelSettings, resetMouseWheelSettings } from '@/stores/mouseWheelSettings'
 
-const wheelSpeed = ref(5.0)
+const { toast } = useUI()
+
+const handleReset = () => {
+  resetMouseWheelSettings()
+  toast.success('已恢复默认鼠标滚轮设置')
+}
 </script>
 
 <style scoped>
@@ -72,5 +87,27 @@ const wheelSpeed = ref(5.0)
   color: #a0a0a5;
   font-size: 14px;
   margin-left: 4px;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid #44444a;
+  color: #a0a0a5;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  border-color: #ff7588;
+  color: #ffffff;
 }
 </style>

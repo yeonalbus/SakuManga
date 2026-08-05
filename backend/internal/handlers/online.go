@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -22,6 +23,22 @@ func NewOnlineComicHandler(db *gorm.DB, ehService *services.EHService) *OnlineCo
 	return &OnlineComicHandler{db: db, ehService: ehService}
 }
 
+// 获取或初始化 EHSetting 配置
+func getEHSetting(db *gorm.DB) *models.EHSetting {
+	var setting models.EHSetting
+	// 1. 仅通过主键 ID=1 查找
+	if err := db.First(&setting, 1).Error; err != nil {
+		// 2. 只有查不到记录时，才插入默认配置
+		setting = models.EHSetting{
+			ID:             1,
+			Site:           "e-hentai",
+			PreferRedirect: true,
+		}
+		db.Create(&setting)
+	}
+	return &setting
+}
+
 // GetOnlineComics 抓取线上画廊列表 (首页 /)
 func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 	var account models.AccountSetting
@@ -40,7 +57,8 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 		params.Page = 1
 	}
 
-	result, err := h.ehService.FetchGalleryList(&account, params)
+	ehSetting := getEHSetting(h.db)
+	result, err := h.ehService.FetchGalleryList(&account, params, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -155,7 +173,8 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		return
 	}
 
-	detail, err := h.ehService.FetchGalleryDetail(&account, gid, token)
+	ehSetting := getEHSetting(h.db)
+	detail, err := h.ehService.FetchGalleryDetail(&account, gid, token, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -188,7 +207,8 @@ func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 		return
 	}
 
-	comics, err := h.ehService.FetchPopularList(&account)
+	ehSetting := getEHSetting(h.db)
+	comics, err := h.ehService.FetchPopularList(&account, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -224,7 +244,8 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 		return
 	}
 
-	previews, err := h.ehService.FetchGalleryPreviews(&account, gid, token, page)
+	ehSetting := getEHSetting(h.db)
+	previews, err := h.ehService.FetchGalleryPreviews(&account, gid, token, page, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -232,3 +253,21 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 
 	c.JSON(http.StatusOK, previews)
 }
+
+// 辅助方法：同时获取账号凭证与 EH 设置
+func (h *OnlineComicHandler) getAccountAndSetting() (*models.AccountSetting, *models.EHSetting, error) {
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		return nil, nil, errors.New("请先绑定并保存 E 站账户凭证")
+	}
+
+	var setting models.EHSetting
+	h.db.FirstOrCreate(&setting, models.EHSetting{
+		ID:             1,
+		Site:           "e-hentai",
+		PreferRedirect: true,
+	})
+
+	return &account, &setting, nil
+}
+

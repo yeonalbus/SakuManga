@@ -23,18 +23,14 @@ func NewFavoritesService(ehService *EHService) *FavoritesService {
 }
 
 // FetchFavoritesList 抓取指定收藏夹分类 (0~9) 及游标的在线画廊列表
-func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, next, prev, seek, sortMode string) (*OnlineComicResult, error) {
+func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, account *models.AccountSetting, favCat int, next, prev, seek, sortMode string,setting *models.EHSetting) (*OnlineComicResult, error) {
 	client, err := s.ehService.BuildClient(account)
 	currentFav := favCat
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
-
+	baseURL := GetBaseURL(account, setting)
 	reqURL, _ := url.Parse(baseURL + "favorites.php")
 	q := reqURL.Query()
 	q.Set("favcat", strconv.Itoa(favCat))
@@ -223,17 +219,13 @@ func isBoundaryCursor(cursor string) bool {
 }
 
 // AddFavorite 添加/修改在线收藏
-func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string, favCat int, note string) error {
+func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string, favCat int, note string,setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
-
+	baseURL := GetBaseURL(account, setting)
 	popURL := fmt.Sprintf("%sgallerypopups.php?gid=%s&t=%s&act=addfav", baseURL, gid, token)
 
 	formData := url.Values{}
@@ -266,16 +258,13 @@ func (s *FavoritesService) AddFavorite(db *gorm.DB, account *models.AccountSetti
 }
 
 // RemoveFavorite 取消在线收藏
-func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string) error {
+func (s *FavoritesService) RemoveFavorite(db *gorm.DB, account *models.AccountSetting, gid, token string,setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
+	baseURL := GetBaseURL(account, setting)
 
 	popURL := fmt.Sprintf("%sgallerypopups.php?gid=%s&t=%s&act=addfav", baseURL, gid, token)
 
@@ -350,17 +339,13 @@ func AttachDetailFavoriteState(db *gorm.DB, detail *GalleryDetailResult) *Galler
 }
 
 // ChangeFavoriteSortOrder 独立触发 E 站排序状态切换，并保存返回的 Cookie
-func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, account *models.AccountSetting, sortMode string) error {
+func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, account *models.AccountSetting, sortMode string,setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)
 	if err != nil {
 		return err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
-
+	baseURL := GetBaseURL(account, setting)
 	inlineSet := "fs_f" // 默认按收藏时间
 	if sortMode == "published" {
 		inlineSet = "fs_p" // 按发布时间

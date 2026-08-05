@@ -18,6 +18,8 @@ func InitDB() {
 	}
 
 	DB.AutoMigrate(
+		&models.AccountSetting{},
+		&models.EHSetting{},
 		&models.ExtraScanPath{},
 		&models.OfflineComic{},
 		&models.FavoriteState{},

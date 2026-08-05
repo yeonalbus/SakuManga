@@ -14,17 +14,14 @@ import (
 )
 
 // FetchGalleryDetail 请求并解析画廊详情页 (仅抓取 p=0 初始预览图与元数据)
-func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, token string) (*GalleryDetailResult, error) {
+func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, token string,setting *models.EHSetting) (*GalleryDetailResult, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := "https://e-hentai.org"
-	if account.IsEx {
-		baseURL = "https://exhentai.org"
-	}
-
+	baseURL := GetBaseURL(account, setting)
+	
 	tags := make([]string, 0)
 	previewPages := make([]PreviewPageDTO, 0)
 	comments := make([]CommentDTO, 0)
@@ -237,16 +234,13 @@ func parseFavColorStyle(style string) int {
 }
 
 // FetchGalleryPreviews 抓取指定页码 (p=0, p=1...) 的预览图切片
-func (s *EHService) FetchGalleryPreviews(account *models.AccountSetting, gid, token string, page int) ([]PreviewPageDTO, error) {
+func (s *EHService) FetchGalleryPreviews(account *models.AccountSetting, gid, token string, page int,setting *models.EHSetting) ([]PreviewPageDTO, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := "https://e-hentai.org"
-	if account.IsEx {
-		baseURL = "https://exhentai.org"
-	}
+	baseURL := GetBaseURL(account, setting)
 
 	// 1. 处理页码对齐：E 站 URL 的 p 参数是 0-based 索引 (p=0 对应第 1 页, p=1 对应第 2 页)
 	// 如果前端传入的 page 是从 1 开始的，这里转换为 ehPage = page - 1

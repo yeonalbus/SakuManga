@@ -40,6 +40,7 @@ func main() {
 	// 3. 初始化 Service 与 Handler
 	ehService := services.NewEHService()
 	accountHandler := handlers.NewAccountHandler(database.DB, ehService)
+	ehSettingHandler := handlers.NewEHSettingHandler(database.DB)
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
 
@@ -81,10 +82,14 @@ func main() {
 		api.GET("/network/proxy", handlers.GetProxyHandler)
 		api.POST("/network/proxy", handlers.SetProxyHandler)
 
-		// E站账户
+		// E站账户与偏好设置
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
 		api.POST("/account/settings", accountHandler.SaveAccountSettings)
 		api.DELETE("/account/settings", accountHandler.ClearAccountSettings)
+
+		// 🟢 新增：EH 专属站点偏好设置接口
+		api.GET("/eh/settings", ehSettingHandler.GetEHSettings)
+		api.POST("/eh/settings", ehSettingHandler.SaveEHSettings)
 
 		// 在线画廊与封面代理
 		api.GET("/comics/online", onlineHandler.GetOnlineComics)

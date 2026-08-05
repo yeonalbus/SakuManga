@@ -33,7 +33,7 @@ func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 	next := c.Query("next")
 	prev := c.Query("prev")
 	seek := c.Query("seek")
-	sortMode := c.DefaultQuery("sort", "favorited") // 🟢 读取排序参数
+	sortMode := c.DefaultQuery("sort", "favorited") // 读取排序参数
 
 	var account models.AccountSetting
 	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
@@ -41,7 +41,9 @@ func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 		return
 	}
 
-	result, err := h.favService.FetchFavoritesList(h.db, &account, favCat, next, prev, seek, sortMode)
+	// 🟢 获取 EHSetting 并作为最后一个参数传入
+	ehSetting := getEHSetting(h.db)
+	result, err := h.favService.FetchFavoritesList(h.db, &account, favCat, next, prev, seek, sortMode, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -69,8 +71,9 @@ func (h *FavoritesHandler) AddFavorite(c *gin.Context) {
 		return
 	}
 
-	// 🟢 补传 h.db
-	if err := h.favService.AddFavorite(h.db, &account, req.GID, req.Token, req.FavCat, req.Note); err != nil {
+	// 🟢 获取 EHSetting 并作为最后一个参数传入
+	ehSetting := getEHSetting(h.db)
+	if err := h.favService.AddFavorite(h.db, &account, req.GID, req.Token, req.FavCat, req.Note, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -95,8 +98,9 @@ func (h *FavoritesHandler) RemoveFavorite(c *gin.Context) {
 		return
 	}
 
-	// 🟢 补传 h.db
-	if err := h.favService.RemoveFavorite(h.db, &account, req.GID, req.Token); err != nil {
+	// 🟢 获取 EHSetting 并作为最后一个参数传入
+	ehSetting := getEHSetting(h.db)
+	if err := h.favService.RemoveFavorite(h.db, &account, req.GID, req.Token, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -119,7 +123,9 @@ func (h *FavoritesHandler) ChangeSortOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.favService.ChangeFavoriteSortOrder(h.db, &account, req.SortMode); err != nil {
+	// 🟢 获取 EHSetting 并作为最后一个参数传入
+	ehSetting := getEHSetting(h.db)
+	if err := h.favService.ChangeFavoriteSortOrder(h.db, &account, req.SortMode, ehSetting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

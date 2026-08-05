@@ -14,6 +14,24 @@ import (
 	"SakuHentai/internal/models"
 )
 
+// 🟢 新增：根据账号权限与站点偏好动态决定请求根路径 (BaseURL)
+// 🟢 改为 package 级别的通用函数（去掉 (s *EHService)）
+func GetBaseURL(account *models.AccountSetting, ehSetting *models.EHSetting) string {
+	if ehSetting != nil && ehSetting.Site == "exhentai" && account != nil && account.IsEx {
+		return "https://exhentai.org/"
+	}
+	return "https://e-hentai.org/"
+}
+
+// 🟢 新增：获取画廊详情页 URL (支持“优先重定向至表站”配置)
+// 🟢 同理，如果有 GetGalleryURL，也改为通用函数
+func GetGalleryURL(account *models.AccountSetting, ehSetting *models.EHSetting, gid, token string) string {
+	if ehSetting != nil && ehSetting.PreferRedirect {
+		return fmt.Sprintf("https://e-hentai.org/g/%s/%s/", gid, token)
+	}
+	return fmt.Sprintf("%sg/%s/%s/", GetBaseURL(account, ehSetting), gid, token)
+}
+
 // buildTransport 构造带有代理设置的 http.Transport
 func buildTransport() *http.Transport {
 	transport := &http.Transport{
@@ -52,7 +70,7 @@ func (s *EHService) BuildClient(setting *models.AccountSetting) (*http.Client, e
 		if setting.Igneous != "" {
 			cookies = append(cookies, &http.Cookie{Name: "igneous", Value: setting.Igneous, Path: "/"})
 		}
-		// 🟢 关键补充：注入 SK Cookie，传递用户的个性化/排序状态
+		// 注入 SK Cookie，传递用户的个性化/排序状态
 		if setting.SK != "" {
 			cookies = append(cookies, &http.Cookie{Name: "sk", Value: setting.SK, Path: "/"})
 		}

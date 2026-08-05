@@ -1,5 +1,6 @@
 <template>
   <div class="eh-settings">
+    <!-- 站点选择 -->
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">站点</div>
@@ -8,20 +9,21 @@
         <button
           class="segment-btn"
           :class="{ active: currentSite === 'e-hentai' }"
-          @click="currentSite = 'e-hentai'"
+          @click="handleSiteChange('e-hentai')"
         >
           E-Hentai
         </button>
         <button
           class="segment-btn"
           :class="{ active: currentSite === 'exhentai' }"
-          @click="currentSite = 'exhentai'"
+          @click="handleSiteChange('exhentai')"
         >
           EXHentai
         </button>
       </div>
     </div>
 
+    <!-- 优先重定向至表站 -->
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">优先重定向至表站</div>
@@ -31,12 +33,13 @@
       </div>
       <div class="switch-control">
         <label class="toggle-switch">
-          <input type="checkbox" v-model="preferRedirect" />
+          <input type="checkbox" v-model="preferRedirect" @change="handleRedirectChange" />
           <span class="slider"></span>
         </label>
       </div>
     </div>
 
+    <!-- Profile设置 -->
     <div class="setting-item clickable" @click="handleOpenProfile">
       <div class="item-info">
         <div class="item-title">Profile设置</div>
@@ -45,6 +48,7 @@
       <span class="arrow-icon">›</span>
     </div>
 
+    <!-- 站点设置 -->
     <div class="setting-item clickable" @click="handleOpenSiteSettings">
       <div class="item-info">
         <div class="item-title">站点设置</div>
@@ -53,6 +57,7 @@
       <span class="arrow-icon">›</span>
     </div>
 
+    <!-- 图片配额 -->
     <div class="setting-item clickable" @click="handleQuotaDetail">
       <div class="item-info">
         <div class="item-title">图片配额</div>
@@ -64,6 +69,7 @@
       </div>
     </div>
 
+    <!-- 资产 -->
     <div class="setting-item clickable" @click="handleAssetsDetail">
       <div class="item-info">
         <div class="item-title">资产</div>
@@ -74,6 +80,7 @@
       <span class="arrow-icon">›</span>
     </div>
 
+    <!-- 我的标签 -->
     <div class="setting-item clickable" @click="handleOpenMyTags">
       <div class="item-info">
         <div class="item-title">我的标签</div>
@@ -85,14 +92,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
+import type { EHSetting, EHSite } from '@/types/eh'
 
 const { toast } = useUI()
 
-// 响应式数据
-const currentSite = ref<'e-hentai' | 'exhentai'>('exhentai')
-const preferRedirect = ref(false)
+// 状态定义
+const currentSite = ref<EHSite>('e-hentai')
+const preferRedirect = ref(true)
+const selectedProfile = ref('default')
 
 // 模拟数据 (配额与资产)
 const currentQuota = ref(0)
@@ -100,7 +109,57 @@ const maxQuota = ref(50000)
 const assetGP = ref('51,667')
 const assetCredits = ref('29,343')
 
-// 页面交互处理 (后续对接网络/抽屉层)
+// 1. 初始化：从后端获取偏好设置
+const fetchEHSettings = async () => {
+  try {
+    const res = await fetch('/api/v1/eh/settings')
+    if (!res.ok) throw new Error('网络响应异常')
+    const data: EHSetting = await res.json()
+
+    currentSite.value = data.site || 'e-hentai'
+    preferRedirect.value = data.preferRedirect ?? true
+    selectedProfile.value = data.selectedProfile || 'default'
+  } catch (err) {
+    toast.error('加载 E 站偏好设置失败')
+    console.error(err)
+  }
+}
+
+// 2. 保存设置至后端
+const saveEHSettings = async (updatedSettings: Partial<EHSetting>) => {
+  try {
+    const payload: EHSetting = {
+      site: currentSite.value,
+      preferRedirect: preferRedirect.value,
+      selectedProfile: selectedProfile.value,
+      ...updatedSettings,
+    }
+
+    const res = await fetch('/api/v1/eh/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!res.ok) throw new Error('保存失败')
+    toast.success('设置已更新')
+  } catch (err) {
+    toast.error('保存 E 站偏好设置失败')
+    console.error(err)
+  }
+}
+
+// 交互事件处理
+const handleSiteChange = (site: EHSite) => {
+  if (currentSite.value === site) return
+  currentSite.value = site
+  saveEHSettings({ site })
+}
+
+const handleRedirectChange = () => {
+  saveEHSettings({ preferRedirect: preferRedirect.value })
+}
+
 const handleOpenProfile = () => {
   toast.info('打开 Profile 设置抽屉')
 }
@@ -120,6 +179,10 @@ const handleAssetsDetail = () => {
 const handleOpenMyTags = () => {
   toast.info('打开我的标签管理')
 }
+
+onMounted(() => {
+  fetchEHSettings()
+})
 </script>
 
 <style scoped>

@@ -13,16 +13,13 @@ import (
 )
 
 // FetchGalleryList 发起网络请求并解析画廊列表
-func (s *EHService) FetchGalleryList(account *models.AccountSetting, params SearchParams) (*OnlineComicResult, error) {
+func (s *EHService) FetchGalleryList(account *models.AccountSetting, params SearchParams, setting *models.EHSetting) (*OnlineComicResult, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
+	baseURL := GetBaseURL(account, setting)
 
 	reqURL, _ := url.Parse(baseURL)
 	q := reqURL.Query()
@@ -213,16 +210,13 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 }
 
 // FetchPopularList 维持原样...
-func (s *EHService) FetchPopularList(account *models.AccountSetting) ([]OnlineComicDTO, error) {
+func (s *EHService) FetchPopularList(account *models.AccountSetting, ehSetting *models.EHSetting) ([]OnlineComicDTO, error) {
 	client, err := s.BuildClient(account)
 	if err != nil {
 		return nil, err
 	}
 
-	baseURL := "https://e-hentai.org/"
-	if account.IsEx {
-		baseURL = "https://exhentai.org/"
-	}
+	baseURL := GetBaseURL(account, ehSetting)
 
 	reqURL := baseURL + "popular"
 

@@ -37,6 +37,11 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
 
+	// Tag 维护服务：启动调度器（启动时执行旧数据迁移，其后按东八区每日/每周触发）
+	tagMaintainService := services.NewTagMaintainService(db, ehService)
+	services.StartTagMaintainScheduler(db, tagMaintainService)
+	tagMaintainHandler := handlers.NewTagMaintainHandler(db, tagMaintainService)
+
 	// 读取默认账号（id=1）并启动榜单定时调度器
 	var account models.AccountSetting
 	db.First(&account, 1)
@@ -145,5 +150,15 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
 		api.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
 		api.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
+
+		// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 手动写回 / 进度轮询）
+		api.GET("/offline/tags/setting", tagMaintainHandler.GetSetting)
+		api.POST("/offline/tags/setting", tagMaintainHandler.SaveSetting)
+		api.POST("/offline/tags/refresh", tagMaintainHandler.RefreshTags)
+		api.POST("/offline/tags/writeback", tagMaintainHandler.Writeback)
+		api.GET("/offline/tags/progress", tagMaintainHandler.GetProgress)
+
+		// 单本 tag 增删落库（详情页编辑）
+		api.PUT("/comics/:id/tags", tagMaintainHandler.EditComicTags)
 	}
 }

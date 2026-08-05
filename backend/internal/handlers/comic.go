@@ -15,7 +15,12 @@ import (
 
 type OfflineComicResponse struct {
 	models.OfflineComic
-	Tags []*services.TagItem `json:"tags"`
+	Tags                  []*services.TagItem `json:"tags"`                  // 展示用（合并后的翻译结果）
+	TagRaws               []string            `json:"tagRaws"`               // 与 Tags 一一对应的原始 tag 字符串（删除时精确匹配）
+	TagSources            []string            `json:"tagSources"`            // 与 Tags 一一对应的来源：online | local
+	OnlineTagsList        []string            `json:"onlineTagsList"`        // 原始三态（前端区分官方/本地展示）
+	OfflineAddTagsList    []string            `json:"offlineAddTagsList"`    // 本地新增 tag
+	OfflineRemoveTagsList []string            `json:"offlineRemoveTagsList"` // 本地删除的 online tag
 }
 
 func parseRawTags(tagsStr string) []string {
@@ -53,12 +58,46 @@ func GetOfflineComicDetail(c *gin.Context) {
 		return
 	}
 
-	rawTags := parseRawTags(comic.Tags)
-	translatedTags := services.GlobalTagEngine.TranslateTags(rawTags)
+	// 双轨三态
+	onlineTags := services.UnmarshalTagSlice(comic.OnlineTags)
+	offlineAddTags := services.UnmarshalTagSlice(comic.OfflineAddTags)
+	offlineRemoveTags := services.UnmarshalTagSlice(comic.OfflineRemoveTags)
+
+	// 展示合并：(online ∪ offlineAdd) − offlineRemove
+	merged := services.MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)
+	// 兼容旧数据：三态全为空（且未迁移）时回退到旧 Tags 字段
+	if len(merged) == 0 && comic.OnlineTags == "" {
+		merged = parseRawTags(comic.Tags)
+	}
+
+	// 计算每个展示 tag 的来源：本地新增标记为 local，其余视为官方 online
+	onlineSet := map[string]bool{}
+	for _, t := range onlineTags {
+		onlineSet[t] = true
+	}
+	addSet := map[string]bool{}
+	for _, t := range offlineAddTags {
+		addSet[t] = true
+	}
+	sources := make([]string, 0, len(merged))
+	for _, t := range merged {
+		if addSet[t] && !onlineSet[t] {
+			sources = append(sources, "local")
+		} else {
+			sources = append(sources, "online")
+		}
+	}
+
+	translatedTags := services.GlobalTagEngine.TranslateTags(merged)
 
 	c.JSON(http.StatusOK, OfflineComicResponse{
-		OfflineComic: comic,
-		Tags:         translatedTags,
+		OfflineComic:          comic,
+		Tags:                  translatedTags,
+		TagRaws:               merged,
+		TagSources:            sources,
+		OnlineTagsList:        onlineTags,
+		OfflineAddTagsList:    offlineAddTags,
+		OfflineRemoveTagsList: offlineRemoveTags,
 	})
 }
 

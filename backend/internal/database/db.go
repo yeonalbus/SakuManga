@@ -26,5 +26,6 @@ func InitDB() {
 		&models.FavoriteState{},
 		&models.DownloadTask{},
 		&models.DownloadSetting{},
+		&models.TagMaintainSetting{},
 	)
 }

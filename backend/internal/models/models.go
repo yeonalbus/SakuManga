@@ -51,6 +51,26 @@ type OfflineComic struct {
 	NewGID     string `json:"newGID,omitempty"`                  // 检测到的新版本 GID
 	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token
 	UpdateNote string `json:"updateNote,omitempty"`              // 更新提示文案
+
+	// ── Tag 双轨维护字段（本地漫画 Tag 维护系统）──
+	OnlineTags        string `gorm:"type:text" json:"onlineTags,omitempty"`        // E站官方 tag JSON 数组（每日刷新覆盖）
+	OfflineAddTags    string `gorm:"type:text" json:"offlineAddTags,omitempty"`    // 本地新增 tag JSON 数组（用户客制化）
+	OfflineRemoveTags string `gorm:"type:text" json:"offlineRemoveTags,omitempty"` // 本地删除的 online tag JSON 数组（刷新略过/写回剔除）
+	LastTagRefreshAt  int64  `json:"lastTagRefreshAt,omitempty"`                   // 上次 Tag 刷新时间戳(ms)
+	TagRefreshCount   int    `json:"tagRefreshCount,omitempty"`                    // 累计刷新次数
+}
+
+// TagMaintainSetting Tag 维护设置（单例 ID=1）
+type TagMaintainSetting struct {
+	ID                  uint      `gorm:"primaryKey;default:1" json:"id"`
+	EnableDailyRefresh  bool      `gorm:"default:true" json:"enableDailyRefresh"`   // 开启每日 Tag 刷新
+	EnableWeeklyWriteback bool    `gorm:"default:true" json:"enableWeeklyWriteback"` // 开启每周反向写回
+	RefreshHour         int       `gorm:"default:6" json:"refreshHour"`             // 每日刷新小时（东八区，默认 6）
+	WritebackWeekday    int       `gorm:"default:0" json:"writebackWeekday"`        // 写回日（0=周日）
+	WritebackHour       int       `gorm:"default:6" json:"writebackHour"`           // 写回小时（东八区，默认 6）
+	LastDailyRunAt      int64     `json:"lastDailyRunAt,omitempty"`                 // 上次每日刷新执行时间(ms)
+	LastWeeklyRunAt     int64     `json:"lastWeeklyRunAt,omitempty"`                // 上次每周写回执行时间(ms)
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 // Bookshelf 本地书架

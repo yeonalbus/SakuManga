@@ -18,6 +18,11 @@ interface OfflineDetailDTO {
   coverUrl: string
   category?: string
   tags?: string[] | string
+  tagRaws?: string[]
+  tagSources?: ('online' | 'local')[]
+  onlineTagsList?: string[]
+  offlineAddTagsList?: string[]
+  offlineRemoveTagsList?: string[]
   rating?: number
   pageCount?: number
   updatedAt: string
@@ -44,6 +49,23 @@ const comic = ref<OfflineComic>({
   fileSize: 0,
   readCount: 0,
 })
+
+// 双轨三态展示辅助数据（与后端 GetOfflineComicDetail 返回对应）
+const tagRaws = ref<string[]>([])
+const tagSources = ref<('online' | 'local')[]>([])
+const onlineTagsList = ref<string[]>([])
+const offlineAddTagsList = ref<string[]>([])
+
+// 兜底：由 TagItem/原始 tag 反查原始字符串（优先使用后端返回的 tagRaws）
+const rawTagOf = (t: string | { namespace?: string; key?: string }): string => {
+  if (typeof t === 'string') return t
+  const ns = (t.namespace || '').toLowerCase()
+  return ns && ns !== 'other' ? `${ns}:${t.key}` : t.key || ''
+}
+
+// 该 tag 属于官方(online) 还是 本地新增(local)
+const tagSource = (idx: number): 'online' | 'local' => tagSources.value[idx] || 'online'
+const tagClass = (idx: number) => (tagSource(idx) === 'local' ? 'tag-local' : 'tag-official')
 
 // 向 Go 后端拉取单本漫画真实数据
 const fetchComicDetail = async () => {
@@ -72,6 +94,11 @@ const fetchComicDetail = async () => {
       tags: parsedTags,
     }
     myLocalRating.value = comic.value.rating || 0
+    // 三态展示辅助数据
+    tagRaws.value = data.tagRaws || []
+    tagSources.value = data.tagSources || []
+    onlineTagsList.value = data.onlineTagsList || []
+    offlineAddTagsList.value = data.offlineAddTagsList || []
   } catch (err) {
     console.error('获取漫画详情失败:', err)
     const msg = err instanceof Error ? err.message : ''
@@ -151,20 +178,35 @@ const handleAddTag = async () => {
     '',
     '新增本地标签',
   )
-  if (newTag && newTag.trim()) {
-    const trimmed = newTag.trim()
-    if (!comic.value.tags.includes(trimmed)) {
-      comic.value.tags.push(trimmed)
-      toast.success(`标签「${trimmed}」添加成功！`)
-    } else {
-      toast.warning('该标签已存在')
-    }
+  if (!newTag || !newTag.trim()) return
+  const trimmed = newTag.trim()
+  // 本地新增 tag 走双轨模型：加入 OfflineAddTags（仅本地客制化，不写回）
+  try {
+    await http(`/comics/${comic.value.id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ addTags: [trimmed], removeTags: [] }),
+    })
+    toast.success(`标签「${trimmed}」添加成功！`)
+    await fetchComicDetail()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '添加标签失败')
   }
 }
 
-const handleRemoveTag = (index: number) => {
-  const removed = comic.value.tags.splice(index, 1)
-  toast.info(`已移除标签「${removed[0]}」`)
+const handleRemoveTag = async (index: number) => {
+  // 优先使用后端返回的原始 tag 字符串精确匹配（官方/本地都能正确剔除）
+  const raw = tagRaws.value[index] || rawTagOf(comic.value.tags[index] as never)
+  if (!raw) return
+  try {
+    await http(`/comics/${comic.value.id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ addTags: [], removeTags: [raw] }),
+    })
+    toast.info(`已移除标签「${raw}」`)
+    await fetchComicDetail()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '移除标签失败')
+  }
 }
 
 const toggleShelfCheck = (shelfId: string) => {
@@ -294,8 +336,16 @@ const handleDelete = async () => {
 
           <!-- 🎯 替换为 TagChip 组件 + 独立删除按钮组合 -->
           <div class="tags-cloud">
-            <div v-for="(tag, idx) in comic.tags" :key="`${tag}-${idx}`" class="detail-tag-item">
+            <div
+              v-for="(tag, idx) in comic.tags"
+              :key="`${tagRaws[idx] || idx}-${idx}`"
+              class="detail-tag-item"
+              :class="tagClass(idx)"
+            >
               <TagChip :tag="tag" />
+              <span v-if="tagSource(idx) === 'local'" class="local-badge" title="本地新增标签">
+                本地
+              </span>
               <span class="remove-tag" title="删除此标签" @click.stop="handleRemoveTag(idx)">
                 ✕
               </span>
@@ -490,6 +540,25 @@ const handleDelete = async () => {
   background-color: #242428;
   padding-right: 6px;
   border-radius: 4px;
+}
+
+/* 本地新增 tag：橙色虚线圈出，区别于官方 online tag */
+.detail-tag-item.tag-local {
+  outline: 1px dashed #ffb74d;
+  outline-offset: 1px;
+  background-color: #2a231a;
+}
+
+.local-badge {
+  font-size: 0.62rem;
+  color: #ffb74d;
+  background-color: rgba(255, 183, 77, 0.15);
+  border: 1px solid rgba(255, 183, 77, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.4;
+  margin-right: 2px;
+  white-space: nowrap;
 }
 
 .remove-tag {

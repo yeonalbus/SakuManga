@@ -33,6 +33,7 @@
           <PreferenceSettings v-else-if="activeTab === 'preference'" />
           <NetworkSettings v-else-if="activeTab === 'network'" />
           <DownloadSettings v-else-if="activeTab === 'download'" />
+          <TagMaintainSettings v-else-if="activeTab === 'tag-maintain'" />
           <AdvancedSettings v-else-if="activeTab === 'advanced'" />
           <SecuritySettings v-else-if="activeTab === 'security'" />
           <AboutSettings v-else-if="activeTab === 'about'" />
@@ -43,8 +44,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 // 导入全部 12 个设置子组件
 import AccountSettings from '@/components/settings/AccountSettings.vue'
@@ -54,12 +55,23 @@ import ReaderSettings from '@/components/settings/ReaderSettings.vue'
 import PreferenceSettings from '@/components/settings/PreferenceSettings.vue'
 import NetworkSettings from '@/components/settings/NetworkSettings.vue'
 import DownloadSettings from '@/components/settings/DownloadSettings.vue'
+import TagMaintainSettings from '@/components/settings/TagMaintainSettings.vue'
 import AdvancedSettings from '@/components/settings/AdvancedSettings.vue'
 import SecuritySettings from '@/components/settings/SecuritySettings.vue'
 import AboutSettings from '@/components/settings/AboutSettings.vue'
 
 const router = useRouter()
-const activeTab = ref('account')
+const route = useRoute()
+// 支持侧边栏快捷入口：/settings?tab=xxx 直达对应设置栏目
+const activeTab = ref((route.query.tab as string) || 'account')
+
+// 已停留在设置页时，侧边栏再次点击同 URL（仅 query 变化）也能实时切换
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab && typeof tab === 'string') activeTab.value = tab
+  },
+)
 
 const menuItems = [
   { id: 'account', label: '账户', icon: '👤', title: '账户设置' },
@@ -69,6 +81,7 @@ const menuItems = [
   { id: 'preference', label: '偏好', icon: '⭐', title: '偏好设置' },
   { id: 'network', label: '网络', icon: '📶', title: '网络设置' },
   { id: 'download', label: '下载', icon: '📥', title: '下载设置' },
+  { id: 'tag-maintain', label: 'Tag 维护', icon: '🏷️', title: 'Tag 维护' },
   { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置' },
   { id: 'security', label: '安全', icon: '🛡️', title: '安全设置' },
   { id: 'about', label: '关于', icon: 'ℹ️', title: '关于软件' },

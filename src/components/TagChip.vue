@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTagStore } from '@/stores/tagStore'
+import { useModeStore } from '@/stores/modeStore'
 // 🎯 引入全局 SearchConfig Store 状态
 import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 
@@ -24,6 +25,7 @@ const props = withDefaults(
 const router = useRouter()
 const route = useRoute()
 const tagStore = useTagStore()
+const modeStore = useModeStore()
 
 // 统一转换为 TagData 结构
 const tagData = computed<TagData>(() => {
@@ -80,7 +82,7 @@ const handleClick = () => {
   const { namespace, key } = tagData.value
   const queryTag = namespace && namespace !== 'other' ? `${namespace}:${key}` : key
 
-  const isOffline = route.path.startsWith('/offline')
+  const isOffline = modeStore.isOffline
 
   if (isOffline) {
     offlineSearchConfig.value.keyword = queryTag

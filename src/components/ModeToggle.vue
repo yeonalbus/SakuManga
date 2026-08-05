@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
+import { useModeStore } from '@/stores/modeStore'
 
 const router = useRouter()
-const route = useRoute()
+const modeStore = useModeStore()
 
-// 核心优化：动态根据当前路由路径是否以 /online 开头来判定状态
-// 这样即使用户在地址栏手动输入 URL 或通过侧边栏跳转，按钮文字图标也会 100% 保持精准同步
-const isOnline = computed(() => route.path.startsWith('/online'))
+// 使用全局模式状态（单一数据源）而非路由路径判断。
+// 这样在 /settings、/downloads 等页面时，按钮会保持进入前的模式，
+// 不会因路径不以 /online 开头而误判成「离线」。
+const isOnline = computed(() => modeStore.isOnline)
 
 const toggleMode = () => {
   // 当前是在线模式，点击切换到离线首页；反之切回在线首页

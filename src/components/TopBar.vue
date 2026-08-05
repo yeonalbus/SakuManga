@@ -1,23 +1,22 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
 import RandomPicker from './RandomPicker.vue'
 import FilterDrawer from './FilterDrawer.vue'
 import SearchBar from './SearchBar.vue'
 import ReadingList from './ReadingList.vue'
 import { useUI } from '@/composables/useUI'
+import { useModeStore } from '@/stores/modeStore'
 // 按领域引入搜索配置，避免依赖 appStore 聚合层
 import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 import type { FilterParams } from '@/types/comic'
 
-const route = useRoute()
 const { toast } = useUI()
+const modeStore = useModeStore()
 const isFilterOpen = ref(false)
 
-// 🟢 1. 动态感知当前是在线还是离线模块
-const currentScope = computed<'online' | 'offline'>(() => {
-  return route.path.startsWith('/offline') ? 'offline' : 'online'
-})
+// 🟢 1. 使用全局模式状态感知当前是在线还是离线模块
+//（/settings、/downloads 等页面保持进入前的模式，与侧边栏 / ModeToggle 保持一致）
+const currentScope = computed<'online' | 'offline'>(() => modeStore.currentMode)
 
 // 🟢 2. 拿到当前生效的 SearchConfig 对象
 const activeSearchConfig = computed(() => {

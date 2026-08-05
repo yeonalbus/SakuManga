@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ModeToggle from '@/components/ModeToggle.vue'
 import OnlineSidebar from '@/components/OnlineSidebar.vue' // 引入两个侧边栏组件
@@ -9,9 +9,11 @@ import GlobalToast from '@/components/common/GlobalToast.vue'
 import GlobalModal from '@/components/common/GlobalModal.vue'
 import { useTagStore } from '@/stores/tagStore'
 import { useUserStore } from '@/stores/userStore'
+import { useModeStore } from '@/stores/modeStore'
 
 const tagStore = useTagStore()
 const userStore = useUserStore()
+const modeStore = useModeStore()
 
 onMounted(() => {
   // 🚀 应用启动时异步获取翻译字典
@@ -20,20 +22,17 @@ onMounted(() => {
 
 const route = useRoute()
 
-// 1. 用一个 ref 存储当前模式，默认设为 'online'
-const currentMode = ref<'online' | 'offline'>('online')
-
-// 2. 监听路由路径变化，更新模式记忆
+// 监听路由路径变化，更新模式记忆（模式由全局 modeStore 维护，作为单一数据源）
+// 只有进入 /online/* 或 /offline/* 时才更新；
+// /downloads、/settings 等页面会保持上一次的模式不变，避免 UI 误判！
 watch(
   () => route.path,
   (newPath) => {
     if (newPath.startsWith('/online')) {
-      currentMode.value = 'online'
+      modeStore.setMode('online')
     } else if (newPath.startsWith('/offline')) {
-      currentMode.value = 'offline'
+      modeStore.setMode('offline')
     }
-    // 注意：如果是 /downloads 或 /settings，既不是 online 也不是 offline，
-    // currentMode 会保持上一次的值不变！
   },
   { immediate: true }, // 页面刚加载时立即执行一次
 )
@@ -56,7 +55,7 @@ watch(
       <!-- 导航菜单 -->
       <nav class="nav-menu">
         <!-- 在线/离线菜单，用 v-if / v-else 切换对应的组件 -->
-        <OnlineSidebar v-if="currentMode === 'online'" />
+        <OnlineSidebar v-if="modeStore.isOnline" />
         <OfflineSidebar v-else />
         <!-- 全局通用的系统菜单与历史记录：放在侧边栏底部或独立组里 -->
         <div class="nav-group">

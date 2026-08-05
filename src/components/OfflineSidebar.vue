@@ -45,7 +45,6 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
     <router-link to="/offline/home">首页</router-link>
     <router-link to="/offline/update">更新</router-link>
     <router-link to="/offline/maintain">维护</router-link>
-    <router-link to="/settings?tab=tag-maintain">Tag 维护</router-link>
     <router-link to="/offline/toplist">排行榜</router-link>
     <router-link to="/offline/history">历史记录</router-link>
 

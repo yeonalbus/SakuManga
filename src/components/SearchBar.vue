@@ -3,12 +3,14 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
+import { useModeStore } from '@/stores/modeStore'
 import TagChip from '@/components/TagChip.vue'
 import type { TagItem } from '@/stores/tagStore'
 import { http } from '@/utils/request'
 
 const router = useRouter()
 const route = useRoute()
+const modeStore = useModeStore()
 const { toast } = useUI()
 
 const keyword = ref('')
@@ -19,9 +21,7 @@ let suggestTimer: number | null = null
 
 // 🎯 1. 监听当前域 Store 的 keyword 变化，同步反显到搜索框输入框内（如点击 TagChip 时）
 const activeStoreKeyword = computed(() => {
-  return route.path.startsWith('/offline')
-    ? offlineSearchConfig.value.keyword
-    : onlineSearchConfig.value.keyword
+  return modeStore.isOffline ? offlineSearchConfig.value.keyword : onlineSearchConfig.value.keyword
 })
 
 watch(
@@ -36,7 +36,7 @@ watch(
 
 // 🎯 2. 重置并回归首页函数
 const resetToHome = () => {
-  const isOffline = route.path.startsWith('/offline')
+  const isOffline = modeStore.isOffline
   if (isOffline) {
     offlineSearchConfig.value.keyword = ''
     if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
@@ -109,7 +109,7 @@ const triggerSearch = (queryText?: string) => {
   }
 
   isFocused.value = false
-  const isOffline = route.path.startsWith('/offline')
+  const isOffline = modeStore.isOffline
 
   if (isOffline) {
     offlineSearchConfig.value.keyword = finalQuery

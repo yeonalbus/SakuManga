@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTagStore } from '@/stores/tagStore'
 // 🎯 引入全局 SearchConfig Store 状态
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 
 export interface TagData {
   namespace: string

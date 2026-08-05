@@ -8,7 +8,10 @@ interface RequestOptions extends RequestInit {
 /**
  * 基础 Fetch 封装
  */
-export async function http<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+export async function http<T = unknown>(
+  endpoint: string,
+  options: RequestOptions = {},
+): Promise<T> {
   const { params, headers, ...restOptions } = options
 
   // 1. 自动处理斜杠拼接

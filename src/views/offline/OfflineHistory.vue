@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { offlineHistoryList, clearHistory } from '@/stores/appStore'
+import { offlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 

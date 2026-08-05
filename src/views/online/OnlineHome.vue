@@ -4,7 +4,7 @@ import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬浮球
 import { useOnlineStore } from '@/stores/onlineStore'
-import { onlineSearchConfig } from '@/stores/appStore'
+import { onlineSearchConfig } from '@/stores/searchStore'
 
 const onlineStore = useOnlineStore()
 

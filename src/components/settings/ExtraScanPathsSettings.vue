@@ -90,21 +90,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue' // 引入 onMounted
-import { useAppStore, type ExtraScanPath } from '@/stores/appStore'
-
-defineEmits<{
-  (e: 'back'): void
-}>()
-
-// 🎯 核心修复：解构变量导出，提升为顶层 Binding，模板才能自动识别数组并解包 .value
-const {
+import {
   scanPaths,
-  fetchScanPaths, // 解构 fetchScanPaths
+  fetchScanPaths,
   addScanPath,
   toggleSubfolders,
   removeScanPath,
   updateScanPathStats,
-} = useAppStore()
+  type ExtraScanPath,
+} from '@/stores/scanPathStore'
+
+defineEmits<{
+  (e: 'back'): void
+}>()
 
 // 组件挂载时向 Go 后端拉取最新路径列表
 onMounted(() => {
@@ -114,12 +112,12 @@ onMounted(() => {
 const inputPath = ref('')
 const activeScanningId = ref<string | null>(null)
 
-// 1. 添加路径
-const handleAdd = () => {
+// 1. 添加路径（addScanPath 返回 Promise<boolean>，必须 await 才能正确判断）
+const handleAdd = async () => {
   const path = inputPath.value.trim()
   if (!path) return
 
-  const ok = addScanPath(path)
+  const ok = await addScanPath(path)
   if (ok) {
     inputPath.value = ''
   } else {

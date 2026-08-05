@@ -125,7 +125,15 @@ const form = reactive<EAccountConfig>({
 // 1. 从后端加载已有账户配置
 const loadAccountSettings = async () => {
   try {
-    const json = await http('/account/settings')
+    const json = await http<{
+      isLoggedIn?: boolean
+      data?: {
+        ipb_member_id?: string
+        igneous?: string
+        sk?: string
+        isEx?: boolean
+      }
+    }>('/account/settings')
 
     if (json.isLoggedIn && json.data) {
       isLoggedIn.value = true
@@ -207,8 +215,8 @@ const handleSaveCookies = async () => {
     showModal.value = false
     toast.success('凭证校验通过并已保存！')
     await loadAccountSettings()
-  } catch (err: any) {
-    toast.error(err?.message || err?.error || 'Cookie 校验失败，请检查网络或凭证！')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : 'Cookie 校验失败，请检查网络或凭证！')
     console.error(err)
   } finally {
     submitting.value = false
@@ -228,8 +236,8 @@ const handleLogout = async () => {
     })
     toast.success('已成功清除凭证！')
     await loadAccountSettings()
-  } catch (err: any) {
-    toast.error(err?.message || '清除失败')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '清除失败')
   } finally {
     submitting.value = false
   }

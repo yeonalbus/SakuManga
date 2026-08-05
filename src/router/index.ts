@@ -78,10 +78,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SettingsView.vue'),
   },
   {
-    path: '/:pathMatch(.*)*',
-    redirect: '/NotFound', // 或指向专门的 404 组件
-  },
-  {
     path: '/online/detail',
     name: 'OnlineDetail',
     component: () => import('@/views/online/OnlineDetail.vue'),
@@ -91,12 +87,21 @@ const routes: RouteRecordRaw[] = [
     name: 'OfflineDetail',
     component: () => import('@/views/offline/OfflineDetail.vue'),
   },
-  // 📖 新增：漫画阅读器路由
+  // 📖 漫画阅读器路由
   {
     path: '/reader',
     name: 'ComicReader',
-    // 假设 ComicReader.vue 放在 src/views/ 目录下（如果在 src/components/ 请对应修改路径）
     component: () => import('@/views/ComicReader.vue'),
+  },
+  // 404 兜底：任意未匹配路径重定向到 NotFound 页面
+  {
+    path: '/not-found',
+    name: 'NotFound',
+    component: () => import('@/views/NotFound.vue'),
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/not-found',
   },
 ]
 

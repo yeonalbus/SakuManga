@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ItemCard from '@/components/ItemCard.vue'
-// 🟢 1. 从 appStore 引入真实的全局离线漫画数据
-import { offlineComics } from '@/stores/appStore'
+// 🟢 1. 从 comicStore 引入真实的全局离线漫画数据
+import { offlineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
 }
 
-// 🟢 2. 核心计算属性：根据点击/阅读次数（clickCount 或 readCount）降序排列并生成 TOP 25
+// 🟢 2. 核心计算属性：根据阅读/点击次数（readCount）降序排列并生成 TOP 25
 const rankedComics = computed<RankedOfflineComic[]>(() => {
   const sorted = [...offlineComics.value].sort((a, b) => {
-    const countA = a.readCount || a.clickCount || 0
-    const countB = b.readCount || b.clickCount || 0
+    const countA = a.readCount || 0
+    const countB = b.readCount || 0
     return countB - countA
   })
 
@@ -30,7 +30,7 @@ const restItems = computed(() => rankedComics.value.slice(3, 25))
 
 // 辅助展示函数：获取漫画的实际阅读/点击次数
 const getComicReadCount = (item: OfflineComic) => {
-  return item.readCount || item.clickCount || 0
+  return item.readCount || 0
 }
 </script>
 

@@ -4,12 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
-import {
-  onlineReadingList,
-  toggleReadingList,
-  addHistory,
-  updateOnlineFavoriteState,
-} from '@/stores/appStore'
+import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
+import { addHistory, updateOnlineFavoriteState } from '@/stores/historyStore'
 import { http } from '@/utils/request'
 
 const route = useRoute()
@@ -32,6 +28,39 @@ interface PreviewPageItem {
   offsetY?: number
   width?: number
   height?: number
+}
+
+// 后端 GetOnlineComicDetail / GetOnlineComicPreviews 返回的预览切片 DTO
+interface PreviewPageDTO {
+  pageIndex: number
+  imageUrl?: string // 后端字段名（前端映射为 url）
+  url?: string
+  isSprite?: boolean
+  offsetX?: number
+  offsetY?: number
+  width?: number
+  height?: number
+}
+
+// 后端 GetOnlineComicDetail 返回的详情 DTO
+interface OnlineDetailDTO {
+  id: string
+  title: string
+  coverUrl: string
+  token?: string
+  subTitle?: string
+  tags: string[]
+  rating?: number
+  pageCount?: number
+  updatedAt: string
+  category?: string
+  uploader?: string
+  isFavorite?: boolean
+  favIndex?: number
+  isDownloaded?: boolean
+  maxPreviewPage?: number
+  previewPages?: PreviewPageDTO[]
+  comments?: { id: number; user: string; date: string; content: string }[]
 }
 
 // 详情页扩展数据模型
@@ -75,12 +104,12 @@ const fetchDetail = async () => {
 
   isLoading.value = true
   try {
-    const data = await http('/comics/online/detail', {
+    const data = await http<OnlineDetailDTO>('/comics/online/detail', {
       params: { id: gid, token },
     })
 
     // 1. fetchDetail 内部的映射：
-    const formattedInitialPreviews = (data.previewPages || []).map((item: any) => ({
+    const formattedInitialPreviews = (data.previewPages || []).map((item) => ({
       pageIndex: item.pageIndex,
       url: item.imageUrl || item.url || '',
       // 🟢 追加雪碧图字段透传
@@ -93,6 +122,7 @@ const fetchDetail = async () => {
 
     comic.value = {
       ...data,
+      source: 'online',
       isFavorite: !!data.isFavorite,
       favIndex: data.favIndex ?? 0,
       tags: data.tags || [],
@@ -104,8 +134,8 @@ const fetchDetail = async () => {
     currentPreviewPage.value = 1
 
     addHistory(comic.value)
-  } catch (err: any) {
-    toast.error(err.message || '获取画廊详情失败')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '获取画廊详情失败')
   } finally {
     isLoading.value = false
   }
@@ -119,7 +149,7 @@ const handleLoadMorePreviews = async () => {
   const nextPage = currentPreviewPage.value + 1
 
   try {
-    const newPreviews = await http<any[]>('/comics/online/previews', {
+    const newPreviews = await http<PreviewPageDTO[]>('/comics/online/previews', {
       params: {
         id: comic.value.id,
         token: comic.value.token,
@@ -144,8 +174,8 @@ const handleLoadMorePreviews = async () => {
       comic.value.previewPages.push(...formattedPreviews)
       currentPreviewPage.value = nextPage
     }
-  } catch (err: any) {
-    toast.error(err.message || '加载更多切片失败')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '加载更多切片失败')
   } finally {
     isLoadingMorePreviews.value = false
   }
@@ -245,8 +275,8 @@ const handleSelectFavorite = async () => {
         updateOnlineFavoriteState(comic.value.id, true, idx)
 
         toast.success(`已成功存入 Favorite ${idx}`)
-      } catch (err: any) {
-        toast.error(err.message || '设置收藏失败')
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : '设置收藏失败')
       }
     } else {
       toast.error('请输入 0 到 9 之间的数字')
@@ -279,8 +309,8 @@ const handleRemoveFavorite = async () => {
     updateOnlineFavoriteState(comic.value.id, false)
 
     toast.success('已从收藏夹移除')
-  } catch (err: any) {
-    toast.error(err.message || '取消收藏失败')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '取消收藏失败')
   }
 }
 

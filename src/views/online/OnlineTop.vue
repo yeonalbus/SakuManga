@@ -56,7 +56,7 @@ onMounted(() => {
 
         <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
           <div class="podium-crown gold">👑 NO.1 CHAMPION</div>
-          <ItemCard :comic="topThree[0]" :rank="1" size="top1" mode="card" />
+          <ItemCard :comic="topThree[0]" :rank="1" size="large" mode="card" />
           <div class="rank-score gold-text">{{ topThree[0].score }} 热度</div>
         </div>
 

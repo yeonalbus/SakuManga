@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-// 🟢 1. 增加控制 Props
-const props = withDefaults(
+// 🟢 1. 增加控制 Props（模板中直接使用 showSort / sortMode）
+withDefaults(
   defineProps<{
     showSort?: boolean // 是否显示排序按钮（仅收藏夹传 true）
     sortMode?: 'favorited' | 'published' // 当前排序模式

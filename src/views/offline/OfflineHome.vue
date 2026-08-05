@@ -4,7 +4,8 @@ import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 // 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
-import { offlineComics, offlineSearchConfig, fetchOfflineComics } from '@/stores/appStore'
+import { offlineComics, fetchOfflineComics } from '@/stores/comicStore'
+import { offlineSearchConfig } from '@/stores/searchStore'
 
 onMounted(() => {
   fetchOfflineComics()
@@ -27,7 +28,7 @@ const filteredComics = computed(() => {
 
     // 🟢 关卡 2：筛选抽屉中的“多关键词队列”过滤 (必须同时匹配队列里的每一个词)
     if (cfg.keywords && cfg.keywords.length > 0) {
-      const allMatched = cfg.keywords.every((filterKw) => {
+      const allMatched = cfg.keywords.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
         const matchTitle = comic.title.toLowerCase().includes(lowerKw)
         const matchTag = comic.tags?.some((t) => t.toLowerCase().includes(lowerKw))

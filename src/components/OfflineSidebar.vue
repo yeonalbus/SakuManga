@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { bookshelves, addBookshelf, removeBookshelf } from '@/stores/appStore'
+import { bookshelves, addBookshelf, removeBookshelf } from '@/stores/bookshelfStore'
 
 const router = useRouter()
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id

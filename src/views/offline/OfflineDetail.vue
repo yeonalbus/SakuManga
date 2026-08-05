@@ -2,12 +2,29 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { bookshelves, offlineReadingList, toggleReadingList } from '@/stores/appStore'
+import { bookshelves } from '@/stores/bookshelfStore'
+import { offlineReadingList, toggleReadingList } from '@/stores/readingStore'
+import { recordComicClick } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
-import { recordComicClick } from '@/stores/appStore'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
+
+// 后端 GetOfflineComicDetail 返回的离线漫画 DTO
+// tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
+interface OfflineDetailDTO {
+  id: string
+  title: string
+  coverUrl: string
+  category?: string
+  tags?: string[] | string
+  rating?: number
+  pageCount?: number
+  updatedAt: string
+  localPath: string
+  fileSize?: number
+  readCount?: number
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -35,7 +52,7 @@ const fetchComicDetail = async () => {
 
   try {
     // 🟢 1. 使用 http 请求，省去 /api/v1 前缀和 res.json()
-    const data = await http(`/comics/${comicId}`)
+    const data = await http<OfflineDetailDTO>(`/comics/${comicId}`)
 
     // 🟢 2. 解析 tags 数组逻辑保持不变
     let parsedTags: string[] = []
@@ -51,6 +68,7 @@ const fetchComicDetail = async () => {
 
     comic.value = {
       ...data,
+      source: 'offline',
       tags: parsedTags,
     }
     myLocalRating.value = comic.value.rating || 0

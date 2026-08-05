@@ -2,6 +2,24 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { OnlineComic, FilterParams } from '@/types/comic' // 对应你的 comic.ts 类型文件[cite: 4]
 
+/**
+ * 后端 /api/v1/online/watched 返回的漫画数据契约（Go OnlineComicDTO）
+ * - 与前端 OnlineComic 字段基本一致
+ * - clickCount 为后端旧字段名，统一映射为前端的 readCount
+ */
+interface OnlineComicDTO {
+  id: string
+  title: string
+  coverUrl: string
+  tags: string[]
+  category?: string
+  rating?: number
+  pageCount?: number
+  updatedAt: string
+  readCount?: number
+  clickCount?: number
+}
+
 export const useSubStore = defineStore('subStore', () => {
   // ─── 状态定义 ───
   const comics = ref<OnlineComic[]>([])
@@ -17,7 +35,7 @@ export const useSubStore = defineStore('subStore', () => {
   /**
    * 将后端 Go 返回的 OnlineComicDTO 转换为前端 OnlineComic 契约[cite: 1, 4]
    */
-  const transformDTO = (dtoList: any[]): OnlineComic[] => {
+  const transformDTO = (dtoList: OnlineComicDTO[]): OnlineComic[] => {
     return dtoList.map((item) => ({
       ...item,
       source: 'online',
@@ -73,9 +91,9 @@ export const useSubStore = defineStore('subStore', () => {
       nextGid.value = resData.next
       prevGid.value = resData.prev
       hasMore.value = !!resData.hasMore
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[subStore] 获取订阅列表失败:', err)
-      error.value = err.message || '获取订阅失败，请重试'
+      error.value = err instanceof Error ? err.message : '获取订阅失败，请重试'
     } finally {
       isLoading.value = false
     }

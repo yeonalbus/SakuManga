@@ -2,13 +2,13 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-// 🎯 核心修改：直接引用 appStore 统一持久化状态与操作方法
+// 🎯 阅读清单队列状态与操作方法（由 appStore 拆分而来）
 import {
   onlineReadingList,
   offlineReadingList,
   clearReadingList,
   toggleReadingList,
-} from '@/stores/appStore'
+} from '@/stores/readingStore'
 import type { ComicItem } from '@/types/comic'
 
 const router = useRouter()

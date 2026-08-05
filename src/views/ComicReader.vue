@@ -2,7 +2,21 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { getNextComicInQueue } from '@/stores/appStore'
+import { getNextComicInQueue } from '@/stores/readingStore'
+import { http } from '@/utils/request'
+import { API_BASE } from '@/config/api'
+
+// 屏幕常亮 Wake Lock 的类型声明（避免 any）
+interface WakeLockManager {
+  request(type: 'screen'): Promise<WakeLockSentinel>
+}
+// 电量 API 的类型声明（避免 any）
+interface BatteryManager {
+  level: number
+  charging: boolean
+  chargingTime: number
+  dischargingTime: number
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -47,15 +61,14 @@ const loadComicPages = async () => {
   if (!realId) return
 
   try {
-    const data = await http<{ proxy: string }>('/network/proxy')
+    // 🎯 修正：请求真正的页列表接口 /comics/:id/pages，返回 { total, pages }
+    const data = await http<{ total?: number; pages?: unknown[] }>(`/comics/${realId}/pages`)
 
     let pageCount = 0
     if (typeof data.total === 'number') {
       pageCount = data.total
     } else if (Array.isArray(data.pages)) {
       pageCount = data.pages.length
-    } else if (Array.isArray(data)) {
-      pageCount = data.length
     }
 
     if (pageCount === 0) return
@@ -63,7 +76,7 @@ const loadComicPages = async () => {
     totalPages.value = pageCount
     pageUrls.value = Array.from(
       { length: pageCount },
-      (_, i) => `/api/v1/comics/${realId}/page/${i}`,
+      (_, i) => `${API_BASE}/comics/${realId}/page/${i}`,
     )
   } catch (err) {
     console.error('加载画廊失败:', err)
@@ -71,11 +84,20 @@ const loadComicPages = async () => {
 }
 
 const handleLeftClick = () => {
-  isRTL.value ? handleNextPage() : handlePrevPage()
+  // RTL（从右向左）模式下，点击左侧应翻到下一页
+  if (isRTL.value) {
+    handleNextPage()
+  } else {
+    handlePrevPage()
+  }
 }
 
 const handleRightClick = () => {
-  isRTL.value ? handlePrevPage() : handleNextPage()
+  if (isRTL.value) {
+    handlePrevPage()
+  } else {
+    handleNextPage()
+  }
 }
 
 // 🎯 优化：按双页模式扩充预加载深度 (预先加载后续 4 页)
@@ -188,7 +210,7 @@ const handleNextPage = async () => {
 // --------------------------------------------------
 
 // 1. 自动翻页定时器
-let autoTurnTimer: unknown = null
+let autoTurnTimer: ReturnType<typeof setInterval> | null = null
 watch([autoTurnInterval, currentPage], ([interval]) => {
   if (autoTurnTimer) clearInterval(autoTurnTimer)
   if (interval > 0) {
@@ -196,18 +218,19 @@ watch([autoTurnInterval, currentPage], ([interval]) => {
       if (currentPage.value < totalPages.value) {
         handleNextPage()
       } else {
-        clearInterval(autoTurnTimer)
+        if (autoTurnTimer) clearInterval(autoTurnTimer)
       }
     }, interval * 1000)
   }
 })
 
 // 2. 屏幕常亮 Wake Lock API
-let wakeLockSentinel: unknown = null
+let wakeLockSentinel: WakeLockSentinel | null = null
 watch(keepScreenOn, async (val) => {
-  if (val && 'wakeLock' in navigator) {
+  const wakeLock = (navigator as Navigator & { wakeLock?: WakeLockManager }).wakeLock
+  if (val && wakeLock) {
     try {
-      wakeLockSentinel = await (navigator as unknown).wakeLock.request('screen')
+      wakeLockSentinel = await wakeLock.request('screen')
       toast.success('已开启屏幕常亮')
     } catch {
       toast.info('当前浏览器不支持屏幕常亮锁')
@@ -232,15 +255,19 @@ const toggleFullscreen = () => {
 }
 
 // 4. 时钟与电量刷新
-let clockTimer: unknown = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
 const updateStatusInfo = async () => {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   if ('getBattery' in navigator) {
     try {
-      const b: unknown = await (navigator as unknown).getBattery()
-      batteryLevel.value = `${Math.round(b.level * 100)}%`
+      const getBattery = (navigator as Navigator & { getBattery?: () => Promise<BatteryManager> })
+        .getBattery
+      if (getBattery) {
+        const b = await getBattery()
+        batteryLevel.value = `${Math.round(b.level * 100)}%`
+      }
     } catch {
       batteryLevel.value = '100%'
     }
@@ -250,9 +277,17 @@ const updateStatusInfo = async () => {
 // 5. 键盘快捷键绑定
 const handleKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'ArrowLeft') {
-    isRTL.value ? handleNextPage() : handlePrevPage()
+    if (isRTL.value) {
+      handleNextPage()
+    } else {
+      handlePrevPage()
+    }
   } else if (e.key === 'ArrowRight') {
-    isRTL.value ? handlePrevPage() : handleNextPage()
+    if (isRTL.value) {
+      handlePrevPage()
+    } else {
+      handleNextPage()
+    }
   } else if (e.key === ' ') {
     handleNextPage()
   } else if (e.key.toLowerCase() === 'f') {

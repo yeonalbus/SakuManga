@@ -6,7 +6,9 @@ import FilterDrawer from './FilterDrawer.vue'
 import SearchBar from './SearchBar.vue'
 import ReadingList from './ReadingList.vue'
 import { useUI } from '@/composables/useUI'
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
+// 按领域引入搜索配置，避免依赖 appStore 聚合层
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
+import type { FilterParams } from '@/types/comic'
 
 const route = useRoute()
 const { toast } = useUI()
@@ -23,7 +25,7 @@ const activeSearchConfig = computed(() => {
 })
 
 // 🟢 3. 保存筛选设置到对应的域中，不互相串味
-const handleApplyFilters = (filters: any) => {
+const handleApplyFilters = (filters: Partial<FilterParams>) => {
   if (currentScope.value === 'offline') {
     Object.assign(offlineSearchConfig.value, filters)
   } else {

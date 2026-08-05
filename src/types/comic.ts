@@ -117,6 +117,20 @@ export interface OnlineCursorState {
 }
 
 /**
+ * 搜索/筛选配置（顶栏、筛选抽屉与页面间共享的“生效中筛选条件”）
+ * 由 appStore 拆出的 searchStore 使用
+ */
+export interface SearchConfig {
+  keyword: string // 顶栏搜索词
+  keywords: string[] // 筛选抽屉中的多关键词队列
+  activeCategories: string[] // 激活的分类（默认全选）
+  minRating: number // 最低评分
+  minPages?: number // 最少页数
+  maxPages?: number // 最多页数
+  onlyDownloaded: boolean // 是否仅显示已下载
+}
+
+/**
  * 搜索与筛选统一配置契约 (扩展游标与页码参数)
  */
 export interface FilterParams {

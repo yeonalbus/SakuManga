@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic, CardViewMode } from '@/types/comic'
-import { addHistory } from '@/stores/appStore'
+import { addHistory } from '@/stores/historyStore'
 import TagChip from '@/components/TagChip.vue'
 
 // 恢复 const props 变量定义，并补回 mode 与 size

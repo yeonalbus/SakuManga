@@ -115,10 +115,10 @@ const handleProxySetting = async () => {
       // 能走到这一步，说明后端响应了 200 OK（设置成功）
       proxyAddress.value = newProxy
       toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为直连模式')
-    } catch (err: any) {
+    } catch (err: unknown) {
       // 🔴 无论是网络连不上，还是后端返回了 400 错误（如“无效的代理格式”），
       // http 都会自动把后端的报错文字放入 err.message 中
-      toast.error(err.message || '设置失败')
+      toast.error(err instanceof Error ? err.message : '设置失败')
     }
   }
 }

@@ -35,6 +35,8 @@ export interface ModalOptions {
   cancelText?: string
 }
 
+type ModalResolve = (value: unknown) => void
+
 const modalState = reactive({
   isOpen: false,
   title: '',
@@ -43,10 +45,14 @@ const modalState = reactive({
   mode: 'alert' as 'alert' | 'confirm' | 'prompt',
   confirmText: '确定',
   cancelText: '取消',
-  resolve: null as ((value: any) => void) | null,
+  resolve: null as ModalResolve | null,
 })
 
-function openModal(options: ModalOptions): Promise<any> {
+/**
+ * 打开模态框，返回 Promise。
+ * @template T 通过调用方（alert/confirm/prompt）显式指定返回类型
+ */
+function openModal<T = string | boolean | null>(options: ModalOptions): Promise<T> {
   return new Promise((resolve) => {
     modalState.title = options.title || (options.mode === 'prompt' ? '请输入' : '提示')
     modalState.message = options.message
@@ -54,7 +60,7 @@ function openModal(options: ModalOptions): Promise<any> {
     modalState.mode = options.mode || 'alert'
     modalState.confirmText = options.confirmText || '确定'
     modalState.cancelText = options.cancelText || '取消'
-    modalState.resolve = resolve
+    modalState.resolve = resolve as ModalResolve
     modalState.isOpen = true
   })
 }
@@ -97,10 +103,12 @@ export function useUI() {
       error: (msg: string) => showToast(msg, 'error'),
     },
     modal: {
-      alert: (msg: string, title?: string) => openModal({ message: msg, title, mode: 'alert' }),
-      confirm: (msg: string, title?: string) => openModal({ message: msg, title, mode: 'confirm' }),
+      alert: (msg: string, title?: string) =>
+        openModal<boolean>({ message: msg, title, mode: 'alert' }),
+      confirm: (msg: string, title?: string) =>
+        openModal<boolean>({ message: msg, title, mode: 'confirm' }),
       prompt: (msg: string, defaultValue = '', title?: string) =>
-        openModal({ message: msg, defaultValue, title, mode: 'prompt' }),
+        openModal<string>({ message: msg, defaultValue, title, mode: 'prompt' }),
     },
     handleConfirm,
     handleCancel,

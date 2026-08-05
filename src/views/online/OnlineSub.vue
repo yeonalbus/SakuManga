@@ -4,7 +4,7 @@ import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import { useSubStore } from '@/stores/subStore' // 🟢 对应订阅专用的 Pinia Store
-import { subSearchConfig } from '@/stores/appStore' // 🟢 对应订阅专用的搜索/分类配置
+import { subSearchConfig } from '@/stores/searchStore' // 🟢 对应订阅专用的搜索/分类配置
 
 const subStore = useSubStore()
 

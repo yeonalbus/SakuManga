@@ -3,12 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
-import {
-  onlineComics,
-  offlineComics,
-  onlineSearchConfig,
-  offlineSearchConfig,
-} from '@/stores/appStore'
+import { onlineComics, offlineComics } from '@/stores/comicStore'
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 import type { ComicItem } from '@/types/comic'
 
 const router = useRouter()

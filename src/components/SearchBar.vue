@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/appStore'
+import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import TagChip from '@/components/TagChip.vue'
 import type { TagItem } from '@/stores/tagStore'
@@ -77,7 +77,7 @@ const loadSearchHistory = () => {
     searchHistory.value = saved
       ? JSON.parse(saved)
       : ['female:nun', 'language:chinese', 'full color']
-  } catch (e) {
+  } catch {
     searchHistory.value = []
   }
 }

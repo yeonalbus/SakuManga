@@ -43,8 +43,8 @@ export const useOnlineStore = defineStore('onlineStore', () => {
       nextGid.value = res.next
       prevGid.value = res.prev
       hasMore.value = res.hasMore ?? !!res.next
-    } catch (err: any) {
-      error.value = err?.message || '获取画廊列表失败'
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : '获取画廊列表失败'
     } finally {
       isLoading.value = false
     }
@@ -70,8 +70,8 @@ export const useOnlineStore = defineStore('onlineStore', () => {
       comics.value.push(...res.comics)
       nextGid.value = res.next
       hasMore.value = res.hasMore ?? !!res.next
-    } catch (err: any) {
-      error.value = err?.message || '加载更多失败'
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : '加载更多失败'
     } finally {
       isLoading.value = false
     }
@@ -111,8 +111,8 @@ export const useOnlineStore = defineStore('onlineStore', () => {
       comics.value.unshift(...(res.comics || []))
       // 更新上游游标
       prevGid.value = res.prev
-    } catch (err: any) {
-      error.value = err?.message || '加载较新内容失败'
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : '加载较新内容失败'
     } finally {
       isLoading.value = false
     }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { onlineHistoryList, clearHistory } from '@/stores/appStore'
+import { onlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
 
 // 动态提取在线浏览过的漫画列表

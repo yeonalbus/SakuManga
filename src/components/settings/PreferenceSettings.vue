@@ -347,10 +347,11 @@ const useBuiltinBlocklist = ref(true)
 // 轮询下载进度
 const pollProgress = async () => {
   try {
-    // 🟢 接口改回 /tags/progress，并定义正确的数据类型
+    // 后端返回结构见 tag_engine.go 中的 DownloadProgress：
+    // { status, progress, downloaded, total, errorMsg }
     const data = await http<{
-      transProgress: { status: string; errorMsg?: string }
-      sortProgress: { status: string; errorMsg?: string }
+      transProgress: ProgressData
+      sortProgress: ProgressData
     }>('/tags/progress')
 
     transProgress.value = data.transProgress
@@ -422,11 +423,10 @@ const handleRefreshTagTranslation = async () => {
   toast.info('正在检查并同步标签中文翻译数据库...')
   prevTransStatus.value = 'downloading' // 预置状态
   try {
-    const res = await fetch(`${API_BASE}/tags/sync/translation`, { method: 'POST' })
-    if (res.ok) {
-      pollProgress()
-    }
-  } catch (err) {
+    // 统一使用 http 封装，避免直接拼 API_BASE
+    await http<{ ok: boolean }>('/tags/sync/translation', { method: 'POST' })
+    pollProgress()
+  } catch {
     toast.error('触发同步失败')
   }
 }
@@ -436,11 +436,9 @@ const handleRefreshTagSort = async () => {
   toast.info('正在检查并同步标签补全排序规则...')
   prevSortStatus.value = 'downloading' // 预置状态
   try {
-    const res = await fetch(`${API_BASE}/tags/sync/count`, { method: 'POST' })
-    if (res.ok) {
-      pollProgress()
-    }
-  } catch (err) {
+    await http<{ ok: boolean }>('/tags/sync/count', { method: 'POST' })
+    pollProgress()
+  } catch {
     toast.error('触发同步失败')
   }
 }

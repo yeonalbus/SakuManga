@@ -66,8 +66,8 @@ const handleChangeSortOrder = async (newMode: 'favorited' | 'published') => {
 
     // 🟢 4. 发起普通的收藏夹列表查询 (此时 E 站服务端已按新 Cookie 生效)
     await fetchFavInitial()
-  } catch (err: any) {
-    toast.error('切换排序失败: ' + (err?.message || '未知错误'))
+  } catch (err: unknown) {
+    toast.error('切换排序失败: ' + (err instanceof Error ? err.message : '未知错误'))
   } finally {
     isLoading.value = false
   }
@@ -102,8 +102,8 @@ const fetchFavInitial = async (seekDate?: string) => {
     nextGid.value = cleanCursor(data.next, false)
     prevGid.value = cleanCursor(data.prev, true)
     hasMore.value = data.hasMore ?? !!nextGid.value
-  } catch (err: any) {
-    errorMsg.value = err?.message || '获取收藏夹数据失败'
+  } catch (err: unknown) {
+    errorMsg.value = err instanceof Error ? err.message : '获取收藏夹数据失败'
     toast.error('网络连接失败')
   } finally {
     isLoading.value = false
@@ -134,8 +134,8 @@ const loadMoreFav = async () => {
     favComicList.value.push(...(data.comics || []))
     nextGid.value = cleanCursor(data.next, false)
     hasMore.value = data.hasMore ?? !!data.next
-  } catch (err: any) {
-    errorMsg.value = err?.message || '加载更多失败'
+  } catch (err: unknown) {
+    errorMsg.value = err instanceof Error ? err.message : '加载更多失败'
     toast.error('加载更多失败')
   } finally {
     isLoading.value = false
@@ -172,8 +172,8 @@ const loadBeforeFav = async () => {
     }
 
     prevGid.value = cleanCursor(data.prev, true)
-  } catch (err: any) {
-    errorMsg.value = err?.message || '加载较新内容失败'
+  } catch (err: unknown) {
+    errorMsg.value = err instanceof Error ? err.message : '加载较新内容失败'
     toast.error('加载较新内容失败')
   } finally {
     isLoading.value = false

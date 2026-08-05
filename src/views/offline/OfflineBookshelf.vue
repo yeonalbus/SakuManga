@@ -1,29 +1,33 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-// 🟢 1. 从 appStore 引入全局响应式数据 offlineComics 与 computedBookshelves
-import { offlineComics, computedBookshelves } from '@/stores/appStore'
+// 🟢 1. 按领域引入：漫画数据源来自 comicStore，书架信息来自 bookshelfStore
+import { offlineComics } from '@/stores/comicStore'
+import { computedBookshelves } from '@/stores/bookshelfStore'
+import type { Bookshelf, OfflineComic } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
-import Pagination from '@/components/PagiNation.vue' // 👈 引入页码组件
+import Pagination from '@/components/Pagination.vue'
 
 const route = useRoute()
 
 // 1. 获取当前路由中的书架 ID (?id=xxx)
 const currentShelfId = computed(() => (route.query.id as string) || '')
 
-// 🟢 2. 从 Store 中查找当前书架信息（包含动态计算出的真实 count）
-const currentShelf = computed(() => {
+// 🟢 2. 从 Store 中查找当前书架信息
+// 说明：fallback 不再引用 shelfComics，避免与下方 computed 形成循环依赖
+const currentShelf = computed<Bookshelf>(() => {
   return (
     computedBookshelves.value.find((s) => s.id === currentShelfId.value) || {
-      id: 'all',
+      id: currentShelfId.value || 'all',
       name: '全部离线作品',
-      count: shelfComics.value.length,
+      // 无匹配书架时 count 展示由 shelfComics.length 负责，这里仅补默认值保证类型完整
+      count: 0,
     }
   )
 })
 
 // 🟢 3. 核心计算：根据当前书架 ID 动态过滤 Store 里的离线漫画
-const shelfComics = computed(() => {
+const shelfComics = computed<OfflineComic[]>(() => {
   if (!currentShelfId.value) {
     // 如果没有传 id 参数，默认展示全部离线漫画
     return offlineComics.value

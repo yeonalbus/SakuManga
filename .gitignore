@@ -37,3 +37,12 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Go backend 运行时数据（勿入库，启动后自动生成）
+backend/manga.db
+backend/manga.db-*
+backend/data/db.raw.json
+backend/data/db.raw.json.etag
+backend/data/*.csv.gz
+backend/data/*.csv.gz.etag
+backend/data/*.tmp

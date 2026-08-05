@@ -39,10 +39,18 @@
       <span class="arrow-icon">›</span>
     </div>
 
-    <div class="setting-item clickable" @click="handleResetDownloadPath">
+    <div
+      class="setting-item clickable"
+      @mousedown="handleResetPressStart"
+      @mouseup="handleResetPressEnd"
+      @mouseleave="handleResetPressEnd"
+      @touchstart="handleResetPressStart"
+      @touchend="handleResetPressEnd"
+      @contextmenu.prevent
+    >
       <div class="item-info">
         <div class="item-title">重置下载路径</div>
-        <div class="item-subtext">长按以重置压缩包路径与解压路径</div>
+        <div class="item-subtext">长按以重置压缩包路径、解压路径与单张图片保存路径</div>
       </div>
     </div>
 
@@ -57,14 +65,6 @@
         <input type="checkbox" v-model="downloadSettings.defaultDownloadOriginal" />
         <span class="slider"></span>
       </label>
-    </div>
-
-    <div class="setting-item clickable" @click="handleResetDownloadGroup">
-      <div class="item-info">
-        <div class="item-title">默认分组（下载）</div>
-        <div class="item-subtext">长按以重置</div>
-      </div>
-      <span class="row-value">{{ downloadSettings.defaultDownloadGroup }}</span>
     </div>
 
     <div class="setting-item">
@@ -104,7 +104,7 @@
       <div class="item-info">
         <div class="item-title">同一优先级下同时下载所有画廊</div>
         <div class="item-subtext">
-          默认情况下逐优先级别下载画廊，且每个优先级下只会同时下载一个画廊 | 需要重启
+          默认情况下逐优先级别下载画廊，且每个优先级下只会同时下载一个画廊（实时生效）
         </div>
       </div>
       <label class="toggle-switch">
@@ -115,14 +115,6 @@
 
     <!-- ── 归档设置 ── -->
     <div class="section-title">🗜️ 归档设置</div>
-
-    <div class="setting-item clickable" @click="handleResetArchiveGroup">
-      <div class="item-info">
-        <div class="item-title">默认分组（归档）</div>
-        <div class="item-subtext">长按以重置</div>
-      </div>
-      <span class="row-value">{{ downloadSettings.defaultArchiveGroup }}</span>
-    </div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -233,50 +225,84 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useUI } from '@/composables/useUI'
-import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue' // 1. 引入画廊路径设置组件
-import { downloadSettings, resetDownloadSettings } from '@/stores/downloadSettings'
+import { http } from '@/utils/request'
+import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue'
+import {
+  downloadSettings,
+  fetchDownloadSettings,
+  resetDownloadPaths,
+  resetDownloadSettings,
+} from '@/stores/downloadSettings'
 
 const { toast, modal } = useUI()
 
-// 2. 增加界面切换的状态
+// 界面切换：额外画廊扫描路径子组件
 const showExtraScanPaths = ref(false)
 
-// 交互事件处理
-const handleSelectArchivePath = () => {
-  toast.info('修改压缩包路径')
-}
-
-const handleSelectExtractPath = () => {
-  toast.info('修改解压后的文件夹存储路径')
-}
-
-const handleSelectSingleImagePath = () => {
-  toast.info('修改单张图片保存路径')
-}
-
-const handleResetDownloadPath = () => {
-  toast.info('已长按重置下载路径')
-}
-
-// 3. 修改点击处理函数：切换为 true
 const handleExtraScanPaths = () => {
   showExtraScanPaths.value = true
 }
 
-const handleResetDownloadGroup = () => {
-  toast.info('重置下载默认分组')
+// ── 下载路径：点击弹出输入框修改，写入 store 后自动同步到后端 ──
+type PathKey = 'archivePath' | 'extractPath' | 'singleImageSavePath'
+
+const editPath = async (key: PathKey, title: string, message: string) => {
+  const value = await modal.prompt(message, downloadSettings[key], `修改${title}`)
+  if (value !== null && value.trim() !== '') {
+    downloadSettings[key] = value.trim()
+    toast.success(`${title}已更新`)
+  }
 }
 
-const handleResetArchiveGroup = () => {
-  toast.info('重置归档默认分组')
+const handleSelectArchivePath = () =>
+  editPath('archivePath', '压缩包路径', '请输入压缩包存储路径：')
+const handleSelectExtractPath = () =>
+  editPath('extractPath', '解压后的文件夹存储路径', '请输入解压后的文件夹存储路径：')
+const handleSelectSingleImagePath = () =>
+  editPath('singleImageSavePath', '单张图片保存路径', '请输入单张图片保存路径：')
+
+// ── 重置下载路径：长按触发（参照 OnlineDetail 收藏长按模式）──
+let pressTimer: number | null = null
+
+const clearResetPressTimer = () => {
+  if (pressTimer !== null) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
 }
 
+const handleResetPressStart = () => {
+  clearResetPressTimer()
+  pressTimer = window.setTimeout(() => {
+    doResetDownloadPath()
+  }, 700)
+}
+
+const handleResetPressEnd = () => {
+  clearResetPressTimer()
+}
+
+const doResetDownloadPath = async () => {
+  const confirm = await modal.confirm(
+    '确定要将压缩包路径、解压路径与单张图片保存路径重置为默认值吗？',
+  )
+  if (confirm) {
+    resetDownloadPaths()
+    toast.success('已重置下载路径')
+  }
+}
+
+// ── 恢复下载任务：调用后端元数据恢复接口 ──
 const handleRestoreDownloadTasks = async () => {
   const confirm = await modal.confirm('确定要通过本地元数据恢复丢失的下载记录吗？')
-  if (confirm) {
-    toast.success('正在尝试从元数据恢复下载任务...')
+  if (!confirm) return
+  try {
+    const res = await http<{ restored: number }>('/downloads/restore', { method: 'POST' })
+    toast.success(`已恢复 ${res.restored} 个下载任务`)
+  } catch (err) {
+    toast.error(`恢复下载任务失败：${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -285,6 +311,15 @@ const handleReset = () => {
   resetDownloadSettings()
   toast.success('已恢复默认下载设置')
 }
+
+// 挂载时从后端拉取最新设置（后端为唯一事实来源）
+onMounted(() => {
+  fetchDownloadSettings()
+})
+
+onUnmounted(() => {
+  clearResetPressTimer()
+})
 </script>
 
 <style scoped>

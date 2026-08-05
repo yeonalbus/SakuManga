@@ -23,7 +23,8 @@ import (
 // 流程：gdata 拉取每页原图 URL → 按「同时下载图片数量」并发逐图下载
 //       → 断点续传（目标存在跳过 / .part + Range 续传）→ 写 metadata + ComicInfo.xml
 //
-// 落地目录：extractPath / {gid} - {清理后的本子名}/
+// 落地目录：singleImageSavePath（单张图片保存路径，未设置时回退 extractPath）
+//           / {gid} - {清理后的本子名}/
 // ─────────────────────────────────────────────────────────────
 
 // invalidFilenameChars 文件名字符清理（Windows 非法字符 + 控制字符）
@@ -38,7 +39,7 @@ type galleryDownloader struct {
 	ehSetting *models.EHSetting
 	client    *http.Client
 
-	destDir string // 落地目录（extractPath/gid - 本子名）
+	destDir string // 落地目录（singleImageSavePath/gid - 本子名）
 	referer string // 图片下载 Referer（图床校验用）
 	limiter *rateLimiter
 
@@ -83,9 +84,13 @@ func (g *galleryDownloader) run() {
 	log.Printf("%s [gallery-engine] 任务 %s 客户端就绪 referer=%s 并发图片=%d 限速=%s",
 		dlLogTag, g.task.ID, g.referer, g.setting.ConcurrentImageDownloads, limitDesc)
 
-	// 2. 落地目录（gid - 本子名）
+	// 2. 落地目录（gid - 本子名）：逐图下载保存到「单张图片保存路径」，未设置时回退解压路径
+	saveRoot := g.task.ExtractPath
+	if g.setting.SingleImageSavePath != "" {
+		saveRoot = g.setting.SingleImageSavePath
+	}
 	dirName := fmt.Sprintf("%s - %s", g.task.GID, cleanFolderName(g.task.Title))
-	g.destDir = filepath.Join(g.task.ExtractPath, dirName)
+	g.destDir = filepath.Join(saveRoot, dirName)
 	if err := os.MkdirAll(g.destDir, 0o755); err != nil {
 		g.fail("创建落地目录失败: " + err.Error())
 		return

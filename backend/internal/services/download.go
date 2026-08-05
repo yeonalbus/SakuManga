@@ -64,16 +64,24 @@ type DownloadManager struct {
 	workers int
 	quit    chan struct{}
 	mu      sync.Mutex
+
+	// 调度门控：控制「同一优先级并发」与「归档并发上限」
+	// 真实并发由调度器按下载设置决定，worker 池数量仅作上限兜底
+	schedMu        sync.Mutex
+	runningTotal   int         // 当前运行任务总数
+	runningArchive int         // 当前运行的归档任务数
+	runningByPri   map[int]int // 各优先级正在运行的任务数
 }
 
 // NewDownloadManager 构造下载任务管理器
 func NewDownloadManager(db *gorm.DB, ehService *EHService) *DownloadManager {
 	return &DownloadManager{
-		db:        db,
-		ehService: ehService,
-		queue:     make(chan string, 256),
-		workers:   2,
-		quit:      make(chan struct{}),
+		db:           db,
+		ehService:    ehService,
+		queue:        make(chan string, 256),
+		workers:      16, // worker 池仅作并发上限，实际并发由调度门控（downloadAllGalleriesSamePriority / archiveThreads）控制
+		quit:         make(chan struct{}),
+		runningByPri: make(map[int]int),
 	}
 }
 
@@ -126,6 +134,22 @@ func (m *DownloadManager) runTask(taskID string) {
 
 	log.Printf("%s [worker] 开始处理任务 id=%s gid=%s title=%q mode=%s",
 		dlLogTag, task.ID, task.GID, task.Title, task.Mode)
+
+	// 调度门控：按设置等待可执行槽位（优先级并发 / 归档并发上限）
+	m.acquireSlot(&task)
+	defer m.releaseSlot(&task)
+
+	// 等待槽位期间任务可能被用户暂停/取消，重新校验状态避免覆盖用户操作
+	var latest models.DownloadTask
+	if err := m.db.First(&latest, "id = ?", taskID).Error; err != nil {
+		log.Printf("%s [worker] 任务 %s 等待槽位期间不存在或已被删除: %v", dlErrTag, taskID, err)
+		return
+	}
+	if latest.Status != models.DownloadQueued {
+		log.Printf("%s [worker] 任务 %s 等待槽位期间状态变为 %s，放弃执行", dlWarnTag, taskID, latest.Status)
+		return
+	}
+	task = latest
 
 	if err := m.markRunning(&task); err != nil {
 		return
@@ -312,13 +336,6 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		ArchivePath:      setting.ArchivePath,
 		ExtractPath:      setting.ExtractPath,
 		UpdateForComicID: p.UpdateForComicID,
-	}
-	if task.Group == "" {
-		if p.Mode == models.DownloadModeArchive {
-			task.Group = setting.DefaultArchiveGroup
-		} else {
-			task.Group = setting.DefaultDownloadGroup
-		}
 	}
 
 	if err := m.db.Create(task).Error; err != nil {
@@ -550,23 +567,20 @@ func (m *DownloadManager) RestoreTasks() (int, error) {
 // ─────────────────────────────────────────────────────────────
 
 // defaultDownloadSetting 默认下载设置（与前端 downloadSettings 默认值保持一致）
-// ⚠️ 当前为测试路径（避免与用户既有仓库 Z:\Comics 冲突），真实路径待设置完善后调整
 func defaultDownloadSetting() models.DownloadSetting {
 	return models.DownloadSetting{
-		ArchivePath:                     `G:\EhentaiWebProject\Download_ZIP`,
-		ExtractPath:                     `G:\EhentaiWebProject\Gallery`,
-		SingleImageSavePath:             `G:\EhentaiWebProject\Gallery`,
-		DefaultDownloadOriginal:         true,
-		DefaultDownloadGroup:            "默认",
-		ConcurrentImageDownloads:        10,
-		SpeedLimitImages:                99,
-		SpeedLimitInterval:              "1s",
+		ArchivePath:                   `G:\EhentaiWebProject\Download_ZIP`,
+		ExtractPath:                   `G:\EhentaiWebProject\Gallery`,
+		SingleImageSavePath:           `G:\EhentaiWebProject\Gallery`,
+		DefaultDownloadOriginal:       true,
+		ConcurrentImageDownloads:      10,
+		SpeedLimitImages:              99,
+		SpeedLimitInterval:            "1s",
 		DownloadAllGalleriesSamePriority: true,
-		DefaultArchiveGroup:             "默认",
-		ArchiveThreads:                  10,
-		ControlArchiveConcurrency:       true,
-		DeleteZipAfterArchiveDownload:   true,
-		AutoResumeTasks:                 true,
+		ArchiveThreads:                10,
+		ControlArchiveConcurrency:     true,
+		DeleteZipAfterArchiveDownload: true,
+		AutoResumeTasks:               true,
 	}
 }
 
@@ -582,6 +596,24 @@ func (m *DownloadManager) GetSettings() *models.DownloadSetting {
 			return &setting
 		}
 		log.Printf("%s 已创建默认下载设置（archivePath=%s extractPath=%s）", dlLogTag, setting.ArchivePath, setting.ExtractPath)
+		return &setting
+	}
+
+	// 旧数据迁移：早期版本无 archiveThreads / controlArchiveConcurrency / downloadAllGalleriesSamePriority 字段，
+	// AutoMigrate 补列后旧记录这些字段为 0/false。UI 不提供 archiveThreads=0 选项，
+	// 故据此用默认值补齐一次并保存，避免新调度语义（并行下载 / 归档并发限制）失效。
+	if setting.ArchiveThreads == 0 {
+		def := defaultDownloadSetting()
+		setting.ArchiveThreads = def.ArchiveThreads
+		setting.ControlArchiveConcurrency = def.ControlArchiveConcurrency
+		setting.DownloadAllGalleriesSamePriority = def.DownloadAllGalleriesSamePriority
+		setting.UpdatedAt = time.Now()
+		if err := m.db.Save(&setting).Error; err != nil {
+			log.Printf("%s 迁移下载设置默认值失败: %v", dlErrTag, err)
+		} else {
+			log.Printf("%s 已迁移旧下载设置：补齐新字段默认值（archiveThreads=%d 控制归档并发=%v 同优先级并行=%v）",
+				dlLogTag, setting.ArchiveThreads, setting.ControlArchiveConcurrency, setting.DownloadAllGalleriesSamePriority)
+		}
 	}
 	return &setting
 }

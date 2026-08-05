@@ -67,18 +67,16 @@ type DownloadSetting struct {
 	SingleImageSavePath string `json:"singleImageSavePath"` // 单张图片保存路径
 
 	// ── 下载行为 ──
-	DefaultDownloadOriginal           bool   `json:"defaultDownloadOriginal"`           // 默认下载原图
-	DefaultDownloadGroup              string `json:"defaultDownloadGroup"`              // 默认分组（下载）
-	ConcurrentImageDownloads          int    `json:"concurrentImageDownloads"`          // 同时下载图片数量
-	SpeedLimitImages                  int    `json:"speedLimitImages"`                  // 速度限制（图片）
-	SpeedLimitInterval                string `json:"speedLimitInterval"`                // 速度限制间隔 1s|2s|5s
-	DownloadAllGalleriesSamePriority  bool   `json:"downloadAllGalleriesSamePriority"`   // 同优先级同时下载所有画廊
+	DefaultDownloadOriginal         bool   `json:"defaultDownloadOriginal"`         // 默认下载原图
+	ConcurrentImageDownloads        int    `json:"concurrentImageDownloads"`        // 同时下载图片数量
+	SpeedLimitImages                int    `json:"speedLimitImages"`                // 速度限制（图片）
+	SpeedLimitInterval              string `json:"speedLimitInterval"`              // 速度限制间隔 1s|2s|5s
+	DownloadAllGalleriesSamePriority bool   `json:"downloadAllGalleriesSamePriority"` // 同一优先级下同时下载所有画廊
 
 	// ── 归档设置 ──
-	DefaultArchiveGroup              string `json:"defaultArchiveGroup"`              // 默认分组（归档）
-	ArchiveThreads                   int    `json:"archiveThreads"`                   // 归档下载线程数
-	ControlArchiveConcurrency        bool   `json:"controlArchiveConcurrency"`        // 控制归档下载并发数
-	DeleteZipAfterArchiveDownload    bool   `json:"deleteZipAfterArchiveDownload"`    // 归档下载完成后删除原压缩包
+	ArchiveThreads                int  `json:"archiveThreads"`                // 归档下载线程数（同时运行的归档任务数）
+	ControlArchiveConcurrency     bool `json:"controlArchiveConcurrency"`      // 控制归档下载并发数
+	DeleteZipAfterArchiveDownload bool `json:"deleteZipAfterArchiveDownload"` // 归档下载完成后删除原压缩包
 
 	// ── 下载任务 ──
 	AutoResumeTasks bool `json:"autoResumeTasks"` // 自动恢复下载任务

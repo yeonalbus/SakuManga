@@ -40,6 +40,7 @@ func (h *ToplistHandler) GetToplist(c *gin.Context) {
 			baseComics[i] = item.OnlineComicDTO
 		}
 		baseComics = services.AttachFavoriteStates(h.db, account.ID, baseComics)
+		baseComics = services.AttachDownloadStates(h.db, baseComics)
 		for i := range list {
 			list[i].OnlineComicDTO = baseComics[i]
 		}

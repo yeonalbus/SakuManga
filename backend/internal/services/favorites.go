@@ -323,6 +323,44 @@ func AttachFavoriteStates(db *gorm.DB, userID uint, comics []OnlineComicDTO) []O
 	return comics
 }
 
+// 🟢 新增：AttachDownloadStates 挂载本地"已下载"状态
+// 通过比对离线漫画库 (OfflineComic) 的 GID 字段，判断哪些在线画廊已下载到本地，
+// 从而让首页/热门/订阅/收藏等在线列表统一显示"已下载"角标。
+// 注意：本地漫画库为全局共享，无需按用户隔离；只补 true，绝不误改 false。
+func AttachDownloadStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO {
+	if len(comics) == 0 {
+		return comics
+	}
+
+	gids := make([]string, 0, len(comics))
+	for _, c := range comics {
+		if c.ID != "" {
+			gids = append(gids, c.ID)
+		}
+	}
+	if len(gids) == 0 {
+		return comics
+	}
+
+	var rows []models.OfflineComic
+	db.Select("g_id").Where("g_id IN ?", gids).Find(&rows)
+
+	downloaded := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		if r.GID != "" {
+			downloaded[r.GID] = true
+		}
+	}
+
+	for i := range comics {
+		if downloaded[comics[i].ID] {
+			comics[i].IsDownloaded = true
+		}
+	}
+
+	return comics
+}
+
 // 🟢 新增：专为详情页 (GalleryDetailResult) 提供本地 SQLite 状态挂载
 func AttachDetailFavoriteState(db *gorm.DB, userID uint, detail *GalleryDetailResult) *GalleryDetailResult {
 	if detail == nil || detail.ID == "" {

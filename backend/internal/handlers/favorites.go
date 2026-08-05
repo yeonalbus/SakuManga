@@ -49,6 +49,9 @@ func (h *FavoritesHandler) GetOnlineFavorites(c *gin.Context) {
 		return
 	}
 
+	// 🟢 挂载本地"已下载"状态，让收藏界面也能显示已下载角标
+	result.Comics = services.AttachDownloadStates(h.db, result.Comics)
+
 	c.JSON(http.StatusOK, result)
 }
 

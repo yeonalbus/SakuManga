@@ -152,6 +152,7 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			return nil, err
 		}
 		comics = services.AttachFavoriteStates(h.db, account.ID, comics)
+		comics = services.AttachDownloadStates(h.db, comics)
 		items := make([]RandomComicItem, 0, len(comics))
 		for _, co := range comics {
 			items = append(items, fromOnlineDTO(co))

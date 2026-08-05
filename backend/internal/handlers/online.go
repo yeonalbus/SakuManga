@@ -85,8 +85,9 @@ func (h *OnlineComicHandler) GetOnlineComics(c *gin.Context) {
 		return
 	}
 
-	// 🟢 解构 result.Comics 并挂载本地 SQLite 收藏状态
+	// 🟢 解构 result.Comics 并挂载本地 SQLite 收藏状态 + 本地已下载状态
 	comics := services.AttachFavoriteStates(h.db, account.ID, result.Comics)
+	comics = services.AttachDownloadStates(h.db, comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics":      comics,
@@ -124,8 +125,9 @@ func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
 		return
 	}
 
-	// 挂载本地 SQLite 收藏状态
+	// 挂载本地 SQLite 收藏状态 + 本地已下载状态
 	comics := services.AttachFavoriteStates(h.db, account.ID, result.Comics)
+	comics = services.AttachDownloadStates(h.db, comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics":      comics,
@@ -308,6 +310,7 @@ func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 	}
 
 	comics = services.AttachFavoriteStates(h.db, account.ID, comics)
+	comics = services.AttachDownloadStates(h.db, comics)
 
 	c.JSON(http.StatusOK, gin.H{
 		"comics": comics,

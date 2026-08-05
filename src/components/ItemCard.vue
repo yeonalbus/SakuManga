@@ -8,6 +8,8 @@ import TagChip from '@/components/TagChip.vue'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
 // 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
+// 🟢 修复名片模式失效：mode 不再设置默认值，否则 props.mode 恒为 'card'，
+// 导致下方 props.mode || viewMode.value 永远走卡片模式，全局 viewMode(compact) 无法生效。
 const props = withDefaults(
   defineProps<{
     comic: ComicItem
@@ -18,7 +20,6 @@ const props = withDefaults(
     selected?: boolean
   }>(),
   {
-    mode: 'card',
     size: 'normal',
     selectable: false,
     selectMode: false,
@@ -40,8 +41,9 @@ const toggleTags = () => {
   showTags.value = !showTags.value
 }
 
-// 当前生效的展示模式
-const currentMode = computed(() => props.mode || viewMode.value)
+// 当前生效的展示模式：显式传入 mode 时优先（如榜单大卡片），
+// 未传时回退到全局 viewMode（支持 card/compact 切换）
+const currentMode = computed(() => props.mode ?? viewMode.value)
 
 // --------------------------------------------------
 // 1. 分类 (Category) 经典 E 站调色盘映射

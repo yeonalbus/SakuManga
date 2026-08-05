@@ -9,7 +9,7 @@
  *   切页再回来时组件 onMounted 会调用 refreshScanProgress() 恢复进度展示。
  */
 import { ref } from 'vue'
-import { API_BASE } from '@/config/api'
+import { http } from '@/utils/request'
 
 /** 额外扫描路径 */
 export interface ExtraScanPath {
@@ -55,9 +55,7 @@ export const getScanProgress = (id: string) => scanProgress.value[id]
 /** 从后端拉取全部扫描进度并写入本地映射（同时同步已完成任务的统计） */
 export const refreshScanProgress = async () => {
   try {
-    const res = await fetch(`${API_BASE}/scan-paths/scan-progress`)
-    if (!res.ok) return
-    const list = (await res.json()) as ScanProgress[]
+    const list = await http<ScanProgress[]>('/scan-paths/scan-progress')
     const map: Record<string, ScanProgress> = {}
     for (const p of list) {
       if (!p.pathId) continue
@@ -108,19 +106,13 @@ export const ensurePolling = () => {
  */
 export const startScanPath = async (id: string, mode: ScanMode = 'full'): Promise<boolean> => {
   try {
-    const res = await fetch(`${API_BASE}/scan-paths/${id}/scan`, {
+    const progress = await http<ScanProgress>(`/scan-paths/${id}/scan`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
     })
-    if (res.ok) {
-      const progress = (await res.json()) as ScanProgress
-      scanProgress.value = { ...scanProgress.value, [progress.pathId]: progress }
-      ensurePolling()
-      return true
-    }
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `HTTP ${res.status}`)
+    scanProgress.value = { ...scanProgress.value, [progress.pathId]: progress }
+    ensurePolling()
+    return true
   } catch (err) {
     console.error('触发扫描失败:', err)
     throw err
@@ -142,10 +134,7 @@ export const clearScanProgress = (id: string) => {
 /** 从 Go 后端拉取所有扫描路径 */
 export const fetchScanPaths = async () => {
   try {
-    const res = await fetch(`${API_BASE}/scan-paths`)
-    if (res.ok) {
-      scanPaths.value = await res.json()
-    }
+    scanPaths.value = await http<ExtraScanPath[]>('/scan-paths')
   } catch (err) {
     console.error('连接 Go 后端失败，请检查 backend 服务是否启动:', err)
   }
@@ -154,20 +143,16 @@ export const fetchScanPaths = async () => {
 /** 添加新路径，成功返回 true */
 export const addScanPath = async (path: string): Promise<boolean> => {
   try {
-    const res = await fetch(`${API_BASE}/scan-paths`, {
+    const newPath = await http<ExtraScanPath>('/scan-paths', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: path.trim() }),
     })
-    if (res.ok) {
-      const newPath = await res.json()
-      scanPaths.value.push(newPath)
-      return true
-    }
+    scanPaths.value.push(newPath)
+    return true
   } catch (err) {
     console.error('添加路径失败:', err)
+    throw err
   }
-  return false
 }
 
 /** 切换是否包含子文件夹 */
@@ -176,9 +161,8 @@ export const toggleSubfolders = async (id: string, includeSubfolders: boolean) =
   if (item) {
     item.includeSubfolders = includeSubfolders
     try {
-      await fetch(`${API_BASE}/scan-paths/${id}`, {
+      await http(`/scan-paths/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ includeSubfolders }),
       })
     } catch (err) {
@@ -192,7 +176,7 @@ export const removeScanPath = async (id: string) => {
   scanPaths.value = scanPaths.value.filter((p) => p.id !== id)
   clearScanProgress(id)
   try {
-    await fetch(`${API_BASE}/scan-paths/${id}`, {
+    await http(`/scan-paths/${id}`, {
       method: 'DELETE',
     })
   } catch (err) {

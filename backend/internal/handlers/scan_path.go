@@ -4,7 +4,10 @@ import (
 	"SakuHentai/internal/database"
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,14 +28,28 @@ func AddScanPath(c *gin.Context) {
 		return
 	}
 
+	// 规范化路径（Windows 下 / 与 \ 视为同一目录，去除尾部多余分隔符）
+	cleanPath := filepath.Clean(req.Path)
+
+	// 精确判断是否已存在（兼容历史遗留的正/反斜杠、大小写差异记录）
+	var existing []models.ExtraScanPath
+	database.DB.Find(&existing)
+	for _, p := range existing {
+		if strings.EqualFold(filepath.Clean(p.Path), cleanPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该路径已存在"})
+			return
+		}
+	}
+
 	newPath := models.ExtraScanPath{
-		ID:                "path-" + time.Now().Format("20060102150405"),
-		Path:              req.Path,
+		// 纳秒时间戳，避免同一秒内添加多条路径时主键冲突被误报为“已存在”
+		ID:                fmt.Sprintf("path-%d", time.Now().UnixNano()),
+		Path:              cleanPath,
 		IncludeSubfolders: true,
 	}
 
 	if err := database.DB.Create(&newPath).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "该路径已存在"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加路径失败"})
 		return
 	}
 

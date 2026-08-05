@@ -220,12 +220,17 @@ const handleAdd = async () => {
   const path = inputPath.value.trim()
   if (!path) return
 
-  const ok = await addScanPath(path)
-  if (ok) {
-    inputPath.value = ''
-    toast.success('路径已添加')
-  } else {
-    toast.warning('该路径已存在！')
+  try {
+    const ok = await addScanPath(path)
+    if (ok) {
+      inputPath.value = ''
+      toast.success('路径已添加')
+    }
+  } catch (err) {
+    // addScanPath 现在会抛出后端真实错误（如“该路径已存在”/“未登录”/“会话已失效”），
+    // 这里直接透传给用户，避免把一切失败都误报成“该路径已存在”。
+    const msg = err instanceof Error ? err.message : '添加失败'
+    toast.warning(msg)
   }
 }
 

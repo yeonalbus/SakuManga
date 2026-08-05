@@ -6,7 +6,7 @@ import { ref, watch, computed } from 'vue'
 import type { OnlineComic, OfflineComic } from '@/types/comic'
 import { generateOnlineComics } from '@/utils/mockData'
 import { loadStorage } from '@/utils/storage'
-import { API_BASE } from '@/config/api'
+import { http } from '@/utils/request'
 import { offlineReadingList } from '@/stores/readingStore'
 // 使用命名空间导入 bookshelfStore / historyStore，避免与本文件产生「值初始化时序」上的循环依赖问题
 import * as bookshelfStore from '@/stores/bookshelfStore'
@@ -43,17 +43,12 @@ interface OfflineComicRaw {
 /** 从 Go 后端拉取全部离线漫画，并在源头把 tags 字符串解析为数组 */
 export const fetchOfflineComics = async () => {
   try {
-    const res = await fetch(`${API_BASE}/comics/offline`)
-    if (res.ok) {
-      const rawData = (await res.json()) as OfflineComicRaw[]
-      offlineComics.value = rawData.map((item) => ({
-        ...item,
-        tags:
-          typeof item.tags === 'string'
-            ? JSON.parse((item.tags as string) || '[]')
-            : item.tags || [],
-      })) as OfflineComic[]
-    }
+    const rawData = await http<OfflineComicRaw[]>('/comics/offline')
+    offlineComics.value = rawData.map((item) => ({
+      ...item,
+      tags:
+        typeof item.tags === 'string' ? JSON.parse((item.tags as string) || '[]') : item.tags || [],
+    })) as OfflineComic[]
   } catch (err) {
     console.error('拉取离线漫画失败:', err)
   }
@@ -98,11 +93,8 @@ export const deleteOfflineComics = async (ids: string[], deleteFile = false): Pr
   let okCount = 0
   for (const id of ids) {
     try {
-      const res = await fetch(
-        `${API_BASE}/comics/${id}?deleteFile=${deleteFile ? 'true' : 'false'}`,
-        { method: 'DELETE' },
-      )
-      if (res.ok) okCount++
+      await http(`/comics/${id}?deleteFile=${deleteFile ? 'true' : 'false'}`, { method: 'DELETE' })
+      okCount++
     } catch (err) {
       console.error('删除离线漫画失败:', err)
     }

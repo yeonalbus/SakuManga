@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { OnlineComic, FilterParams } from '@/types/comic' // 对应你的 comic.ts 类型文件[cite: 4]
+import { http } from '@/utils/request'
 
 /**
  * 后端 /api/v1/online/watched 返回的漫画数据契约（Go OnlineComicDTO）
@@ -66,14 +67,15 @@ export const useSubStore = defineStore('subStore', () => {
       if (params.prev) query.append('prev', params.prev)
       if (params.seek) query.append('seek', params.seek)
 
-      // 请求后端订阅 API（接口路径可调整为项目实际路由）
-      const response = await fetch(`/api/v1/online/watched?${query.toString()}`)
-      if (!response.ok) {
-        throw new Error(`HTTP 状态异常: ${response.status}`)
-      }
+      // 请求后端订阅 API（http 封装自动附加 Bearer token）
+      const resData = await http<{
+        comics: OnlineComicDTO[]
+        next?: string
+        prev?: string
+        hasMore?: boolean
+      }>(`/online/watched?${query.toString()}`)
 
       // 解析 OnlineComicResult 数据[cite: 1]
-      const resData = await response.json()
       const newComics = transformDTO(resData.comics || [])
 
       if (mode === 'append') {

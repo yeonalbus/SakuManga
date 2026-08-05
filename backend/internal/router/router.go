@@ -105,6 +105,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/comics/online/popular", onlineHandler.GetOnlinePopular)
 		api.GET("/comics/online/detail", onlineHandler.GetOnlineComicDetail)
 		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)
+		api.GET("/comics/online/pages", onlineHandler.GetOnlineComicPages)
+		api.GET("/comics/online/page", onlineHandler.GetOnlinePageByIndex)
 		api.GET("/comics/online/toplist", toplistHandler.GetToplist)
 		api.GET("/comics/online/favorites", favHandler.GetOnlineFavorites)
 		api.POST("/comics/online/favorites/sort", favHandler.ChangeSortOrder)

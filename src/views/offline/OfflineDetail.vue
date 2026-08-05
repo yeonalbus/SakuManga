@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { bookshelves } from '@/stores/bookshelfStore'
 import { offlineReadingList, toggleReadingList } from '@/stores/readingStore'
-import { recordComicClick } from '@/stores/comicStore'
+import { fetchOfflineComics, recordComicClick } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
@@ -74,7 +74,14 @@ const fetchComicDetail = async () => {
     myLocalRating.value = comic.value.rating || 0
   } catch (err) {
     console.error('获取漫画详情失败:', err)
-    toast.error('连接后端失败')
+    const msg = err instanceof Error ? err.message : ''
+    if (/找不到该漫画|not found|404/i.test(msg)) {
+      // 漫画 id 不在本地库：可能是扫描数据被重建 / 列表缓存过期，刷新离线列表
+      toast.error('找不到该漫画，可能已从本地库移除，已刷新离线列表')
+      fetchOfflineComics()
+    } else {
+      toast.error('连接后端失败')
+    }
   }
 }
 

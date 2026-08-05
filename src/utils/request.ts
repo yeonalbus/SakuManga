@@ -37,12 +37,13 @@ export async function http<T = unknown>(
     'Content-Type': 'application/json',
   }
 
-  // 4. 发起请求
+  // 4. 发起请求（默认 60s 超时，防止慢接口导致无限 loading；调用方可通过 signal 覆盖）
   const response = await fetch(url, {
     headers: {
       ...defaultHeaders,
       ...headers,
     },
+    signal: options.signal ?? AbortSignal.timeout(60_000),
     ...restOptions,
   })
 

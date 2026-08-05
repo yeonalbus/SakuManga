@@ -255,6 +255,65 @@ func (h *OnlineComicHandler) GetOnlineComicPreviews(c *gin.Context) {
 	c.JSON(http.StatusOK, previews)
 }
 
+// GetOnlineComicPages 获取在线画廊每页原图 URL 列表（供阅读器使用）
+func (h *OnlineComicHandler) GetOnlineComicPages(c *gin.Context) {
+	gid := c.Query("id")
+	token := c.Query("token")
+
+	if gid == "" || token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失，必需传递 id (GID) 和 token"})
+		return
+	}
+
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		return
+	}
+
+	ehSetting := getEHSetting(h.db)
+	result, err := h.ehService.FetchOnlinePageUrls(&account, gid, token, ehSetting)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GetOnlinePageByIndex 就近解析在线画廊指定页（1-based）的原图 URL（供阅读器懒加载补全）
+func (h *OnlineComicHandler) GetOnlinePageByIndex(c *gin.Context) {
+	gid := c.Query("id")
+	token := c.Query("token")
+	pageStr := c.DefaultQuery("index", "1")
+
+	if gid == "" || token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数缺失，必需传递 id (GID) 和 token"})
+		return
+	}
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "页码格式不正确"})
+		return
+	}
+
+	var account models.AccountSetting
+	if err := h.db.First(&account, 1).Error; err != nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		return
+	}
+
+	ehSetting := getEHSetting(h.db)
+	url, total, err := h.ehService.FetchOnlinePageURL(&account, gid, token, ehSetting, page)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"index": page, "url": url, "total": total})
+}
+
 // 辅助方法：同时获取账号凭证与 EH 设置
 func (h *OnlineComicHandler) getAccountAndSetting() (*models.AccountSetting, *models.EHSetting, error) {
 	var account models.AccountSetting

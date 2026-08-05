@@ -1,160 +1,13 @@
 <template>
   <div class="reader-settings">
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启沉浸模式</div>
-        <div class="item-subtext">隐藏顶部标题栏</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="immersiveMode" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">阅读时屏幕不自动锁定</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="keepAwake" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示缩略图</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="showThumbnails" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示滚动条</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="showScrollbar" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">底部显示状态信息</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="showBottomStatus" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启翻页动画</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="enableTurnAnimation" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">允许双击放大图片</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="allowDoubleTapZoom" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">允许单击后拖拽放大图片</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="allowSingleClickDragZoom" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启底部菜单</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="enableBottomMenu" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">反转翻页方向</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="reverseTurnDirection" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">禁用点击翻页手势</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="disableTapTurnGesture" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启图片压缩</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="enableImageCompression" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">菜单手势区域宽度比例</div>
-      </div>
-      <div class="input-inline">
-        <input type="number" v-model="gestureZoneWidth" class="setting-input" min="10" max="90" />
-        <span class="unit">%</span>
-        <span class="check-mark">✓</span>
-      </div>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">使用第三方阅读器</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="useThirdPartyReader" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item clickable" @click="handleSelectThirdPartyPath">
-      <div class="item-info">
-        <div class="item-title">第三方阅读器路径（可执行文件）</div>
-        <div class="item-subtext" v-if="thirdPartyPath">{{ thirdPartyPath }}</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
+    <!-- ── 阅读方向 / 页面布局 ── -->
+    <div class="section-title">📐 布局</div>
 
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">阅读方向</div>
       </div>
-      <select v-model="readDirection" class="setting-select">
+      <select v-model="readerSettings.readDirection" class="setting-select">
         <option value="rtl_double">从右至左(双列)</option>
         <option value="rtl_single">从右至左(单列)</option>
         <option value="ltr_double">从左至右(双列)</option>
@@ -165,9 +18,242 @@
 
     <div class="setting-item">
       <div class="item-info">
+        <div class="item-title">页面缩放</div>
+        <div class="item-subtext">匹配屏幕 / 覆盖屏幕 / 适应宽度</div>
+      </div>
+      <select v-model="readerSettings.pageFit" class="setting-select">
+        <option value="contain">匹配屏幕</option>
+        <option value="cover">覆盖屏幕</option>
+        <option value="width">适应宽度</option>
+      </select>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">图片间隔</div>
+      </div>
+      <select v-model="readerSettings.imageGap" class="setting-select">
+        <option :value="0">0</option>
+        <option :value="5">5</option>
+        <option :value="10">10</option>
+        <option :value="15">15</option>
+        <option :value="20">20</option>
+      </select>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">双页首页模式</div>
+        <div class="item-subtext">双列阅读时的首页排版</div>
+      </div>
+      <select v-model="readerSettings.singleCover" class="setting-select">
+        <option :value="true">双页带首页（P1 单独一屏）</option>
+        <option :value="false">双页不带首页（P1+P2 并排）</option>
+      </select>
+    </div>
+
+    <!-- ── 翻页行为 ── -->
+    <div class="section-title">📖 翻页行为</div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">自动翻页(秒)</div>
+        <div class="item-subtext">0 表示关闭</div>
+      </div>
+      <div class="input-inline">
+        <input
+          v-model.number="readerSettings.autoTurnInterval"
+          type="number"
+          class="setting-input wide"
+          min="0"
+          max="120"
+        />
+        <span class="unit">秒</span>
+      </div>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">开启翻页动画</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.enableTurnAnimation" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">反转翻页方向</div>
+        <div class="item-subtext">左右点击/按键方向互换</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.reverseTurnDirection" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">禁用点击翻页手势</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.disableTapTurnGesture" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- ── 界面显隐 ── -->
+    <div class="section-title">🖥️ 界面显隐</div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">开启沉浸模式</div>
+        <div class="item-subtext">进入阅读器时隐藏顶部标题栏</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.immersiveMode" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">开启底部菜单</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.enableBottomMenu" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">底部显示状态信息</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showBottomStatus" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">显示滚动条</div>
+        <div class="item-subtext">底部页码进度条</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showScrollbar" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">显示缩略图</div>
+        <div class="item-subtext">阅读器底部缩略图进度条（点击底部区域切换显隐）</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showThumbnails" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">显示时钟</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showClock" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">显示进度</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showProgress" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">显示电量</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.showBattery" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- ── 设备能力 ── -->
+    <div class="section-title">🔋 设备能力</div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">阅读时屏幕不自动锁定</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.keepAwake" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">自定义屏幕亮度</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.customBrightness" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div v-if="readerSettings.customBrightness" class="setting-item">
+      <div class="item-info">
+        <div class="item-title">屏幕亮度</div>
+        <div class="item-subtext">{{ readerSettings.brightnessValue }}%</div>
+      </div>
+      <input
+        v-model.number="readerSettings.brightnessValue"
+        type="range"
+        min="20"
+        max="100"
+        class="setting-range"
+      />
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">允许双击放大图片</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.allowDoubleTapZoom" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">允许单击后拖拽放大图片</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.allowSingleClickDragZoom" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- ── 性能 / 扩展 ── -->
+    <div class="section-title">⚡ 性能 / 扩展</div>
+
+    <div class="setting-item">
+      <div class="item-info">
         <div class="item-title">预加载图片数量(在线模式)</div>
       </div>
-      <select v-model="preloadOnline" class="setting-select">
+      <select v-model="readerSettings.preloadOnline" class="setting-select">
         <option :value="5">5</option>
         <option :value="10">10</option>
         <option :value="15">15</option>
@@ -179,7 +265,7 @@
       <div class="item-info">
         <div class="item-title">预加载图片数量(本地模式)</div>
       </div>
-      <select v-model="preloadOffline" class="setting-select">
+      <select v-model="readerSettings.preloadOffline" class="setting-select">
         <option :value="5">5</option>
         <option :value="10">10</option>
         <option :value="15">15</option>
@@ -187,62 +273,22 @@
       </select>
     </div>
 
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">单独展示首页(全局)</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="singleCover" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">图片间隔</div>
-      </div>
-      <select v-model="imageGap" class="setting-select">
-        <option :value="0">0</option>
-        <option :value="5">5</option>
-        <option :value="10">10</option>
-        <option :value="15">15</option>
-        <option :value="20">20</option>
-      </select>
+    <div class="reset-row">
+      <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { readerSettings, resetReaderSettings } from '@/stores/readerSettings'
 
 const { toast } = useUI()
 
-// 开关与控件响应式变量 (根据截图对齐初始值)
-const immersiveMode = ref(true)
-const keepAwake = ref(true)
-const showThumbnails = ref(true)
-const showScrollbar = ref(true)
-const showBottomStatus = ref(true)
-const enableTurnAnimation = ref(true)
-const allowDoubleTapZoom = ref(true)
-const allowSingleClickDragZoom = ref(false)
-const enableBottomMenu = ref(false)
-const reverseTurnDirection = ref(false)
-const disableTapTurnGesture = ref(false)
-const enableImageCompression = ref(false)
-const gestureZoneWidth = ref(60)
-const useThirdPartyReader = ref(false)
-const thirdPartyPath = ref('')
-const readDirection = ref('rtl_double')
-const preloadOnline = ref(10)
-const preloadOffline = ref(10)
-const singleCover = ref(true)
-const imageGap = ref(10)
-
-// 选择第三方程序路径
-const handleSelectThirdPartyPath = async () => {
-  toast.info('选择第三方阅读器可执行文件路径')
+// 恢复默认阅读设置
+const handleReset = () => {
+  resetReaderSettings()
+  toast.success('已恢复默认阅读设置')
 }
 </script>
 
@@ -251,6 +297,16 @@ const handleSelectThirdPartyPath = async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ff7588;
+  letter-spacing: 0.5px;
+  margin: 12px 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #26262a;
 }
 
 .setting-item {
@@ -337,8 +393,18 @@ const handleSelectThirdPartyPath = async () => {
   outline: none;
 }
 
+.setting-input.wide {
+  width: 60px;
+}
+
 .setting-input:focus {
   border-bottom-color: #ff7588;
+}
+
+.setting-range {
+  accent-color: #ff7588;
+  width: 140px;
+  cursor: pointer;
 }
 
 .unit {
@@ -397,5 +463,28 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(20px);
   background-color: #ffffff;
+}
+
+/* 恢复默认按钮 */
+.reset-row {
+  margin-top: 8px;
+}
+
+.reset-btn {
+  width: 100%;
+  background: #242428;
+  border: 1px solid #3a3a3d;
+  color: #ccc;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reset-btn:hover {
+  background-color: #2e2e33;
+  border-color: #ff7588;
+  color: #ff7588;
 }
 </style>

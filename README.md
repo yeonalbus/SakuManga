@@ -7,6 +7,10 @@
   ✅️Headless 优先：Go 构筑的轻量后端，为 NAS/服务器环境量身定制  
   ✅️高吞吐缓存架构：针对大图库优化，基于预加载机制实现毫秒级响应  
 
+# 📚 接下来的计划：
+开发到哪算哪
+完善设置界面，然后再完善在线看本子
+
 # 📷 预览图
 ## 在线界面
 <img width="2457" height="1287" alt="image" src="https://github.com/user-attachments/assets/37d1d499-a84e-419b-9b8c-94cf7b3b8e4f" />
@@ -25,10 +29,6 @@
 
 ## 阅读界面（未完工）
 <img width="2455" height="1286" alt="image" src="https://github.com/user-attachments/assets/f73edeb9-4dd2-41ad-89e9-d42ee1459b39" />
-
-# 📚 接下来的计划：
-开发到哪算哪
-目前在线的收藏问题比较大，还有一些功能没有实现的
 
 # 🌲 项目结构图
 ```

@@ -21,6 +21,10 @@ import (
 
 var ErrAlreadyLatest = errors.New("已经是最新版本")
 
+// 标签数据自动更新周期：每 24 小时检查一次远端是否有新版本
+const TagUpdateIntervalHours = 24
+const tagUpdateInterval = TagUpdateIntervalHours * time.Hour
+
 type DownloadProgress struct {
 	Status     string  `json:"status"`     // "idle", "downloading", "success", "error"
 	Progress   float64 `json:"progress"`   // 0.0 ~ 100.0
@@ -118,7 +122,16 @@ func InitTagEngine() {
 	GlobalTagEngine.LoadFromDisk()
 
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
+		// 1. 启动时立即检查一次：自动查找本地文件；若缺失或非最新（远端 ETag 变化）则自行下载
+		if GlobalTagEngine.EnableCN {
+			GlobalTagEngine.UpdateTranslation()
+		}
+		if GlobalTagEngine.EnableSort {
+			GlobalTagEngine.UpdateCountData()
+		}
+
+		// 2. 每 24 小时自动检查更新（更新周期对外可见，见 /tags/status）
+		ticker := time.NewTicker(tagUpdateInterval)
 		for range ticker.C {
 			if GlobalTagEngine.EnableCN {
 				GlobalTagEngine.UpdateTranslation()

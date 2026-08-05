@@ -277,13 +277,19 @@ func MaintainDedup(db *gorm.DB) (*DedupResult, error) {
 	return result, nil
 }
 
-// RemoveDedupComic 删除重复漫画：仅删数据库记录，删除成功后可选择是否物理删除文件
-func RemoveDedupComic(db *gorm.DB, comicID string, deleteFile bool) error {
+// DeleteOfflineComic 删除本地画廊：
+//   - 可选物理删除本地文件
+//   - 删除数据库记录
+//
+// 说明：书架与历史记录均为前端 localStorage 功能（后端数据库无对应表），
+// 由前端删除方法在本地同步清理引用，后端无需（也无法）处理。
+func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	var comic models.OfflineComic
 	if err := db.First(&comic, "id = ?", comicID).Error; err != nil {
 		return fmt.Errorf("未找到漫画记录: %v", err)
 	}
 
+	// 1. 可选：物理删除本地文件
 	if deleteFile && comic.LocalPath != "" {
 		if err := os.RemoveAll(comic.LocalPath); err != nil {
 			return fmt.Errorf("删除本地文件失败 %q: %v", comic.LocalPath, err)
@@ -291,11 +297,17 @@ func RemoveDedupComic(db *gorm.DB, comicID string, deleteFile bool) error {
 		log.Printf("%s [maintain] 已删除本地文件 %q（comic %s）", dlLogTag, comic.LocalPath, comicID)
 	}
 
+	// 2. 删除数据库记录
 	if err := db.Delete(&comic).Error; err != nil {
 		return fmt.Errorf("删除漫画记录失败: %v", err)
 	}
-	log.Printf("%s [maintain] 已删除重复漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
+	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
 	return nil
+}
+
+// RemoveDedupComic 删除重复漫画（查重维护入口）：委托 DeleteOfflineComic 统一处理历史记录与文件
+func RemoveDedupComic(db *gorm.DB, comicID string, deleteFile bool) error {
+	return DeleteOfflineComic(db, comicID, deleteFile)
 }
 
 // hashFile 计算文件 md5（归档查重用，分块读取避免大内存占用）

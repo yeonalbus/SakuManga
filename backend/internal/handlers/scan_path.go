@@ -59,6 +59,8 @@ func DeleteScanPath(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
+// TriggerScanPath 异步启动一次扫描（全量 / 增量）。
+// 启动成功立即返回进度对象；若该路径已在扫描中则返回 409。
 func TriggerScanPath(c *gin.Context) {
 	id := c.Param("id")
 	var targetPath models.ExtraScanPath
@@ -67,20 +69,37 @@ func TriggerScanPath(c *gin.Context) {
 		return
 	}
 
-	count, err := services.ScanAndSaveDirectory(targetPath.Path, targetPath.IncludeSubfolders)
+	var req struct {
+		Mode string `json:"mode"` // full | incremental，缺省为 full
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.Mode == "" {
+		req.Mode = "full"
+	}
+
+	progress, err := services.GetScanManager().StartScan(
+		targetPath.ID, targetPath.Path, targetPath.IncludeSubfolders, req.Mode,
+	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "扫描路径失败: " + err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 
-	now := time.Now().UnixMilli()
-	database.DB.Model(&targetPath).Updates(map[string]interface{}{
-		"last_scanned": now,
-		"comic_count":  count,
-	})
+	c.JSON(http.StatusOK, progress.Snapshot())
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"lastScanned": now,
-		"comicCount":  count,
-	})
+// GetScanPathProgress 查询指定路径的扫描进度；若该路径从未启动过扫描返回 404。
+func GetScanPathProgress(c *gin.Context) {
+	id := c.Param("id")
+	progress := services.GetScanManager().GetProgress(id)
+	if progress == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "该路径暂无扫描任务"})
+		return
+	}
+	c.JSON(http.StatusOK, progress.Snapshot())
+}
+
+// GetAllScanProgress 查询全部路径的扫描进度（供前端统一轮询）。
+func GetAllScanProgress(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetScanManager().GetAllProgress())
 }

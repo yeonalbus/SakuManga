@@ -5,6 +5,17 @@ import ItemCard from './ItemCard.vue'
 
 defineProps<{
   items: ComicItem[]
+  /** 是否允许长按卡片进入选择模式（仅离线漫画生效） */
+  selectable?: boolean
+  /** 是否处于选择模式 */
+  selectMode?: boolean
+  /** 已选中的漫画 id 列表 */
+  selectedIds?: string[]
+}>()
+
+const emit = defineEmits<{
+  (e: 'longpress', comic: ComicItem): void
+  (e: 'select', comic: ComicItem): void
 }>()
 </script>
 
@@ -17,7 +28,16 @@ defineProps<{
 
     <!-- 2. 网格主体 -->
     <div class="card-grid" :class="viewMode">
-      <ItemCard v-for="item in items" :key="item.id" :comic="item" />
+      <ItemCard
+        v-for="item in items"
+        :key="item.id"
+        :comic="item"
+        :selectable="selectable"
+        :select-mode="selectMode"
+        :selected="selectedIds?.includes(item.id) ?? false"
+        @longpress="(c) => emit('longpress', c)"
+        @select="(c) => emit('select', c)"
+      />
     </div>
 
     <!-- 3. 底部扩展插槽 -->

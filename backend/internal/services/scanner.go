@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,113 +19,141 @@ func generateID(path string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) {
-	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
-		return 0, err
-	}
+// ─────────────────────────────────────────────────────────────
+// 扫描进度（内存态，供前端轮询 /scan-paths/:id/scan/progress）
+// ─────────────────────────────────────────────────────────────
 
-	comicCount := 0
+// ScanPhase 扫描阶段
+type ScanPhase string
 
-	saveComic := func(localPath string, isDir bool) {
-		title := filepath.Base(localPath)
-		if !isDir {
-			title = strings.TrimSuffix(title, filepath.Ext(title))
-		}
-	
-		// 🎯 1. 尝试解析本地/压缩包内部的 metadata、ametadata 以及 ComicInfo.xml
-		var meta *ParsedMetadata
-		if isDir {
-			meta = ParseDirMetadata(localPath)
-		} else {
-			meta = ParseZipMetadata(localPath)
-		}
-	
-		// 优先使用元数据中的标题与分类
-		if meta.Title != "" {
-			title = meta.Title
-		}
-		category := "Doujinshi"
-		if meta.Category != "" {
-			category = meta.Category
-		}
-	
-		// 默认兜底标签
-		tags := meta.Tags
-		if len(tags) == 0 {
-			tags = []string{"本地扫描"}
-		}
-		tagsJSON, _ := json.Marshal(tags)
-	
-		pageCount := 0
-		var fileSize int64
-		if isDir {
-			entries, _ := os.ReadDir(localPath)
-			for _, entry := range entries {
-				if !entry.IsDir() && IsImage(entry.Name()) {
-					pageCount++
-				}
-				if !entry.IsDir() {
-					if fi, err := entry.Info(); err == nil {
-						fileSize += fi.Size()
-					}
-				}
-			}
-		} else {
-			if fi, err := os.Stat(localPath); err == nil {
-				fileSize = fi.Size()
-			}
-		}
-	
-		comicID := generateID(localPath)
-		coverURL := "/api/v1/comics/" + comicID + "/cover"
-	
-		// 🎯 2. gid 查重：同一 gid 已有记录时，优先保留「文件夹」形态（画廊下载），跳过「压缩包」形态（归档）
-		if meta.GID != "" {
-			var existing models.OfflineComic
-			err := database.DB.Where("g_id = ? AND id != ?", meta.GID, comicID).First(&existing).Error
-			if err == nil {
-				existingIsDir := existing.SourceMode == "gallery" ||
-					!strings.HasSuffix(strings.ToLower(existing.LocalPath), ".zip")
-				if existingIsDir && !isDir {
-					// 已存在文件夹形态（画廊下载），跳过压缩包形态（归档）
-					log.Printf("%s [scan] 跳过同 gid=%s 的压缩包（已存在文件夹形态 %q）: %q",
-						dlLogTag, meta.GID, existing.LocalPath, localPath)
-					return
-				}
-				if !existingIsDir && isDir {
-					// 新的是文件夹形态，删除旧的压缩包记录，保留文件夹
-					log.Printf("%s [scan] gid=%s 由压缩包 %q 升级为文件夹 %q，移除旧压缩包记录",
-						dlLogTag, meta.GID, existing.LocalPath, localPath)
-					database.DB.Delete(&existing)
-				}
-			}
-		}
-	
-		sourceMode := "gallery"
-		if !isDir {
-			sourceMode = "archive"
-		}
-		comic := models.OfflineComic{
-			ID:           comicID,
-			Title:        title,
-			CoverURL:     coverURL,
-			Source:       models.SourceOffline,
-			Category:     category,             // 写入解析出的分类
-			Tags:         string(tagsJSON),     // 写入解析出的多元标签数组 JSON
-			PageCount:    pageCount,
-			UpdatedAt:    time.Now(),
-			IsDownloaded: true,
-			LocalPath:    localPath,
-			FileSize:     fileSize,
-			GID:          meta.GID,
-			Token:        meta.Token,
-			ParentGID:    meta.ParentGID,
-			SourceMode:   sourceMode,
-		}
-	
-		database.DB.Save(&comic)
-		comicCount++
+const (
+	ScanPhaseCounting ScanPhase = "counting" // 统计待扫描条目
+	ScanPhaseScanning ScanPhase = "scanning" // 正在逐条处理
+	ScanPhaseDone     ScanPhase = "done"     // 完成
+)
+
+// ScanProgress 单条扫描路径的进度快照结构（线程安全）
+type ScanProgress struct {
+	mu           sync.Mutex
+	PathID       string    `json:"pathId"`
+	Mode         string    `json:"mode"` // full | incremental
+	Phase        ScanPhase `json:"phase"`
+	Total        int       `json:"total"`        // 待扫描条目总数
+	Processed    int       `json:"processed"`    // 已处理条目数
+	Found        int       `json:"found"`        // 实际入库的漫画数
+	Skipped      int       `json:"skipped"`      // 跳过的条目数（增量模式已存在等）
+	CurrentTitle string    `json:"currentTitle"` // 当前正在处理的条目
+	Error        string    `json:"error,omitempty"`
+	Done         bool      `json:"done"`
+	StartedAt    int64     `json:"startedAt"`
+	FinishedAt   int64     `json:"finishedAt,omitempty"`
+	ComicCount   int       `json:"comicCount,omitempty"` // 完成后的入库数量（同 Found）
+}
+
+func newScanProgress(pathID, mode string) *ScanProgress {
+	return &ScanProgress{
+		PathID:    pathID,
+		Mode:      mode,
+		Phase:     ScanPhaseCounting,
+		StartedAt: time.Now().UnixMilli(),
 	}
+}
+
+// Snapshot 返回一个安全的浅拷贝快照，供外部读取（JSON 序列化）
+func (p *ScanProgress) Snapshot() ScanProgress {
+	if p == nil {
+		return ScanProgress{}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return ScanProgress{
+		PathID:       p.PathID,
+		Mode:         p.Mode,
+		Phase:        p.Phase,
+		Total:        p.Total,
+		Processed:    p.Processed,
+		Found:        p.Found,
+		Skipped:      p.Skipped,
+		CurrentTitle: p.CurrentTitle,
+		Error:        p.Error,
+		Done:         p.Done,
+		StartedAt:    p.StartedAt,
+		FinishedAt:   p.FinishedAt,
+		ComicCount:   p.ComicCount,
+	}
+}
+
+// IsDone 线程安全地判断扫描是否结束
+func (p *ScanProgress) IsDone() bool {
+	if p == nil {
+		return true
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.Done
+}
+
+func (p *ScanProgress) setPhase(phase ScanPhase) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Phase = phase
+}
+
+func (p *ScanProgress) setTotal(total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Total = total
+}
+
+func (p *ScanProgress) setCurrentTitle(title string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.CurrentTitle = title
+}
+
+func (p *ScanProgress) incProcessed() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Processed++
+}
+
+func (p *ScanProgress) incFound() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Found++
+}
+
+func (p *ScanProgress) incSkipped() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Skipped++
+}
+
+func (p *ScanProgress) finish(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Done = true
+	p.FinishedAt = time.Now().UnixMilli()
+	p.Phase = ScanPhaseDone
+	p.ComicCount = p.Found
+	if err != nil {
+		p.Error = err.Error()
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// 候选收集
+// ─────────────────────────────────────────────────────────────
+
+// scanCandidate 待扫描条目
+type scanCandidate struct {
+	path  string
+	isDir bool
+}
+
+// collectCandidates 收集扫描路径下的所有候选条目（含图片的文件夹 + 归档压缩包）
+func collectCandidates(rootPath string, includeSubfolders bool) ([]scanCandidate, error) {
+	var candidates []scanCandidate
 
 	if includeSubfolders {
 		err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
@@ -133,8 +162,8 @@ func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) 
 			}
 
 			if d.IsDir() {
-				entries, err := os.ReadDir(path)
-				if err != nil {
+				entries, readErr := os.ReadDir(path)
+				if readErr != nil {
 					return nil
 				}
 
@@ -147,7 +176,7 @@ func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) 
 				}
 
 				if hasImage {
-					saveComic(path, true)
+					candidates = append(candidates, scanCandidate{path: path, isDir: true})
 					if path != rootPath {
 						return filepath.SkipDir
 					}
@@ -156,48 +185,214 @@ func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) 
 			}
 
 			if !d.IsDir() && IsArchive(d.Name()) {
-				saveComic(path, false)
+				candidates = append(candidates, scanCandidate{path: path, isDir: false})
 			}
 
 			return nil
 		})
-		return comicCount, err
-	} else {
-		entries, err := os.ReadDir(rootPath)
-		if err != nil {
-			return 0, err
-		}
+		return candidates, err
+	}
 
-		// 根目录自身直接平铺图片（归档解压落地后 extractDir 直接含图片，非子目录形态）
-		rootHasImage := false
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// 根目录自身直接平铺图片（归档解压落地后 extractDir 直接含图片，非子目录形态）
+	rootHasImage := false
+	for _, entry := range entries {
+		if !entry.IsDir() && IsImage(entry.Name()) {
+			rootHasImage = true
+			break
+		}
+	}
+	if rootHasImage {
+		return []scanCandidate{{path: rootPath, isDir: true}}, nil
+	}
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(rootPath, entry.Name())
+		if entry.IsDir() {
+			subEntries, subErr := os.ReadDir(fullPath)
+			if subErr != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				if !sub.IsDir() && IsImage(sub.Name()) {
+					candidates = append(candidates, scanCandidate{path: fullPath, isDir: true})
+					break
+				}
+			}
+		} else if IsArchive(entry.Name()) {
+			candidates = append(candidates, scanCandidate{path: fullPath, isDir: false})
+		}
+	}
+	return candidates, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// 单个条目入库
+// ─────────────────────────────────────────────────────────────
+
+// saveComic 处理单个候选条目：解析元数据并入库。
+// 返回是否真正写入（增量模式下已存在的路径 / 同 gid 冲突跳过的会返回 false）。
+func saveComic(localPath string, isDir bool, incremental bool) bool {
+	title := filepath.Base(localPath)
+	if !isDir {
+		title = strings.TrimSuffix(title, filepath.Ext(title))
+	}
+
+	// 🎯 1. 尝试解析本地/压缩包内部的 metadata、ametadata 以及 ComicInfo.xml
+	var meta *ParsedMetadata
+	if isDir {
+		meta = ParseDirMetadata(localPath)
+	} else {
+		meta = ParseZipMetadata(localPath)
+	}
+
+	// 优先使用元数据中的标题与分类
+	if meta.Title != "" {
+		title = meta.Title
+	}
+	category := "Doujinshi"
+	if meta.Category != "" {
+		category = meta.Category
+	}
+
+	// 默认兜底标签
+	tags := meta.Tags
+	if len(tags) == 0 {
+		tags = []string{"本地扫描"}
+	}
+	tagsJSON, _ := json.Marshal(tags)
+
+	pageCount := 0
+	var fileSize int64
+	if isDir {
+		entries, _ := os.ReadDir(localPath)
 		for _, entry := range entries {
 			if !entry.IsDir() && IsImage(entry.Name()) {
-				rootHasImage = true
-				break
+				pageCount++
+			}
+			if !entry.IsDir() {
+				if fi, err := entry.Info(); err == nil {
+					fileSize += fi.Size()
+				}
 			}
 		}
-		if rootHasImage {
-			saveComic(rootPath, true)
-			return 1, nil
+	} else {
+		if fi, err := os.Stat(localPath); err == nil {
+			fileSize = fi.Size()
 		}
-
-		for _, entry := range entries {
-			fullPath := filepath.Join(rootPath, entry.Name())
-			if entry.IsDir() {
-				subEntries, err := os.ReadDir(fullPath)
-				if err != nil {
-					continue
-				}
-				for _, sub := range subEntries {
-					if !sub.IsDir() && IsImage(sub.Name()) {
-						saveComic(fullPath, true)
-						break
-					}
-				}
-			} else if IsArchive(entry.Name()) {
-				saveComic(fullPath, false)
-			}
-		}
-		return comicCount, nil
 	}
+
+	comicID := generateID(localPath)
+	coverURL := "/api/v1/comics/" + comicID + "/cover"
+
+	// 🎯 1.5 增量模式：该路径已在库中 → 直接跳过（不重复解析/入库）
+	if incremental {
+		var existing models.OfflineComic
+		if err := database.DB.Where("local_path = ?", localPath).First(&existing).Error; err == nil {
+			log.Printf("%s [scan] 增量模式跳过已存在路径: %q", dlLogTag, localPath)
+			return false
+		}
+	}
+
+	// 🎯 2. gid 查重：同一 gid 已有记录时，优先保留「文件夹」形态（画廊下载），跳过「压缩包」形态（归档）
+	if meta.GID != "" {
+		var existing models.OfflineComic
+		err := database.DB.Where("g_id = ? AND id != ?", meta.GID, comicID).First(&existing).Error
+		if err == nil {
+			existingIsDir := existing.SourceMode == "gallery" ||
+				!strings.HasSuffix(strings.ToLower(existing.LocalPath), ".zip")
+			if existingIsDir && !isDir {
+				// 已存在文件夹形态（画廊下载），跳过压缩包形态（归档）
+				log.Printf("%s [scan] 跳过同 gid=%s 的压缩包（已存在文件夹形态 %q）: %q",
+					dlLogTag, meta.GID, existing.LocalPath, localPath)
+				return false
+			}
+			if !existingIsDir && isDir {
+				// 新的是文件夹形态，删除旧的压缩包记录，保留文件夹
+				log.Printf("%s [scan] gid=%s 由压缩包 %q 升级为文件夹 %q，移除旧压缩包记录",
+					dlLogTag, meta.GID, existing.LocalPath, localPath)
+				database.DB.Delete(&existing)
+			}
+		}
+	}
+
+	sourceMode := "gallery"
+	if !isDir {
+		sourceMode = "archive"
+	}
+	comic := models.OfflineComic{
+		ID:           comicID,
+		Title:        title,
+		CoverURL:     coverURL,
+		Source:       models.SourceOffline,
+		Category:     category,             // 写入解析出的分类
+		Tags:         string(tagsJSON),     // 写入解析出的多元标签数组 JSON
+		PageCount:    pageCount,
+		UpdatedAt:    time.Now(),
+		IsDownloaded: true,
+		LocalPath:    localPath,
+		FileSize:     fileSize,
+		GID:          meta.GID,
+		Token:        meta.Token,
+		ParentGID:    meta.ParentGID,
+		SourceMode:   sourceMode,
+	}
+
+	database.DB.Save(&comic)
+	return true
+}
+
+// ─────────────────────────────────────────────────────────────
+// 主扫描流程
+// ─────────────────────────────────────────────────────────────
+
+// scanDirectory 扫描指定路径并入库，返回入库数量。
+// mode: "full" 全量 | "incremental" 增量；progress 可为 nil（不汇报进度）。
+func scanDirectory(rootPath string, includeSubfolders bool, mode string, progress *ScanProgress) (int, error) {
+	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
+		return 0, err
+	}
+
+	if progress != nil {
+		progress.setPhase(ScanPhaseCounting)
+	}
+	candidates, err := collectCandidates(rootPath, includeSubfolders)
+	if err != nil {
+		return 0, err
+	}
+	if progress != nil {
+		progress.setTotal(len(candidates))
+		progress.setPhase(ScanPhaseScanning)
+	}
+
+	incremental := mode == "incremental"
+	comicCount := 0
+
+	for _, cand := range candidates {
+		if progress != nil {
+			progress.setCurrentTitle(filepath.Base(cand.path))
+		}
+		if saveComic(cand.path, cand.isDir, incremental) {
+			comicCount++
+			if progress != nil {
+				progress.incFound()
+			}
+		} else if progress != nil {
+			progress.incSkipped()
+		}
+		if progress != nil {
+			progress.incProcessed()
+		}
+	}
+
+	return comicCount, nil
+}
+
+// ScanAndSaveDirectory 兼容旧调用：全量扫描，不汇报进度
+func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) {
+	return scanDirectory(rootPath, includeSubfolders, "full", nil)
 }

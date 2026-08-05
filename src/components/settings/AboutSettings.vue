@@ -3,42 +3,24 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">版本</div>
-        <div class="item-subtext">8.0.10+305</div>
+        <div class="item-subtext">0.1</div>
       </div>
     </div>
 
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">创作者</div>
-        <div class="item-subtext">酱天小禽兽(JTMonster)</div>
+        <div class="item-subtext">珱垣</div>
       </div>
     </div>
 
     <div
       class="setting-item clickable"
-      @click="handleOpenLink('https://github.com/jiangtian616/JHentai')"
+      @click="handleOpenLink('https://github.com/yeonalbus/SakuHentai')"
     >
       <div class="item-info">
         <div class="item-title">Github</div>
-        <div class="item-subtext link-text">https://github.com/jiangtian616/JHentai</div>
-      </div>
-    </div>
-
-    <div class="setting-item clickable" @click="handleOpenLink('https://t.me/+PindoE9yvlpmOWI9')">
-      <div class="item-info">
-        <div class="item-title">Telegram(Chinese Mainly)</div>
-        <div class="item-desc">账号登录、里站、网络等基础问题请自行搜索解决</div>
-        <div class="item-subtext link-text">https://t.me/+PindoE9yvlpmOWI9</div>
-      </div>
-    </div>
-
-    <div
-      class="setting-item clickable"
-      @click="handleOpenLink('https://github.com/jiangtian616/JHentai/wiki')"
-    >
-      <div class="item-info">
-        <div class="item-title">常见问题</div>
-        <div class="item-subtext link-text">https://github.com/jiangtian616/JHentai/wiki</div>
+        <div class="item-subtext link-text">https://github.com/yeonalbus/SakuHentai</div>
       </div>
     </div>
   </div>

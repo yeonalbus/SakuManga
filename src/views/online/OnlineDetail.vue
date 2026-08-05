@@ -772,9 +772,31 @@ onUnmounted(() => {
 }
 
 .read-btn {
-  background: #00a896;
+  background: linear-gradient(135deg, #ff7588, #ff9a3c);
   color: #fff;
-  font-weight: bold;
+  font-weight: 600;
+  padding: 9px 22px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 14px rgba(255, 117, 136, 0.35);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.read-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 117, 136, 0.5);
+  filter: brightness(1.06);
+}
+
+.read-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(255, 117, 136, 0.35);
 }
 
 .title-header {

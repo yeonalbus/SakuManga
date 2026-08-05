@@ -32,6 +32,9 @@ func main() {
 	// 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 
+	// 启动标签引擎：加载本地翻译/热度数据，若缺失或非最新则自动下载（含 24 小时自动更新周期）
+	services.InitTagEngine()
+
 	database.DB.AutoMigrate(&models.AccountSetting{})
 
 	// 2. 初始化 Router 并挂载中间件

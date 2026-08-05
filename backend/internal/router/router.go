@@ -54,11 +54,14 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.PUT("/scan-paths/:id", handlers.UpdateScanPath)
 		api.DELETE("/scan-paths/:id", handlers.DeleteScanPath)
 		api.POST("/scan-paths/:id/scan", handlers.TriggerScanPath)
+		api.GET("/scan-paths/:id/scan/progress", handlers.GetScanPathProgress)
+		api.GET("/scan-paths/scan-progress", handlers.GetAllScanProgress)
 
 		// 漫画数据与封面
 		api.GET("/comics/offline", handlers.GetOfflineComics)
 		api.GET("/comics/:id/cover", handlers.GetComicCover)
 		api.GET("/comics/:id", handlers.GetComicDetail)
+		api.DELETE("/comics/:id", handlers.DeleteOfflineComic)
 
 		// 阅读器
 		api.GET("/comics/:id/pages", handlers.GetComicPages)

@@ -3,18 +3,20 @@ package handlers
 import (
 	"SakuHentai/internal/services"
 	"net/http"
-	"github.com/gin-gonic/gin"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
 
-// GetTagEngineStatus 获取当前标签引擎配置与版本
+// GetTagEngineStatus 获取当前标签引擎配置、版本与自动更新周期
 func GetTagEngineStatus(c *gin.Context) {
 	cnVer, sortVer := services.GlobalTagEngine.GetVersions()
 	c.JSON(http.StatusOK, gin.H{
-		"enableCN":               services.GlobalTagEngine.EnableCN,
-		"tagCNVersion":           cnVer,
-		"enableSort":             services.GlobalTagEngine.EnableSort,
-		"tagSortVersion":         sortVer,
+		"enableCN":            services.GlobalTagEngine.EnableCN,
+		"tagCNVersion":        cnVer,
+		"enableSort":          services.GlobalTagEngine.EnableSort,
+		"tagSortVersion":      sortVer,
+		"updateCycleHours":    services.TagUpdateIntervalHours,
 	})
 }
 

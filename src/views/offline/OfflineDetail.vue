@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { bookshelves } from '@/stores/bookshelfStore'
 import { offlineReadingList, toggleReadingList } from '@/stores/readingStore'
-import { fetchOfflineComics, recordComicClick } from '@/stores/comicStore'
+import { fetchOfflineComics, recordComicClick, deleteOfflineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
@@ -196,6 +196,38 @@ const handleStartReading = () => {
   comic.value.readCount = (comic.value.readCount || 0) + 1
   router.push(`/reader?id=${comic.value.id}&source=offline`)
 }
+
+const deleting = ref(false)
+
+// 删除本地画廊：确认后询问是否同时删除本地文件
+const handleDelete = async () => {
+  if (!comic.value.id || deleting.value) return
+
+  const confirmed = await modal.confirm(
+    `确定要删除《${comic.value.title}》吗？\n将同时移除书架与历史记录中的引用。`,
+    '删除本地画廊',
+  )
+  if (!confirmed) return
+
+  // 询问是否同时物理删除本地文件（取消 = 仅删除记录）
+  const alsoDeleteFile = await modal.confirm(
+    '是否同时删除本地文件？\n选择「确定」将永久删除磁盘上的漫画文件，无法恢复。',
+    '删除本地文件',
+  )
+
+  deleting.value = true
+  try {
+    const okCount = await deleteOfflineComics([comic.value.id], alsoDeleteFile)
+    if (okCount > 0) {
+      toast.success(alsoDeleteFile ? '已删除漫画记录及本地文件' : '已删除漫画记录')
+      handleBack()
+    } else {
+      toast.error('删除失败，请重试')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <template>
@@ -213,6 +245,10 @@ const handleStartReading = () => {
 
         <button class="read-btn" @click="handleStartReading">
           📖 继续阅读 (已读 {{ comic.readCount || 0 }} 次)
+        </button>
+
+        <button class="delete-btn" :disabled="deleting" @click="handleDelete">
+          {{ deleting ? '删除中…' : '🗑️ 删除' }}
         </button>
       </div>
     </div>
@@ -583,6 +619,29 @@ const handleStartReading = () => {
 
 .read-btn {
   flex-shrink: 0;
+}
+
+.delete-btn {
+  background: rgba(255, 77, 79, 0.12);
+  border: 1px solid rgba(255, 77, 79, 0.5);
+  color: #ff4d4f;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.delete-btn:hover {
+  background: rgba(255, 77, 79, 0.25);
+  border-color: #ff4d4f;
+}
+
+.delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .category-wrapper {

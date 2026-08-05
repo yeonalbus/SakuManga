@@ -30,53 +30,120 @@
     <!-- 动态路径列表 -->
     <div class="path-list">
       <div v-for="item in scanPaths" :key="item.id" class="card path-item">
-        <div class="path-info">
-          <!-- 路径文字与图标 -->
-          <div class="path-title">
-            <span class="folder-icon">📁</span>
-            <span class="path-text" :title="item.path">{{ item.path }}</span>
+        <div class="path-row">
+          <div class="path-info">
+            <!-- 路径文字与图标 -->
+            <div class="path-title">
+              <span class="folder-icon">📁</span>
+              <span class="path-text" :title="item.path">{{ item.path }}</span>
+            </div>
+
+            <!-- 扫描状态与元信息 -->
+            <div class="path-meta">
+              <span v-if="item.lastScanned">上次扫描: {{ formatTime(item.lastScanned) }}</span>
+              <span v-else class="status-unscanned">未扫描</span>
+              <span v-if="item.comicCount !== undefined" class="count-text">
+                • 发现 {{ item.comicCount }} 本漫画
+              </span>
+              <span v-if="isScanning(item)" class="scan-badge">{{ scanModeText(item) }}</span>
+            </div>
           </div>
 
-          <!-- 扫描状态与元信息 -->
-          <div class="path-meta">
-            <span v-if="item.lastScanned">上次扫描: {{ formatTime(item.lastScanned) }}</span>
-            <span v-else class="status-unscanned">未扫描</span>
-            <span v-if="item.comicCount !== undefined" class="count-text">
-              • 发现 {{ item.comicCount }} 本漫画
+          <div class="path-actions">
+            <!-- 包含子文件夹 Switch 开关 -->
+            <label class="toggle-container" title="包含子文件夹">
+              <span class="toggle-label">包含子文件夹</span>
+              <span class="toggle-switch">
+                <input
+                  type="checkbox"
+                  :checked="item.includeSubfolders"
+                  @change="
+                    handleToggleSubfolders(item.id, ($event.target as HTMLInputElement).checked)
+                  "
+                />
+                <span class="slider"></span>
+              </span>
+            </label>
+
+            <!-- 扫描模式按钮（空闲或已完成时显示） -->
+            <template v-if="!isScanning(item)">
+              <button
+                class="btn btn-mode"
+                @click="handleSingleScan(item, 'full')"
+                title="全文件夹扫描：重新扫描整个目录"
+              >
+                全量
+              </button>
+              <button
+                class="btn btn-mode incremental"
+                @click="handleSingleScan(item, 'incremental')"
+                title="增量式更新：跳过已收录的漫画，仅入库新内容"
+              >
+                增量
+              </button>
+            </template>
+
+            <!-- 扫描中显示旋转图标 -->
+            <span v-else class="btn btn-icon" title="扫描中…">
+              <span class="spinning">↻</span>
             </span>
+
+            <!-- 删除按钮 -->
+            <button @click="handleRemove(item.id)" class="btn btn-icon danger" title="移除路径">
+              ✕
+            </button>
           </div>
         </div>
 
-        <div class="path-actions">
-          <!-- 包含子文件夹 Switch 开关 -->
-          <label class="toggle-container" title="包含子文件夹">
-            <span class="toggle-label">包含子文件夹</span>
-            <span class="toggle-switch">
-              <input
-                type="checkbox"
-                :checked="item.includeSubfolders"
-                @change="
-                  handleToggleSubfolders(item.id, ($event.target as HTMLInputElement).checked)
-                "
-              />
-              <span class="slider"></span>
-            </span>
-          </label>
+        <!-- 扫描进度区域（扫描中） -->
+        <div v-if="isScanning(item)" class="scan-progress-area">
+          <!-- 计数阶段 -->
+          <div v-if="progressOf(item)!.phase === 'counting'" class="progress-counting">
+            <span class="spinning">↻</span> 正在扫描文件夹结构…
+          </div>
+          <!-- 扫描阶段 -->
+          <template v-else>
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                :style="{ width: progressPercent(progressOf(item)!) + '%' }"
+              ></div>
+            </div>
+            <div class="progress-meta">
+              <span
+                v-if="progressOf(item)!.currentTitle"
+                class="progress-title"
+                :title="progressOf(item)!.currentTitle"
+              >
+                正在处理: {{ progressOf(item)!.currentTitle }}
+              </span>
+              <span v-else class="progress-title">正在扫描…</span>
+              <span class="progress-num">
+                {{ progressOf(item)!.processed }}/{{ progressOf(item)!.total || '?' }}
+                <template v-if="progressOf(item)!.found">
+                  • 发现 {{ progressOf(item)!.found }}
+                </template>
+                <template v-if="progressOf(item)!.skipped">
+                  • 跳过 {{ progressOf(item)!.skipped }}
+                </template>
+              </span>
+            </div>
+          </template>
+        </div>
 
-          <!-- 扫描按钮 -->
-          <button
-            @click="handleSingleScan(item)"
-            :disabled="activeScanningId === item.id"
-            class="btn btn-icon"
-            title="扫描此路径"
-          >
-            <span :class="{ spinning: activeScanningId === item.id }">↻</span>
-          </button>
-
-          <!-- 删除按钮 -->
-          <button @click="handleRemove(item.id)" class="btn btn-icon danger" title="移除路径">
-            ✕
-          </button>
+        <!-- 完成提示区域 -->
+        <div
+          v-else-if="progressOf(item) && progressOf(item)!.done"
+          class="scan-done-area"
+          :class="{ error: progressOf(item)!.error }"
+        >
+          <span v-if="progressOf(item)!.error">⚠️ 扫描失败: {{ progressOf(item)!.error }}</span>
+          <span v-else>
+            ✅ 扫描完成，共 {{ progressOf(item)!.comicCount ?? progressOf(item)!.found }} 本
+            <template v-if="progressOf(item)!.skipped"
+              >（跳过 {{ progressOf(item)!.skipped }}）</template
+            >
+          </span>
         </div>
       </div>
 
@@ -89,28 +156,64 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue' // 引入 onMounted
+import { ref, onMounted, watch } from 'vue'
 import {
   scanPaths,
+  scanProgress,
   fetchScanPaths,
   addScanPath,
   toggleSubfolders,
   removeScanPath,
-  updateScanPathStats,
+  startScanPath,
+  refreshScanProgress,
+  ensurePolling,
+  clearScanProgress,
+  getScanProgress,
+  hasActiveScan,
   type ExtraScanPath,
+  type ScanProgress,
+  type ScanMode,
 } from '@/stores/scanPathStore'
+import { useUI } from '@/composables/useUI'
+
+const { toast } = useUI()
 
 defineEmits<{
   (e: 'back'): void
 }>()
 
-// 组件挂载时向 Go 后端拉取最新路径列表
-onMounted(() => {
-  fetchScanPaths()
+// 组件挂载时向 Go 后端拉取最新路径列表，并恢复可能仍在进行的扫描进度
+// （解决切页后“看起来被截断”的问题：后端扫描在 goroutine 中持续运行，回来时重新拉取）
+onMounted(async () => {
+  await fetchScanPaths()
+  await refreshScanProgress()
+  if (hasActiveScan()) ensurePolling()
 })
 
+// 记录上一轮各路径是否已完成，用于在扫描完成瞬间弹出提示
+const prevDone = ref<Record<string, boolean>>({})
+watch(
+  scanProgress,
+  (map) => {
+    for (const [id, p] of Object.entries(map)) {
+      if (p.done && !prevDone.value[id]) {
+        if (p.error) {
+          toast.error(`扫描失败：${p.error}`)
+        } else {
+          toast.success(`扫描完成：${p.comicCount ?? p.found} 本漫画`)
+          // 完成后展示几秒，再收起进度提示区
+          setTimeout(() => {
+            if (getScanProgress(id)?.done) clearScanProgress(id)
+          }, 4000)
+        }
+      }
+    }
+    prevDone.value = Object.fromEntries(Object.entries(map).map(([id, p]) => [id, !!p.done]))
+  },
+  { deep: true, immediate: true },
+)
+
 const inputPath = ref('')
-const activeScanningId = ref<string | null>(null)
 
 // 1. 添加路径（addScanPath 返回 Promise<boolean>，必须 await 才能正确判断）
 const handleAdd = async () => {
@@ -120,8 +223,9 @@ const handleAdd = async () => {
   const ok = await addScanPath(path)
   if (ok) {
     inputPath.value = ''
+    toast.success('路径已添加')
   } else {
-    alert('该路径已存在！')
+    toast.warning('该路径已存在！')
   }
 }
 
@@ -135,14 +239,31 @@ const handleRemove = (id: string) => {
   removeScanPath(id)
 }
 
-// 4. 单路径扫描
-const handleSingleScan = async (item: ExtraScanPath) => {
-  activeScanningId.value = item.id
+// 4. 单路径扫描（异步启动，进度由轮询实时更新）
+const handleSingleScan = async (item: ExtraScanPath, mode: ScanMode) => {
   try {
-    await updateScanPathStats(item.id)
-  } finally {
-    activeScanningId.value = null
+    await startScanPath(item.id, mode)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '触发扫描失败')
   }
+}
+
+// 5. 进度辅助函数
+const progressOf = (item: ExtraScanPath): ScanProgress | undefined => getScanProgress(item.id)
+
+const isScanning = (item: ExtraScanPath): boolean => {
+  const p = progressOf(item)
+  return !!p && !p.done
+}
+
+const scanModeText = (item: ExtraScanPath): string => {
+  const p = progressOf(item)
+  return p?.mode === 'incremental' ? '增量更新中' : '全量扫描中'
+}
+
+const progressPercent = (p: ScanProgress): number => {
+  if (p.phase !== 'scanning' || !p.total) return 0
+  return Math.min(100, Math.round((p.processed / p.total) * 100))
 }
 
 const formatTime = (ts: number) => {
@@ -250,6 +371,12 @@ const formatTime = (ts: number) => {
 
 .path-item {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.path-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -301,10 +428,19 @@ const formatTime = (ts: number) => {
   color: #88888c;
 }
 
+.scan-badge {
+  font-size: 11px;
+  color: #ff7588;
+  border: 1px solid rgba(255, 117, 136, 0.4);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .path-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -413,6 +549,25 @@ input:checked + .slider:before {
   color: #ff4d4f;
 }
 
+/* 扫描模式按钮 */
+.btn-mode {
+  background: #121214;
+  border: 1px solid #38383e;
+  color: #a0a0a5;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.btn-mode:hover {
+  border-color: #ff7588;
+  color: #ff7588;
+}
+
+.btn-mode.incremental:hover {
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+}
+
 /* 旋转动画 */
 .spinning {
   display: inline-block;
@@ -426,6 +581,78 @@ input:checked + .slider:before {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 扫描进度区域 */
+.scan-progress-area {
+  border: 1px solid rgba(255, 117, 136, 0.25);
+  background-color: rgba(255, 117, 136, 0.05);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-counting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #ffb6c1;
+}
+
+.progress-bar {
+  height: 6px;
+  background-color: #26262a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff7588, #ff5e74);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #a0a0a5;
+}
+
+.progress-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-num {
+  flex-shrink: 0;
+  color: #ffb6c1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 完成提示区域 */
+.scan-done-area {
+  border: 1px solid rgba(82, 196, 26, 0.3);
+  background-color: rgba(82, 196, 26, 0.06);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #95de64;
+}
+
+.scan-done-area.error {
+  border-color: rgba(255, 77, 79, 0.3);
+  background-color: rgba(255, 77, 79, 0.06);
+  color: #ff7875;
 }
 
 /* 空状态 */

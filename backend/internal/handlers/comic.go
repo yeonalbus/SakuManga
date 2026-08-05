@@ -5,10 +5,11 @@ import (
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 	"encoding/json"
-	"net/http"
-	"strings"
-	"os"
 	"fmt"
+	"net/http"
+	"os"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -159,4 +160,25 @@ func GetComicPageImage(c *gin.Context) {
 	// 🎯 开启强缓存：浏览器命中本地缓存后零延迟加载
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Data(http.StatusOK, contentType, data)
+}
+
+// DeleteOfflineComic 删除本地画廊。
+// 查询参数 deleteFile=true 时同时物理删除本地文件；默认仅删除记录。
+// 删除时自动清理书架与历史记录中的引用。
+func DeleteOfflineComic(c *gin.Context) {
+	id := c.Param("id")
+	deleteFile := c.Query("deleteFile") == "true"
+
+	var comic models.OfflineComic
+	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
+		return
+	}
+
+	if err := services.DeleteOfflineComic(database.DB, id, deleteFile); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }

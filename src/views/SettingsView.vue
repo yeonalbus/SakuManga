@@ -33,8 +33,6 @@
           <PreferenceSettings v-else-if="activeTab === 'preference'" />
           <NetworkSettings v-else-if="activeTab === 'network'" />
           <DownloadSettings v-else-if="activeTab === 'download'" />
-          <PerformanceSettings v-else-if="activeTab === 'performance'" />
-          <MouseWheelSettings v-else-if="activeTab === 'wheel'" />
           <AdvancedSettings v-else-if="activeTab === 'advanced'" />
           <SecuritySettings v-else-if="activeTab === 'security'" />
           <AboutSettings v-else-if="activeTab === 'about'" />
@@ -56,8 +54,6 @@ import ReaderSettings from '@/components/settings/ReaderSettings.vue'
 import PreferenceSettings from '@/components/settings/PreferenceSettings.vue'
 import NetworkSettings from '@/components/settings/NetworkSettings.vue'
 import DownloadSettings from '@/components/settings/DownloadSettings.vue'
-import PerformanceSettings from '@/components/settings/PerformanceSettings.vue'
-import MouseWheelSettings from '@/components/settings/MouseWheelSettings.vue'
 import AdvancedSettings from '@/components/settings/AdvancedSettings.vue'
 import SecuritySettings from '@/components/settings/SecuritySettings.vue'
 import AboutSettings from '@/components/settings/AboutSettings.vue'
@@ -73,8 +69,6 @@ const menuItems = [
   { id: 'preference', label: '偏好', icon: '⭐', title: '偏好设置' },
   { id: 'network', label: '网络', icon: '📶', title: '网络设置' },
   { id: 'download', label: '下载', icon: '📥', title: '下载设置' },
-  { id: 'performance', label: '性能', icon: '⚡', title: '性能设置' },
-  { id: 'wheel', label: '鼠标滚轮', icon: '🖱️', title: '鼠标滚轮设置' },
   { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置' },
   { id: 'security', label: '安全', icon: '🛡️', title: '安全设置' },
   { id: 'about', label: '关于', icon: 'ℹ️', title: '关于软件' },

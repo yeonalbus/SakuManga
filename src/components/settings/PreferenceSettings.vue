@@ -87,6 +87,17 @@
       </div>
     </div>
 
+    <!-- 自动更新周期提示 -->
+    <div class="setting-item update-cycle-item">
+      <div class="item-info">
+        <div class="item-title">🔄 标签数据自动更新周期</div>
+        <div class="item-subtext">
+          启动时自动查找本地文件，若缺失或不是最新版本将自行下载；之后每
+          {{ updateCycleHours }} 小时自动检查一次更新
+        </div>
+      </div>
+    </div>
+
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">启动时默认菜单</div>
@@ -305,6 +316,9 @@ const tagCNVersion = ref('未加载')
 const enableTagSortRules = ref(true)
 const tagSortVersion = ref('未加载')
 
+// 自动更新周期（小时），后端 /tags/status 返回
+const updateCycleHours = ref(24)
+
 // 进度状态定义
 interface ProgressData {
   status: 'idle' | 'downloading' | 'success' | 'error'
@@ -384,12 +398,16 @@ const fetchTagEngineStatus = async () => {
       tagCNVersion?: string
       enableSort: boolean
       tagSortVersion?: string
+      updateCycleHours?: number
     }>('/tags/status')
 
     enableTagCNTranslation.value = data.enableCN
     tagCNVersion.value = data.tagCNVersion || '尚未下载'
     enableTagSortRules.value = data.enableSort
     tagSortVersion.value = data.tagSortVersion || '尚未下载'
+    if (typeof data.updateCycleHours === 'number' && data.updateCycleHours > 0) {
+      updateCycleHours.value = data.updateCycleHours
+    }
   } catch (err) {
     console.error('获取引擎状态失败:', err)
   }

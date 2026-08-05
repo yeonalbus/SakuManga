@@ -7,17 +7,29 @@ import { addHistory } from '@/stores/historyStore'
 import TagChip from '@/components/TagChip.vue'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
+// 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
 const props = withDefaults(
   defineProps<{
     comic: ComicItem
     mode?: CardViewMode
     size?: 'large' | 'normal' | 'small'
+    selectable?: boolean
+    selectMode?: boolean
+    selected?: boolean
   }>(),
   {
     mode: 'card',
     size: 'normal',
+    selectable: false,
+    selectMode: false,
+    selected: false,
   },
 )
+
+const emit = defineEmits<{
+  (e: 'longpress', comic: ComicItem): void
+  (e: 'select', comic: ComicItem): void
+}>()
 
 const router = useRouter()
 
@@ -73,9 +85,50 @@ const onlineComic = computed(() => {
 })
 
 // --------------------------------------------------
-// 3. 点击卡片主体跳转详情页
+// 3. 长按选择（pointerdown 计时 600ms 触发）
+// --------------------------------------------------
+const LONG_PRESS_MS = 600
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+const longPressed = ref(false)
+
+const clearLongPressTimer = () => {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+const handlePointerDown = () => {
+  // 选择模式中不做长按检测；非可选中卡片不响应
+  if (props.selectMode || !props.selectable || props.comic.source !== 'offline') return
+  longPressed.value = false
+  clearLongPressTimer()
+  longPressTimer = setTimeout(() => {
+    longPressed.value = true
+    emit('longpress', props.comic)
+  }, LONG_PRESS_MS)
+}
+
+const handlePointerUp = () => {
+  clearLongPressTimer()
+}
+
+// --------------------------------------------------
+// 4. 点击卡片主体：选择模式切换选中，否则跳转详情页
 // --------------------------------------------------
 const handleCardClick = () => {
+  // 长按已触发选择 → 抑制随后的 click 导航
+  if (longPressed.value) {
+    longPressed.value = false
+    return
+  }
+
+  // 选择模式 → 切换选中
+  if (props.selectMode) {
+    emit('select', props.comic)
+    return
+  }
+
   if (!props.comic || !props.comic.id) return
   addHistory(props.comic)
 
@@ -89,6 +142,15 @@ const handleCardClick = () => {
   } else {
     router.push(`/offline/detail?id=${props.comic.id}`)
   }
+}
+
+// 名片模式下缩略图点击：选择模式切换选中，否则展开/收起 Tag
+const handleThumbClick = () => {
+  if (props.selectMode) {
+    emit('select', props.comic)
+    return
+  }
+  toggleTags()
 }
 
 // 统一解析 Tags，确保永远返回 string[] 数组
@@ -120,12 +182,30 @@ const handleImgError = (e: Event) => {
 </script>
 
 <template>
-  <div class="item-card" :class="[currentMode, size || 'normal']" @click="handleCardClick">
+  <div
+    class="item-card"
+    :class="[currentMode, size || 'normal', { 'select-mode': selectMode, selected }]"
+    @click="handleCardClick"
+    @pointerdown="handlePointerDown"
+    @pointerup="handlePointerUp"
+    @pointerleave="handlePointerUp"
+    @pointercancel="handlePointerUp"
+  >
+    <!-- 选择模式的勾选框覆盖层 -->
+    <span
+      v-if="selectMode"
+      class="select-checkbox"
+      :class="{ checked: selected }"
+      @click.stop="emit('select', comic)"
+    >
+      <span class="check-mark">{{ selected ? '✓' : '' }}</span>
+    </span>
+
     <!-- 🪪 名片模式 (Compact) -->
     <template v-if="currentMode === 'compact'">
       <div
         class="compact-thumb-box"
-        @click.stop="toggleTags"
+        @click.stop="handleThumbClick"
         :title="showTags ? '点击收起 Tag' : '点击查看完整 Tag 列表'"
       >
         <!-- 🟢 加上 referrerpolicy="no-referrer" 防止封面防盗链报错 -->
@@ -233,6 +313,7 @@ const handleImgError = (e: Event) => {
 
 <style scoped>
 .item-card {
+  position: relative;
   background-color: #1a1a1e;
   border: 1px solid #26262a;
   border-radius: 8px;
@@ -536,5 +617,48 @@ const handleImgError = (e: Event) => {
 
 .source-tag.offline {
   color: #ff7588;
+}
+
+/* 选择模式：卡片高亮 + 勾选框 */
+.item-card.select-mode {
+  cursor: default;
+}
+
+.item-card.select-mode:hover {
+  box-shadow: 0 0 0 2px rgba(255, 117, 136, 0.35);
+}
+
+.item-card.selected {
+  border-color: #ff7588;
+  box-shadow: 0 0 0 2px rgba(255, 117, 136, 0.45);
+}
+
+.select-checkbox {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background-color: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.select-checkbox .check-mark {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.select-checkbox.checked {
+  background-color: #ff7588;
+  border-color: #ff7588;
 }
 </style>

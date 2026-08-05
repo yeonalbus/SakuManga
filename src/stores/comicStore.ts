@@ -7,6 +7,10 @@ import type { OnlineComic, OfflineComic } from '@/types/comic'
 import { generateOnlineComics } from '@/utils/mockData'
 import { loadStorage } from '@/utils/storage'
 import { API_BASE } from '@/config/api'
+import { offlineReadingList } from '@/stores/readingStore'
+// 使用命名空间导入 bookshelfStore / historyStore，避免与本文件产生「值初始化时序」上的循环依赖问题
+import * as bookshelfStore from '@/stores/bookshelfStore'
+import * as historyStore from '@/stores/historyStore'
 
 // --------------------------------------------------
 // 在线 / 离线漫画数据源（支持 localStorage 持久化）
@@ -79,3 +83,47 @@ export const recordComicClick = (comicId: string) => {
 export const rankedOfflineComics = computed(() => {
   return [...offlineComics.value].sort((a, b) => (b.readCount || 0) - (a.readCount || 0))
 })
+
+// --------------------------------------------------
+// 本地画廊删除
+// --------------------------------------------------
+
+/**
+ * 删除本地画廊（记录 + 可选物理文件）。
+ * 同步清理前端状态：离线列表、离线阅读清单、本地书架引用
+ * （后端会同步清理 DB 中的书架与历史记录引用）。
+ * 返回删除成功的数量。
+ */
+export const deleteOfflineComics = async (ids: string[], deleteFile = false): Promise<number> => {
+  let okCount = 0
+  for (const id of ids) {
+    try {
+      const res = await fetch(
+        `${API_BASE}/comics/${id}?deleteFile=${deleteFile ? 'true' : 'false'}`,
+        { method: 'DELETE' },
+      )
+      if (res.ok) okCount++
+    } catch (err) {
+      console.error('删除离线漫画失败:', err)
+    }
+  }
+
+  if (okCount > 0) {
+    const removedIds = new Set(ids)
+    // 1. 离线列表
+    offlineComics.value = offlineComics.value.filter((c) => !removedIds.has(c.id))
+    // 2. 离线阅读清单
+    offlineReadingList.value = offlineReadingList.value.filter((c) => !removedIds.has(c.id))
+    // 3. 本地书架引用（comicIds）
+    for (const shelf of bookshelfStore.bookshelves.value) {
+      if (shelf.comicIds?.length) {
+        shelf.comicIds = shelf.comicIds.filter((cid) => !removedIds.has(cid))
+      }
+    }
+    // 4. 本地离线历史（localStorage 存储）
+    historyStore.offlineHistoryList.value = historyStore.offlineHistoryList.value.filter(
+      (h) => !removedIds.has(h.comic.id),
+    )
+  }
+  return okCount
+}

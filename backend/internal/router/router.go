@@ -62,6 +62,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 封面/页图代理：浏览器 <img> 媒体加载无法携带 Authorization 头，故作公开路由，
 		// 由 handler 内部做可选认证（优先当前用户凭证，未登录回退 admin 凭证代理图片）
 		public.GET("/comics/cover-proxy", onlineHandler.ProxyCover)
+
+		// 离线封面/页图：与在线 cover-proxy 同理，浏览器 <img> 无法携带 Authorization 头，
+		// 故作公开路由（离线画廊数据本身为全局共享，无用户隔离）。
+		public.GET("/comics/:id/cover", handlers.GetComicCover)
+		public.GET("/comics/:id/pages", handlers.GetComicPages)
+		public.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
 	}
 
 	// ─── 3. 受保护路由（需登录）───
@@ -80,15 +86,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/scan-paths/:id/scan/progress", handlers.GetScanPathProgress)
 		api.GET("/scan-paths/scan-progress", handlers.GetAllScanProgress)
 
-		// 漫画数据与封面
+		// 漫画数据与封面（封面/页图为公开路由，见上方 public 分组）
 		api.GET("/comics/offline", handlers.GetOfflineComics)
-		api.GET("/comics/:id/cover", handlers.GetComicCover)
 		api.GET("/comics/:id", handlers.GetComicDetail)
 		api.DELETE("/comics/:id", handlers.DeleteOfflineComic)
-
-		// 阅读器
-		api.GET("/comics/:id/pages", handlers.GetComicPages)
-		api.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
 
 		// 标签 API（只读查询开放给所有用户；数据同步为管理员）
 		api.GET("/tags/status", handlers.GetTagEngineStatus)

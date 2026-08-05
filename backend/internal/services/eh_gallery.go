@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"SakuHentai/internal/models"
 
@@ -25,6 +26,8 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 	q := reqURL.Query()
 
 	// 1. 搜索关键词
+	// ⚠️ 实时性说明：E 站首页时差（约 2h 缓存）的真正原因是缺少 sk 会话 Cookie，
+	// 而非缺少 f_search 参数。请确保账号已配置 sk（见 eh_auth.go BuildClient）。
 	if params.Keyword != "" {
 		q.Set("f_search", params.Keyword)
 	}
@@ -50,6 +53,9 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		q.Set("f_cats", strconv.Itoa(fCats))
 	}
 
+	// 🟢 追加随机时间戳参数，强制 E 站绕过服务器端缓存，确保首页始终返回最新列表
+	q.Set("t", strconv.FormatInt(time.Now().UnixNano(), 10))
+
 	reqURL.RawQuery = q.Encode()
 
 	// 发起请求
@@ -60,6 +66,9 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	// 🟢 禁用缓存：强制 E 站返回最新列表，避免命中服务器端缓存导致首页更新不及时
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
 
 	resp, err := client.Do(req)
 	if err != nil && strings.Contains(err.Error(), "EOF") {

@@ -14,7 +14,7 @@ import (
 )
 
 // FetchWatchedList 抓取 E 站订阅列表 (/watched)
-func (s *EHService) FetchWatchedList(account *models.AccountSetting, params SearchParams) (*OnlineComicResult, error) {
+func (s *EHService) FetchWatchedList(account *models.AccountSetting, params SearchParams,setting *models.EHSetting) (*OnlineComicResult, error) {
 	// 1. 订阅（Watched）页面强依赖 E 站 Cookie，必须先校验账号登录状态
 	if account == nil || account.IPBMemberID == "" || account.IPBPassHash == "" {
 		return nil, errors.New("未登录 E 站账号或 Cookie 无效，无法获取订阅列表")
@@ -27,11 +27,7 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 
 	// 2. 指向 /watched 端点
 	// eh_sub.go 构造 URL 逻辑
-	baseURL := "https://e-hentai.org/watched"
-	// 仅当明确开启 Ex 且配有 igneous 时才走 Ex 站
-	if account.IsEx && account.Igneous != "" {
-		baseURL = "https://exhentai.org/watched"
-	}
+	baseURL := GetBaseURL(account, setting)
 
 	reqURL, _ := url.Parse(baseURL)
 	q := reqURL.Query()

@@ -95,8 +95,9 @@ func (h *OnlineComicHandler) GetWatchedComics(c *gin.Context) {
 		params.Page = 1
 	}
 
+	ehSetting := getEHSetting(h.db)
 	// 调用 services/eh_sub.go 的 FetchWatchedList
-	result, err := h.ehService.FetchWatchedList(&account, params)
+	result, err := h.ehService.FetchWatchedList(&account, params, ehSetting)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

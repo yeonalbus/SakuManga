@@ -19,14 +19,6 @@ type AccountSetting struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// EHUserStatus E 站动态配额与资产信息（由后端解析 HTML 头部或 API 后返回，不必全部落库）
-type EHUserStatus struct {
-	CurrentQuota int    `json:"currentQuota"` // 当前用量
-	MaxQuota     int    `json:"maxQuota"`     // 最大配额
-	AssetGP      string `json:"assetGP"`      // 算力/GP 点数
-	AssetCredits string `json:"assetCredits"` // Credits 积分
-}
-
 // EHFavoriteCategory E 站自定义收藏夹结构（0 ~ 9 槽位）
 type EHFavoriteCategory struct {
 	Index int    `json:"index"` // 0 - 9

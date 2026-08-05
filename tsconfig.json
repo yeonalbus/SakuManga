@@ -14,9 +14,9 @@
     // 覆盖 node24 预设中无法识别的高版本 lib
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
 
-    "baseUrl": ".",
+    // TS6 起 baseUrl 已弃用：paths 直接相对本配置文件解析，无需 baseUrl
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   }
 }

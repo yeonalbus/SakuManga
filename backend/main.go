@@ -40,7 +40,7 @@ func main() {
 	// 3. 初始化 Service 与 Handler
 	ehService := services.NewEHService()
 	accountHandler := handlers.NewAccountHandler(database.DB, ehService)
-	ehSettingHandler := handlers.NewEHSettingHandler(database.DB)
+	ehSettingHandler := handlers.NewEHSettingHandler(database.DB, ehService)
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
 
@@ -87,9 +87,29 @@ func main() {
 		api.POST("/account/settings", accountHandler.SaveAccountSettings)
 		api.DELETE("/account/settings", accountHandler.ClearAccountSettings)
 
-		// 🟢 新增：EH 专属站点偏好设置接口
+		// EH 专属站点偏好设置接口
 		api.GET("/eh/settings", ehSettingHandler.GetEHSettings)
 		api.POST("/eh/settings", ehSettingHandler.SaveEHSettings)
+
+		// uconfig.php 代理：应用内读取/修改/保存 E 站配置（含 profile 管理）
+		api.GET("/eh/uconfig", ehSettingHandler.GetUConfig)
+		api.POST("/eh/uconfig", ehSettingHandler.SaveUConfig)
+
+		// Profile 管理（兼容保留，站点配置请使用 uconfig 接口）
+		api.GET("/eh/profiles", ehSettingHandler.GetProfiles)
+		api.POST("/eh/profiles", ehSettingHandler.CreateProfile)
+		api.PUT("/eh/profiles/:id", ehSettingHandler.UpdateProfile)
+		api.DELETE("/eh/profiles/:id", ehSettingHandler.DeleteProfile)
+		api.POST("/eh/profiles/:id/select", ehSettingHandler.SelectProfile)
+
+		// 图片配额与资产（GP / Credits / Hath）
+		api.GET("/eh/status", ehSettingHandler.GetEHUserStatus)
+
+		// 我的标签（关注 / 隐藏，直连 E 站读取与上传）
+		api.GET("/eh/mytags", ehSettingHandler.GetMyTags)
+		api.POST("/eh/mytags", ehSettingHandler.AddMyTag)
+		api.POST("/eh/mytags/remove", ehSettingHandler.RemoveMyTag)
+		api.POST("/eh/mytags/tagset", ehSettingHandler.CreateMyTagset)
 
 		// 在线画廊与封面代理
 		api.GET("/comics/online", onlineHandler.GetOnlineComics)

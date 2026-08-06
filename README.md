@@ -46,27 +46,31 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ## 在线界面
 
-<img width="2457" height="1287" alt="image" src="https://github.com/user-attachments/assets/37d1d499-a84e-419b-9b8c-94cf7b3b8e4f" />
+<img width="2418" height="1288" alt="image" src="https://github.com/user-attachments/assets/b58524a2-9f90-45be-90ca-2bdc5f1a735d" />
 
 ## 在线排行榜
 
-<img width="2452" height="1279" alt="image" src="https://github.com/user-attachments/assets/0ff94560-7ead-40b1-b2be-b1066e067f5f" />
+<img width="2456" height="1286" alt="image" src="https://github.com/user-attachments/assets/a0c16b33-611a-4828-bbe2-e09113530b65" />
+
 
 ## 下载界面
 
-<img width="2454" height="1289" alt="image" src="https://github.com/user-attachments/assets/11983327-d0c8-4db0-9553-861f17d697a5" />
+<img width="2453" height="1286" alt="image" src="https://github.com/user-attachments/assets/241a67a0-23f6-4dcc-92aa-0fbd9c4656cd" />
+
 
 ## 本地首页
 
-<img width="2455" height="1287" alt="image" src="https://github.com/user-attachments/assets/7f277b6e-7082-48f7-8dd4-fd1fbd29e9b3" />
+<img width="2428" height="1288" alt="image" src="https://github.com/user-attachments/assets/34d65fc5-7ea1-4b2f-a3c3-8b74527f0302" />
+
 
 ## 抽卡界面
 
-<img width="1661" height="1109" alt="image" src="https://github.com/user-attachments/assets/d9f9d0ef-3136-4037-9b80-3e5edcd0310b" />
+<img width="2424" height="1286" alt="image" src="https://github.com/user-attachments/assets/66b632d1-67c6-4b19-9ee6-19ab42879c12" />
+
 
 ## 阅读界面
 
-<img width="2455" height="1286" alt="image" src="https://github.com/user-attachments/assets/f73edeb9-4dd2-41ad-89e9-d42ee1459b39" />
+<img width="2453" height="1289" alt="image" src="https://github.com/user-attachments/assets/8623608a-4a2a-4199-8d43-3cccbcfc412b" />
 
 # ⚙️ 设置说明
 

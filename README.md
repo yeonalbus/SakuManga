@@ -40,6 +40,8 @@ cd backend && go run .        # 后端 http://127.0.0.1:8081
 npm run dev                   # 前端开发服务器（Vite 代理到后端 API）
 ```
 
+> 后端 `//go:embed all:dist` 编译必需 `backend/webui/dist`（该目录不常驻仓库）：开发模式下请先执行一次 `npm run build` 并将 `dist/` 拷贝到 `backend/webui/dist`，或直接运行一次 `build-release.bat`。
+
 # 🖼️ 预览图
 
 ## 在线界面
@@ -88,28 +90,33 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ```
 SakuHentai/
-├── backend/                # Go 后端服务（Gin + GORM + SQLite）
-│   ├── config.json         # 服务配置文件
-│   ├── webui/              # 内嵌前端产物（go:embed，单 exe 打包用）
-│   ├── internal/           # 核心业务逻辑 (路由、控制层、服务层、托盘)
-│   ├── main.go             # 后端程序入口（--headless 双模式 + 系统托盘）
-│   └── manga.db            # SQLite 本地数据库
-├── src/                    # Vue 3 前端核心源码
-│   ├── api/                # Axios/Fetch 接口封装
-│   ├── components/         # 可复用的 UI 通用组件
-│   ├── composables/        # Vue 组合式函数 (Hooks)
-│   ├── router/             # 路由配置 (Vue Router)
-│   ├── stores/             # 全局状态管理 (Pinia)
-│   ├── views/              # 页面级组件 (各路由对应页面)
-│   ├── App.vue             # 根组件
-│   └── main.ts             # 前端入口文件
-├── 学习笔记/                # 个人开发过程中的语法与功能总结（已弃用）
-├── 计划书/                  # 前端开发排期与规划文档（已弃用）
-├── vite.config.ts          # Vite 构建与代理配置
-├── package.json            # 前端项目依赖与脚本
-├── build-release.bat       # 一键打包单 exe
-├── go.mod                  # Go 模块依赖（位于 backend/ 下）
-└── README.md               # 项目说明文档
+├── backend/                     # Go 后端服务（Gin + GORM + SQLite，单 exe 打包）
+│   ├── main.go                  # 程序入口（--headless 双模式 + 系统托盘 + 自动端口）
+│   ├── config.json              # 服务配置（本机代理地址等）
+│   ├── internal/                # 核心逻辑（router / handlers / services / models / database / tray）
+│   ├── webui/                   # 内嵌前端（go:embed all:dist，打包时拷入前端 dist/）
+│   └── cmd_debug/               # 调试用命令行小工具（不影响主程序）
+├── src/                         # Vue 3 前端核心源码（Vite + Pinia + Vue Router + TS）
+│   ├── api/                     # 领域 API 封装
+│   ├── components/              # 通用 UI 组件（含 common/ 与 settings/）
+│   ├── composables/             # Vue 组合式函数（toast/modal/手柄/布局）
+│   ├── config/                  # 接口基地址与 token 配置
+│   ├── router/                  # 路由配置 + 登录守卫
+│   ├── stores/                  # Pinia 全局状态（按领域分文件）
+│   ├── types/                   # 数据契约类型
+│   ├── utils/                   # 请求 / 存储 / 错误上报等基础设施
+│   ├── views/                   # 页面级组件（online/offline/抽卡/下载/阅读等）
+│   ├── App.vue                  # 根组件
+│   └── main.ts                  # 前端入口
+├── public/                      # PWA 静态资源（favicon / manifest）
+├── scripts/                     # 构建辅助脚本
+├── plans/                       # 功能开发方案文档
+├── testdata_eh/                 # E 站抓取测试样本（HTML）
+├── 学习笔记/                     # 个人学习笔记（已弃用）
+├── 计划书/                       # 早期规划文档（已弃用）
+├── vite.config.ts / package.json / tsconfig*.json   # 前端工程配置
+├── build-release.bat            # 一键打包单 exe
+└── README.md                    # 项目说明文档
 ```
 
 # 📄 开源协议与致谢

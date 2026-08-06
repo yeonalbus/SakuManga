@@ -48,25 +48,9 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 <img width="2418" height="1288" alt="image" src="https://github.com/user-attachments/assets/b58524a2-9f90-45be-90ca-2bdc5f1a735d" />
 
-## 在线排行榜
-
-<img width="2456" height="1286" alt="image" src="https://github.com/user-attachments/assets/a0c16b33-611a-4828-bbe2-e09113530b65" />
-
-
 ## 下载界面
 
 <img width="2453" height="1286" alt="image" src="https://github.com/user-attachments/assets/241a67a0-23f6-4dcc-92aa-0fbd9c4656cd" />
-
-
-## 本地首页
-
-<img width="2428" height="1288" alt="image" src="https://github.com/user-attachments/assets/34d65fc5-7ea1-4b2f-a3c3-8b74527f0302" />
-
-
-## 抽卡界面
-
-<img width="2424" height="1286" alt="image" src="https://github.com/user-attachments/assets/66b632d1-67c6-4b19-9ee6-19ab42879c12" />
-
 
 ## 阅读界面
 

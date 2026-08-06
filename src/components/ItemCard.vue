@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic, OfflineComic, CardViewMode } from '@/types/comic'
@@ -175,12 +175,54 @@ const normalizedTags = computed<string[]>(() => {
 const defaultCover =
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%2355555a" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
 
-const handleImgError = (e: Event) => {
-  const target = e.target as HTMLImageElement
-  if (target) {
-    target.src = defaultCover
+// 在线封面加载失败自动重试：加载失败不再直接换占位图跳过（否则需整页刷新才恢复）。
+// 反复请求需规避 E 站反爬——采用递增退避 + 随机抖动错峰，避免整页卡片同时重试触发限流；
+// 最多重试 3 次，仍失败才显示占位图。离线封面（本地文件）失败一般即文件缺失，直接占位。
+const COVER_RETRY_DELAYS = [2000, 4000, 6000]
+const MAX_COVER_RETRY = COVER_RETRY_DELAYS.length
+const coverRetryCount = ref(0)
+const coverFailed = ref(false)
+let coverRetryTimer: ReturnType<typeof setTimeout> | null = null
+
+const coverSrc = computed(() => {
+  if (coverFailed.value) return defaultCover
+  const raw = props.comic.coverUrl
+  if (!raw) return defaultCover
+  if (props.comic.source === 'online' && coverRetryCount.value > 0) {
+    // 重试时追加 cache-buster，强制绕过 cover-proxy 的 86400s 浏览器缓存重新请求
+    const sep = raw.includes('?') ? '&' : '?'
+    return `${raw}${sep}retry=${coverRetryCount.value}`
   }
+  return raw
+})
+
+const handleImgError = () => {
+  if (props.comic.source !== 'online' || coverRetryCount.value >= MAX_COVER_RETRY) {
+    coverFailed.value = true
+    return
+  }
+  const delay = COVER_RETRY_DELAYS[coverRetryCount.value] + Math.random() * 1500
+  coverRetryTimer = setTimeout(() => {
+    coverRetryCount.value += 1 // coverSrc 变化 → 触发 <img> 重新加载
+  }, delay)
 }
+
+// comic 切换（列表刷新/翻页复用组件）时重置重试状态，避免继承旧封面的失败结果
+watch(
+  () => props.comic.coverUrl,
+  () => {
+    coverRetryCount.value = 0
+    coverFailed.value = false
+    if (coverRetryTimer) {
+      clearTimeout(coverRetryTimer)
+      coverRetryTimer = null
+    }
+  },
+)
+
+onUnmounted(() => {
+  if (coverRetryTimer) clearTimeout(coverRetryTimer)
+})
 
 // --------------------------------------------------
 // 5. 问题2：日语标题优先双行显示（titleJpn 为空时回退到原 title）
@@ -235,7 +277,7 @@ const comicSourceBadge = computed(() => {
       >
         <!-- 🟢 加上 referrerpolicy="no-referrer" 防止封面防盗链报错 -->
         <img
-          :src="comic.coverUrl"
+          :src="coverSrc"
           :alt="comic.title"
           class="thumb-img"
           loading="lazy"
@@ -299,7 +341,7 @@ const comicSourceBadge = computed(() => {
       <div class="card-cover-wrapper">
         <!-- 🟢 防盗链保护 -->
         <img
-          :src="comic.coverUrl"
+          :src="coverSrc"
           :alt="comic.title"
           class="cover-img"
           loading="lazy"

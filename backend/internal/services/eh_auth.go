@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"SakuHentai/internal/models"
@@ -36,6 +37,12 @@ func GetGalleryURL(account *models.AccountSetting, ehSetting *models.EHSetting, 
 func buildTransport() *http.Transport {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 避免部分代理软件截断/解密 Https 时报证书错误
+		// 连接池参数：同主机并发上限 + 空闲连接复用与回收。没有复用时每个请求都新建
+		// TCP 连接打向代理隧道，并发一高就容易被隧道批量断开（EOF）。
+		MaxConnsPerHost:     6,
+		MaxIdleConnsPerHost: 4,
+		MaxIdleConns:        32,
+		IdleConnTimeout:     90 * time.Second,
 	}
 
 	proxyStr := GetProxyURL()
@@ -50,6 +57,70 @@ func buildTransport() *http.Transport {
 	}
 
 	return transport
+}
+
+// ---------------------------------------------------------------------------
+// 共享 Transport 单例：把「每请求新建连接池」收敛为「进程级复用」。
+//   - getSharedTransport：主站/交互请求共用（列表、详情、阅读、收藏、下载等）；
+//   - getCoverTransport：封面代理专用，与主站隔离，避免下载/列表抢占封面连接配额；
+//   - resetSharedTransports：代理配置变更后置空，下次请求按最新代理重建。
+// ---------------------------------------------------------------------------
+
+var (
+	sharedTransportMu sync.RWMutex
+	sharedTransport   *http.Transport
+)
+
+// getSharedTransport 返回进程级共享的主站 Transport（懒加载）。
+func getSharedTransport() *http.Transport {
+	sharedTransportMu.RLock()
+	t := sharedTransport
+	sharedTransportMu.RUnlock()
+	if t != nil {
+		return t
+	}
+
+	sharedTransportMu.Lock()
+	defer sharedTransportMu.Unlock()
+	if sharedTransport == nil {
+		sharedTransport = buildTransport()
+	}
+	return sharedTransport
+}
+
+var (
+	coverTransportMu sync.RWMutex
+	coverTransport   *http.Transport
+)
+
+// getCoverTransport 返回封面代理专用的共享 Transport。
+// MaxConnsPerHost 取正常并发上限，实际动态并发由 cover_health.go 的应用层闸门收敛。
+func getCoverTransport() *http.Transport {
+	coverTransportMu.RLock()
+	t := coverTransport
+	coverTransportMu.RUnlock()
+	if t != nil {
+		return t
+	}
+
+	coverTransportMu.Lock()
+	defer coverTransportMu.Unlock()
+	if coverTransport == nil {
+		coverTransport = buildTransport()
+		coverTransport.MaxConnsPerHost = coverConcurrencyNormal
+	}
+	return coverTransport
+}
+
+// resetSharedTransports 在代理配置变更后清空共享 Transport，下次请求重建。
+func resetSharedTransports() {
+	sharedTransportMu.Lock()
+	sharedTransport = nil
+	sharedTransportMu.Unlock()
+
+	coverTransportMu.Lock()
+	coverTransport = nil
+	coverTransportMu.Unlock()
 }
 
 // BuildClient 根据凭证与当前代理配置构造 HTTP Client
@@ -81,7 +152,44 @@ func (s *EHService) BuildClient(setting *models.AccountSetting) (*http.Client, e
 	client := &http.Client{
 		Jar:       jar,
 		Timeout:   20 * time.Second,
-		Transport: buildTransport(),
+		Transport: getSharedTransport(),
+	}
+
+	return client, nil
+}
+
+// BuildCoverClient 构造用于封面代理的 HTTP Client（复用共享的封面 Transport）。
+// 与主站客户端隔离：封面请求的并发由 cover_health.go 的动态降级闸门统一收敛，
+// 避免隧道抖动时封面/下载相互抢占连接配额。
+func (s *EHService) BuildCoverClient(setting *models.AccountSetting) (*http.Client, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	domains := []string{"https://e-hentai.org", "https://exhentai.org"}
+	for _, domainStr := range domains {
+		u, _ := url.Parse(domainStr)
+		cookies := []*http.Cookie{
+			{Name: "ipb_member_id", Value: setting.IPBMemberID, Path: "/"},
+			{Name: "ipb_pass_hash", Value: setting.IPBPassHash, Path: "/"},
+			{Name: "inline_set", Value: "ts_l", Path: "/"},
+		}
+		if setting.Igneous != "" {
+			cookies = append(cookies, &http.Cookie{Name: "igneous", Value: setting.Igneous, Path: "/"})
+		}
+		// 注入 SK Cookie，传递用户的个性化/排序状态
+		if setting.SK != "" {
+			cookies = append(cookies, &http.Cookie{Name: "sk", Value: setting.SK, Path: "/"})
+		}
+
+		jar.SetCookies(u, cookies)
+	}
+
+	client := &http.Client{
+		Jar:       jar,
+		Timeout:   20 * time.Second,
+		Transport: getCoverTransport(),
 	}
 
 	return client, nil
@@ -104,7 +212,7 @@ func (s *EHService) TryFetchIgneous(setting *models.AccountSetting) string {
 	client := &http.Client{
 		Jar:       jar,
 		Timeout:   20 * time.Second,
-		Transport: buildTransport(),
+		Transport: getSharedTransport(),
 	}
 
 	req, err := http.NewRequest("GET", "https://exhentai.org/", nil)

@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"log"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -223,23 +227,84 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 		return
 	}
 
-	client, err := h.ehService.BuildClient(account)
+	client, err := h.ehService.BuildCoverClient(account)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 
-	req, err := http.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		c.Status(http.StatusBadRequest)
-		return
+	// E 站图片 CDN 偶发超时/限流（网络错误、5xx、429、403），单次失败直接 502 会让列表封面
+	// 大面积空白且无法自愈。这里对临时性失败做有限次退避重试：
+	//   - 网络层错误 / 5xx / 429 视为临时性，最多重试 3 次，并计入健康统计；
+	//   - 403 可能为凭证失效（永久）或风控限流（临时），仅额外重试 1 次观察，不计入健康；
+	//   - 404/410（图不存在）等确定性 4xx 不重试，不计入健康；
+	// 退避间隔递增并叠加随机抖动错峰；隧道抖动（健康降级）时自动拉长退避并收敛并发，
+	// 避免把隧道连接数打爆（EOF）。
+	const coverMaxRetries = 3
+
+	var (
+		resp    *http.Response
+		lastErr error
+	)
+	for attempt := 0; attempt <= coverMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := services.CoverBackoffFor(attempt) + time.Duration(rand.IntN(400))*time.Millisecond
+			select {
+			case <-time.After(delay):
+			case <-c.Request.Context().Done():
+				return // 客户端已断开，终止重试
+			}
+		}
+
+		req, reqErr := http.NewRequestWithContext(c.Request.Context(), "GET", targetURL, nil)
+		if reqErr != nil {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		req.Header.Set("Referer", "https://exhentai.org/")
+
+		// 并发闸门：超过当前并发上限的请求在此排队（降级时自然错峰，避免打爆隧道）
+		releaseCover := services.AcquireCoverSlot()
+		resp, err = client.Do(req)
+		releaseCover()
+
+		if err != nil {
+			lastErr = err
+			services.RecordCoverResult(false) // 网络层错误（超时/连接重置/EOF）→ 计入健康
+			continue                           // 网络层错误 → 重试
+		}
+
+		// 成功：立即透传
+		if resp.StatusCode == http.StatusOK {
+			services.RecordCoverResult(true)
+			break
+		}
+
+		// 图不存在等确定性 4xx：不重试，且与隧道健康无关，不计入统计
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+			resp.Body.Close()
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("E 站图片返回 403")
+			if attempt >= 1 {
+				c.Status(http.StatusForbidden)
+				return
+			}
+			continue // 403（凭证/风控）非隧道问题，不计入健康统计
+		}
+
+		// 其余（5xx / 429 等）视为临时性 → 计入健康并重试
+		resp.Body.Close()
+		lastErr = fmt.Errorf("E 站图片返回状态码 %d", resp.StatusCode)
+		services.RecordCoverResult(false)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", "https://exhentai.org/")
-
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		log.Printf("[COVER-PROXY] 代理封面失败 url=%s err=%v", targetURL, lastErr)
 		c.Status(http.StatusBadGateway)
 		return
 	}

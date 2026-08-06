@@ -59,6 +59,9 @@ func SetProxyURL(p string) error {
 	// 同步到标签引擎的 globalProxy，保证标签数据（GitHub）下载同样走代理
 	_ = SetGlobalProxy(p)
 
+	// 代理已变更：清空共享 Transport（主站 + 封面），下次请求按新代理重建连接池
+	resetSharedTransports()
+
 	// 写入 config.json
 	cfg := ConfigFile{Proxy: p}
 	data, _ := json.MarshalIndent(cfg, "", "  ")

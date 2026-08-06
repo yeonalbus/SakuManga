@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
@@ -44,6 +44,70 @@ const downloadingId = ref('')
 // 每个漫画的下载方案覆盖：''(按设置) | archive | gallery
 const modeFor = ref<Record<string, string>>({})
 
+// ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
+interface OfflineTaskState {
+  type: 'maintain' | 'update'
+  status: 'idle' | 'running' | 'success' | 'error'
+  phase?: string
+  total: number
+  done: number
+  currentTitle?: string
+  message?: string
+  startedAt?: number
+  finishedAt?: number
+  error?: string
+}
+
+const taskState = ref<OfflineTaskState | null>(null)
+const progressPercent = computed(() => {
+  const s = taskState.value
+  if (!s || s.total <= 0) return 0
+  return Math.min(100, Math.round((s.done / s.total) * 100))
+})
+const phaseText = computed(() => taskState.value?.phase || '')
+const currentTitle = computed(() => taskState.value?.currentTitle || '')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+// 轮询更新检测进度（1s 一次；结束后停止并读取结果、刷新列表）
+const pollProgress = () => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const s = await http<OfflineTaskState>('/offline/updates/check/progress')
+      taskState.value = s
+      if (s.status === 'success' || s.status === 'error') {
+        stopPolling()
+        isChecking.value = false
+        if (s.status === 'error') {
+          toast.error(s.error || '更新检测失败（可能未绑定 E 站账户或网络异常）')
+          return
+        }
+        // 任务完成：读取结果并刷新更新列表
+        try {
+          const result = await http<CheckResult>('/offline/updates/check/result')
+          const found = result?.needsUpdate?.length || 0
+          toast.success(
+            `检测完成：核对 ${result?.checked ?? 0} 个画廊，发现 ${found} 个需要更新` +
+              (result?.parentFound ? `（父画廊关系发现 ${result.parentFound} 个）` : ''),
+          )
+        } catch {
+          // 结果读取失败不阻断刷新
+        }
+        await fetchUpdates()
+      }
+    } catch {
+      // 网络抖动忽略，继续轮询
+    }
+  }, 1000)
+}
+
 const fetchUpdates = async () => {
   isLoading.value = true
   try {
@@ -58,26 +122,19 @@ const fetchUpdates = async () => {
   }
 }
 
-// 联网核对全部离线画廊（每个画廊约 1.2s，耗时较长 → 用 20 分钟超时）
+// 联网核对全部离线画廊（异步任务：接口立即返回，随后轮询进度）
 const runCheck = async () => {
   if (isChecking.value) return
   isChecking.value = true
-  toast.info('正在联网核对离线画廊更新...（每个画廊约 1.2 秒，请耐心等待）')
+  taskState.value = null
   try {
-    const result = await http<CheckResult>('/offline/updates/check', {
+    await http<{ started: boolean }>('/offline/updates/check', {
       method: 'POST',
-      signal: AbortSignal.timeout(20 * 60 * 1000),
     })
-    const found = result.needsUpdate?.length || 0
-    toast.success(
-      `检测完成：核对 ${result.checked} 个画廊，发现 ${found} 个需要更新` +
-        (result.parentFound > 0 ? `（父画廊关系发现 ${result.parentFound} 个）` : ''),
-    )
-    await fetchUpdates()
+    pollProgress()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
-    toast.error(msg || '更新检测失败（可能未绑定 E 站账户或网络异常）')
-  } finally {
+    toast.error(msg || '启动更新检测失败（可能未绑定 E 站账户或网络异常）')
     isChecking.value = false
   }
 }
@@ -133,6 +190,7 @@ const onCoverError = (id: string) => {
 const isDownloading = computed(() => downloadingId.value !== '')
 
 onMounted(fetchUpdates)
+onUnmounted(stopPolling)
 </script>
 
 <template>
@@ -160,11 +218,23 @@ onMounted(fetchUpdates)
 
     <div v-if="isChecking" class="checking-banner">
       <span class="spinner"></span>
-      <div>
-        <p class="checking-title">正在联网核对离线画廊更新</p>
-        <p class="checking-sub">
-          请求间隔约 1.2 秒以规避 E 站限流，画廊较多时可能需要数分钟，请勿关闭页面。
+      <div class="checking-info">
+        <p class="checking-title">
+          {{ phaseText || '正在联网核对离线画廊更新' }}
+          <span v-if="taskState && taskState.total > 0" class="checking-percent"
+            >{{ progressPercent }}%</span
+          >
         </p>
+        <div v-if="taskState && taskState.total > 0" class="progress-track">
+          <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+        </div>
+        <p class="checking-sub">
+          <template v-if="taskState && taskState.total > 0">
+            进度 {{ taskState.done }} / {{ taskState.total }} · {{ phaseText }}
+          </template>
+          <template v-else>正在启动检测任务...</template>
+        </p>
+        <p v-if="currentTitle" class="checking-current">📖 {{ currentTitle }}</p>
       </div>
     </div>
 
@@ -352,6 +422,36 @@ onMounted(fetchUpdates)
   color: #9bb6c8;
   margin: 3px 0 0 0;
   font-size: 0.78rem;
+}
+.checking-info {
+  flex: 1;
+  min-width: 0;
+}
+.checking-percent {
+  margin-left: 8px;
+  color: #7ec8ff;
+  font-weight: 700;
+}
+.checking-current {
+  color: #d7e6f0;
+  margin: 6px 0 0 0;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.progress-track {
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #007acc, #4cc3ff);
+  border-radius: 4px;
+  transition: width 0.3s ease;
 }
 
 .spinner {

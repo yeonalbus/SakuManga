@@ -189,9 +189,13 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 离线更新检测 + 维护查重
 		api.POST("/offline/updates/check", offlineHandler.CheckOfflineUpdates)
+		api.GET("/offline/updates/check/progress", offlineHandler.GetCheckUpdatesProgress)
+		api.GET("/offline/updates/check/result", offlineHandler.GetCheckUpdatesResult)
 		api.GET("/offline/updates", offlineHandler.ListOfflineUpdates)
 		api.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
 		api.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
+		api.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
+		api.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)
 		api.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 
 		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置）───

@@ -40,6 +40,16 @@ type UpdateCheckResult struct {
 //
 // 联网核对会逐个请求在线详情，为避免触发限流，请求间隔 ~1.2s。
 func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error) {
+	return checkUpdatesWithProgress(db, ehService, nil)
+}
+
+// CheckUpdatesWithProgress 带进度回调的更新检测（问题3：长任务进度可感知，供 handler 异步任务使用）
+func CheckUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*UpdateCheckResult, error) {
+	return checkUpdatesWithProgress(db, ehService, onProgress)
+}
+
+// checkUpdatesWithProgress 带进度回调的更新检测（问题3：长任务进度可感知）
+func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*UpdateCheckResult, error) {
 	if db == nil || ehService == nil {
 		return nil, fmt.Errorf("非法参数：db / ehService 不能为空")
 	}
@@ -64,10 +74,23 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 
 	log.Printf("%s [update] 开始更新检测：共 %d 个离线漫画（含 gid）", dlLogTag, len(comics))
 
+	// 问题3：联网核对进度（含 gid 的漫画数）
+	netTotal := 0
+	for i := range comics {
+		if comics[i].GID != "" {
+			netTotal++
+		}
+	}
+	netDone := 0
+
 	for i := range comics {
 		c := &comics[i]
 		if c.GID == "" {
 			continue
+		}
+		netDone++
+		if onProgress != nil {
+			onProgress(netDone, netTotal, c.Title, "在线更新核对")
 		}
 		if _, ok := gidMap[c.GID]; !ok {
 			gidMap[c.GID] = c
@@ -256,6 +279,16 @@ type DedupResult struct {
 //     parent/child 关系为空，需联网核对详情页；ehService 为空或未绑账号时退化为纯本地）
 //   - 文件夹内容签名相同（无 gid/hash/parent 元数据的复制型重复）→ 删除复制项（问题3修复）
 func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
+	return maintainDedupWithProgress(db, ehService, nil)
+}
+
+// MaintainDedupWithProgress 带进度回调的维护查重（问题3：长任务进度可感知，供 handler 异步任务使用）
+func MaintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*DedupResult, error) {
+	return maintainDedupWithProgress(db, ehService, onProgress)
+}
+
+// maintainDedupWithProgress 带进度回调的本地维护查重（问题3：长任务进度可感知）
+func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*DedupResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("非法参数：db 不能为空")
 	}
@@ -309,12 +342,24 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 
 	// ── 2. 归档文件 hash 查重（仅 .zip/.cbz 等归档）──
 	hashGroups := map[string][]models.OfflineComic{}
-	for _, c := range comics {
+	hashTotal := 0
+	for i := range comics {
+		if comics[i].SourceMode == "archive" && comics[i].LocalPath != "" && IsArchive(comics[i].LocalPath) {
+			hashTotal++
+		}
+	}
+	hashDone := 0
+	for i := range comics {
+		c := &comics[i]
 		if c.SourceMode != "archive" || c.LocalPath == "" {
 			continue
 		}
 		if !IsArchive(c.LocalPath) {
 			continue
+		}
+		hashDone++
+		if onProgress != nil {
+			onProgress(hashDone, hashTotal, c.Title, "归档 Hash 计算")
 		}
 		h, err := hashFile(c.LocalPath)
 		if err != nil {
@@ -322,8 +367,8 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 			continue
 		}
 		c.FileHash = h
-		_ = db.Model(&c).Update("file_hash", h)
-		hashGroups[h] = append(hashGroups[h], c)
+		_ = db.Model(c).Update("file_hash", h)
+		hashGroups[h] = append(hashGroups[h], *c)
 	}
 	for _, group := range hashGroups {
 		if len(group) < 2 {
@@ -359,10 +404,24 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 		account := LoadAdminAccount(db)
 		if account.IPBMemberID != "" {
 			ehSetting := loadEHSetting(db, LoadAdminUserID(db))
+			// 问题3：在线父子关系发现阶段进度（联网抓取最长，逐本限流 1.2s）
+			fetchTotal := 0
 			for i := range comics {
 				c := &comics[i]
 				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] {
 					continue
+				}
+				fetchTotal++
+			}
+			fetchDone := 0
+			for i := range comics {
+				c := &comics[i]
+				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] {
+					continue
+				}
+				fetchDone++
+				if onProgress != nil {
+					onProgress(fetchDone, fetchTotal, c.Title, "在线父子关系发现")
 				}
 				detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 				if err != nil || detail == nil {
@@ -438,6 +497,7 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 		//   递归收集文件夹内所有图片的「相对路径|大小」生成内容签名，签名相同 = 内容完全一致。
 		//   签名缓存进 file_hash（与规则2的归档 hash 互斥：仅 gallery 形态使用）。
 		sigGroups := map[string][]models.OfflineComic{}
+		sigTotal := 0
 		for i := range comics {
 			c := &comics[i]
 			if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
@@ -445,6 +505,21 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 			}
 			if removeSet[c.ID] {
 				continue
+			}
+			sigTotal++
+		}
+		sigDone := 0
+		for i := range comics {
+			c := &comics[i]
+			if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
+				continue
+			}
+			if removeSet[c.ID] {
+				continue
+			}
+			sigDone++
+			if onProgress != nil {
+				onProgress(sigDone, sigTotal, c.Title, "文件夹内容签名")
 			}
 			// 快路径：已有签名且文件夹目录 mtime 未超过已记录的最新文件 mtime → 内容未变，直接复用
 			if c.FileHash != "" && !c.FileModifiedAt.IsZero() {
@@ -461,7 +536,7 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 			if c.FileHash != sig || maxMod.After(c.FileModifiedAt) {
 				c.FileHash = sig
 				c.FileModifiedAt = maxMod
-				_ = db.Model(&c).Updates(map[string]interface{}{"file_hash": sig, "file_modified_at": maxMod})
+				_ = db.Model(c).Updates(map[string]interface{}{"file_hash": sig, "file_modified_at": maxMod})
 			}
 			sigGroups[sig] = append(sigGroups[sig], *c)
 		}

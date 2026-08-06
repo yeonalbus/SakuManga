@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 
@@ -37,16 +37,80 @@ const coverFailed = ref<Record<string, boolean>>({})
 // 批量删除：多选“建议删除”项后一次提交，避免反复“删除→刷新”
 const selectedIds = ref<string[]>([])
 
-// 拉取查重结果
-const runMaintain = async () => {
-  isScanning.value = true
+// ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
+interface OfflineTaskState {
+  type: 'maintain' | 'update'
+  status: 'idle' | 'running' | 'success' | 'error'
+  phase?: string
+  total: number
+  done: number
+  currentTitle?: string
+  message?: string
+  startedAt?: number
+  finishedAt?: number
+  error?: string
+}
+
+const taskState = ref<OfflineTaskState | null>(null)
+const progressPercent = computed(() => {
+  const s = taskState.value
+  if (!s || s.total <= 0) return 0
+  return Math.min(100, Math.round((s.done / s.total) * 100))
+})
+const phaseText = computed(() => taskState.value?.phase || '')
+const currentTitle = computed(() => taskState.value?.currentTitle || '')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+// 拉取查重结果（任务完成后调用）
+const loadResult = async () => {
   try {
-    const data = await http<DedupResultDTO>('/offline/maintain')
-    items.value = data.items || []
+    const data = await http<DedupResultDTO>('/offline/maintain/result')
+    items.value = data?.items || []
+  } catch {
+    // 结果暂未就绪，交给轮询下一轮
+  }
+}
+
+// 轮询维护任务进度（1s 一次；结束后停止并拉取结果）
+const pollProgress = () => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const s = await http<OfflineTaskState>('/offline/maintain/progress')
+      taskState.value = s
+      if (s.status === 'success' || s.status === 'error') {
+        stopPolling()
+        isScanning.value = false
+        if (s.status === 'error') {
+          toast.error(s.error || '维护查重失败')
+          return
+        }
+        await loadResult()
+      }
+    } catch {
+      // 网络抖动忽略，继续轮询
+    }
+  }, 1000)
+}
+
+// 异步启动维护查重：接口立即返回，随后轮询进度
+const runMaintain = async () => {
+  if (isScanning.value) return
+  isScanning.value = true
+  taskState.value = null
+  try {
+    await http<{ started: boolean }>('/offline/maintain')
+    pollProgress()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
-    toast.error(msg || '查重失败，请检查后端是否运行')
-  } finally {
+    toast.error(msg || '启动查重失败，请检查后端是否运行')
     isScanning.value = false
   }
 }
@@ -81,8 +145,9 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
     toast.success(
       deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
     )
-    // 刷新查重结果（删除后保留/删除关系会变化）
-    await runMaintain()
+    // 本地过滤该项（保留/删除关系在结果里已固定，无需重新全盘扫描）
+    items.value = items.value.filter((i) => i.comic.id !== c.id)
+    selectedIds.value = selectedIds.value.filter((id) => id !== c.id)
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '删除失败')
@@ -140,8 +205,8 @@ const removeSelected = async (deleteFile: boolean) => {
         : `已批量删除 ${deleted} 项记录（保留本地文件）`,
     )
     selectedIds.value = []
-    // 刷新查重结果（删除后保留/删除关系会变化）
-    await runMaintain()
+    // 本地过滤已删除项（保留/删除关系在结果里已固定，无需重新全盘扫描）
+    items.value = items.value.filter((i) => !ids.includes(i.comic.id))
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '批量删除失败')
@@ -172,6 +237,7 @@ const formatDate = (iso?: string) => {
 const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
 
 onMounted(runMaintain)
+onUnmounted(stopPolling)
 </script>
 
 <template>
@@ -196,9 +262,23 @@ onMounted(runMaintain)
 
     <div v-if="isScanning" class="scanning-banner">
       <span class="spinner"></span>
-      <div>
-        <p class="scanning-title">正在扫描本地书库查重...</p>
-        <p class="scanning-sub">对归档文件计算 Hash 可能需要一些时间，请稍候。</p>
+      <div class="scanning-info">
+        <p class="scanning-title">
+          {{ phaseText || '正在扫描本地书库查重...' }}
+          <span v-if="taskState && taskState.total > 0" class="scanning-percent"
+            >{{ progressPercent }}%</span
+          >
+        </p>
+        <div v-if="taskState && taskState.total > 0" class="progress-track">
+          <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+        </div>
+        <p class="scanning-sub">
+          <template v-if="taskState && taskState.total > 0">
+            进度 {{ taskState.done }} / {{ taskState.total }} · {{ phaseText }}
+          </template>
+          <template v-else>正在启动维护任务...</template>
+        </p>
+        <p v-if="currentTitle" class="scanning-current">📖 {{ currentTitle }}</p>
       </div>
     </div>
 
@@ -438,6 +518,36 @@ onMounted(runMaintain)
   color: #9bb6c8;
   margin: 3px 0 0 0;
   font-size: 0.78rem;
+}
+.scanning-info {
+  flex: 1;
+  min-width: 0;
+}
+.scanning-percent {
+  margin-left: 8px;
+  color: #7ec8ff;
+  font-weight: 700;
+}
+.scanning-current {
+  color: #d7e6f0;
+  margin: 6px 0 0 0;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.progress-track {
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #007acc, #4cc3ff);
+  border-radius: 4px;
+  transition: width 0.3s ease;
 }
 
 .spinner {

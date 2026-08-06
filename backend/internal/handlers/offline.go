@@ -41,20 +41,39 @@ func NewOfflineHandler(db *gorm.DB, ehService *services.EHService, manager *serv
 // 联网逐画廊核对在线详情（限流退避内置），可能耗时较长，由前端异步调用。
 // 检测内部固定使用管理员账号（后台维护任务），用户仅作为触发入口。
 func (h *OfflineHandler) CheckOfflineUpdates(c *gin.Context) {
-	result, err := services.CheckUpdates(h.db, h.ehService)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !services.StartOfflineTask(services.OfflineTaskUpdate) {
+		c.JSON(http.StatusConflict, gin.H{"error": "已有离线维护任务正在运行，请稍后再试"})
 		return
 	}
 
-	// 自动更新画廊（autoUpdateGallery）：检测到新版后立即按所选方案入队下载
-	if h.manager.GetSettings().AutoUpdateGallery {
-		enqueued, skipped := h.autoEnqueueUpdates(result)
-		log.Printf("%s [update] 检测完成：需要更新 %d 个，自动入队 %d 个，跳过 %d 个（autoUpdateGallery=true）",
-			dlLogTag, len(result.NeedsUpdate), enqueued, skipped)
-	}
+	go func() {
+		result, err := services.CheckUpdatesWithProgress(h.db, h.ehService, services.OfflineUpdateProgressSink)
+		if err != nil {
+			services.FinishOfflineTask(err)
+			return
+		}
+		services.StoreUpdateCheckResult(result)
 
-	c.JSON(http.StatusOK, result)
+		// 自动更新画廊（autoUpdateGallery）：检测到新版后立即按所选方案入队下载
+		if h.manager.GetSettings().AutoUpdateGallery {
+			enqueued, skipped := h.autoEnqueueUpdates(result)
+			log.Printf("%s [update] 检测完成：需要更新 %d 个，自动入队 %d 个，跳过 %d 个（autoUpdateGallery=true）",
+				dlLogTag, len(result.NeedsUpdate), enqueued, skipped)
+		}
+		services.FinishOfflineTask(nil)
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"started": true})
+}
+
+// GetCheckUpdatesProgress 更新检测进度轮询 GET /api/v1/offline/updates/check/progress
+func (h *OfflineHandler) GetCheckUpdatesProgress(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetOfflineTaskProgress())
+}
+
+// GetCheckUpdatesResult 更新检测结果读取 GET /api/v1/offline/updates/check/result
+func (h *OfflineHandler) GetCheckUpdatesResult(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetUpdateCheckResult())
 }
 
 // ListOfflineUpdates 列出需要更新的漫画 GET /api/v1/offline/updates
@@ -187,14 +206,39 @@ func (h *OfflineHandler) DownloadUpdate(c *gin.Context) {
 // 维护查重
 // ─────────────────────────────────────────────────────────────
 
-// GetMaintainDedup 运行维护查重 GET /api/v1/offline/maintain
+// GetMaintainDedup 异步启动维护查重 GET /api/v1/offline/maintain
+//
+// 维护查重逐画廊联网核对，可能耗时数十分钟，改为异步任务 + 进度轮询：
+//   1. 本接口立即返回 202（启动结果）；
+//   2. 前端轮询 GET /offline/maintain/progress 获取进度；
+//   3. 完成后前端读取 GET /offline/maintain/result 获取结果。
 func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
-	result, err := services.MaintainDedup(h.db, h.ehService)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if !services.StartOfflineTask(services.OfflineTaskMaintain) {
+		c.JSON(http.StatusConflict, gin.H{"error": "已有离线维护任务正在运行，请稍后再试"})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+
+	go func() {
+		result, err := services.MaintainDedupWithProgress(h.db, h.ehService, services.OfflineMaintainProgressSink)
+		if err != nil {
+			services.FinishOfflineTask(err)
+			return
+		}
+		services.StoreMaintainDedupResult(result)
+		services.FinishOfflineTask(nil)
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"started": true})
+}
+
+// GetMaintainProgress 维护查重进度轮询 GET /api/v1/offline/maintain/progress
+func (h *OfflineHandler) GetMaintainProgress(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetOfflineTaskProgress())
+}
+
+// GetMaintainResult 维护查重结果读取 GET /api/v1/offline/maintain/result
+func (h *OfflineHandler) GetMaintainResult(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetMaintainDedupResult())
 }
 
 // removeDedupReq 删除重复项请求体

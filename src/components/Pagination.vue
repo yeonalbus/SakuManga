@@ -241,4 +241,12 @@ const showRightEllipsis = computed(() => {
 .jump-input:focus {
   border-bottom-color: #00a896;
 }
+
+/* 📱 窄屏适配：隐藏 ±10/±20 快捷跳页与首页/尾页，减少按钮换行堆叠 */
+@media (max-width: 767px) {
+  .offset,
+  .nav-btn {
+    display: none;
+  }
+}
 </style>

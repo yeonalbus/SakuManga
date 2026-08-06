@@ -21,6 +21,32 @@ export type ReadDirection =
 export type PageFit = 'contain' | 'cover' | 'width'
 
 /** 阅读器设置项集合 */
+/**
+ * Gamepad 标准映射按键索引（standard mapping）
+ * 8BitDo Micro：A/B + D-Pad + Start/Select，无摇杆/肩键。
+ * 0:A  1:B  2:X  3:Y  4:LB  5:RB  6:LT  7:RT
+ * 8:Select  9:Start  10:L3  11:R3
+ * 12:D-Pad上  13:D-Pad下  14:D-Pad左  15:D-Pad右
+ */
+export const GAMEPAD_BUTTONS = {
+  A: 0,
+  B: 1,
+  X: 2,
+  Y: 3,
+  LB: 4,
+  RB: 5,
+  LT: 6,
+  RT: 7,
+  SELECT: 8,
+  START: 9,
+  L3: 10,
+  R3: 11,
+  DPAD_UP: 12,
+  DPAD_DOWN: 13,
+  DPAD_LEFT: 14,
+  DPAD_RIGHT: 15,
+} as const
+
 export interface ReaderSettings {
   // ── 阅读方向 / 页面布局 ──
   readDirection: ReadDirection
@@ -50,6 +76,12 @@ export interface ReaderSettings {
   brightnessValue: number // 屏幕亮度 (20-100)
   allowDoubleTapZoom: boolean // 允许双击放大图片
   allowSingleClickDragZoom: boolean // 允许单击后拖拽放大图片
+
+  // ── 游戏手柄 ──
+  enableGamepad: boolean // 启用手柄控制
+  gamepadNextKeys: number[] // 下一页按键索引（可多个：D-Pad右 / A）
+  gamepadPrevKeys: number[] // 上一页按键索引（可多个：D-Pad左 / B）
+  gamepadToggleKeys: number[] // 切换设置菜单按键索引（Start / Select）
 
   // ── 性能 / 扩展 ──
   preloadOnline: number // 预加载图片数量(在线模式)
@@ -84,6 +116,11 @@ const defaultSettings: ReaderSettings = {
   brightnessValue: 100,
   allowDoubleTapZoom: true,
   allowSingleClickDragZoom: false,
+
+  enableGamepad: true,
+  gamepadNextKeys: [GAMEPAD_BUTTONS.DPAD_RIGHT, GAMEPAD_BUTTONS.A],
+  gamepadPrevKeys: [GAMEPAD_BUTTONS.DPAD_LEFT, GAMEPAD_BUTTONS.B],
+  gamepadToggleKeys: [GAMEPAD_BUTTONS.START, GAMEPAD_BUTTONS.SELECT],
 
   preloadOnline: 10,
   preloadOffline: 10,

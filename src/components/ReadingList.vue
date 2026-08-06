@@ -423,4 +423,16 @@ const handleQuickImport = async () => {
 .fade-leave-to {
   opacity: 0;
 }
+
+/* 📱 窄屏适配：右侧抽屉占满宽度，触发器只显示图标 */
+@media (max-width: 767px) {
+  .right-drawer {
+    width: 100vw;
+    max-width: 100vw;
+    padding-bottom: var(--safe-bottom);
+  }
+  .trigger-btn .text {
+    display: none;
+  }
+}
 </style>

@@ -95,4 +95,15 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
   display: flex;
   justify-content: center;
 }
+
+/* 📱 窄屏适配：顶栏给汉堡按钮让位，并适配 iOS 安全区 */
+@media (max-width: 767px) {
+  .top-bar {
+    height: calc(56px + var(--safe-top));
+    padding-top: var(--safe-top);
+    padding-left: calc(56px + var(--safe-left));
+    padding-right: calc(12px + var(--safe-right));
+    gap: 6px;
+  }
+}
 </style>

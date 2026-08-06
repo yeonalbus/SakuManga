@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { getNextComicInQueue } from '@/stores/readingStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
+import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic } from '@/types/comic'
 import { fetchOfflineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
@@ -674,6 +675,83 @@ const handleKeyDown = (e: KeyboardEvent) => {
   }
 }
 
+// 5.1 物理方向翻页：手柄 / 滑动翻页共用
+// 「物理方向」语义与键盘 ArrowRight/ArrowLeft 一致，自动兼容 RTL 反转与 Webtoon 滚动
+const turnByPhysicalDirection = (dir: 'next' | 'prev') => {
+  if (isWebtoon.value) {
+    if (dir === 'next') handleNextPage()
+    else handlePrevPage()
+    return
+  }
+  if (effectiveRTL.value) {
+    if (dir === 'next') handlePrevPage()
+    else handleNextPage()
+    return
+  }
+  if (dir === 'next') handleNextPage()
+  else handlePrevPage()
+}
+
+// 5.2 手柄绑定（8BitDo Micro：D-Pad右/A=下一页，D-Pad左/B=上一页，Start/Select=设置）
+const { isConnected: gamepadConnected, gamepadName } = useGamepad({
+  onNext: () => turnByPhysicalDirection('next'),
+  onPrev: () => turnByPhysicalDirection('prev'),
+  onToggle: () => {
+    showSettings.value = !showSettings.value
+  },
+})
+
+// 5.3 触摸滑动翻页（基础版：横向位移阈值 + 与点击/拖拽做手势仲裁）
+const canvasStage = ref<HTMLElement | null>(null)
+const SWIPE_THRESHOLD = 60 // 横向位移阈值 (px)
+let touchStart: { x: number; y: number } | null = null
+let suppressNextClick = false
+
+const onTouchStart = (e: TouchEvent) => {
+  const t = e.changedTouches[0]
+  if (!t) return
+  touchStart = { x: t.clientX, y: t.clientY }
+}
+
+const onTouchMove = (e: TouchEvent) => {
+  // 非 Webtoon 模式：横向意图明显时阻止默认（防浏览器后退/手势干扰）
+  if (isWebtoon.value || !touchStart) return
+  const t = e.changedTouches[0]
+  if (!t) return
+  const dx = t.clientX - touchStart.x
+  const dy = t.clientY - touchStart.y
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+    e.preventDefault()
+  }
+}
+
+const onTouchEnd = (e: TouchEvent) => {
+  if (!touchStart) return
+  const t = e.changedTouches[0]
+  const dx = t ? t.clientX - touchStart.x : 0
+  const dy = t ? t.clientY - touchStart.y : 0
+  touchStart = null
+  // 仲裁：横向位移须超过阈值，且明显大于纵向（排除滚动/点按）
+  if (Math.abs(dx) < SWIPE_THRESHOLD) return
+  if (Math.abs(dx) < Math.abs(dy) * 1.2) return
+  // 抑制随后的 click（防热区点击再翻一页 / 误切换控制条）
+  suppressNextClick = true
+  setTimeout(() => {
+    suppressNextClick = false
+  }, 350)
+  if (dx < 0)
+    turnByPhysicalDirection('next') // 向左滑 = 下一页方向
+  else turnByPhysicalDirection('prev') // 向右滑 = 上一页方向
+}
+
+const onCaptureClick = (e: Event) => {
+  if (suppressNextClick) {
+    e.stopPropagation()
+    e.preventDefault()
+    suppressNextClick = false
+  }
+}
+
 // 6. 双击放大（受 allowDoubleTapZoom 设置控制）
 const handleDoubleClick = () => {
   if (!readerSettings.allowDoubleTapZoom) return
@@ -748,11 +826,23 @@ onMounted(() => {
   showThumbnailsPanel.value = false
   updateStatusInfo()
   clockTimer = setInterval(updateStatusInfo, 30000) // 30秒更新一次状态
+  // 滑动翻页：非 passive 监听 touchmove 以允许 preventDefault
+  const stage = canvasStage.value
+  if (stage) {
+    stage.addEventListener('touchmove', onTouchMove, { passive: false })
+  }
+  // 捕获阶段拦截滑动产生的误点击
+  document.addEventListener('click', onCaptureClick, true)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('resize', handleResize)
+  const stage = canvasStage.value
+  if (stage) {
+    stage.removeEventListener('touchmove', onTouchMove)
+  }
+  document.removeEventListener('click', onCaptureClick, true)
   if (autoTurnTimer) clearInterval(autoTurnTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (wakeLockSentinel) wakeLockSentinel.release()
@@ -811,6 +901,13 @@ watch(
         </div>
 
         <div class="status-widgets">
+          <span
+            v-if="gamepadConnected"
+            class="widget-item gamepad-indicator"
+            title="游戏手柄已连接"
+          >
+            🎮<span class="gamepad-name">{{ gamepadName }}</span>
+          </span>
           <span v-if="readerSettings.showClock" class="widget-item">🕒 {{ currentTime }}</span>
           <span v-if="readerSettings.showBattery" class="widget-item"> 🔋 {{ batteryLevel }} </span>
           <span v-if="readerSettings.showProgress" class="page-indicator"
@@ -876,12 +973,15 @@ watch(
     <!-- 📄 单页 / 双页模式 -->
     <template v-else>
       <div
+        ref="canvasStage"
         class="canvas-stage"
         @click="handleStageClick"
         @mousedown="onCanvasMouseDown"
         @mousemove="onCanvasMouseMove"
         @mouseup="onCanvasMouseUp"
         @mouseleave="onCanvasMouseLeave"
+        @touchstart="onTouchStart"
+        @touchend="onTouchEnd"
       >
         <div class="click-zone top-zone" @click.stop="handleMidClick" title="打开阅读设置"></div>
         <div
@@ -1205,6 +1305,20 @@ watch(
   padding: 2px 6px;
 }
 
+/* 手柄连接指示器 */
+.gamepad-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4ade80;
+}
+.gamepad-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 主画布及图片缩放类 */
 .canvas-stage {
   flex: 1;
@@ -1214,6 +1328,8 @@ watch(
   position: relative;
   width: 100%;
   height: 100%;
+  /* 纵向平移交给浏览器，横向滑动由 JS 手势接管 */
+  touch-action: pan-y;
 }
 
 .click-zone {
@@ -1728,5 +1844,50 @@ watch(
   background: #007acc;
   border-color: #007acc;
   color: #fff;
+}
+
+/* 📱 窄屏适配：安全区 + 压缩 UI（手机/iPad 竖屏） */
+@media (max-width: 767px) {
+  /* 顶部/底部浮动条避开刘海屏与 Home 条 */
+  .floating-header {
+    padding: calc(10px + var(--safe-top)) 12px 10px;
+  }
+  .floating-footer {
+    padding: 10px 12px calc(10px + var(--safe-bottom));
+  }
+  /* 作品标题超长截断，避免挤压状态栏 */
+  .header-info .comic-title {
+    max-width: 36vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-widgets {
+    gap: 6px;
+  }
+  /* 点击热区上下各 72px 太占屏，收窄到 56px */
+  .top-zone,
+  .bottom-zone {
+    height: 56px;
+  }
+  .prev-zone,
+  .mid-zone,
+  .next-zone {
+    top: 56px;
+    bottom: 56px;
+  }
+  /* 阅读器内部设置抽屉占满屏宽 */
+  .settings-drawer {
+    width: 100vw;
+    max-width: 100vw;
+    padding: 20px 16px calc(20px + var(--safe-bottom));
+  }
+  /* 缩略图进度条与 Webtoon 滚动容器适配底部安全区 */
+  .thumb-strip {
+    padding-bottom: var(--safe-bottom);
+  }
+  .webtoon-container {
+    padding-bottom: var(--safe-bottom);
+  }
 }
 </style>

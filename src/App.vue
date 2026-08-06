@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ModeToggle from '@/components/ModeToggle.vue'
 import OnlineSidebar from '@/components/OnlineSidebar.vue' // 引入两个侧边栏组件
@@ -15,6 +15,18 @@ import { useModeStore } from '@/stores/modeStore'
 const tagStore = useTagStore()
 const userStore = useUserStore()
 const modeStore = useModeStore()
+
+// 🍔 窄屏汉堡抽屉状态（<768px 生效；桌面端侧边栏常驻，汉堡按钮隐藏）
+const isSidebarOpen = ref(false)
+const closeSidebar = () => {
+  isSidebarOpen.value = false
+}
+const handleResize = () => {
+  // 回到宽屏时强制收起抽屉，避免残留遮罩层挡住内容
+  if (window.innerWidth >= 768) isSidebarOpen.value = false
+}
+onMounted(() => window.addEventListener('resize', handleResize))
+onUnmounted(() => window.removeEventListener('resize', handleResize))
 
 onMounted(() => {
   // 🚀 应用启动时异步获取翻译字典
@@ -45,7 +57,26 @@ watch(
     <GlobalModal />
   </div>
 
-  <div v-if="userStore.isAuthenticated" class="app-container">
+  <div
+    v-if="userStore.isAuthenticated"
+    class="app-container"
+    :class="{ 'sidebar-open': isSidebarOpen }"
+  >
+    <!-- 🍔 汉堡按钮（窄屏显示，fixed 悬浮于顶栏左侧；桌面端隐藏） -->
+    <button
+      class="menu-toggle"
+      :class="{ active: isSidebarOpen }"
+      aria-label="打开菜单"
+      @click="isSidebarOpen = !isSidebarOpen"
+    >
+      <span class="menu-toggle-bar"></span>
+      <span class="menu-toggle-bar"></span>
+      <span class="menu-toggle-bar"></span>
+    </button>
+
+    <!-- 抽屉遮罩（窄屏抽屉打开时显示，点击关闭） -->
+    <div v-if="isSidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
+
     <!-- 左侧导航栏（错误边界包裹：单区渲染错误不影响其他区域） -->
     <ErrorBoundary>
       <aside class="sidebar">
@@ -54,8 +85,8 @@ watch(
           <ModeToggle />
         </div>
 
-        <!-- 导航菜单 -->
-        <nav class="nav-menu">
+        <!-- 导航菜单：点击任意链接后自动收起抽屉（窄屏） -->
+        <nav class="nav-menu" @click="closeSidebar">
           <!-- 在线/离线菜单，用 v-if / v-else 切换对应的组件 -->
           <OnlineSidebar v-if="modeStore.isOnline" />
           <OfflineSidebar v-else />
@@ -113,11 +144,29 @@ watch(
   --app-accent: #0066b8;
 }
 
+/* 响应式断点与 iOS 安全区变量（供全局各组件参考） */
+:root {
+  /* 断点：<768 为平板/手机（侧边栏收进抽屉）；<480 为手机竖屏 */
+  --bp-tablet: 768px;
+  --bp-phone: 480px;
+  /* 安全区：iOS 刘海屏 / 底部 Home 条；非 iOS 或无安全区时为 0 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
 /* 全局基础重置 */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+/* 移动端防误触：禁止双击缩放/长按选择，交给组件自行处理 */
+html,
+body {
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
 }
 body {
   background-color: var(--app-bg);
@@ -131,6 +180,8 @@ body {
 .app-container {
   display: flex;
   height: 100vh;
+  /* 移动端动态视口：避免浏览器地址栏收起/展开导致布局跳动 */
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -143,6 +194,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 20px 10px;
+  flex-shrink: 0;
 }
 
 /* 让 Logo 标题和按钮在同一行并排显示 */
@@ -151,7 +203,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 5px 20px 5px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border);
   margin-bottom: 15px;
 }
 
@@ -183,11 +235,11 @@ body {
   transition: all 0.2s;
 }
 .nav-menu a:hover {
-  background-color: #2a2a2a;
-  color: #fff;
+  background-color: var(--app-surface-hover);
+  color: var(--app-fg);
 }
 .nav-menu a.router-link-active {
-  background-color: #007acc;
+  background-color: var(--app-accent);
   color: #fff;
   font-weight: bold;
 }
@@ -198,7 +250,9 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  min-width: 0; /* 允许内部内容收缩，避免溢出 */
 }
 
 /* 顶部操作栏 */
@@ -226,5 +280,90 @@ body {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ─────────────────────────────────────────
+   🍔 汉堡按钮：默认隐藏，仅窄屏显示
+   ───────────────────────────────────────── */
+.menu-toggle {
+  display: none;
+}
+.menu-toggle-bar {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: var(--app-fg);
+  border-radius: 2px;
+  transition:
+    transform 0.3s ease,
+    opacity 0.3s ease;
+}
+.menu-toggle.active .menu-toggle-bar:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+.menu-toggle.active .menu-toggle-bar:nth-child(2) {
+  opacity: 0;
+}
+.menu-toggle.active .menu-toggle-bar:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* ─────────────────────────────────────────
+   📱 窄屏（<768px）：侧边栏收进左侧抽屉
+   ───────────────────────────────────────── */
+@media (max-width: 767px) {
+  .menu-toggle {
+    display: flex;
+    position: fixed;
+    top: calc(8px + var(--safe-top));
+    left: calc(10px + var(--safe-left));
+    z-index: 70;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 侧边栏：从常驻改为 fixed 抽屉，默认藏在屏幕左侧外 */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    z-index: 65;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    padding-top: calc(20px + var(--safe-top));
+    padding-bottom: calc(20px + var(--safe-bottom));
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.4);
+  }
+  .app-container.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  /* 抽屉遮罩 */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 60;
+  }
+
+  .right-wrapper {
+    width: 100vw;
+  }
+
+  /* 主内容区减小留白，充分利用屏幕 */
+  .main-content {
+    padding: 12px;
+  }
 }
 </style>

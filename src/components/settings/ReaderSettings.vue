@@ -246,6 +246,53 @@
       </label>
     </div>
 
+    <!-- ── 游戏手柄 ── -->
+    <div class="section-title">🎮 游戏手柄</div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">启用手柄控制</div>
+        <div class="item-subtext">配合 8BitDo Micro 手柄按键翻页</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.enableGamepad" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">手柄连接状态</div>
+        <div class="item-subtext" :class="{ 'text-connected': gamepadConnected }">
+          {{ gamepadConnected ? `已连接：${gamepadName}` : '未检测到手柄' }}
+        </div>
+      </div>
+    </div>
+
+    <div v-for="slot in keySlots" :key="slot.key" class="setting-item setting-column">
+      <div class="item-info">
+        <div class="item-title">{{ slot.label }}</div>
+        <div class="key-list">
+          <span v-for="k in readerSettings[slot.key]" :key="k" class="key-chip">
+            {{ btnName(k) }}
+            <button class="key-remove" title="移除该键位" @click="removeKey(slot.key, k)">×</button>
+          </span>
+          <span v-if="readerSettings[slot.key].length === 0" class="key-empty">未设置</span>
+        </div>
+      </div>
+      <button
+        class="key-capture"
+        :class="{ capturing: captureSlot === slot.key }"
+        @click="startCapture(slot.key)"
+      >
+        {{ captureSlot === slot.key ? '请按手柄按键…' : '＋ 录制' }}
+      </button>
+    </div>
+
+    <div class="preset-row">
+      <button class="preset-btn" @click="applyMicroPreset">🔄 恢复 8BitDo Micro 默认键位</button>
+    </div>
+
     <!-- ── 性能 / 扩展 ── -->
     <div class="section-title">⚡ 性能 / 扩展</div>
 
@@ -280,8 +327,9 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useUI } from '@/composables/useUI'
-import { readerSettings, resetReaderSettings } from '@/stores/readerSettings'
+import { readerSettings, resetReaderSettings, GAMEPAD_BUTTONS } from '@/stores/readerSettings'
 
 const { toast } = useUI()
 
@@ -290,6 +338,131 @@ const handleReset = () => {
   resetReaderSettings()
   toast.success('已恢复默认阅读设置')
 }
+
+// ── 游戏手柄：连接状态检测 ──
+const gamepadConnected = ref(false)
+const gamepadName = ref('')
+
+function getActivePad(): Gamepad | null {
+  if (!('getGamepads' in navigator)) return null
+  const pads = navigator.getGamepads()
+  for (const pad of pads) {
+    if (pad && pad.connected) return pad
+  }
+  return null
+}
+
+function refreshConnection(): void {
+  const pad = getActivePad()
+  gamepadConnected.value = !!pad
+  gamepadName.value = pad ? pad.id : ''
+}
+
+let statusTimer: ReturnType<typeof setInterval> | null = null
+
+// ── 游戏手柄：键位映射（8BitDo Micro 预设 + 自定义录制） ──
+const KEY_BUTTON_NAMES: Record<number, string> = {
+  [GAMEPAD_BUTTONS.A]: 'A',
+  [GAMEPAD_BUTTONS.B]: 'B',
+  [GAMEPAD_BUTTONS.X]: 'X',
+  [GAMEPAD_BUTTONS.Y]: 'Y',
+  [GAMEPAD_BUTTONS.LB]: 'LB',
+  [GAMEPAD_BUTTONS.RB]: 'RB',
+  [GAMEPAD_BUTTONS.LT]: 'LT',
+  [GAMEPAD_BUTTONS.RT]: 'RT',
+  [GAMEPAD_BUTTONS.SELECT]: 'Select',
+  [GAMEPAD_BUTTONS.START]: 'Start',
+  [GAMEPAD_BUTTONS.L3]: 'L3',
+  [GAMEPAD_BUTTONS.R3]: 'R3',
+  [GAMEPAD_BUTTONS.DPAD_UP]: 'D-Pad↑',
+  [GAMEPAD_BUTTONS.DPAD_DOWN]: 'D-Pad↓',
+  [GAMEPAD_BUTTONS.DPAD_LEFT]: 'D-Pad←',
+  [GAMEPAD_BUTTONS.DPAD_RIGHT]: 'D-Pad→',
+}
+
+function btnName(key: number): string {
+  return KEY_BUTTON_NAMES[key] ?? `键${key}`
+}
+
+const keySlots = [
+  { key: 'gamepadNextKeys', label: '下一页按键' },
+  { key: 'gamepadPrevKeys', label: '上一页按键' },
+  { key: 'gamepadToggleKeys', label: '切换设置菜单' },
+] as const
+
+type GamepadKeySlot = (typeof keySlots)[number]['key']
+
+const captureSlot = ref<GamepadKeySlot | null>(null)
+const prevPressed = new Set<number>()
+let captureTimer: ReturnType<typeof setInterval> | null = null
+
+const getKeyArr = (slot: GamepadKeySlot): number[] => readerSettings[slot]
+
+function startCapture(slot: GamepadKeySlot): void {
+  stopCapture()
+  captureSlot.value = slot
+  prevPressed.clear()
+  const pad = getActivePad()
+  if (pad) {
+    pad.buttons.forEach((b, i) => {
+      if (b.pressed) prevPressed.add(i)
+    })
+  }
+  // 轮询等待下一次按键（上升沿），50ms 采样一次
+  captureTimer = setInterval(() => {
+    const currentSlot = captureSlot.value
+    if (!currentSlot) return
+    const p = getActivePad()
+    if (!p) return
+    p.buttons.forEach((b, i) => {
+      if (!b.pressed) return
+      if (!prevPressed.has(i)) {
+        const arr = getKeyArr(currentSlot)
+        if (!arr.includes(i)) arr.push(i)
+        toast.success(`已录制 ${btnName(i)}`)
+        stopCapture()
+      } else {
+        prevPressed.add(i)
+      }
+    })
+  }, 50)
+}
+
+function stopCapture(): void {
+  captureSlot.value = null
+  if (captureTimer) {
+    clearInterval(captureTimer)
+    captureTimer = null
+  }
+  prevPressed.clear()
+}
+
+function removeKey(slot: GamepadKeySlot, key: number): void {
+  const arr = getKeyArr(slot)
+  const idx = arr.indexOf(key)
+  if (idx >= 0) arr.splice(idx, 1)
+}
+
+function applyMicroPreset(): void {
+  readerSettings.gamepadNextKeys = [GAMEPAD_BUTTONS.DPAD_RIGHT, GAMEPAD_BUTTONS.A]
+  readerSettings.gamepadPrevKeys = [GAMEPAD_BUTTONS.DPAD_LEFT, GAMEPAD_BUTTONS.B]
+  readerSettings.gamepadToggleKeys = [GAMEPAD_BUTTONS.START, GAMEPAD_BUTTONS.SELECT]
+  toast.success('已恢复 8BitDo Micro 默认键位')
+}
+
+onMounted(() => {
+  refreshConnection()
+  window.addEventListener('gamepadconnected', refreshConnection)
+  window.addEventListener('gamepaddisconnected', refreshConnection)
+  statusTimer = setInterval(refreshConnection, 3000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('gamepadconnected', refreshConnection)
+  window.removeEventListener('gamepaddisconnected', refreshConnection)
+  if (statusTimer) clearInterval(statusTimer)
+  stopCapture()
+})
 </script>
 
 <style scoped>
@@ -484,6 +657,108 @@ input:checked + .slider:before {
 
 .reset-btn:hover {
   background-color: #2e2e33;
+  border-color: #ff7588;
+  color: #ff7588;
+}
+
+/* ── 游戏手柄设置 ── */
+.setting-column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.text-connected {
+  color: #4ade80;
+}
+
+.key-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #26262a;
+  border: 1px solid #3a3a3d;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #fff;
+}
+
+.key-remove {
+  background: transparent;
+  border: none;
+  color: #88888c;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.key-remove:hover {
+  color: #ff7588;
+}
+
+.key-empty {
+  color: #66666c;
+  font-size: 13px;
+}
+
+.key-capture {
+  background: #242428;
+  border: 1px solid #3a3a3d;
+  color: #ccc;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.key-capture:hover {
+  border-color: #ff7588;
+  color: #ff7588;
+}
+
+.key-capture.capturing {
+  background: #ff7588;
+  border-color: #ff7588;
+  color: #fff;
+  animation: capture-pulse 1s ease-in-out infinite;
+}
+
+@keyframes capture-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.preset-row {
+  margin-top: 4px;
+}
+
+.preset-btn {
+  width: 100%;
+  background: #242428;
+  border: 1px dashed #3a3a3d;
+  color: #ccc;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
   border-color: #ff7588;
   color: #ff7588;
 }

@@ -24,6 +24,25 @@ export const onlineComics = ref<OnlineComic[]>([])
 /** 离线漫画列表（从后端 /comics/offline 拉取，本地持久化缓存） */
 export const offlineComics = ref<OfflineComic[]>([])
 
+/**
+ * 剥离 EH Tag Translation 数据库 name 中的 markdown 图标语法（bug1）。
+ * 例如 `![](https://.../image.png)Fate/Grand Order` → `Fate/Grand Order`；
+ * 纯图标（无文本）时退回取 alt 文本，如 `![大船](https://...)` → `大船`。
+ */
+const cleanTagName = (raw: string): string => {
+  const s = String(raw || '').trim()
+  // ① 完整图标 ![alt](url)；② 数据源脏数据：孤立图片残片 ![alt]（无 url）
+  let cleaned = s
+    .replace(/!\[.*?\]\(.*?\)/g, '')
+    .replace(/!\[[^\]]*\]/g, '')
+    .trim()
+  if (!cleaned) {
+    const alt = s.match(/!\[(.*?)\]\(.*?\)/)
+    if (alt && alt[1]) cleaned = alt[1].trim()
+  }
+  return cleaned
+}
+
 /** 后端 /comics/offline 返回的原始行（tags 为 TagItem 对象数组） */
 interface OfflineComicRaw {
   id: string
@@ -44,9 +63,17 @@ export const fetchOfflineComics = async () => {
       return {
         ...item,
         // 需求2：tags 归一化为「翻译名」字符串数组，供卡片展示与 tag 搜索
+        // bug1：name 可能含 markdown 图标语法（如 ![](url)Fate/Grand Order），
+        // 必须先剥离图标再入组，避免 TagChip 把整段 URL 当原文显示。
         tags:
           tagItems.length > 0
-            ? tagItems.map((t) => (t && (t.name || t.key)) || '').filter(Boolean)
+            ? tagItems
+                .map((t) => {
+                  if (!t) return ''
+                  const name = cleanTagName(t.name || '')
+                  return name || cleanTagName(t.key || '') || (t.key || '').trim()
+                })
+                .filter(Boolean)
             : typeof item.tags === 'string'
               ? JSON.parse((item.tags as string) || '[]')
               : [],

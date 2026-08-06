@@ -25,13 +25,16 @@ const currentList = computed(() =>
 // 触发跳转至连贯阅读器
 const handleRead = (comic: ComicItem) => {
   toast.info(`即将开启连贯阅读：${comic.title}`)
+  // bug3：以当前分栏（activeTab）强制确定 source，而不是依赖 comic.source。
+  // 历史遗留的清单快照可能缺失/错误 source 字段，若照搬会造成在线 gid 被误判为离线模式。
+  const src = activeTab.value
   const query: Record<string, string> = {
     id: comic.id,
-    source: comic.source,
+    source: src,
   }
   // 在线模式必须携带 token，否则阅读器无法拉取 E 站页图（与 OnlineDetail 一致）
-  if (comic.source === 'online') {
-    query.token = comic.token || ''
+  if (src === 'online') {
+    query.token = (comic as { token?: string }).token || ''
   }
   router.push({ path: '/reader', query })
 }

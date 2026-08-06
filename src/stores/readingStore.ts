@@ -17,7 +17,9 @@ export const loadReadingList = async (source: 'online' | 'offline') => {
     const data = await http<{ source: string; items: ComicItem[] }>(
       `/reading-list?source=${source}`,
     )
-    const items = data.items || []
+    // bug3：强制归一化每条记录的 source 与所在清单一致，避免历史遗留快照中
+    // source 缺失/错误，导致阅读清单「立即阅读」时把在线 gid 误判为离线模式。
+    const items = (data.items || []).map((it) => ({ ...it, source }) as ComicItem)
     if (source === 'online') onlineReadingList.value = items
     else offlineReadingList.value = items
   } catch (e) {
@@ -43,7 +45,9 @@ export const toggleReadingList = (comic: ComicItem) => {
   if (index >= 0) {
     targetList.value.splice(index, 1)
   } else {
-    targetList.value.push(comic)
+    // bug3：入队时强制写入 source，防止调用方传入的 comic 缺 source 字段，
+    // 从而在后续「立即阅读」时被误判为离线模式（在线 gid 走离线接口 404）。
+    targetList.value.push({ ...comic, source } as ComicItem)
   }
   saveReadingList(source)
 }

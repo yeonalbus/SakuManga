@@ -182,6 +182,22 @@ const loadComicPages = async () => {
     const msg = err instanceof Error ? err.message : '加载画廊失败'
     // 离线模式 404：漫画 id 可能已从本地库移除（列表/历史缓存过期），友好提示 + 刷新列表
     if (source.value === 'offline' && /找不到该漫画|not found|404/i.test(msg)) {
+      // bug3 兜底：本地库漫画 id 是 md5 hex（含字母），纯数字 id 只可能是 E 站 gid。
+      // 若以离线模式打开纯数字 gid，说明 source 被误传为 offline（如阅读清单快照缺失 source），
+      // 此时不应误报「漫画已移除」，而是尝试自动纠正为在线模式。
+      const isOnlineGid = /^\d+$/.test(realId)
+      if (isOnlineGid) {
+        const tok = route.query.token as string
+        if (tok) {
+          toast.info('检测到该画廊属于在线资源，已自动切换为在线模式')
+          await router.replace({ path: '/reader', query: { ...route.query, source: 'online' } })
+          // watch 只监听 route.query.id，source 变化不会自动重载，需手动重新加载
+          await loadComicPages()
+          return
+        }
+        toast.error('该漫画不在本地库中，且缺少在线画廊 token，无法阅读')
+        return
+      }
       const confirmed = await modal.confirm(
         '该漫画可能已从本地库移除，或本地扫描数据已过期。\n是否刷新离线列表后返回？',
         '找不到该漫画',
@@ -195,7 +211,6 @@ const loadComicPages = async () => {
         }
         router.back()
       }
-      isLoading.value = false
       return
     }
     toast.error(msg)

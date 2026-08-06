@@ -247,7 +247,23 @@ const formatDate = (iso?: string) => {
 
 const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
 
-onMounted(runMaintain)
+// bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
+// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；已有结果则直接展示；否则保持空态，
+// 由用户点击「重新扫描 / 强制全量核对」按钮时才开始新任务。
+onMounted(async () => {
+  try {
+    const s = await http<OfflineTaskState>('/offline/maintain/progress')
+    taskState.value = s
+    if (s.status === 'running') {
+      isScanning.value = true
+      pollProgress()
+    } else if (s.status === 'success') {
+      await loadResult()
+    }
+  } catch {
+    // 进度接口异常（如后端未启动），忽略，页面保持空态
+  }
+})
 onUnmounted(stopPolling)
 </script>
 

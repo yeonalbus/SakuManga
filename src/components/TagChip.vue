@@ -33,7 +33,22 @@ const modeStore = useModeStore()
 const tagData = computed<TagData>(() => {
   let base: TagData
   if (typeof props.tag === 'string') {
-    base = tagStore.translate(props.tag)
+    // bug1 防御：若字符串含 EH 翻译库的 markdown 图标语法（如 ![](url)名称），
+    // 先剥离图标再交给 translate，避免 translate 把 URL 中的冒号误判为 namespace 分隔符，
+    // 也避免整段 markdown 被当作原文显示。
+    const raw = props.tag
+    let cleaned = ''
+    if (/!\[.*?\]\(.*?\)/.test(raw)) {
+      cleaned = raw
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        .replace(/!\[[^\]]*\]/g, '')
+        .trim()
+      if (!cleaned) {
+        const alt = raw.match(/!\[(.*?)\]\(.*?\)/)
+        if (alt && alt[1]) cleaned = alt[1].trim()
+      }
+    }
+    base = tagStore.translate(cleaned || raw)
   } else if (props.tag && typeof props.tag === 'object') {
     base = props.tag as TagData
   } else {
@@ -52,7 +67,10 @@ const displayName = computed(() => {
   const cleanKey = key ? key.replace(/_/g, ' ') : ''
 
   if (props.showTranslation && name && name !== key) {
-    let cleanName = name.replace(/!\[.*?\]\(.*?\)/g, '').trim()
+    let cleanName = name
+      .replace(/!\[.*?\]\(.*?\)/g, '')
+      .replace(/!\[[^\]]*\]/g, '')
+      .trim()
     if (!cleanName) {
       const altMatch = name.match(/!\[(.*?)\]\(.*?\)/)
       if (altMatch && altMatch[1]) {

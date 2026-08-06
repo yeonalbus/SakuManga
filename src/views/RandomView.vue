@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
 import { fetchRandomComicsApi } from '@/api/comic'
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
-import { useModeStore } from '@/stores/modeStore'
 import type {
   ComicItem,
   OnlineComic,
   OfflineComic,
   RandomComicItem,
   RandomComicParams,
+  SearchConfig,
 } from '@/types/comic'
 
-const modeStore = useModeStore()
 const { toast } = useUI()
 
+// ======================================================
 // 1. 数量控制逻辑
+// ======================================================
 const selectedCountOption = ref<1 | 4 | 8 | 'custom'>(1)
 const customCountInput = ref<number>(12) // 自定义输入的数量
 
@@ -27,10 +27,118 @@ const targetCount = computed(() => {
   return selectedCountOption.value
 })
 
-// 2. 范围制定控制（all/online/offline）
+// ======================================================
+// 2. 抽卡专用过滤器（独立于全局 searchStore，专供抽卡使用）
+// ======================================================
+const categories = [
+  { key: 'Doujinshi', label: 'Doujinshi', color: '#e53935' },
+  { key: 'Manga', label: 'Manga', color: '#f57c00' },
+  { key: 'Image Set', label: 'Image Set', color: '#3949ab' },
+  { key: 'Game CG', label: 'Game CG', color: '#2e7d32' },
+  { key: 'Artist CG', label: 'Artist CG', color: '#cddc39' },
+  { key: 'Cosplay', label: 'Cosplay', color: '#8e24aa' },
+  { key: 'Non-H', label: 'Non-H', color: '#424242' },
+  { key: 'Asian Porn', label: 'Asian Porn', color: '#d81b60' },
+  { key: 'Western', label: 'Western', color: '#00e676' },
+  { key: 'Misc', label: 'Misc', color: '#757575' },
+]
+
+const allCategoryKeys = () => categories.map((c) => c.key)
+
+/** 抽卡专用过滤配置：独立于全局筛选，仅作用于本次抽卡 */
+const drawConfig = reactive<SearchConfig>({
+  keyword: '', // 抽卡面板用多关键词队列（keywords），此处留空
+  keywords: [],
+  activeCategories: allCategoryKeys(),
+  minRating: 0,
+  minPages: undefined,
+  maxPages: undefined,
+  onlyDownloaded: false,
+  language: 'All',
+  onlyRemoved: false,
+  onlyTorrents: false,
+  disableLangFilter: false,
+  disableUploaderFilter: false,
+  disableTagFilter: false,
+})
+
+// 过滤器面板展开状态与关键词输入
+const filterOpen = ref(false)
+const keywordInput = ref('')
+
+// 切换分类选中状态
+const toggleCategory = (key: string) => {
+  const idx = drawConfig.activeCategories.indexOf(key)
+  if (idx >= 0) {
+    drawConfig.activeCategories.splice(idx, 1)
+  } else {
+    drawConfig.activeCategories.push(key)
+  }
+}
+
+// 关键词队列：有字压入，空按 Enter 清空
+const handleKeywordEnter = () => {
+  const text = keywordInput.value.trim()
+  if (text) {
+    if (!drawConfig.keywords.includes(text)) {
+      drawConfig.keywords.push(text)
+    }
+    keywordInput.value = ''
+  } else {
+    drawConfig.keywords = []
+  }
+}
+
+const removeKeyword = (index: number) => {
+  drawConfig.keywords.splice(index, 1)
+}
+
+// 重置抽卡过滤器
+const resetFilter = () => {
+  keywordInput.value = ''
+  drawConfig.keywords = []
+  drawConfig.activeCategories = allCategoryKeys()
+  drawConfig.minRating = 0
+  drawConfig.minPages = undefined
+  drawConfig.maxPages = undefined
+  drawConfig.onlyDownloaded = false
+  drawConfig.language = 'All'
+  drawConfig.onlyRemoved = false
+  drawConfig.onlyTorrents = false
+  drawConfig.disableLangFilter = false
+  drawConfig.disableUploaderFilter = false
+  drawConfig.disableTagFilter = false
+}
+
+// 已生效条件数量（用于徽标与状态提示）
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (drawConfig.keywords.length > 0) n++
+  if (drawConfig.activeCategories.length < categories.length) n++
+  if (drawConfig.minRating > 0) n++
+  if (drawConfig.minPages && drawConfig.minPages > 0) n++
+  if (drawConfig.maxPages && drawConfig.maxPages > 0) n++
+  if (drawConfig.onlyDownloaded) n++
+  if (drawConfig.language !== 'All') n++
+  if (drawConfig.onlyRemoved) n++
+  if (drawConfig.onlyTorrents) n++
+  if (drawConfig.disableLangFilter) n++
+  if (drawConfig.disableUploaderFilter) n++
+  if (drawConfig.disableTagFilter) n++
+  return n
+})
+
+// ======================================================
+// 3. 范围制定控制（all/online/offline）
+// ======================================================
 const scopeType = ref<'all' | 'online' | 'offline'>('all')
 
-// 3. 抽卡状态与结果存储
+// 在线高级筛选项仅在包含在线时展示
+const showOnlineOptions = computed(() => scopeType.value !== 'offline')
+
+// ======================================================
+// 4. 抽卡状态与结果存储
+// ======================================================
 const isSpinning = ref(false)
 const hasDrawn = ref(false)
 const drawnComics = ref<ComicItem[]>([])
@@ -73,48 +181,55 @@ const toComicItem = (item: RandomComicItem): ComicItem => {
   } as OfflineComic
 }
 
+/**
+ * 依据抽卡专用过滤器构建随机抽卡入参。
+ * - 分类：在线/离线均生效
+ * - 语言：在线并入 f_search；离线按 language:xx 标签匹配（禁用语言过滤时不生效）
+ * - 在线高级筛选：仅在线/全库下发
+ */
+const buildParams = (): RandomComicParams => {
+  const params: RandomComicParams = {
+    count: targetCount.value,
+    source: scopeType.value,
+  }
+
+  const kw = (drawConfig.keyword || '').trim()
+  if (kw) params.keyword = kw
+  if (drawConfig.keywords && drawConfig.keywords.length > 0) {
+    params.keywords = drawConfig.keywords.filter((k) => k.trim())
+  }
+  if (drawConfig.activeCategories.length > 0) {
+    params.categories = [...drawConfig.activeCategories]
+  }
+  if (drawConfig.minRating > 0) params.minRating = drawConfig.minRating
+  if (drawConfig.minPages && drawConfig.minPages > 0) params.minPages = drawConfig.minPages
+  if (drawConfig.maxPages && drawConfig.maxPages > 0) params.maxPages = drawConfig.maxPages
+  // 语言：离线且禁用语言过滤时不按语言匹配
+  if (drawConfig.language && drawConfig.language !== 'All') {
+    if (scopeType.value !== 'offline' || !drawConfig.disableLangFilter) {
+      params.language = drawConfig.language
+    }
+  }
+  if (drawConfig.onlyDownloaded) params.onlyDownloaded = true
+
+  // 在线高级筛选（仅在线 / 全库时下发，后端离线分支忽略）
+  if (drawConfig.onlyRemoved) params.onlyRemoved = true
+  if (drawConfig.onlyTorrents) params.onlyTorrents = true
+  if (drawConfig.disableLangFilter) params.disableLangFilter = true
+  if (drawConfig.disableUploaderFilter) params.disableUploaderFilter = true
+  if (drawConfig.disableTagFilter) params.disableTagFilter = true
+
+  return params
+}
+
 // 🎲 抽卡核心逻辑：对接后端 /comics/random
-// view 化后直接继承当前模式（在线/离线）对应域的全局筛选配置，不再提供「继承全局筛选」开关
+// 全库模式由后端"先随机抽本地约一半，再在线补齐剩余"，比例接近 1:1
 const handleStartDraw = async () => {
   isSpinning.value = true
 
   try {
-    // 1. 依据当前作用域继承对应的全局筛选配置
-    const config =
-      modeStore.currentMode === 'online' ? onlineSearchConfig.value : offlineSearchConfig.value
+    const res = await fetchRandomComicsApi(buildParams())
 
-    const params: RandomComicParams = {
-      count: targetCount.value,
-      source: scopeType.value,
-    }
-
-    const kw = (config.keyword || '').trim()
-    if (kw) params.keyword = kw
-    // 问题1：继承筛选抽屉的“多关键词队列”（在线由后端合并 f_search，离线按 AND 匹配）
-    if (config.keywords && config.keywords.length > 0) {
-      params.keywords = config.keywords.filter((k) => k.trim())
-    }
-    // 分类在线/离线均继承（问题6：离线抽卡不再跳过分类过滤）
-    if (config.activeCategories.length > 0) {
-      params.categories = [...config.activeCategories]
-    }
-    // 语言筛选：离线按 disableLangFilter 决定是否应用（D11：language 可选继承）
-    if (
-      scopeType.value === 'offline' &&
-      config.language &&
-      config.language !== 'All' &&
-      !config.disableLangFilter
-    ) {
-      params.language = config.language
-    }
-    if (config.minRating > 0) params.minRating = config.minRating
-    if (config.minPages && config.minPages > 0) params.minPages = config.minPages
-    if (config.maxPages && config.maxPages > 0) params.maxPages = config.maxPages
-
-    // 2. 调用后端随机接口（离线 SQL RANDOM + 在线随机页采样）
-    const res = await fetchRandomComicsApi(params)
-
-    // 3. 统一映射为卡片可渲染的 ComicItem
     drawnComics.value = res.comics.map(toComicItem)
     isSpinning.value = false
     hasDrawn.value = true
@@ -146,50 +261,217 @@ const handleStartDraw = async () => {
       </div>
     </div>
 
-    <!-- 2. 控制面板 -->
+    <!-- 2. 控制面板：数量 → 抽卡专用过滤器 → 范围 → 抽卡按钮 -->
     <div class="control-panel">
-      <div class="panel-top-row">
-        <!-- 数量指定 -->
-        <div class="control-group">
-          <label class="group-label">数量：</label>
-          <div class="count-selector">
-            <button
-              v-for="num in [1, 4, 8]"
-              :key="num"
-              class="pill-btn"
-              :class="{ active: selectedCountOption === num }"
-              @click="selectedCountOption = num as 1 | 4 | 8"
-            >
-              {{ num }} 本
-            </button>
+      <!-- ① 数量指定 -->
+      <div class="control-group">
+        <label class="group-label">数量：</label>
+        <div class="count-selector">
+          <button
+            v-for="num in [1, 4, 8]"
+            :key="num"
+            class="pill-btn"
+            :class="{ active: selectedCountOption === num }"
+            @click="selectedCountOption = num as 1 | 4 | 8"
+          >
+            {{ num }} 本
+          </button>
 
-            <button
-              class="pill-btn custom"
-              :class="{ active: selectedCountOption === 'custom' }"
-              @click="selectedCountOption = 'custom'"
-            >
-              自定义
-            </button>
+          <button
+            class="pill-btn custom"
+            :class="{ active: selectedCountOption === 'custom' }"
+            @click="selectedCountOption = 'custom'"
+          >
+            自定义
+          </button>
 
-            <div v-if="selectedCountOption === 'custom'" class="custom-input-box">
-              <input v-model.number="customCountInput" type="number" min="1" max="50" />
-              <span class="unit">本</span>
-            </div>
+          <div v-if="selectedCountOption === 'custom'" class="custom-input-box">
+            <input v-model.number="customCountInput" type="number" min="1" max="50" />
+            <span class="unit">本</span>
           </div>
-        </div>
-
-        <!-- 范围制定 -->
-        <div class="control-group">
-          <label class="group-label">范围：</label>
-          <select v-model="scopeType" class="dark-select">
-            <option value="all">🌐+📚 全库 (在线+本地)</option>
-            <option value="online">🌐 仅在线图库</option>
-            <option value="offline">📚 仅本地画库</option>
-          </select>
         </div>
       </div>
 
-      <!-- 开始抽卡大按钮 -->
+      <!-- ② 抽卡专用过滤器（独立于全局筛选，位于数量与范围之间） -->
+      <div class="filter-block">
+        <div class="filter-toggle-row">
+          <button
+            class="filter-toggle-btn"
+            :class="{ open: filterOpen }"
+            @click="filterOpen = !filterOpen"
+          >
+            <span class="ft-icon">🎛️</span>
+            <span class="ft-label">抽卡过滤器</span>
+            <span v-if="activeFilterCount > 0" class="filter-badge">{{ activeFilterCount }}</span>
+            <span class="ft-arrow">{{ filterOpen ? '▲' : '▼' }}</span>
+          </button>
+          <span class="filter-status" :class="{ active: activeFilterCount > 0 }">
+            {{
+              activeFilterCount > 0
+                ? `已应用 ${activeFilterCount} 项条件（不影响全局筛选）`
+                : '未设置（全库随机，不影响全局筛选）'
+            }}
+          </span>
+        </div>
+
+        <div v-if="filterOpen" class="filter-panel">
+          <!-- 关键词队列 -->
+          <div class="filter-section">
+            <label class="filter-label">
+              关键词队列
+              <span class="tip-text">(Enter 压入，框为空按 Enter 清空)</span>
+            </label>
+            <div v-if="drawConfig.keywords.length > 0" class="kw-chips">
+              <span v-for="(kw, index) in drawConfig.keywords" :key="kw + index" class="kw-chip">
+                <span class="kw-text">{{ kw }}</span>
+                <span class="kw-remove" title="删除此关键词" @click.stop="removeKeyword(index)">
+                  ✕
+                </span>
+              </span>
+            </div>
+            <input
+              v-model="keywordInput"
+              type="text"
+              class="filter-input"
+              placeholder="输入关键词后按 Enter 压入队列..."
+              @keydown.enter.prevent="handleKeywordEnter"
+            />
+          </div>
+
+          <!-- 分类 -->
+          <div class="filter-section">
+            <label class="filter-label">分类</label>
+            <div class="cat-grid">
+              <button
+                v-for="cat in categories"
+                :key="cat.key"
+                class="cat-chip"
+                :class="{ disabled: !drawConfig.activeCategories.includes(cat.key) }"
+                :style="{
+                  backgroundColor: drawConfig.activeCategories.includes(cat.key)
+                    ? cat.color
+                    : 'var(--app-border-2)',
+                  color: drawConfig.activeCategories.includes(cat.key)
+                    ? '#ffffff'
+                    : 'var(--app-text-3)',
+                }"
+                @click="toggleCategory(cat.key)"
+              >
+                {{ cat.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 语言 / 评分 / 页数 -->
+          <div class="filter-grid">
+            <div class="filter-field">
+              <label class="field-label">语言</label>
+              <select v-model="drawConfig.language" class="dark-select">
+                <option value="All">All (全部)</option>
+                <option value="Chinese">Chinese (中文)</option>
+                <option value="Japanese">Japanese (日文)</option>
+                <option value="English">English (英文)</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
+              <label class="field-label">最低评分</label>
+              <select v-model="drawConfig.minRating" class="dark-select">
+                <option :value="0">0 ⭐ (全部)</option>
+                <option :value="1">1 ⭐</option>
+                <option :value="2">2 ⭐</option>
+                <option :value="3">3 ⭐</option>
+                <option :value="4">4 ⭐</option>
+                <option :value="5">5 ⭐</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
+              <label class="field-label">页数范围</label>
+              <div class="page-range">
+                <input
+                  v-model.number="drawConfig.minPages"
+                  type="number"
+                  class="number-input"
+                  placeholder="Min"
+                />
+                <span class="range-text">~</span>
+                <input
+                  v-model.number="drawConfig.maxPages"
+                  type="number"
+                  class="number-input"
+                  placeholder="Max"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 仅已下载（本地） -->
+          <div class="filter-row">
+            <span class="row-label">仅已下载（本地）</span>
+            <label class="toggle-switch">
+              <input v-model="drawConfig.onlyDownloaded" type="checkbox" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <!-- 在线高级筛选（仅在线 / 全库展示） -->
+          <template v-if="showOnlineOptions">
+            <div class="filter-divider">在线高级筛选</div>
+            <div class="filter-row">
+              <span class="row-label">仅搜索移除了的画廊</span>
+              <label class="toggle-switch">
+                <input v-model="drawConfig.onlyRemoved" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span class="row-label">只显示有种子的画廊</span>
+              <label class="toggle-switch">
+                <input v-model="drawConfig.onlyTorrents" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span class="row-label">禁用语言过滤</span>
+              <label class="toggle-switch">
+                <input v-model="drawConfig.disableLangFilter" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span class="row-label">禁用上传者过滤</span>
+              <label class="toggle-switch">
+                <input v-model="drawConfig.disableUploaderFilter" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span class="row-label">禁用标签过滤</span>
+              <label class="toggle-switch">
+                <input v-model="drawConfig.disableTagFilter" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </template>
+
+          <div class="filter-actions">
+            <button class="filter-reset" @click="resetFilter">🔄 重置过滤器</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ 范围制定 -->
+      <div class="control-group">
+        <label class="group-label">范围：</label>
+        <select v-model="scopeType" class="dark-select">
+          <option value="all">🌐+📚 全库 (在线+本地)</option>
+          <option value="online">🌐 仅在线图库</option>
+          <option value="offline">📚 仅本地画库</option>
+        </select>
+      </div>
+
+      <!-- ④ 开始抽卡大按钮 -->
       <button class="draw-btn" :disabled="isSpinning" @click="handleStartDraw">
         {{ isSpinning ? '🎰 正在洗牌抽卡中...' : hasDrawn ? '🔄 重新抽取' : '🎴 开始抽卡！' }}
       </button>
@@ -260,16 +542,8 @@ const handleStartDraw = async () => {
   padding: 14px 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.panel-top-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
 }
 
 .control-group {
@@ -277,6 +551,7 @@ const handleStartDraw = async () => {
   align-items: center;
   gap: 8px;
   font-size: 0.88rem;
+  flex-wrap: wrap;
 }
 
 .group-label {
@@ -288,6 +563,7 @@ const handleStartDraw = async () => {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pill-btn {
@@ -343,6 +619,314 @@ const handleStartDraw = async () => {
   outline: none;
 }
 
+/* ───────── 抽卡专用过滤器 ───────── */
+.filter-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dashed var(--app-border-3);
+  padding-top: 12px;
+}
+
+.filter-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-toggle-btn:hover {
+  border-color: #007acc;
+  color: var(--app-text-strong);
+}
+
+.filter-toggle-btn.open {
+  border-color: #007acc;
+  color: var(--app-text-strong);
+  background: rgba(0, 122, 204, 0.12);
+}
+
+.ft-icon {
+  font-size: 0.9rem;
+}
+
+.ft-label {
+  font-weight: 600;
+}
+
+.filter-badge {
+  background: #007acc;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: bold;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 9px;
+  padding: 0 5px;
+}
+
+.ft-arrow {
+  font-size: 0.7rem;
+  color: var(--app-text-3);
+}
+
+.filter-status {
+  font-size: 0.75rem;
+  color: var(--app-text-muted);
+}
+
+.filter-status.active {
+  color: #10b981;
+}
+
+/* 过滤面板 */
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--app-surface-1);
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 0.82rem;
+  color: var(--app-text-3);
+}
+
+.tip-text {
+  font-size: 0.7rem;
+  color: var(--app-text-muted);
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+.kw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  background-color: var(--app-surface-2);
+  border-radius: 6px;
+  border: 1px dashed var(--app-border-3);
+}
+
+.kw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: #ff7588;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.kw-remove {
+  color: var(--app-text-3);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.kw-remove:hover {
+  color: var(--app-text-strong);
+}
+
+.filter-input {
+  background-color: transparent;
+  border: none;
+  border-bottom: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
+  padding: 6px 0;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.filter-input:focus {
+  border-bottom-color: #007acc;
+}
+
+/* 分类网格 */
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+}
+
+.cat-chip {
+  padding: 7px 0;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.cat-chip.disabled {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+/* 语言 / 评分 / 页数 网格 */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+}
+
+.page-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.number-input {
+  width: 52px;
+  height: 30px;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
+  border-radius: 4px;
+  color: var(--app-text-strong);
+  text-align: center;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.range-text {
+  font-size: 0.8rem;
+  color: var(--app-text-3);
+}
+
+/* 开关行 */
+.filter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.86rem;
+  color: var(--app-text-2);
+}
+
+.row-label {
+  color: var(--app-text-2);
+}
+
+.filter-divider {
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+  border-bottom: 1px solid var(--app-border-3);
+  padding-bottom: 4px;
+}
+
+/* 开关 Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: var(--app-border-3);
+  border-radius: 22px;
+  transition: 0.3s;
+}
+
+.slider:before {
+  position: absolute;
+  content: '';
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--app-text-3);
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+input:checked + .slider {
+  background-color: rgba(124, 77, 255, 0.3);
+}
+
+input:checked + .slider:before {
+  transform: translateX(18px);
+  background-color: #7c4dff;
+}
+
+/* 过滤器底部操作 */
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--app-border-3);
+  padding-top: 10px;
+}
+
+.filter-reset {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-reset:hover {
+  border-color: #e53935;
+  color: #e53935;
+}
+
+/* 抽卡按钮 */
 .draw-btn {
   width: 100%;
   background: linear-gradient(135deg, #007acc, #005999);
@@ -476,16 +1060,18 @@ const handleStartDraw = async () => {
 
 /* 📱 移动形态（<1024px）：控制面板垂直堆叠 + 结果网格固定 2 列 */
 @media (max-width: 1024px) {
-  .panel-top-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-  }
   .control-group {
     justify-content: space-between;
   }
   .count-selector {
     flex-wrap: wrap;
+  }
+  .filter-toggle-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .cat-grid {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
   }
   .results-container {
     min-height: 40vh;

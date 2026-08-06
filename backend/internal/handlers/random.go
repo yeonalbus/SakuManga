@@ -126,6 +126,13 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 	language := c.DefaultQuery("language", "All")
 	onlyDownloaded := c.DefaultQuery("onlyDownloaded", "false") == "true"
 
+	// 抽卡专用过滤器：在线高级筛选（E-Hentai f_* 参数，仅在线/全库生效）
+	onlyRemoved := c.DefaultQuery("onlyRemoved", "false") == "true"
+	onlyTorrents := c.DefaultQuery("onlyTorrents", "false") == "true"
+	disableLangFilter := c.DefaultQuery("disableLangFilter", "false") == "true"
+	disableUploaderFilter := c.DefaultQuery("disableUploaderFilter", "false") == "true"
+	disableTagFilter := c.DefaultQuery("disableTagFilter", "false") == "true"
+
 	// 2. 离线随机：SQL ORDER BY RANDOM() 全库随机
 	randomOffline := func(limit int) []RandomComicItem {
 		q := h.db.Model(&models.OfflineComic{}).Order("RANDOM()").Limit(limit)
@@ -187,9 +194,20 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			" ",
 		)
 		mergedKw = strings.TrimSpace(mergedKw)
+		// 抽卡专用过滤器：在线全量透传（语言并入 f_search，高级筛选走 f_* 参数）
 		params := services.SearchParams{
-			Keyword:          mergedKw,
-			ActiveCategories: activeCategories,
+			Keyword:               mergedKw,
+			ActiveCategories:      activeCategories,
+			Language:              language,
+			OnlyRemoved:           onlyRemoved,
+			OnlyTorrents:          onlyTorrents,
+			DisableLangFilter:     disableLangFilter,
+			DisableUploaderFilter: disableUploaderFilter,
+			DisableTagFilter:      disableTagFilter,
+		}
+		if minRating > 0 {
+			// 在线映射为 E 站 f_srdd 星级（与 OnlineHome 一致）
+			params.MinRating = strconv.FormatFloat(minRating, 'f', -1, 64)
 		}
 		comics, err := h.ehService.FetchRandomGalleryList(account, params, ehSetting, limit)
 		if err != nil {
@@ -217,21 +235,32 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 		items = result
 	case "offline":
 		items = randomOffline(count)
-	default: // all：在线/离线各占一半，在线失败时降级为全量本地补充
-		onlineCount := count/2 + count%2
-		offlineCount := count - onlineCount
+	default: // all：先随机抽本地约一半，再在线补齐剩余，比例接近 1:1；任一方不足时由另一方补齐
+		offlineCount := count/2 + count%2
+		onlineCount := count - offlineCount
 
+		// 1. 先随机抽本地
+		offlineItems := randomOffline(offlineCount)
+
+		// 2. 本地不足 → 在线多抽补齐剩余
+		if len(offlineItems) < offlineCount {
+			onlineCount += offlineCount - len(offlineItems)
+		}
+
+		// 3. 再抽在线（补齐剩余数量）
 		onlineItems, err := randomOnline(onlineCount)
 		if err != nil {
 			warning = "在线抽卡失败：" + err.Error() + "，已为你从本地库补充抽取"
 			onlineItems = nil
-			offlineCount = count
+			// 在线失败 → 本地补齐总数
+			if missing := count - len(offlineItems); missing > 0 {
+				offlineItems = append(offlineItems, randomOffline(missing)...)
+			}
 		}
-		offlineItems := randomOffline(offlineCount)
 
-		items = make([]RandomComicItem, 0, count)
+		// 输出顺序：本地在前，在线在后
+		items = append([]RandomComicItem{}, offlineItems...)
 		items = append(items, onlineItems...)
-		items = append(items, offlineItems...)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

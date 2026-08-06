@@ -63,9 +63,9 @@ export const fetchRandomComicsApi = async (
   query.append('count', String(params.count))
   query.append('source', params.source)
 
-  // 1. 继承全局筛选（问题6：分类在线/离线均生效；语言离线生效；onlyDownloaded 预留）
+  // 1. 抽卡专用过滤器逐项下发
   if (params.keyword) query.append('keyword', params.keyword)
-  // 问题1：多关键词队列逐项下发（在线由后端合并 f_search，离线 AND 匹配）
+  // 多关键词队列逐项下发（在线由后端合并 f_search，离线 AND 匹配）
   if (params.keywords && params.keywords.length > 0) {
     params.keywords.forEach((k) => query.append('keywords', k))
   }
@@ -78,6 +78,13 @@ export const fetchRandomComicsApi = async (
   if (params.language && params.language !== 'All') query.append('language', params.language)
   if (params.onlyDownloaded) query.append('onlyDownloaded', 'true')
 
-  // 2. 发起网络请求 (自动拼接 API_BASE + /comics/random)
+  // 2. 在线高级筛选透传（后端据此生成 advsearch=1 与 f_* 参数）
+  if (params.onlyRemoved) query.append('onlyRemoved', '1')
+  if (params.onlyTorrents) query.append('onlyTorrents', '1')
+  if (params.disableLangFilter) query.append('disableLangFilter', '1')
+  if (params.disableUploaderFilter) query.append('disableUploaderFilter', '1')
+  if (params.disableTagFilter) query.append('disableTagFilter', '1')
+
+  // 3. 发起网络请求 (自动拼接 API_BASE + /comics/random)
   return await http<RandomComicResponse>(`/comics/random?${query.toString()}`)
 }

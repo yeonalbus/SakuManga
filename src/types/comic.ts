@@ -207,13 +207,20 @@ export interface RandomComicParams {
   count: number
   source: 'all' | 'online' | 'offline'
   keyword?: string
-  keywords?: string[] // 筛选抽屉的多关键词队列（问题1：随机抽卡继承）
-  categories?: string[] // 在线/离线均生效（问题6）
-  minRating?: number // 仅离线生效
+  keywords?: string[] // 抽卡专用过滤器的多关键词队列
+  categories?: string[] // 在线/离线均生效
+  minRating?: number // 在线映射 f_srdd 星级，离线按 rating 过滤
   minPages?: number // 仅离线生效
   maxPages?: number // 仅离线生效
-  language?: string // 仅离线生效（All|Chinese|Japanese|English，问题6）
-  onlyDownloaded?: boolean // 预留（D11：离线随机忽略）
+  language?: string // 在线并入 f_search，离线按 language:xx 标签匹配（All|Chinese|Japanese|English）
+  onlyDownloaded?: boolean // 仅已下载（仅离线生效）
+
+  // ─── 抽卡专用过滤器：在线高级筛选（E-Hentai f_* 参数，仅在线/全库生效） ───
+  onlyRemoved?: boolean // f_sh=on 仅搜索移除了的画廊
+  onlyTorrents?: boolean // f_sto=on 只显示有种子的画廊
+  disableLangFilter?: boolean // f_sfl=on 禁用语言过滤
+  disableUploaderFilter?: boolean // f_sfu=on 禁用上传者过滤
+  disableTagFilter?: boolean // f_sft=on 禁用 Tag 过滤
 }
 
 /** 随机抽卡响应 */

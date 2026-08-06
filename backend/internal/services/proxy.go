@@ -30,6 +30,8 @@ func InitProxyConfig() {
 		var cfg ConfigFile
 		if err := json.Unmarshal(data, &cfg); err == nil {
 			currentProxy = cfg.Proxy
+			// 同步到标签引擎的 globalProxy，保证标签数据（GitHub）下载同样走代理
+			_ = SetGlobalProxy(cfg.Proxy)
 		}
 	}
 }
@@ -53,6 +55,9 @@ func SetProxyURL(p string) error {
 	proxyLock.Lock()
 	currentProxy = p
 	proxyLock.Unlock()
+
+	// 同步到标签引擎的 globalProxy，保证标签数据（GitHub）下载同样走代理
+	_ = SetGlobalProxy(p)
 
 	// 写入 config.json
 	cfg := ConfigFile{Proxy: p}

@@ -167,6 +167,15 @@ const formattedSize = computed(() => {
   return `${mb.toFixed(1)} MB`
 })
 
+// 格式化后端返回的 ISO 时间字符串为本地 "YYYY-MM-DD HH:mm"；空值/非法值返回 null（展示为 —）
+const fmtTime = (t?: string | null): string | null => {
+  if (!t) return null
+  const d = new Date(t)
+  if (Number.isNaN(d.getTime())) return null
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 const myLocalRating = ref(0)
 const setRating = (star: number) => {
   myLocalRating.value = star
@@ -396,8 +405,20 @@ const handleDelete = async () => {
               <span class="v">{{ comic.pageCount }} 页</span>
             </div>
             <div class="info-item">
+              <span class="k">入库时间:</span>
+              <span class="v">{{ fmtTime(comic.addedAt) || '—' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="k">发布时间:</span>
+              <span class="v">{{ fmtTime(comic.publishedAt) || '—' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="k">修改时间:</span>
+              <span class="v">{{ fmtTime(comic.fileModifiedAt) || '—' }}</span>
+            </div>
+            <div class="info-item">
               <span class="k">最后扫描:</span>
-              <span class="v">{{ comic.updatedAt }}</span>
+              <span class="v">{{ fmtTime(comic.updatedAt) || '—' }}</span>
             </div>
             <div class="info-item">
               <span class="k">来源:</span>

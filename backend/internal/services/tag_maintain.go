@@ -234,11 +234,12 @@ func filterRemovedTags(newOnline, offlineRemove []string) []string {
 
 // TagRefreshResult 单次刷新结果
 type TagRefreshResult struct {
-	Total      int    `json:"total"`      // 参与刷新的漫画数（含 gid）
-	Skipped    int    `json:"skipped"`    // 跳过（无 gid / 拉取失败）
-	Updated    int    `json:"updated"`    // tag 有变更的漫画数
-	Unchanged  int    `json:"unchanged"`  // 无变更
-	ElapsedSec float64 `json:"elapsedSec"` // 耗时(秒)
+	Total               int     `json:"total"`               // 参与刷新的漫画数（含 gid）
+	Skipped             int     `json:"skipped"`             // 跳过（无 gid / 拉取失败）
+	Updated             int     `json:"updated"`             // tag 有变更的漫画数
+	Unchanged           int     `json:"unchanged"`           // 无变更
+	PublishedBackfilled int     `json:"publishedBackfilled"` // 本次补写的发布时间数量（问题2：从 E 站详情 Posted 回填）
+	ElapsedSec          float64 `json:"elapsedSec"`          // 耗时(秒)
 }
 
 // RefreshAllTags 联网刷新全部含 gid 漫画的 OnlineTags
@@ -294,6 +295,19 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 			continue
 		}
 
+		// ── 顺带补齐发布时间（问题2）：外部导入的画廊本地 metadata 无 publishTime，
+		//    用本次拉取的 E 站详情 Posted 字段解析并回写 published_at，无需额外请求 ──
+		if c.PublishedAt == nil && detail.UpdatedAt != "" {
+			if pt := parsePublishTime(detail.UpdatedAt); pt != nil {
+				if err := s.db.Model(c).Update("published_at", *pt).Error; err != nil {
+					log.Printf("%s [tagm] 漫画 %q 补写发布时间失败: %v", dlWarnTag, c.Title, err)
+				} else {
+					c.PublishedAt = pt
+					result.PublishedBackfilled++
+				}
+			}
+		}
+
 		// 刷新规则：剔除用户删除过的 online tag
 		newOnline := filterRemovedTags(detail.Tags, UnmarshalTagSlice(c.OfflineRemoveTags))
 
@@ -333,8 +347,8 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 	_ = s.db.Model(setting).Update("last_daily_run_at", setting.LastDailyRunAt).Error
 
 	s.setProgress(TagMaintainProgress{Status: "success", Type: "refresh", Done: result.Total, Total: result.Total, Updated: result.Updated,
-		Message: fmt.Sprintf("刷新完成：更新 %d，无变化 %d，跳过 %d", result.Updated, result.Unchanged, result.Skipped), StartedAt: start.UnixMilli()})
-	log.Printf("%s [tagm] Tag 刷新完成：更新 %d / 无变化 %d / 跳过 %d，耗时 %.1fs", dlLogTag, result.Updated, result.Unchanged, result.Skipped, result.ElapsedSec)
+		Message: fmt.Sprintf("刷新完成：更新 %d，无变化 %d，跳过 %d，补写发布时间 %d", result.Updated, result.Unchanged, result.Skipped, result.PublishedBackfilled), StartedAt: start.UnixMilli()})
+	log.Printf("%s [tagm] Tag 刷新完成：更新 %d / 无变化 %d / 跳过 %d / 补写发布时间 %d，耗时 %.1fs", dlLogTag, result.Updated, result.Unchanged, result.Skipped, result.PublishedBackfilled, result.ElapsedSec)
 	return result, nil
 }
 

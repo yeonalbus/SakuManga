@@ -9,12 +9,14 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// 调度门控：控制「同一优先级并发」与「归档并发上限」
+// 调度门控：控制「同一优先级并发」
 //
 // 语义与 E-Hentai 官方一致：
 //   - downloadAllGalleriesSamePriority=false：全局串行，同一时刻仅下载 1 个画廊（含归档）
 //   - downloadAllGalleriesSamePriority=true：同一优先级可并行；低优先级任务需等待更高优先级任务结束
-//   - controlArchiveConcurrency=true：归档任务并发数受 archiveThreads 限制
+//
+// 归档任务的「线程并发」不在此门控：由 archive_thread_pool 全局线程配额池统一管理
+//（controlArchiveConcurrency=true 时，归档任务需先获取全局线程配额，不足则排队等待）。
 //
 // worker 池数量（NewDownloadManager 的 workers）仅作并发上限兜底，
 // 真实并发由这里按下载设置决定。
@@ -83,12 +85,8 @@ func (m *DownloadManager) releaseSlot(task *models.DownloadTask) {
 
 // slotAvailable 判断任务当前是否可执行（须在持有 schedMu 时调用）
 func (m *DownloadManager) slotAvailable(task *models.DownloadTask, setting *models.DownloadSetting) bool {
-	// 归档并发上限：仅当开启控制且线程数 > 0 时限制（<=0 视为不限，避免死锁）
-	if task.Mode == models.DownloadModeArchive && setting.ControlArchiveConcurrency {
-		if setting.ArchiveThreads > 0 && m.runningArchive >= setting.ArchiveThreads {
-			return false
-		}
-	}
+	// 归档任务的线程并发由 archiveThreadPool 全局配额池管理（不足时在引擎内排队等待），
+	// 此处不再按 archiveThreads 限制同时运行的归档任务数，多个归档任务可并发启动。
 
 	if setting.DownloadAllGalleriesSamePriority {
 		// 并行模式：低优先级任务必须等待所有更高优先级任务结束

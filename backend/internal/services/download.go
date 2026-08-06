@@ -66,23 +66,29 @@ type DownloadManager struct {
 	quit    chan struct{}
 	mu      sync.Mutex
 
-	// 调度门控：控制「同一优先级并发」与「归档并发上限」
+	// 调度门控：控制「同一优先级并发」
 	// 真实并发由调度器按下载设置决定，worker 池数量仅作上限兜底
 	schedMu        sync.Mutex
 	runningTotal   int         // 当前运行任务总数
-	runningArchive int         // 当前运行的归档任务数
+	runningArchive int         // 当前运行的归档任务数（仅统计/日志）
 	runningByPri   map[int]int // 各优先级正在运行的任务数
+
+	// 归档引擎运行时管理：全局线程配额池 + 正在运行的归档引擎（动态调整/立即中断）
+	archivePool    *archiveThreadPool
+	activeArchives map[string]*archiveDownloader // 任务ID -> 正在运行的归档引擎
 }
 
 // NewDownloadManager 构造下载任务管理器
 func NewDownloadManager(db *gorm.DB, ehService *EHService) *DownloadManager {
 	return &DownloadManager{
-		db:           db,
-		ehService:    ehService,
-		queue:        make(chan string, 256),
-		workers:      16, // worker 池仅作并发上限，实际并发由调度门控（downloadAllGalleriesSamePriority / archiveThreads）控制
-		quit:         make(chan struct{}),
-		runningByPri: make(map[int]int),
+		db:             db,
+		ehService:      ehService,
+		queue:          make(chan string, 256),
+		workers:        16, // worker 池仅作并发上限，实际并发由调度门控（downloadAllGalleriesSamePriority / 归档线程配额）控制
+		quit:           make(chan struct{}),
+		runningByPri:   make(map[int]int),
+		archivePool:    newArchiveThreadPool(defaultMaxArchiveThreads),
+		activeArchives: make(map[string]*archiveDownloader),
 	}
 }
 
@@ -378,6 +384,8 @@ func (m *DownloadManager) PauseTask(taskID string) (*models.DownloadTask, error)
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
 	}
+	// 立即中断运行中的归档下载（分块 Range 请求取消，.part 保留供恢复续传）
+	m.stopArchiveDownload(taskID)
 	log.Printf("%s 暂停任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -430,6 +438,8 @@ func (m *DownloadManager) CancelTask(taskID string) (*models.DownloadTask, error
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
 	}
+	// 立即中断运行中的归档下载（分块 Range 请求取消）
+	m.stopArchiveDownload(taskID)
 	log.Printf("%s 取消任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -622,16 +632,66 @@ func (m *DownloadManager) GetSettings() *models.DownloadSetting {
 
 // SaveSettings 保存下载设置
 func (m *DownloadManager) SaveSettings(s *models.DownloadSetting) (*models.DownloadSetting, error) {
+	old := m.GetSettings()
 	s.ID = 1
 	s.UpdatedAt = time.Now()
 	if err := m.db.Save(s).Error; err != nil {
 		log.Printf("%s 保存下载设置失败: %v", dlErrTag, err)
 		return nil, err
 	}
-	log.Printf("%s 保存下载设置: archivePath=%q extractPath=%q 并发图片=%d 速度=%d/%s 删除压缩包=%v 自动恢复=%v 自动更新画廊=%v",
+	log.Printf("%s 保存下载设置: archivePath=%q extractPath=%q 并发图片=%d 速度=%d/%s 删除压缩包=%v 自动恢复=%v 自动更新画廊=%v 归档线程=%d 控制归档并发=%v",
 		dlLogTag, s.ArchivePath, s.ExtractPath, s.ConcurrentImageDownloads, s.SpeedLimitImages, s.SpeedLimitInterval,
-		s.DeleteZipAfterArchiveDownload, s.AutoResumeTasks, s.AutoUpdateGallery)
+		s.DeleteZipAfterArchiveDownload, s.AutoResumeTasks, s.AutoUpdateGallery, s.ArchiveThreads, s.ControlArchiveConcurrency)
+
+	// 归档线程数/并发控制开关变化 → 动态调整所有运行中的归档任务（对应 JHentai _onIsolateCountChange）
+	if s.ArchiveThreads != old.ArchiveThreads || s.ControlArchiveConcurrency != old.ControlArchiveConcurrency {
+		m.notifyArchiveThreadsChange(s.ArchiveThreads)
+	}
 	return s, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// 归档引擎运行时管理：注册 / 注销 / 立即中断 / 线程数动态调整
+// ─────────────────────────────────────────────────────────────
+
+// registerArchive 注册正在运行的归档引擎（供暂停/取消中断与线程数动态调整）
+func (m *DownloadManager) registerArchive(g *archiveDownloader) {
+	m.mu.Lock()
+	m.activeArchives[g.task.ID] = g
+	m.mu.Unlock()
+}
+
+// unregisterArchive 注销归档引擎
+func (m *DownloadManager) unregisterArchive(taskID string) {
+	m.mu.Lock()
+	delete(m.activeArchives, taskID)
+	m.mu.Unlock()
+}
+
+// stopArchiveDownload 立即中断指定归档任务的下载（暂停/取消时调用）：
+// 置位本地停止标记 + 取消分块下载器 context，进行中的 Range 请求即刻中止。
+// 同时唤醒线程配额池中排队等待的任务，使它们检查停止标记（否则被暂停的任务会一直阻塞在 acquire）。
+func (m *DownloadManager) stopArchiveDownload(taskID string) {
+	m.mu.Lock()
+	g := m.activeArchives[taskID]
+	m.mu.Unlock()
+	if g != nil {
+		g.stopDownload()
+	}
+	m.archivePool.wakeAll()
+}
+
+// notifyArchiveThreadsChange 归档线程数设置变化时，动态调整所有运行中的归档任务的分块 worker 数
+func (m *DownloadManager) notifyArchiveThreadsChange(newThreads int) {
+	m.mu.Lock()
+	list := make([]*archiveDownloader, 0, len(m.activeArchives))
+	for _, g := range m.activeArchives {
+		list = append(list, g)
+	}
+	m.mu.Unlock()
+	for _, g := range list {
+		g.onArchiveThreadsChange(newThreads)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────

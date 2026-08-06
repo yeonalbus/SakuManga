@@ -124,7 +124,9 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">归档下载线程数</div>
-        <div class="item-subtext">所有任务活跃线程数之和若超过10将导致下载失败</div>
+        <div class="item-subtext">
+          单个归档文件分片下载的并发线程数；所有任务活跃线程数之和上限为 10，超出部分自动排队等待
+        </div>
       </div>
       <select v-model="downloadSettings.archiveThreads" class="setting-select">
         <option :value="3">3</option>
@@ -136,7 +138,9 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">控制归档下载并发数</div>
-        <div class="item-subtext">在有足够的线程下载之前，归档任务会保持等待状态</div>
+        <div class="item-subtext">
+          开启后归档任务需先获取全局线程配额，线程不足时保持等待状态；关闭后各任务直接使用设置线程数下载
+        </div>
       </div>
       <label class="toggle-switch">
         <input type="checkbox" v-model="downloadSettings.controlArchiveConcurrency" />

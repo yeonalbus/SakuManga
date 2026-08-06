@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"SakuHentai/internal/models"
@@ -58,7 +59,10 @@ type archiveDownloader struct {
 	referer         string
 	limiter         *rateLimiter
 	lockFailed      bool
-	lastArchiveInfo *models.ArchiveInfo // 最近一次解析到的归档报价（含 SizeBytes 预估）
+	chunk           *archiveChunkDownloader // 当前分块下载器（nil 表示单线程路径/未开始分块）
+	chunkMu         sync.Mutex              // 保护 chunk 字段（暂停/取消/线程调整并发访问）
+	stopFlag        atomic.Bool             // 本地停止标记（暂停/取消时置位，避免频繁回查 DB）
+	lastArchiveInfo *models.ArchiveInfo     // 最近一次解析到的归档报价（含 SizeBytes 预估）
 	lastPlain       string              // 最近一次 archiver.php 页面去标签文本（用于识别「已解锁」变体）
 	mu              sync.Mutex
 	startedAt       time.Time
@@ -67,6 +71,8 @@ type archiveDownloader struct {
 // runArchiveEngine 归档下载引擎入口（由任务管理器分派）
 func (m *DownloadManager) runArchiveEngine(task *models.DownloadTask) {
 	g := &archiveDownloader{m: m, task: task}
+	m.registerArchive(g)
+	defer m.unregisterArchive(task.ID)
 	g.run()
 }
 
@@ -153,8 +159,8 @@ func (g *archiveDownloader) run() {
 	}
 	log.Printf("%s [archive-engine] 任务 %s 已获取 H@H 下载链接: %s", dlLogTag, g.task.ID, truncateForLog(downloadURL, 200))
 
-	// 5. Range 续传下载 zip
-	if err := g.downloadZip(downloadURL); err != nil {
+	// 5. 下载 zip：探测 Range 支持与总大小后，按线程数分流（分块并发 / 单线程续传）
+	if err := g.downloadArchiveFile(downloadURL); err != nil {
 		g.failOrLock(err)
 		return
 	}
@@ -696,15 +702,7 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 		log.Printf("%s [archive-engine] 任务 %s 从 %d 字节续传 zip", dlLogTag, g.task.ID, startOffset)
 	}
 
-	// 下载专用客户端：复用 Cookie/代理，但不设全局 Timeout。
-	// BuildClient 的 20s 超时对整个请求（含 body 读取）生效，大文件 zip（数十~上百 MiB）会中途被截断；
-	// 中断由 Range 断点续传兜底（失败重试时从 .part 偏移续传），故此处仅保留头部响应超时防止头部阶段挂死。
-	dlClient := &http.Client{Jar: g.client.Jar, Transport: g.client.Transport}
-	if tr, ok := g.client.Transport.(*http.Transport); ok {
-		cl := tr.Clone()
-		cl.ResponseHeaderTimeout = 30 * time.Second
-		dlClient.Transport = cl
-	}
+	dlClient := g.downloadClient()
 
 	resp, err := dlClient.Do(req)
 	if err != nil {
@@ -801,6 +799,106 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 	return nil
 }
 
+// downloadClient 返回归档 zip 下载专用客户端（复用 Cookie/代理，仅保留头部超时）。
+// BuildClient 的 20s 超时对整个请求（含 body 读取）生效，大文件 zip 会中途被截断；
+// 中断由 Range 断点续传兜底，故此处仅保留头部响应超时防止头部阶段挂死。
+func (g *archiveDownloader) downloadClient() *http.Client {
+	dlClient := &http.Client{Jar: g.client.Jar, Transport: g.client.Transport}
+	if tr, ok := g.client.Transport.(*http.Transport); ok {
+		cl := tr.Clone()
+		cl.ResponseHeaderTimeout = 30 * time.Second
+		dlClient.Transport = cl
+	}
+	return dlClient
+}
+
+// downloadArchiveFile 归档 zip 下载入口：探测 Range 支持与总大小，
+// 按「控制并发 + 线程数」决定走分块并发下载还是单线程续传。
+func (g *archiveDownloader) downloadArchiveFile(downloadURL string) error {
+	g.stopFlag.Store(false)
+
+	total, rangeOK, err := g.probeArchiveDownload(downloadURL)
+	if err != nil {
+		return err
+	}
+
+	setting := g.m.GetSettings()
+	threads := setting.ArchiveThreads
+	if threads < 1 {
+		threads = 1
+	}
+
+	// 分块条件：支持 Range、线程数 > 1、文件足够大（至少 2 块）
+	useChunk := rangeOK && total > 0 && threads > 1 && total >= minChunkSize*2
+	if !useChunk {
+		log.Printf("%s [archive-engine] 任务 %s 走单线程下载（rangeOK=%v total=%d threads=%d）",
+			dlLogTag, g.task.ID, rangeOK, total, threads)
+		return g.downloadZip(downloadURL)
+	}
+
+	// 全局线程配额：全有或全无，不足则阻塞排队等待其他任务释放（对应 JHentai waitingIsolate 排队机制）
+	if setting.ControlArchiveConcurrency {
+		got := g.m.archivePool.acquire(g.task.ID, threads, func() bool { return g.stopped() })
+		if got <= 0 {
+			return errTaskStopped // 等待期间被暂停/取消
+		}
+		threads = got
+		defer g.m.archivePool.releaseAll(g.task.ID)
+	}
+
+	return g.runChunkDownload(downloadURL, total, threads)
+}
+
+// runChunkDownload 执行分块并发下载（含断点续传与 zip 校验）
+func (g *archiveDownloader) runChunkDownload(downloadURL string, total int64, threads int) error {
+	d := newArchiveChunkDownloader(g, downloadURL, total)
+	g.setChunk(d)
+	defer g.setChunk(nil)
+	return d.run(threads)
+}
+
+// stopDownload 立即中断当前下载（暂停/取消时由 DownloadManager 调用）：
+// 置位本地停止标记，并取消分块下载器的 context 以中断进行中的 Range 请求。
+// 单线程路径通过 stopped() 检测停止标记退出；.part 保留供恢复续传。
+func (g *archiveDownloader) stopDownload() {
+	g.stopFlag.Store(true)
+	g.chunkMu.Lock()
+	c := g.chunk
+	g.chunkMu.Unlock()
+	if c != nil {
+		c.stop()
+	}
+}
+
+// onArchiveThreadsChange 下载设置线程数变化时动态调整本任务的分块 worker 数
+//（对应 JHentai _onIsolateCountChange → changeIsolateCount）。
+func (g *archiveDownloader) onArchiveThreadsChange(newThreads int) {
+	if newThreads < 1 {
+		newThreads = 1
+	}
+	g.chunkMu.Lock()
+	c := g.chunk
+	g.chunkMu.Unlock()
+	if c == nil {
+		return // 单线程路径或尚未开始分块
+	}
+	setting := g.m.GetSettings()
+	if setting.ControlArchiveConcurrency {
+		// 受全局配额约束：调大受全局余量限制（best-effort），调小立即释放线程唤醒排队任务
+		got := g.m.archivePool.adjust(g.task.ID, newThreads)
+		c.setTarget(got)
+	} else {
+		c.setTarget(newThreads)
+	}
+}
+
+// setChunk 记录当前分块下载器（并发访问由 chunkMu 保护）
+func (g *archiveDownloader) setChunk(c *archiveChunkDownloader) {
+	g.chunkMu.Lock()
+	g.chunk = c
+	g.chunkMu.Unlock()
+}
+
 // recordBytes 更新下载进度并周期性写库
 func (g *archiveDownloader) recordBytes(n int64) {
 	g.mu.Lock()
@@ -816,9 +914,9 @@ func (g *archiveDownloader) recordBytes(n int64) {
 	}
 }
 
-// stopped 任务是否已被取消/暂停（回查 DB，引擎内存状态不会更新）
+// stopped 任务是否已被取消/暂停（本地停止标记 + 回查 DB）
 func (g *archiveDownloader) stopped() bool {
-	return g.m.taskStopped(g.task.ID)
+	return g.stopFlag.Load() || g.m.taskStopped(g.task.ID)
 }
 
 // persist 将进度写库（调用方需持有 g.mu）

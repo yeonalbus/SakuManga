@@ -75,8 +75,8 @@ type DownloadSetting struct {
 	DownloadAllGalleriesSamePriority bool   `json:"downloadAllGalleriesSamePriority"` // 同一优先级下同时下载所有画廊
 
 	// ── 归档设置 ──
-	ArchiveThreads                int  `json:"archiveThreads"`                // 归档下载线程数（同时运行的归档任务数）
-	ControlArchiveConcurrency     bool `json:"controlArchiveConcurrency"`      // 控制归档下载并发数
+	ArchiveThreads                int  `json:"archiveThreads"`                // 单个归档文件分片下载的并发线程数（全局线程配额池统一调度，上限 10）
+	ControlArchiveConcurrency     bool `json:"controlArchiveConcurrency"`      // 控制归档下载并发：开启后归档任务需先获取全局线程配额（不足则排队等待）
 	DeleteZipAfterArchiveDownload bool `json:"deleteZipAfterArchiveDownload"` // 归档下载完成后删除原压缩包
 
 	// ── 下载任务 ──

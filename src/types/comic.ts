@@ -147,6 +147,10 @@ export interface SearchConfig {
   disableLangFilter: boolean // f_sfl=on 禁用语言过滤 (离线=忽略语言选择)
   disableUploaderFilter: boolean // f_sfu=on 禁用上传者过滤 (仅在线)
   disableTagFilter: boolean // f_sft=on 禁用 Tag 过滤 (离线=关键词仅匹配标题)
+
+  // ─── Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）───
+  excludeTags?: string[] // 负向 tag（如 "female:yuri"，精确匹配 namespace:key）
+  excludeKeywords?: string[] // 负向关键词（如 "3d"，子串匹配标题/tag/上传者）
 }
 
 /**
@@ -172,6 +176,10 @@ export interface FilterParams {
   disableLangFilter?: boolean // f_sfl=on
   disableUploaderFilter?: boolean // f_sfu=on
   disableTagFilter?: boolean // f_sft=on
+
+  // ─── Round3-任务6：负向排除 ───
+  excludeTags?: string[]
+  excludeKeywords?: string[]
 
   // ─── 线上游标与线下页码入参 ───
   page?: number // 线下页码
@@ -224,6 +232,10 @@ export interface RandomComicParams {
   disableLangFilter?: boolean // f_sfl=on 禁用语言过滤
   disableUploaderFilter?: boolean // f_sfu=on 禁用上传者过滤
   disableTagFilter?: boolean // f_sft=on 禁用 Tag 过滤
+
+  // ─── Round3-任务6：负向排除（离线过滤 + 在线本地丢弃）───
+  excludeTags?: string[]
+  excludeKeywords?: string[]
 }
 
 /** 随机抽卡响应 */

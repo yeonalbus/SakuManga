@@ -188,18 +188,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/downloads/:id/retry", downloadHandler.RetryDownload)
 		api.POST("/downloads/:id/unlock", downloadHandler.UnlockDownload)
 
-		// 离线更新检测 + 维护查重
-		api.POST("/offline/updates/check", offlineHandler.CheckOfflineUpdates)
-		api.GET("/offline/updates/check/progress", offlineHandler.GetCheckUpdatesProgress)
-		api.GET("/offline/updates/check/result", offlineHandler.GetCheckUpdatesResult)
-		api.GET("/offline/updates", offlineHandler.ListOfflineUpdates)
-		api.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
-		api.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
-		api.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
-		api.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)
-		api.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
-
-		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置）───
+		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置 / 离线更新维护）───
+		// Round3-任务2：离线更新检测 + 维护查重从登录组移入仅管理员分组
 		admin := api.Group("")
 		admin.Use(middleware.AdminOnly())
 		{
@@ -235,6 +225,17 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 			// 管理员查看成员历史（可按 userId / source 过滤）
 			admin.GET("/admin/history", libraryHandler.AdminGetHistory)
+
+			// 离线更新检测 + 维护查重（Round3-任务2：由登录组移入仅管理员）
+			admin.POST("/offline/updates/check", offlineHandler.CheckOfflineUpdates)
+			admin.GET("/offline/updates/check/progress", offlineHandler.GetCheckUpdatesProgress)
+			admin.GET("/offline/updates/check/result", offlineHandler.GetCheckUpdatesResult)
+			admin.GET("/offline/updates", offlineHandler.ListOfflineUpdates)
+			admin.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
+			admin.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
+			admin.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
+			admin.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)
+			admin.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 		}
 	}
 }

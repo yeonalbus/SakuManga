@@ -2,7 +2,11 @@
 import { ref, reactive, computed } from 'vue'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
+import TagChip from '@/components/TagChip.vue'
+import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import { fetchRandomComicsApi } from '@/api/comic'
+// Round3-任务6：负向排除（抽卡结果前端兜底过滤）
+import { isNegativeItem, matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 import type {
   ComicItem,
   OnlineComic,
@@ -60,11 +64,30 @@ const drawConfig = reactive<SearchConfig>({
   disableLangFilter: false,
   disableUploaderFilter: false,
   disableTagFilter: false,
+  // ─── Round3-任务6：负向排除（`- ` 前缀拆解后单独存放，便于后端/前端复用）───
+  excludeTags: [],
+  excludeKeywords: [],
 })
 
 // 过滤器面板展开状态与关键词输入
 const filterOpen = ref(false)
 const keywordInput = ref('')
+const kwInputFocused = ref(false)
+
+// ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
+const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
+  () => keywordInput.value,
+)
+
+// 选中联想项：负向项以「- namespace:key」压入队列
+const pickSuggestion = (sug: TagSuggestion) => {
+  if (!drawConfig.keywords.includes(sug.insertText)) {
+    drawConfig.keywords.push(sug.insertText)
+  }
+  keywordInput.value = ''
+  clearSuggest()
+  kwInputFocused.value = false
+}
 
 // 切换分类选中状态
 const toggleCategory = (key: string) => {
@@ -84,8 +107,10 @@ const handleKeywordEnter = () => {
       drawConfig.keywords.push(text)
     }
     keywordInput.value = ''
+    clearSuggest()
   } else {
     drawConfig.keywords = []
+    clearSuggest()
   }
 }
 
@@ -96,7 +121,11 @@ const removeKeyword = (index: number) => {
 // 重置抽卡过滤器
 const resetFilter = () => {
   keywordInput.value = ''
+  clearSuggest()
+  kwInputFocused.value = false
   drawConfig.keywords = []
+  drawConfig.excludeTags = []
+  drawConfig.excludeKeywords = []
   drawConfig.activeCategories = allCategoryKeys()
   drawConfig.minRating = 0
   drawConfig.minPages = undefined
@@ -195,9 +224,13 @@ const buildParams = (): RandomComicParams => {
 
   const kw = (drawConfig.keyword || '').trim()
   if (kw) params.keyword = kw
-  if (drawConfig.keywords && drawConfig.keywords.length > 0) {
-    params.keywords = drawConfig.keywords.filter((k) => k.trim())
+  // Round3-任务6：把队列按「- 」前缀拆分为正向 / 负向，正向下发搜索，负向单独下发
+  const parsed = parseKeywordQueue(drawConfig.keywords)
+  if (parsed.positive.length > 0) {
+    params.keywords = parsed.positive
   }
+  if (parsed.excludeTags.length > 0) params.excludeTags = parsed.excludeTags
+  if (parsed.excludeKeywords.length > 0) params.excludeKeywords = parsed.excludeKeywords
   if (drawConfig.activeCategories.length > 0) {
     params.categories = [...drawConfig.activeCategories]
   }
@@ -230,18 +263,32 @@ const handleStartDraw = async () => {
   try {
     const res = await fetchRandomComicsApi(buildParams())
 
-    drawnComics.value = res.comics.map(toComicItem)
+    let items = res.comics.map(toComicItem)
+
+    // ─── Round3-任务6：前端负向兜底过滤（负向 tag 精确 / 负向关键词子串）───
+    const parsed = parseKeywordQueue(drawConfig.keywords)
+    const excludeRule = {
+      excludeTags: [...(drawConfig.excludeTags || []), ...parsed.excludeTags],
+      excludeKeywords: [...(drawConfig.excludeKeywords || []), ...parsed.excludeKeywords],
+    }
+    const filtered = items.filter((c) => matchExcludes(c, excludeRule))
+    const dropped = items.length - filtered.length
+    items = filtered
+
+    drawnComics.value = items
     isSpinning.value = false
     hasDrawn.value = true
 
     if (res.warning) {
       toast.warning(res.warning)
-    } else if (drawnComics.value.length === 0) {
+    } else if (items.length === 0) {
       toast.error('当前范围内没有符合条件的作品！')
-    } else if (drawnComics.value.length < targetCount.value) {
-      toast.warning(`符合条件的作品仅有 ${drawnComics.value.length} 本，已为你全数抽出！`)
+    } else if (dropped > 0 && items.length < targetCount.value) {
+      toast.warning(`负向排除后仅剩 ${items.length} 本（已排除 ${dropped} 本）`)
+    } else if (items.length < targetCount.value) {
+      toast.warning(`符合条件的作品仅有 ${items.length} 本，已为你全数抽出！`)
     } else {
-      toast.success(`成功抽出 ${drawnComics.value.length} 本作品！`)
+      toast.success(`成功抽出 ${items.length} 本作品！`)
     }
   } catch (err) {
     isSpinning.value = false
@@ -322,7 +369,12 @@ const handleStartDraw = async () => {
               <span class="tip-text">(Enter 压入，框为空按 Enter 清空)</span>
             </label>
             <div v-if="drawConfig.keywords.length > 0" class="kw-chips">
-              <span v-for="(kw, index) in drawConfig.keywords" :key="kw + index" class="kw-chip">
+              <span
+                v-for="(kw, index) in drawConfig.keywords"
+                :key="kw + index"
+                class="kw-chip"
+                :class="{ 'is-negative': isNegativeItem(kw) }"
+              >
                 <span class="kw-text">{{ kw }}</span>
                 <span class="kw-remove" title="删除此关键词" @click.stop="removeKeyword(index)">
                   ✕
@@ -333,9 +385,33 @@ const handleStartDraw = async () => {
               v-model="keywordInput"
               type="text"
               class="filter-input"
-              placeholder="输入关键词后按 Enter 压入队列..."
+              placeholder="输入关键词后按 Enter 压入队列，前缀「- 」表示排除..."
+              @focus="kwInputFocused = true"
+              @blur="kwInputFocused = false"
               @keydown.enter.prevent="handleKeywordEnter"
             />
+
+            <!-- ─── Round3-任务5：tag 联想（正向 / 负向「- 」前缀）─── -->
+            <div
+              v-if="kwInputFocused && (suggestions.length > 0 || loading)"
+              class="tag-suggest-box"
+            >
+              <div v-if="loading" class="suggest-loading">加载中...</div>
+              <div
+                v-for="sug in suggestions"
+                :key="`${sug.namespace}:${sug.key}`"
+                class="tag-suggest-item"
+                :class="{ negative: sug.isNegative }"
+                @mousedown.prevent
+                @click="pickSuggestion(sug)"
+              >
+                <TagChip :tag="sug" />
+                <span v-if="sug.count" class="tag-count-badge"
+                  >🔥 {{ sug.count.toLocaleString() }}</span
+                >
+                <span class="suggest-hint">{{ sug.isNegative ? '排除' : '加入' }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- 分类 -->
@@ -747,6 +823,13 @@ const handleStartDraw = async () => {
   font-weight: 500;
 }
 
+.kw-chip.is-negative {
+  background-color: rgba(255, 77, 109, 0.12);
+  border-color: #ff4d6d;
+  color: #ff4d6d;
+  text-decoration: line-through;
+}
+
 .kw-remove {
   color: var(--app-text-3);
   font-size: 0.75rem;
@@ -771,6 +854,60 @@ const handleStartDraw = async () => {
 
 .filter-input:focus {
   border-bottom-color: #007acc;
+}
+
+/* ─── Round3-任务5：tag 联想下拉 ─── */
+.tag-suggest-box {
+  margin-top: 4px;
+  border: 1px solid var(--app-border-3);
+  border-radius: 6px;
+  background-color: var(--app-surface-2);
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.suggest-loading {
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: var(--app-text-3);
+}
+
+.tag-suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.tag-suggest-item:hover {
+  background-color: var(--app-surface-3);
+}
+
+.tag-suggest-item.negative .suggest-hint {
+  color: #ff4d6d;
+}
+
+.tag-count-badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+  white-space: nowrap;
+}
+
+.suggest-hint {
+  font-size: 0.72rem;
+  color: #10b981;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
 }
 
 /* 分类网格 */

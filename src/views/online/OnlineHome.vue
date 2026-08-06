@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted } from 'vue'
+import { watch, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
@@ -10,8 +10,31 @@ import { useOnlineStore } from '@/stores/onlineStore'
 import { onlineSearchConfig } from '@/stores/searchStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
+import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 
 const onlineStore = useOnlineStore()
+
+// ─── Round3-任务6：在线列表负向过滤（负向项不参与服务端搜索，仅渲染前本地剔除）───
+const filteredComics = computed(() => {
+  const cfg = onlineSearchConfig.value
+  const parsed = parseKeywordQueue(cfg.keywords)
+  // Round3-任务6：顶栏主搜索词同样支持「- 」负向前缀（并入本地负向规则）
+  const searchBarParsed = parseKeywordQueue(cfg.keyword?.trim() ? [cfg.keyword] : [])
+  const rule = {
+    excludeTags: [
+      ...(cfg.excludeTags || []),
+      ...parsed.excludeTags,
+      ...searchBarParsed.excludeTags,
+    ],
+    excludeKeywords: [
+      ...(cfg.excludeKeywords || []),
+      ...parsed.excludeKeywords,
+      ...searchBarParsed.excludeKeywords,
+    ],
+  }
+  return onlineStore.comics.filter((comic) => matchExcludes(comic, rule))
+})
 
 const route = useRoute()
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
@@ -34,13 +57,20 @@ const {
   handleSelect,
   toggleSelectAll,
   handleBatchClose,
-} = useBatchSelection(() => onlineStore.comics)
+} = useBatchSelection(() => filteredComics.value)
 
 const initSearch = () => {
   const cfg = onlineSearchConfig.value
   // E-Hentai 的 f_search 支持空格分隔多词（隐式 AND），因此把
   // 顶栏主搜索词与筛选抽屉的“多关键词队列”合并为一条 f_search 字符串。
-  const kwTokens = [cfg.keyword || '', ...(cfg.keywords || [])].map((t) => t.trim()).filter(Boolean)
+  // Round3-任务6：负向项（`- ` 前缀）不参与服务端搜索（E 站不支持排除语法），
+  // 只保留正向词下发，负向剔除交由 filteredComics 本地完成。
+  const parsed = parseKeywordQueue(cfg.keywords)
+  // Round3-任务6：顶栏主搜索词的「- 」负向部分不参与服务端搜索（E 站不支持排除语法），只取正向词
+  const searchBarParsed = parseKeywordQueue(cfg.keyword?.trim() ? [cfg.keyword] : [])
+  const kwTokens = [...searchBarParsed.positive, ...parsed.positive]
+    .map((t) => t.trim())
+    .filter(Boolean)
   onlineStore.fetchInitial({
     keyword: kwTokens.join(' '),
     categories: cfg.activeCategories,
@@ -97,7 +127,7 @@ onUnmounted(() => {
     <div class="online-split">
       <div class="split-main">
         <GridContainer
-          :items="onlineStore.comics"
+          :items="filteredComics"
           :selectable="true"
           :select-mode="selectMode"
           :selected-ids="selectedIds"

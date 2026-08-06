@@ -27,6 +27,8 @@ const props = withDefaults(
     selected?: boolean
     /** 左右分栏面板模式：宽屏在线列表页开启后，点击卡片改发 open 事件而非跳转路由 */
     panelMode?: boolean
+    /** Round3-任务3：隐藏副标题（排行榜等场景只保留单一标题，日文优先） */
+    hideSubtitle?: boolean
   }>(),
   {
     size: 'normal',
@@ -34,6 +36,7 @@ const props = withDefaults(
     selectMode: false,
     selected: false,
     panelMode: false,
+    hideSubtitle: false,
   },
 )
 
@@ -403,7 +406,9 @@ const comicSourceBadge = computed(() => {
       <div class="compact-main-content">
         <div class="compact-title-wrap">
           <h4 class="compact-title" :title="displayTitle || comic.title">{{ displayTitle }}</h4>
-          <span v-if="subTitle" class="compact-subtitle" :title="comic.title">{{ subTitle }}</span>
+          <span v-if="subTitle && !hideSubtitle" class="compact-subtitle" :title="comic.title">{{
+            subTitle
+          }}</span>
         </div>
 
         <div v-if="!showTags" class="compact-normal-panel">
@@ -490,10 +495,14 @@ const comicSourceBadge = computed(() => {
         <div class="card-title-wrap">
           <h4 class="card-title" :title="displayTitle || comic.title">{{ displayTitle }}</h4>
           <!-- 🏆 排行榜大卡片（size=large，仅领奖台使用）：只显示主标题，隐藏副标题，
-               避免「日语标题 + 中文副标题」双标题把卡片撑高撑宽（离线 NO.1 过大的 Bug） -->
-          <span v-if="subTitle && size !== 'large'" class="card-subtitle" :title="comic.title">{{
-            subTitle
-          }}</span>
+               避免「日语标题 + 中文副标题」双标题把卡片撑高撑宽（离线 NO.1 过大的 Bug）。
+               Round3-任务3：hideSubtitle 用于排行榜普通卡片同样只保留单一标题 -->
+          <span
+            v-if="subTitle && size !== 'large' && !hideSubtitle"
+            class="card-subtitle"
+            :title="comic.title"
+            >{{ subTitle }}</span
+          >
         </div>
         <div class="card-tags-row">
           <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue'
 import type { SearchConfig } from '@/types/comic'
+import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
+import TagChip from '@/components/TagChip.vue'
+// Round3-任务6：负向 chips（「- 」前缀红色/删除线区分）
+import { isNegativeItem } from '@/utils/tagFilter'
 
 const props = defineProps<{
   visible: boolean
@@ -50,11 +54,31 @@ const filterState = reactive({
 
 // 关键词输入框的临时响应式变量
 const inputKeyword = ref('')
+const inputFocused = ref(false)
+
+// ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
+const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
+  () => inputKeyword.value,
+)
+
+// 选中联想项：负向项以「- namespace:key」压入队列
+const pickSuggestion = (sug: TagSuggestion) => {
+  if (!filterState.keywords.includes(sug.insertText)) {
+    filterState.keywords.push(sug.insertText)
+  }
+  inputKeyword.value = ''
+  clearSuggest()
+  inputFocused.value = false
+}
 
 // 🟢 3. 打开抽屉时回填当前域的 Config
 watch(
   () => props.visible,
   (isOpen) => {
+    if (isOpen) {
+      inputFocused.value = false
+      clearSuggest()
+    }
     if (isOpen && props.config) {
       filterState.keywords = [...(props.config.keywords || [])]
       filterState.activeCategories = new Set(
@@ -93,8 +117,10 @@ const handleKeydownEnter = () => {
       filterState.keywords.push(text)
     }
     inputKeyword.value = ''
+    clearSuggest()
   } else {
     filterState.keywords = []
+    clearSuggest()
   }
 }
 
@@ -105,12 +131,16 @@ const removeKeyword = (index: number) => {
 
 // 关闭抽屉
 const handleClose = () => {
+  clearSuggest()
+  inputFocused.value = false
   emit('update:visible', false)
 }
 
 // 重置抽屉
 const handleReset = () => {
   inputKeyword.value = ''
+  clearSuggest()
+  inputFocused.value = false
   filterState.keywords = []
   filterState.activeCategories = new Set(categories.map((c) => c.key))
   filterState.minRating = 0
@@ -193,6 +223,7 @@ const handleApply = () => {
                 v-for="(kw, index) in filterState.keywords"
                 :key="kw + index"
                 class="filter-kw-chip"
+                :class="{ 'is-negative': isNegativeItem(kw) }"
               >
                 <span class="kw-text">{{ kw }}</span>
                 <span class="remove-x" title="删除此关键词" @click.stop="removeKeyword(index)">
@@ -205,9 +236,33 @@ const handleApply = () => {
               v-model="inputKeyword"
               type="text"
               class="dark-input"
-              placeholder="输入关键词后按 Enter 压入队列..."
+              placeholder="输入关键词后按 Enter 压入队列，前缀「- 」表示排除..."
+              @focus="inputFocused = true"
+              @blur="inputFocused = false"
               @keydown.enter.prevent="handleKeydownEnter"
             />
+
+            <!-- ─── Round3-任务5：tag 联想（正向 / 负向「- 」前缀）─── -->
+            <div
+              v-if="inputFocused && (suggestions.length > 0 || loading)"
+              class="tag-suggest-box"
+            >
+              <div v-if="loading" class="suggest-loading">加载中...</div>
+              <div
+                v-for="sug in suggestions"
+                :key="`${sug.namespace}:${sug.key}`"
+                class="tag-suggest-item"
+                :class="{ negative: sug.isNegative }"
+                @mousedown.prevent
+                @click="pickSuggestion(sug)"
+              >
+                <TagChip :tag="sug" />
+                <span v-if="sug.count" class="tag-count-badge"
+                  >🔥 {{ sug.count.toLocaleString() }}</span
+                >
+                <span class="suggest-hint">{{ sug.isNegative ? '排除' : '加入' }}</span>
+              </div>
+            </div>
           </div>
 
           <div class="form-row">
@@ -434,6 +489,13 @@ const handleApply = () => {
   font-weight: 500;
 }
 
+.filter-kw-chip.is-negative {
+  background-color: rgba(255, 77, 109, 0.12);
+  border-color: #ff4d6d;
+  color: #ff4d6d;
+  text-decoration: line-through;
+}
+
 .remove-x {
   color: var(--app-text-3);
   font-size: 0.75rem;
@@ -458,6 +520,60 @@ const handleApply = () => {
 
 .dark-input:focus {
   border-bottom-color: #007acc;
+}
+
+/* ─── Round3-任务5：tag 联想下拉 ─── */
+.tag-suggest-box {
+  margin-top: 4px;
+  border: 1px solid var(--app-border-3);
+  border-radius: 6px;
+  background-color: var(--app-surface-2);
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.suggest-loading {
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: var(--app-text-3);
+}
+
+.tag-suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.tag-suggest-item:hover {
+  background-color: var(--app-surface-3);
+}
+
+.tag-suggest-item.negative .suggest-hint {
+  color: #ff4d6d;
+}
+
+.tag-count-badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+  white-space: nowrap;
+}
+
+.suggest-hint {
+  font-size: 0.72rem;
+  color: #10b981;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
 }
 
 /* 表单行 */

@@ -8,6 +8,8 @@ import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import type { ComicItem, OfflineComic } from '@/types/comic'
+// Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）
+import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 
 const { toast, modal } = useUI()
 
@@ -86,7 +88,12 @@ const comicTagStrings = (comic: ComicItem): string[] => {
 // 🟢 2. 核心过滤管道：兼顾 URL 中的 ?q= 搜索词 与 TopBar 传进来的离线筛选配置 (求交集)
 const filteredComics = computed(() => {
   const cfg = offlineSearchConfig.value
-  const searchBarKw = (cfg.keyword || '').toLowerCase().trim()
+  // ─── Round3-任务6：顶栏主搜索词同样支持「- 」负向前缀（拆出正向匹配 + 并入负向规则）───
+  const searchBarParsed = parseKeywordQueue((cfg.keyword || '').trim() ? [cfg.keyword || ''] : [])
+  const searchBarKw = searchBarParsed.positive.join(' ').toLowerCase().trim()
+
+  // ─── Round3-任务6：把关键词队列按「- 」前缀拆分为正向 / 负向两部分 ───
+  const parsedQueue = parseKeywordQueue(cfg.keywords)
 
   // f_sft 禁用 Tag 过滤的本地语义：开启后关键词只匹配标题，不再匹配 Tag
   const matchTagEnabled = !cfg.disableTagFilter
@@ -106,16 +113,17 @@ const filteredComics = computed(() => {
       if (!matchTitle && !matchTag) return false
     }
 
-    // 🟢 关卡 2：筛选抽屉中的“多关键词队列”过滤 (必须同时匹配队列里的每一个词)
-    if (cfg.keywords && cfg.keywords.length > 0) {
-      const allMatched = cfg.keywords.every((filterKw: string) => {
+    // 🟢 关卡 2：筛选抽屉中的“多关键词队列”过滤 (必须同时匹配队列里的每一个正向词)
+    // Round3-任务6：负向项（`- ` 前缀）不再参与正向匹配，交由末尾负向关卡剔除
+    if (parsedQueue.positive.length > 0) {
+      const allMatched = parsedQueue.positive.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
         const matchTitle = comic.title.toLowerCase().includes(lowerKw)
         const matchTag = matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(lowerKw))
         return matchTitle || matchTag
       })
 
-      if (!allMatched) return false // 只要有一个词不满足，就过滤掉
+      if (!allMatched) return false // 只要有一个正向词不满足，就过滤掉
     }
 
     // 🟢 关卡 2.5：语言过滤 (仅当语言选择非 All 且未禁用语言过滤时生效)
@@ -145,6 +153,21 @@ const filteredComics = computed(() => {
       return false
     }
 
+    // ─── Round3-任务6：负向关卡（负向 tag 精确匹配 + 负向关键词子串匹配）───
+    const excludeRule = {
+      excludeTags: [
+        ...(cfg.excludeTags || []),
+        ...parsedQueue.excludeTags,
+        ...searchBarParsed.excludeTags,
+      ],
+      excludeKeywords: [
+        ...(cfg.excludeKeywords || []),
+        ...parsedQueue.excludeKeywords,
+        ...searchBarParsed.excludeKeywords,
+      ],
+    }
+    if (!matchExcludes(comic, excludeRule)) return false
+
     return true
   })
 })
@@ -172,12 +195,13 @@ const sortOptions = [
   { value: 'updatedAt', label: '更新时间' },
 ] as const
 type SortKey = (typeof sortOptions)[number]['value']
-const sortBy = ref<SortKey>('addedAt')
+// Round3-任务4：默认按发布时间降序
+const sortBy = ref<SortKey>('publishedAt')
 const sortDesc = ref(true)
 
 // 空时间字段始终排最后（无论升降序）
 const sortedComics = computed(() => {
-  const dir = sortDesc.value ? 1 : -1
+  const dir = sortDesc.value ? -1 : 1
   return [...filteredComics.value].sort((a, b) => {
     const ra = (a as unknown as Record<string, unknown>)[sortBy.value]
     const rb = (b as unknown as Record<string, unknown>)[sortBy.value]

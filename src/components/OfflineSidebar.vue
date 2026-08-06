@@ -3,10 +3,14 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { bookshelves, addBookshelf, removeBookshelf } from '@/stores/bookshelfStore'
+import { useUserStore } from '@/stores/userStore'
 
 const router = useRouter()
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id
 const { modal, toast } = useUI()
+
+// Round3-任务2：更新/维护入口仅管理员可见
+const { isAdmin } = useUserStore()
 
 // 控制书架菜单的展开/折叠状态
 const isBookshelfOpen = ref(true)
@@ -43,8 +47,9 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
   <div class="nav-group">
     <span class="group-title">📚 离线模式</span>
     <router-link to="/offline/home">首页</router-link>
-    <router-link to="/offline/update">更新</router-link>
-    <router-link to="/offline/maintain">维护</router-link>
+    <!-- Round3-任务2：更新/维护入口仅管理员可见 -->
+    <router-link v-if="isAdmin" to="/offline/update">更新</router-link>
+    <router-link v-if="isAdmin" to="/offline/maintain">维护</router-link>
     <router-link to="/offline/toplist">排行榜</router-link>
     <router-link to="/offline/history">历史记录</router-link>
 

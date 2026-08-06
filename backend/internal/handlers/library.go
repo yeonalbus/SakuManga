@@ -264,6 +264,18 @@ func (h *LibraryHandler) GetHistory(c *gin.Context) {
 		q = q.Where("source = ?", source)
 	}
 
+	// Round3-任务1：可选 comicId 单条查询（阅读器进入时按账号精确读取进度）
+	if comicID := c.Query("comicId"); comicID != "" {
+		var rec models.HistoryRecord
+		err := q.Where("comic_id = ?", comicID).First(&rec).Error
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{"items": []models.HistoryRecord{rec}, "total": 1})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"items": []models.HistoryRecord{}, "total": 0})
+		}
+		return
+	}
+
 	var records []models.HistoryRecord
 	if err := q.Order("last_read_at desc").Limit(limit).Find(&records).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取历史失败"})

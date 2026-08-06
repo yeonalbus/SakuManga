@@ -5,10 +5,13 @@ import { useUI } from '@/composables/useUI'
 import { getNextComicInQueue } from '@/stores/readingStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import { useGamepad } from '@/composables/useGamepad'
-import type { OnlineComic } from '@/types/comic'
-import { fetchOfflineComics } from '@/stores/comicStore'
+import type { OnlineComic, ComicItem } from '@/types/comic'
+import { fetchOfflineComics, offlineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
+// Round3-任务1：阅读进度按账号写回后端 /history
+import { getHistoryProgress, syncHistory } from '@/stores/historyStore'
+import { useUserStore } from '@/stores/userStore'
 
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
 interface WakeLockManager {
@@ -25,6 +28,7 @@ interface BatteryManager {
 const router = useRouter()
 const route = useRoute()
 const { toast, modal } = useUI()
+const userStore = useUserStore()
 
 // --------------------------------------------------
 // 1. 基础参数与基础控制
@@ -168,8 +172,13 @@ const loadComicPages = async () => {
     if (Number.isInteger(targetPage) && targetPage >= 1 && targetPage <= totalPages.value) {
       startPage = targetPage
     } else {
+      // Round3-任务1：本地缓存先定位，随后以按账号隔离的后端进度校准（后端有记录则覆盖）
       const last = getSavedPage(source.value, realId)
       startPage = Math.min(Math.max(1, last), totalPages.value)
+      const serverPage = await getHistoryProgress(source.value, realId)
+      if (serverPage && serverPage >= 1 && serverPage <= totalPages.value) {
+        startPage = serverPage
+      }
     }
     currentPage.value = startPage
     if (isWebtoon.value) scrollToPage(startPage)
@@ -318,12 +327,16 @@ const resetImgStates = () => {
 // --------------------------------------------------
 // 📖 阅读历史进度持久化 (localStorage)
 // --------------------------------------------------
-const PROGRESS_STORAGE_KEY = 'saku_comic_progress'
+// Round3-任务1：进度 key 按账号隔离（不同账号缓存互不干扰；未登录回退 anonymous）
+const progressStorageKey = () => {
+  const uid = userStore.user?.id ?? 'anonymous'
+  return `saku_comic_progress:${uid}`
+}
 
 // 1. 获取全量进度 Map { [source:id]: pageNumber }
 const getProgressMap = (): Record<string, number> => {
   try {
-    return JSON.parse(localStorage.getItem(PROGRESS_STORAGE_KEY) || '{}')
+    return JSON.parse(localStorage.getItem(progressStorageKey()) || '{}')
   } catch {
     return {}
   }
@@ -334,13 +347,44 @@ const saveProgress = (src: 'online' | 'offline', id: string, page: number) => {
   if (!id) return
   const map = getProgressMap()
   map[`${src}:${id}`] = page
-  localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(map))
+  localStorage.setItem(progressStorageKey(), JSON.stringify(map))
 }
 
 // 3. 读取指定作品的历史进度（无记录则默认第 1 页）
 const getSavedPage = (src: 'online' | 'offline', id: string): number => {
   const map = getProgressMap()
   return map[`${src}:${id}`] || 1
+}
+
+// Round3-任务1：当前阅读作品元信息（供后端进度写回；离线优先取库内真实条目）
+const currentComicMeta = computed<ComicItem | null>(() => {
+  if (!comicId.value) return null
+  if (source.value === 'offline') {
+    const found = offlineComics.value.find((c) => c.id === comicId.value)
+    if (found) return found
+  }
+  return {
+    id: comicId.value,
+    title: comicId.value,
+    coverUrl: '',
+    source: source.value,
+    tags: [],
+    updatedAt: '',
+    pageCount: totalPages.value,
+  } as ComicItem
+})
+
+// Round3-任务1：翻页进度 debounce 写回后端（避免高频请求；离线/后端不可用时静默失败）
+let progressSyncTimer: ReturnType<typeof setTimeout> | null = null
+const scheduleSyncProgress = () => {
+  if (progressSyncTimer) clearTimeout(progressSyncTimer)
+  progressSyncTimer = setTimeout(() => {
+    if (!currentComicMeta.value || totalPages.value <= 0) return
+    syncHistory(source.value, currentComicMeta.value, {
+      lastPageIndex: currentPage.value,
+      totalPageCount: totalPages.value,
+    })
+  }, 1000)
 }
 
 // --------------------------------------------------
@@ -861,6 +905,7 @@ onUnmounted(() => {
   if (autoTurnTimer) clearInterval(autoTurnTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (wakeLockSentinel) wakeLockSentinel.release()
+  if (progressSyncTimer) clearTimeout(progressSyncTimer)
 })
 
 // --------------------------------------------------
@@ -871,6 +916,10 @@ onUnmounted(() => {
 watch(currentPage, (newPg) => {
   if (comicId.value) {
     saveProgress(source.value, comicId.value, newPg)
+    // Round3-任务1：翻页 debounce 写回后端（按账号），页面数就绪后再同步
+    if (totalPages.value > 0) {
+      scheduleSyncProgress()
+    }
   }
   nextTick(() => {
     if (!isWebtoon.value) {

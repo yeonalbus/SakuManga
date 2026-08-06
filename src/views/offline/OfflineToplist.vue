@@ -46,19 +46,19 @@ const getComicReadCount = (item: OfflineComic) => {
     <div v-if="!isMobileDevice" class="podium-section">
       <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
         <div class="podium-crown">🥈 NO.2</div>
-        <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" />
+        <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" :hide-subtitle="true" />
         <div class="read-count">{{ getComicReadCount(topThree[1]) }} 次阅读</div>
       </div>
 
       <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
         <div class="podium-crown crown-gold">👑 NO.1</div>
-        <ItemCard :comic="topThree[0]" :rank="1" size="large" mode="card" />
+        <ItemCard :comic="topThree[0]" :rank="1" size="large" mode="card" :hide-subtitle="true" />
         <div class="read-count gold-text">{{ getComicReadCount(topThree[0]) }} 次阅读</div>
       </div>
 
       <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
         <div class="podium-crown">🥉 NO.3</div>
-        <ItemCard :comic="topThree[2]" :rank="3" size="large" mode="card" />
+        <ItemCard :comic="topThree[2]" :rank="3" size="large" mode="card" :hide-subtitle="true" />
         <div class="read-count">{{ getComicReadCount(topThree[2]) }} 次阅读</div>
       </div>
     </div>
@@ -67,7 +67,7 @@ const getComicReadCount = (item: OfflineComic) => {
       <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
       <div class="card-grid">
         <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
-          <ItemCard :comic="item" :rank="item.rank" mode="card" />
+          <ItemCard :comic="item" :rank="item.rank" mode="card" :hide-subtitle="true" />
           <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
         </div>
       </div>

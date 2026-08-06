@@ -3,6 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { TOKEN_KEY } from '@/config/api'
 import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMemory'
 import { preferenceSettings } from '@/stores/preferenceSettings'
+import { useUserStore } from '@/stores/userStore'
 
 //显式声明 : RouteRecordRaw[]
 const routes: RouteRecordRaw[] = [
@@ -63,6 +64,8 @@ const routes: RouteRecordRaw[] = [
     path: '/offline/update',
     name: 'OfflineUpdate',
     component: () => import('@/views/offline/OfflineUpdate.vue'),
+    // Round3-任务2：仅管理员可访问
+    meta: { requiresAdmin: true },
   },
   {
     path: '/offline/bookshelf',
@@ -73,6 +76,8 @@ const routes: RouteRecordRaw[] = [
     path: '/offline/maintain',
     name: 'OfflineMaintain',
     component: () => import('@/views/offline/OfflineMaintain.vue'),
+    // Round3-任务2：仅管理员可访问
+    meta: { requiresAdmin: true },
   },
   {
     path: '/offline/toplist',
@@ -153,6 +158,21 @@ router.beforeEach((to) => {
   }
   if (token && isLoginPage) {
     return { path: '/online/home' }
+  }
+  return true
+})
+
+// Round3-任务2：管理员路由守卫（离线更新/维护仅管理员，前端兜底防直接输 URL）
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAdmin) {
+    const userStore = useUserStore()
+    // 会话恢复是异步的（fetchMe），刷新后 user 可能仍为空：先拉取一次再判断
+    if (userStore.user === null && userStore.isAuthenticated) {
+      await userStore.fetchMe()
+    }
+    if (!userStore.isAdmin) {
+      return { path: '/offline/home' }
+    }
   }
   return true
 })

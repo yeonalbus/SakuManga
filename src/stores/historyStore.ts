@@ -60,8 +60,18 @@ export const loadHistory = async (source: 'online' | 'offline') => {
   }
 }
 
+/** 同步历史的可选进度入参（Round3-任务1：阅读器回传 lastPageIndex/totalPageCount） */
+export interface SyncHistoryOptions {
+  lastPageIndex?: number
+  totalPageCount?: number
+}
+
 /** 向后端写入一条历史记录（upsert，后端负责上限淘汰） */
-export const syncHistory = async (source: 'online' | 'offline', comic: ComicItem) => {
+export const syncHistory = async (
+  source: 'online' | 'offline',
+  comic: ComicItem,
+  opts: SyncHistoryOptions = {},
+) => {
   try {
     await http('/history', {
       method: 'POST',
@@ -71,12 +81,36 @@ export const syncHistory = async (source: 'online' | 'offline', comic: ComicItem
         comicTitle: comic.title || '',
         coverUrl: comic.coverUrl || '',
         lastChapterTitle: '',
-        lastPageIndex: 0,
-        totalPageCount: comic.pageCount || 0,
+        lastPageIndex: opts.lastPageIndex ?? 0,
+        totalPageCount: opts.totalPageCount ?? comic.pageCount ?? 0,
       }),
     })
   } catch (e) {
     console.error('同步历史失败:', e)
+  }
+}
+
+/**
+ * Round3-任务1：按账号读取单条阅读进度（阅读器进入时校准定位）
+ * 走 /history?source=..&comicId=.. 精确查询；无有效进度记录返回 null（不抛异常）
+ */
+export const getHistoryProgress = async (
+  source: 'online' | 'offline',
+  comicId: string,
+): Promise<number | null> => {
+  if (!comicId) return null
+  try {
+    const data = await http<{ items: HistoryRecordDTO[]; total: number }>(
+      `/history?source=${source}&comicId=${encodeURIComponent(comicId)}`,
+    )
+    const first = (data.items || [])[0]
+    if (first && typeof first.lastPageIndex === 'number' && first.lastPageIndex > 0) {
+      return first.lastPageIndex
+    }
+    return null
+  } catch (e) {
+    console.error('读取阅读进度失败:', e)
+    return null
   }
 }
 

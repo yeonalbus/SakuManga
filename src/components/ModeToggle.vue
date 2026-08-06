@@ -35,9 +35,9 @@ const toggleMode = () => {
 
 <style scoped>
 .mode-toggle-btn {
-  background-color: #242424;
-  border: 1px solid #3a3a3a;
-  color: #e0e0e0;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 4px 8px;
   border-radius: 12px;
   cursor: pointer;
@@ -49,7 +49,7 @@ const toggleMode = () => {
 }
 
 .mode-toggle-btn:hover {
-  background-color: #323232;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
 }
 
@@ -59,6 +59,6 @@ const toggleMode = () => {
 
 .label {
   font-size: 0.75rem;
-  color: #aaa;
+  color: var(--app-text-2);
 }
 </style>

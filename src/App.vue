@@ -126,6 +126,10 @@ watch(
 
 <style>
 /* 全局主题 CSS 变量：通过 <html data-theme> 切换（见 main.ts applyTheme） */
+/* 语义层级（dark 默认值，与现有深色界面视觉一致）：
+   bg / surface(卡片) / surface-2(次级卡片) / surface-3(控件) / input
+   text-strong / fg(正文) / text-2(次要) / text-3(弱化) / text-muted(更弱)
+   border(卡片分隔) / border-2(次级边框) / border-3(控件边框) */
 :root {
   --app-bg: #121212;
   --app-fg: #e0e0e0;
@@ -133,6 +137,24 @@ watch(
   --app-surface-hover: #2a2a2a;
   --app-border: #2a2a2a;
   --app-accent: #007acc;
+
+  /* 新增：深色/次级背景 */
+  --app-bg-deep: #0d0d0f;
+  --app-bg-alt: #121214;
+  /* 新增：次级表面（卡片/设置项）与第三级表面（按钮/输入框） */
+  --app-surface-2: #1a1a1e;
+  --app-surface-2-hover: #222226;
+  --app-surface-3: #242428;
+  --app-surface-3-hover: #2e2e33;
+  --app-input-bg: #121214;
+  /* 新增：文字层级 */
+  --app-text-strong: #ffffff;
+  --app-text-2: #aaa;
+  --app-text-3: #888;
+  --app-text-muted: #666;
+  /* 新增：边框层级 */
+  --app-border-2: #26262a;
+  --app-border-3: #38383e;
 }
 
 :root[data-theme='light'] {
@@ -142,6 +164,24 @@ watch(
   --app-surface-hover: #ececef;
   --app-border: #e2e2e6;
   --app-accent: #0066b8;
+
+  /* 新增：深色/次级背景（浅色下为浅灰底） */
+  --app-bg-deep: #ececef;
+  --app-bg-alt: #f0f0f2;
+  /* 新增：次级/第三级表面 */
+  --app-surface-2: #ffffff;
+  --app-surface-2-hover: #f0f0f3;
+  --app-surface-3: #f5f5f7;
+  --app-surface-3-hover: #e8e8ec;
+  --app-input-bg: #ffffff;
+  /* 新增：文字层级（浅色下加深，保证可读性） */
+  --app-text-strong: #1c1c1e;
+  --app-text-2: #55555a;
+  --app-text-3: #6b6b72;
+  --app-text-muted: #8a8a92;
+  /* 新增：边框层级 */
+  --app-border-2: #dcdce0;
+  --app-border-3: #d0d0d5;
 }
 
 /* 响应式断点与 iOS 安全区变量（供全局各组件参考） */
@@ -220,13 +260,13 @@ body {
 }
 .group-title {
   font-size: 0.75rem;
-  color: #666;
+  color: var(--app-text-muted);
   margin-bottom: 8px;
   padding-left: 10px;
 }
 
 .nav-menu a {
-  color: #aaa;
+  color: var(--app-text-2);
   text-decoration: none;
   padding: 8px 12px;
   border-radius: 6px;

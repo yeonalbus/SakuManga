@@ -347,13 +347,13 @@ onUnmounted(() => {
 
 .page-title {
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
 .total-count {
   font-size: 0.85rem;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .filter-row {
@@ -364,9 +364,9 @@ onUnmounted(() => {
 }
 
 .filter-btn {
-  background: #1a1a1e;
-  border: 1px solid #2a2a2d;
-  color: #aaa;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  color: var(--app-text-2);
   padding: 6px 14px;
   border-radius: 16px;
   font-size: 0.82rem;
@@ -376,7 +376,7 @@ onUnmounted(() => {
 
 .filter-btn:hover {
   border-color: #007acc;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .filter-btn.active {
@@ -395,7 +395,7 @@ onUnmounted(() => {
 .filter-divider {
   width: 1px;
   height: 18px;
-  background: #2a2a2d;
+  background: var(--app-border-2);
   margin: 0 4px;
 }
 
@@ -404,7 +404,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   height: 160px;
-  color: #777;
+  color: var(--app-text-3);
   font-size: 0.9rem;
 }
 
@@ -416,8 +416,8 @@ onUnmounted(() => {
 
 .download-card {
   display: flex;
-  background-color: #1a1a1e;
-  border: 1px solid #2a2a2d;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 12px;
   gap: 16px;
@@ -427,7 +427,7 @@ onUnmounted(() => {
 .cover-box {
   width: 60px;
   height: 80px;
-  background-color: #26262a;
+  background-color: var(--app-border-2);
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -455,7 +455,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 0.9rem;
-  color: #e0e0e0;
+  color: var(--app-text-2);
   gap: 12px;
 }
 
@@ -481,8 +481,8 @@ onUnmounted(() => {
   font-size: 0.72rem;
   padding: 1px 8px;
   border-radius: 10px;
-  border: 1px solid #333338;
-  color: #aaa;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
 }
 
 .meta-tag.archive {
@@ -496,7 +496,7 @@ onUnmounted(() => {
 }
 
 .meta-tag.group {
-  border-color: #4a4a4f;
+  border-color: var(--app-border-3);
 }
 
 .meta-tag.update {
@@ -515,7 +515,7 @@ onUnmounted(() => {
 
 .progress-bar-bg {
   height: 6px;
-  background-color: #26262a;
+  background-color: var(--app-border-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -532,7 +532,7 @@ onUnmounted(() => {
   background-color: #67c23a;
 }
 .progress-bar-fill.paused {
-  background-color: #88888c;
+  background-color: var(--app-text-3);
 }
 .progress-bar-fill.error {
   background-color: #e63946;
@@ -543,7 +543,7 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   font-size: 0.8rem;
-  color: #888;
+  color: var(--app-text-3);
   gap: 12px;
 }
 
@@ -583,15 +583,15 @@ onUnmounted(() => {
 }
 .status-label.paused {
   background: rgba(136, 136, 140, 0.2);
-  color: #aaa;
+  color: var(--app-text-2);
 }
 .status-label.queued {
   background: rgba(136, 136, 140, 0.15);
-  color: #888;
+  color: var(--app-text-3);
 }
 .status-label.cancelled {
   background: rgba(136, 136, 140, 0.15);
-  color: #666;
+  color: var(--app-text-muted);
 }
 
 .action-btn {
@@ -646,9 +646,9 @@ onUnmounted(() => {
 }
 
 .page-btn {
-  background: #1a1a1e;
-  border: 1px solid #2a2a2d;
-  color: #aaa;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  color: var(--app-text-2);
   padding: 6px 16px;
   border-radius: 6px;
   cursor: pointer;
@@ -656,7 +656,7 @@ onUnmounted(() => {
 }
 .page-btn:hover:not(:disabled) {
   border-color: #007acc;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 .page-btn:disabled {
   opacity: 0.4;
@@ -665,6 +665,6 @@ onUnmounted(() => {
 
 .page-info {
   font-size: 0.85rem;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 </style>

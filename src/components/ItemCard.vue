@@ -344,8 +344,8 @@ const comicSourceBadge = computed(() => {
 <style scoped>
 .item-card {
   position: relative;
-  background-color: #1a1a1e;
-  border: 1px solid #26262a;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   cursor: pointer;
   user-select: none;
@@ -354,8 +354,8 @@ const comicSourceBadge = computed(() => {
 }
 
 .item-card:hover {
-  background-color: #222226;
-  border-color: #38383e;
+  background-color: var(--app-surface-2-hover);
+  border-color: var(--app-border-3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
@@ -375,7 +375,7 @@ const comicSourceBadge = computed(() => {
   flex-shrink: 0;
   border-radius: 6px;
   overflow: hidden;
-  background-color: #121214;
+  background-color: var(--app-input-bg);
 }
 
 .thumb-img {
@@ -394,7 +394,7 @@ const comicSourceBadge = computed(() => {
   top: 4px;
   left: 4px;
   background-color: rgba(0, 0, 0, 0.75);
-  color: #a0a0a5;
+  color: var(--app-text-2);
   font-size: 10px;
   font-weight: 700;
   padding: 1px 4px;
@@ -411,7 +411,7 @@ const comicSourceBadge = computed(() => {
   bottom: 4px;
   right: 4px;
   background-color: rgba(0, 0, 0, 0.75);
-  color: #d0d0d0;
+  color: var(--app-text-2);
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
@@ -441,7 +441,7 @@ const comicSourceBadge = computed(() => {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -451,7 +451,7 @@ const comicSourceBadge = computed(() => {
 
 .compact-subtitle {
   font-size: 11px;
-  color: #88888c;
+  color: var(--app-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -468,7 +468,7 @@ const comicSourceBadge = computed(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #88888c;
+  color: var(--app-text-3);
   flex-wrap: wrap;
 }
 
@@ -499,7 +499,7 @@ const comicSourceBadge = computed(() => {
 
 .pages-text,
 .date-text {
-  color: #77777c;
+  color: var(--app-text-3);
   font-size: 11px;
 }
 
@@ -543,13 +543,13 @@ const comicSourceBadge = computed(() => {
   width: 4px;
 }
 .tags-scroll-container::-webkit-scrollbar-thumb {
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   border-radius: 2px;
 }
 
 .empty-tag-text {
   font-size: 11px;
-  color: #55555a;
+  color: var(--app-text-3);
 }
 
 /* 大卡片模式 (Card Mode) */
@@ -563,7 +563,7 @@ const comicSourceBadge = computed(() => {
   position: relative;
   width: 100%;
   aspect-ratio: 3 / 4;
-  background-color: #121214;
+  background-color: var(--app-input-bg);
   overflow: hidden;
 }
 
@@ -642,7 +642,7 @@ const comicSourceBadge = computed(() => {
   margin: 0;
   font-size: 13px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -652,7 +652,7 @@ const comicSourceBadge = computed(() => {
 
 .card-subtitle {
   font-size: 11px;
-  color: #88888c;
+  color: var(--app-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -670,7 +670,7 @@ const comicSourceBadge = computed(() => {
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: #66666c;
+  color: var(--app-text-muted);
 }
 
 .source-tag.online {

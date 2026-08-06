@@ -49,9 +49,9 @@ const handleOpenLink = (url: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -60,7 +60,7 @@ const handleOpenLink = (url: string) => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .item-info {
@@ -72,17 +72,17 @@ const handleOpenLink = (url: string) => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-desc {
   font-size: 12px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
   line-height: 1.4;
 }
 

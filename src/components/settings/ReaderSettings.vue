@@ -479,7 +479,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.5px;
   margin: 12px 0 4px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .setting-item {
@@ -487,9 +487,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .item-info {
@@ -510,31 +510,31 @@ onBeforeUnmount(() => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
 .arrow-icon {
   font-size: 20px;
-  color: #66666c;
+  color: var(--app-text-muted);
   margin-left: 8px;
 }
 
 /* 统一的原生下拉菜单 */
 .setting-select {
   background-color: transparent;
-  color: #ffffff;
+  color: var(--app-text-strong);
   border: none;
   font-size: 14px;
   padding: 4px 8px;
   cursor: pointer;
   outline: none;
-  border-bottom: 1px solid #44444a;
+  border-bottom: 1px solid var(--app-border-3);
   text-align-last: right;
   transition: border-color 0.2s;
 }
@@ -544,8 +544,8 @@ onBeforeUnmount(() => {
 }
 
 .setting-select option {
-  background-color: #1a1a1e;
-  color: #ffffff;
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
 }
 
 /* 内联数值输入框 */
@@ -558,8 +558,8 @@ onBeforeUnmount(() => {
 .setting-input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid #44444a;
-  color: #ffffff;
+  border-bottom: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   font-size: 14px;
   width: 40px;
   text-align: center;
@@ -582,11 +582,11 @@ onBeforeUnmount(() => {
 
 .unit {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .check-mark {
-  color: #a0a0a5;
+  color: var(--app-text-2);
   font-size: 14px;
   margin-left: 4px;
 }
@@ -612,7 +612,7 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 24px;
 }
@@ -624,7 +624,7 @@ onBeforeUnmount(() => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -645,9 +645,9 @@ input:checked + .slider:before {
 
 .reset-btn {
   width: 100%;
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 10px 16px;
   border-radius: 8px;
   font-size: 14px;
@@ -656,7 +656,7 @@ input:checked + .slider:before {
 }
 
 .reset-btn:hover {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #ff7588;
   color: #ff7588;
 }
@@ -682,18 +682,18 @@ input:checked + .slider:before {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #26262a;
-  border: 1px solid #3a3a3d;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 3px 8px;
   font-size: 12px;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .key-remove {
   background: transparent;
   border: none;
-  color: #88888c;
+  color: var(--app-text-3);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -705,14 +705,14 @@ input:checked + .slider:before {
 }
 
 .key-empty {
-  color: #66666c;
+  color: var(--app-text-muted);
   font-size: 13px;
 }
 
 .key-capture {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 5px 12px;
   border-radius: 6px;
   font-size: 13px;
@@ -748,9 +748,9 @@ input:checked + .slider:before {
 
 .preset-btn {
   width: 100%;
-  background: #242428;
-  border: 1px dashed #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px dashed var(--app-border-3);
+  color: var(--app-text-2);
   padding: 9px 16px;
   border-radius: 8px;
   font-size: 13px;

@@ -168,8 +168,10 @@ const handleApply = () => {
               class="cat-chip"
               :class="{ disabled: !filterState.activeCategories.has(cat.key) }"
               :style="{
-                backgroundColor: filterState.activeCategories.has(cat.key) ? cat.color : '#26262a',
-                color: filterState.activeCategories.has(cat.key) ? '#ffffff' : '#666666',
+                backgroundColor: filterState.activeCategories.has(cat.key)
+                  ? cat.color
+                  : 'var(--app-border-2)',
+                color: filterState.activeCategories.has(cat.key) ? '#ffffff' : 'var(--app-text-3)',
               }"
               @click="toggleCategory(cat.key)"
             >
@@ -311,13 +313,13 @@ const handleApply = () => {
   right: 0;
   width: 320px;
   height: 100vh;
-  background-color: #141416;
-  border-left: 1px solid #2a2a2d;
+  background-color: var(--app-bg-deep);
+  border-left: 1px solid var(--app-border-2);
   z-index: 2000;
   display: flex;
   flex-direction: column;
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.8);
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 /* 顶栏 Header */
@@ -326,13 +328,13 @@ const handleApply = () => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid #242427;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .drawer-title {
   font-size: 1.2rem;
   font-weight: bold;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
@@ -340,14 +342,14 @@ const handleApply = () => {
   background: transparent;
   border: none;
   font-size: 1.2rem;
-  color: #aaa;
+  color: var(--app-text-2);
   cursor: pointer;
   padding: 4px;
   transition: transform 0.2s;
 }
 
 .icon-btn:hover {
-  color: #fff;
+  color: var(--app-text-strong);
   transform: scale(1.1);
 }
 .apply-btn {
@@ -397,12 +399,12 @@ const handleApply = () => {
 
 .input-label {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .tip-text {
   font-size: 0.72rem;
-  color: #66666c;
+  color: var(--app-text-muted);
   font-weight: normal;
   margin-left: 4px;
 }
@@ -414,17 +416,17 @@ const handleApply = () => {
   gap: 6px;
   margin-bottom: 4px;
   padding: 6px;
-  background-color: #1a1a1d;
+  background-color: var(--app-surface-2);
   border-radius: 6px;
-  border: 1px dashed #3a3a3d;
+  border: 1px dashed var(--app-border-3);
 }
 
 .filter-kw-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: #2b2b30;
-  border: 1px solid #44444a;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   color: #ff7588;
   padding: 2px 8px;
   border-radius: 4px;
@@ -433,21 +435,21 @@ const handleApply = () => {
 }
 
 .remove-x {
-  color: #88888c;
+  color: var(--app-text-3);
   font-size: 0.75rem;
   cursor: pointer;
   transition: color 0.15s;
 }
 
 .remove-x:hover {
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .dark-input {
   background-color: transparent;
   border: none;
-  border-bottom: 1px solid #444;
-  color: #fff;
+  border-bottom: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   padding: 6px 0;
   font-size: 0.9rem;
   outline: none;
@@ -464,13 +466,13 @@ const handleApply = () => {
   justify-content: space-between;
   align-items: center;
   font-size: 0.9rem;
-  color: #ddd;
+  color: var(--app-text-2);
 }
 
 .dark-select {
-  background-color: #242428;
-  color: #fff;
-  border: 1px solid #3a3a3d;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
+  border: 1px solid var(--app-border-3);
   padding: 6px 12px;
   border-radius: 6px;
   outline: none;
@@ -490,10 +492,10 @@ const handleApply = () => {
 .number-input {
   width: 54px;
   height: 32px;
-  background-color: #000;
-  border: 1px solid #333;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   border-radius: 4px;
-  color: #fff;
+  color: var(--app-text-strong);
   text-align: center;
   font-size: 0.85rem;
   outline: none;
@@ -501,7 +503,7 @@ const handleApply = () => {
 
 .range-text {
   font-size: 0.8rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 /* 开关 Toggle Switch */
@@ -522,7 +524,7 @@ const handleApply = () => {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: #333;
+  background-color: var(--app-border-3);
   border-radius: 24px;
   transition: 0.3s;
 }
@@ -534,7 +536,7 @@ const handleApply = () => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #888;
+  background-color: var(--app-text-3);
   border-radius: 50%;
   transition: 0.3s;
 }

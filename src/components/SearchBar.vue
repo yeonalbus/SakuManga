@@ -274,8 +274,8 @@ onUnmounted(() => {
 .input-wrapper {
   display: flex;
   align-items: center;
-  background-color: #1a1a1d;
-  border: 1px solid #333;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 20px;
   padding: 4px 6px 4px 12px;
   transition: all 0.2s ease;
@@ -284,12 +284,12 @@ onUnmounted(() => {
 .input-wrapper.focused {
   border-color: #007acc;
   box-shadow: 0 0 10px rgba(0, 122, 204, 0.25);
-  background-color: #222225;
+  background-color: var(--app-surface-2-hover);
 }
 
 .search-icon {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--app-text-muted);
   margin-right: 8px;
 }
 
@@ -297,7 +297,7 @@ onUnmounted(() => {
   flex: 1;
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--app-text-strong);
   font-size: 0.88rem;
   outline: none;
 }
@@ -305,13 +305,13 @@ onUnmounted(() => {
 .clear-input-btn {
   background: transparent;
   border: none;
-  color: #666;
+  color: var(--app-text-muted);
   cursor: pointer;
   padding: 0 6px;
   font-size: 0.8rem;
 }
 .clear-input-btn:hover {
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .search-submit-btn {
@@ -334,8 +334,8 @@ onUnmounted(() => {
   top: calc(100% + 6px);
   left: 0;
   right: 0;
-  background-color: #1e1e22;
-  border: 1px solid #333;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 12px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
   padding: 12px;
@@ -356,14 +356,14 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   font-size: 0.75rem;
-  color: #888;
+  color: var(--app-text-3);
   font-weight: bold;
 }
 
 .clear-history-text-btn {
   background: transparent;
   border: none;
-  color: #666;
+  color: var(--app-text-muted);
   font-size: 0.72rem;
   cursor: pointer;
 }
@@ -381,9 +381,9 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: #2a2a2e;
-  border: 1px solid #3d3d42;
-  color: #ccc;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 3px 10px;
   border-radius: 16px;
   font-size: 0.8rem;
@@ -392,14 +392,14 @@ onUnmounted(() => {
 }
 
 .history-chip:hover {
-  background-color: #333338;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .delete-chip-btn {
   font-size: 0.7rem;
-  color: #666;
+  color: var(--app-text-muted);
   border-radius: 50%;
   padding: 0 2px;
 }
@@ -426,7 +426,7 @@ onUnmounted(() => {
 }
 
 .vertical-tag-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--app-surface-2-hover);
 }
 
 .tag-count-badge {

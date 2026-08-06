@@ -168,8 +168,8 @@ const showRightEllipsis = computed(() => {
 /* 椭圆型胶囊统一按钮基类 */
 .pill-btn {
   background-color: transparent;
-  color: #aaa;
-  border: 1px solid #3a3a3a;
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 20px; /* 椭圆胶囊造型 */
   padding: 3px 12px;
   font-size: 0.82rem;
@@ -185,7 +185,7 @@ const showRightEllipsis = computed(() => {
 
 .pill-btn:hover {
   border-color: #00a896;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 /* 激活状态 (青蓝色高亮) */
@@ -199,8 +199,8 @@ const showRightEllipsis = computed(() => {
 /* 状态展示 */
 .pill-btn.status {
   cursor: default;
-  color: #888;
-  border-color: #2a2a2a;
+  color: var(--app-text-3);
+  border-color: var(--app-border-2);
   padding: 3px 14px;
 }
 
@@ -212,7 +212,7 @@ const showRightEllipsis = computed(() => {
 
 /* 间隔符号 */
 .symbol {
-  color: #666;
+  color: var(--app-text-muted);
   font-size: 0.85rem;
   padding: 0 4px;
 }
@@ -230,8 +230,8 @@ const showRightEllipsis = computed(() => {
   height: 26px;
   background-color: transparent;
   border: none;
-  border-bottom: 1px solid #555;
-  color: #fff;
+  border-bottom: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   text-align: center;
   font-size: 0.85rem;
   outline: none;

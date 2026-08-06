@@ -156,7 +156,7 @@ const handleQuickImport = async () => {
   gap: 6px;
   background-color: transparent;
   border: 1px solid transparent;
-  color: #ccc;
+  color: var(--app-text-2);
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 0.85rem;
@@ -165,9 +165,9 @@ const handleQuickImport = async () => {
 }
 
 .trigger-btn:hover {
-  background-color: #242428;
-  border-color: #3a3a3d;
-  color: #fff;
+  background-color: var(--app-surface-3);
+  border-color: var(--app-border-3);
+  color: var(--app-text-strong);
 }
 
 .badge {
@@ -196,13 +196,13 @@ const handleQuickImport = async () => {
   right: 0;
   width: 360px;
   height: 100vh;
-  background-color: #161619;
-  border-left: 1px solid #2a2a2d;
+  background-color: var(--app-bg-deep);
+  border-left: 1px solid var(--app-border-2);
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.7);
   z-index: 2001;
   display: flex;
   flex-direction: column;
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 .drawer-header {
@@ -216,24 +216,24 @@ const handleQuickImport = async () => {
   font-size: 1.1rem;
   font-weight: bold;
   margin: 0;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .close-btn {
   background: transparent;
   border: none;
   font-size: 1.1rem;
-  color: #888;
+  color: var(--app-text-3);
   cursor: pointer;
 }
 .close-btn:hover {
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 /* Tabs 分栏 */
 .tabs-container {
   display: flex;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--app-border-2);
   padding: 0 10px;
 }
 
@@ -241,7 +241,7 @@ const handleQuickImport = async () => {
   flex: 1;
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--app-text-3);
   padding: 10px 0;
   font-size: 0.9rem;
   cursor: pointer;
@@ -260,20 +260,20 @@ const handleQuickImport = async () => {
   display: flex;
   justify-content: space-between;
   padding: 8px 16px;
-  background: #1e1e22;
-  border-bottom: 1px solid #2a2a2d;
+  background: var(--app-surface-3);
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .action-text-btn {
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--app-text-2);
   font-size: 0.8rem;
   cursor: pointer;
   transition: color 0.2s;
 }
 .action-text-btn:hover {
-  color: #fff;
+  color: var(--app-text-strong);
 }
 .action-text-btn.danger:hover {
   color: #ef4444;
@@ -292,7 +292,7 @@ const handleQuickImport = async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--app-text-muted);
   text-align: center;
   padding: 20px;
 }
@@ -310,8 +310,8 @@ const handleQuickImport = async () => {
 /* 迷你卡片 UI */
 .mini-card {
   display: flex;
-  background-color: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 8px;
   gap: 12px;
@@ -324,7 +324,7 @@ const handleQuickImport = async () => {
 
 .mini-card:hover {
   border-color: #007acc;
-  background-color: #242428;
+  background-color: var(--app-surface-3);
 }
 
 .cover-box {
@@ -332,7 +332,7 @@ const handleQuickImport = async () => {
   height: 70px;
   border-radius: 4px;
   overflow: hidden;
-  background-color: #26262a;
+  background-color: var(--app-border-2);
   flex-shrink: 0;
 }
 
@@ -351,7 +351,7 @@ const handleQuickImport = async () => {
 
 .title {
   font-size: 0.85rem;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0 0 6px 0;
   white-space: nowrap;
   overflow: hidden;
@@ -360,7 +360,7 @@ const handleQuickImport = async () => {
 
 .meta-pages {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 /* 悬浮动作按键 (默认隐藏，hover显示) */
@@ -398,7 +398,7 @@ const handleQuickImport = async () => {
 
 .remove-btn {
   background-color: transparent;
-  color: #666;
+  color: var(--app-text-muted);
 }
 .remove-btn:hover {
   background-color: rgba(239, 68, 68, 0.2);

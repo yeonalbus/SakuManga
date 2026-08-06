@@ -472,21 +472,21 @@ onUnmounted(() => {
 
 .intro-card {
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
 }
 
 .intro-title {
   font-size: 15px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
   margin-bottom: 8px;
 }
 
 .intro-text {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.7;
 }
 
@@ -499,9 +499,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
 }
 
 .status-row {
@@ -512,7 +512,7 @@ onUnmounted(() => {
 
 .status-key {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .status-val {
@@ -527,9 +527,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -543,22 +543,22 @@ onUnmounted(() => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
 .num-input {
   width: 72px;
   padding: 8px 10px;
-  background-color: #121214;
-  border: 1px solid #38383e;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
-  color: #ffffff;
+  color: var(--app-text-strong);
   font-size: 14px;
   text-align: center;
   outline: none;
@@ -570,10 +570,10 @@ onUnmounted(() => {
 
 .select-input {
   padding: 8px 10px;
-  background-color: #121214;
-  border: 1px solid #38383e;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
-  color: #ffffff;
+  color: var(--app-text-strong);
   font-size: 14px;
   outline: none;
   cursor: pointer;
@@ -605,7 +605,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 24px;
 }
@@ -617,7 +617,7 @@ onUnmounted(() => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -680,7 +680,7 @@ input:checked + .slider:before {
 .progress-banner {
   padding: 14px 16px;
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   font-size: 13px;
 }
 
@@ -709,7 +709,7 @@ input:checked + .slider:before {
 
 .progress-track {
   height: 6px;
-  background-color: #2a2a2e;
+  background-color: var(--app-border-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -756,12 +756,12 @@ input:checked + .slider:before {
   padding: 4px;
   border-radius: 50%;
   transition: transform 0.2s ease;
-  color: #a0a0a5;
+  color: var(--app-text-2);
 }
 
 .icon-action-btn:hover {
   transform: rotate(180deg);
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .icon-action-btn.spinning {
@@ -781,7 +781,7 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #121214;
+  background: var(--app-input-bg);
   padding: 8px 12px;
   border-radius: 6px;
 }
@@ -789,7 +789,7 @@ input:checked + .slider:before {
 .progress-bar-bg {
   flex: 1;
   height: 6px;
-  background-color: #2a2a2e;
+  background-color: var(--app-border-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -802,7 +802,7 @@ input:checked + .slider:before {
 
 .tag-progress-text {
   font-size: 11px;
-  color: #aaa;
+  color: var(--app-text-2);
   font-family: monospace;
 }
 </style>

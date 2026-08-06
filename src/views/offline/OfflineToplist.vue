@@ -91,7 +91,7 @@ const getComicReadCount = (item: OfflineComic) => {
   align-items: flex-end;
   gap: 20px;
   padding: 20px 0;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .podium-item {
@@ -109,7 +109,7 @@ const getComicReadCount = (item: OfflineComic) => {
 .podium-crown {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #aaa;
+  color: var(--app-text-2);
   margin-bottom: 8px;
 }
 
@@ -121,7 +121,7 @@ const getComicReadCount = (item: OfflineComic) => {
 .read-count {
   margin-top: 8px;
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .gold-text {
@@ -137,7 +137,7 @@ const getComicReadCount = (item: OfflineComic) => {
 
 .section-subtitle {
   font-size: 1.1rem;
-  color: #bbb;
+  color: var(--app-text-2);
   margin: 0;
 }
 
@@ -156,6 +156,6 @@ const getComicReadCount = (item: OfflineComic) => {
 .sub-read-count {
   margin-top: 6px;
   font-size: 0.78rem;
-  color: #777;
+  color: var(--app-text-3);
 }
 </style>

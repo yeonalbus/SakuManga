@@ -67,19 +67,19 @@ const handleClear = () => {
   justify-content: space-between;
   align-items: center;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2e;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .view-title {
   font-size: 1.2rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
 .clear-btn {
-  background-color: #2a2a2e;
-  border: 1px solid #3d3d42;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   color: #ef4444;
   padding: 6px 12px;
   border-radius: 6px;
@@ -96,7 +96,7 @@ const handleClear = () => {
 .empty-tip {
   margin-top: 60px;
   text-align: center;
-  color: #66666c;
+  color: var(--app-text-muted);
   font-size: 0.95rem;
 }
 </style>

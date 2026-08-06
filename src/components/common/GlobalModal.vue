@@ -50,8 +50,8 @@ const { modalState, handleConfirm, handleCancel } = useUI()
 .modal-card {
   width: 90%;
   max-width: 400px;
-  background: #1e1e20;
-  border: 1px solid #333;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 12px;
   padding: 20px 24px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -60,13 +60,13 @@ const { modalState, handleConfirm, handleCancel } = useUI()
 .modal-title {
   margin: 0 0 10px 0;
   font-size: 18px;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .modal-message {
   margin: 0 0 16px 0;
   font-size: 14px;
-  color: #aaa;
+  color: var(--app-text-2);
   line-height: 1.5;
 }
 
@@ -77,10 +77,10 @@ const { modalState, handleConfirm, handleCancel } = useUI()
 .modal-input {
   width: 100%;
   padding: 10px 12px;
-  background: #2a2a2d;
-  border: 1px solid #444;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
-  color: #fff;
+  color: var(--app-text-strong);
   outline: none;
   font-size: 14px;
   box-sizing: border-box;
@@ -109,8 +109,8 @@ const { modalState, handleConfirm, handleCancel } = useUI()
   opacity: 0.85;
 }
 .btn-cancel {
-  background: #333;
-  color: #ccc;
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
 }
 .btn-confirm {
   background: #007acc;

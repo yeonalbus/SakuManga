@@ -264,23 +264,23 @@ const handlePageChange = (newPage: number) => {
   gap: 10px;
   padding-bottom: 12px;
   margin-bottom: 16px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
   position: sticky;
   top: 0;
   z-index: 10;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
 }
 
 .select-count {
-  color: #ffffff;
+  color: var(--app-text-strong);
   font-size: 0.95rem;
   font-weight: 500;
 }
 
 .toolbar-btn {
-  background-color: #26262a;
-  color: #e0e0e0;
-  border: 1px solid #3a3a3f;
+  background-color: var(--app-border-2);
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 0.85rem;
@@ -291,8 +291,8 @@ const handlePageChange = (newPage: number) => {
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background-color: #333338;
-  border-color: #4a4a4f;
+  background-color: var(--app-surface-3-hover);
+  border-color: var(--app-border-3);
 }
 
 .toolbar-btn:disabled {
@@ -319,8 +319,8 @@ const handlePageChange = (newPage: number) => {
 
 .segmented-control {
   display: inline-flex;
-  background-color: #26262a;
-  border: 1px solid #3a3a3f;
+  background-color: var(--app-border-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -328,7 +328,7 @@ const handlePageChange = (newPage: number) => {
 .seg-option {
   background: transparent;
   border: none;
-  color: #9a9aa2;
+  color: var(--app-text-3);
   padding: 6px 16px;
   font-size: 0.85rem;
   cursor: pointer;
@@ -338,7 +338,7 @@ const handlePageChange = (newPage: number) => {
 }
 
 .seg-option:hover {
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 .seg-option.active {
@@ -347,9 +347,9 @@ const handlePageChange = (newPage: number) => {
 }
 
 .sort-direction {
-  background-color: #26262a;
-  color: #e0e0e0;
-  border: 1px solid #3a3a3f;
+  background-color: var(--app-border-2);
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 8px;
   padding: 6px 14px;
   font-size: 0.95rem;
@@ -358,6 +358,6 @@ const handlePageChange = (newPage: number) => {
 }
 
 .sort-direction:hover {
-  background-color: #333338;
+  background-color: var(--app-surface-3-hover);
 }
 </style>

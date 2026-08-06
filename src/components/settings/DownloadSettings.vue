@@ -336,7 +336,7 @@ onUnmounted(() => {
   letter-spacing: 0.5px;
   margin: 12px 0 4px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .setting-item {
@@ -344,9 +344,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -355,7 +355,7 @@ onUnmounted(() => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .item-info {
@@ -367,23 +367,23 @@ onUnmounted(() => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
 .row-value {
   font-size: 14px;
-  color: #d0d0d0;
+  color: var(--app-text-2);
 }
 
 .arrow-icon {
   font-size: 20px;
-  color: #66666c;
+  color: var(--app-text-muted);
   margin-left: 8px;
 }
 
@@ -396,19 +396,19 @@ onUnmounted(() => {
 
 .inline-text {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 /* 下拉菜单 */
 .setting-select {
   background-color: transparent;
-  color: #ffffff;
+  color: var(--app-text-strong);
   border: none;
   font-size: 14px;
   padding: 4px 8px;
   cursor: pointer;
   outline: none;
-  border-bottom: 1px solid #44444a;
+  border-bottom: 1px solid var(--app-border-3);
   text-align-last: right;
   transition: border-color 0.2s;
 }
@@ -418,8 +418,8 @@ onUnmounted(() => {
 }
 
 .setting-select option {
-  background-color: #1a1a1e;
-  color: #ffffff;
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
 }
 
 /* Switch 开关 */
@@ -443,7 +443,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 24px;
 }
@@ -455,7 +455,7 @@ onUnmounted(() => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -476,9 +476,9 @@ input:checked + .slider:before {
 
 .reset-btn {
   width: 100%;
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 10px 16px;
   border-radius: 8px;
   font-size: 14px;
@@ -487,7 +487,7 @@ input:checked + .slider:before {
 }
 
 .reset-btn:hover {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #ff7588;
   color: #ff7588;
 }

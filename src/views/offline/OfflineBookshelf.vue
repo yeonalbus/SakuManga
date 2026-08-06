@@ -182,7 +182,7 @@ const handleDeleteSelected = async () => {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .title-area {
@@ -199,12 +199,12 @@ const handleDeleteSelected = async () => {
   margin: 0;
   font-size: 1.3rem;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .shelf-badge {
-  background-color: #2a2a2e;
-  color: #a0a0a5;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-2);
   font-size: 0.8rem;
   padding: 2px 8px;
   border-radius: 12px;
@@ -216,19 +216,19 @@ const handleDeleteSelected = async () => {
   align-items: center;
   gap: 10px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .select-count {
-  color: #ffffff;
+  color: var(--app-text-strong);
   font-size: 0.95rem;
   font-weight: 500;
 }
 
 .toolbar-btn {
-  background-color: #26262a;
-  color: #e0e0e0;
-  border: 1px solid #3a3a3f;
+  background-color: var(--app-border-2);
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 0.85rem;
@@ -239,8 +239,8 @@ const handleDeleteSelected = async () => {
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background-color: #333338;
-  border-color: #4a4a4f;
+  background-color: var(--app-surface-3-hover);
+  border-color: var(--app-border-3);
 }
 
 .toolbar-btn:disabled {

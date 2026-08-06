@@ -84,8 +84,8 @@ onMounted(() => {
 
 .pill-btn {
   background: transparent;
-  color: #aaa;
-  border: 1px solid #3a3a3a;
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 20px;
   padding: 6px 18px;
   font-size: 0.82rem;
@@ -95,7 +95,7 @@ onMounted(() => {
 
 .pill-btn:hover:not(:disabled) {
   border-color: #00a896;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .pill-btn:disabled {

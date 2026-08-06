@@ -378,7 +378,7 @@ onMounted(() => {
   letter-spacing: 0.5px;
   margin: 12px 0 4px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .setting-item {
@@ -386,9 +386,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -397,7 +397,7 @@ onMounted(() => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .setting-item.danger:hover {
@@ -414,12 +414,12 @@ onMounted(() => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
@@ -431,8 +431,8 @@ onMounted(() => {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background-color: #333;
-  color: #aaa;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-2);
 }
 
 .badge.ex {
@@ -450,11 +450,11 @@ onMounted(() => {
 
 .text-input {
   flex: 1;
-  background: #121214;
-  border: 1px solid #26262a;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-2);
   border-radius: 6px;
   padding: 8px 10px;
-  color: #eee;
+  color: var(--app-text-2);
   font-size: 13px;
   outline: none;
   font-family: inherit;
@@ -467,9 +467,9 @@ onMounted(() => {
 .action-btn {
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid #36363a;
-  background: #26262a;
-  color: #eee;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.2s;
@@ -503,9 +503,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   gap: 12px;
 }
 
@@ -518,7 +518,7 @@ onMounted(() => {
 .member-name {
   font-size: 14px;
   font-weight: 500;
-  color: #fff;
+  color: var(--app-text-strong);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -537,7 +537,7 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .member-actions {
@@ -550,9 +550,9 @@ onMounted(() => {
 .mini-btn {
   padding: 5px 10px;
   border-radius: 6px;
-  border: 1px solid #36363a;
-  background: #26262a;
-  color: #ccc;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
@@ -560,8 +560,8 @@ onMounted(() => {
 }
 
 .mini-btn:hover:not(:disabled) {
-  background: #323236;
-  color: #fff;
+  background: var(--app-surface-3-hover);
+  color: var(--app-text-strong);
 }
 
 .mini-btn.danger:hover:not(:disabled) {
@@ -577,7 +577,7 @@ onMounted(() => {
 
 .empty-tip {
   text-align: center;
-  color: #666;
+  color: var(--app-text-muted);
   font-size: 13px;
   padding: 12px 0;
 }
@@ -585,13 +585,13 @@ onMounted(() => {
 /* 下拉 / 输入 */
 .setting-select {
   background-color: transparent;
-  color: #ffffff;
+  color: var(--app-text-strong);
   border: none;
   font-size: 14px;
   padding: 4px 8px;
   cursor: pointer;
   outline: none;
-  border-bottom: 1px solid #44444a;
+  border-bottom: 1px solid var(--app-border-3);
   text-align-last: right;
   transition: border-color 0.2s;
 }
@@ -601,8 +601,8 @@ onMounted(() => {
 }
 
 .setting-select option {
-  background-color: #1a1a1e;
-  color: #ffffff;
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
 }
 
 .input-inline {
@@ -614,8 +614,8 @@ onMounted(() => {
 .setting-input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid #44444a;
-  color: #ffffff;
+  border-bottom: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   font-size: 14px;
   width: 40px;
   text-align: center;
@@ -632,7 +632,7 @@ onMounted(() => {
 
 .unit {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 /* 保存按钮 */
@@ -642,9 +642,9 @@ onMounted(() => {
 
 .reset-btn {
   width: 100%;
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 10px 16px;
   border-radius: 8px;
   font-size: 14px;
@@ -653,7 +653,7 @@ onMounted(() => {
 }
 
 .reset-btn:hover:not(:disabled) {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #ff7588;
   color: #ff7588;
 }

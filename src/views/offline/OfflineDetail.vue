@@ -419,7 +419,7 @@ const handleDelete = async () => {
   padding: 20px;
   max-width: 1000px;
   margin: 0 auto;
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 .top-bar {
@@ -431,16 +431,16 @@ const handleDelete = async () => {
 
 .back-btn {
   background: transparent;
-  border: 1px solid #333;
-  color: #aaa;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 .back-btn:hover {
-  color: #fff;
-  border-color: #555;
+  color: var(--app-text-strong);
+  border-color: var(--app-border-3);
 }
 
 .read-btn {
@@ -462,7 +462,7 @@ const handleDelete = async () => {
   width: 240px;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  border: 1px solid #333;
+  border: 1px solid var(--app-border-3);
 }
 
 .right-panel {
@@ -481,12 +481,12 @@ const handleDelete = async () => {
 .title {
   font-size: 1.3rem;
   margin: 0;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .subtitle {
   font-size: 0.9rem;
-  color: #88888c;
+  color: var(--app-text-3);
   word-break: break-all;
 }
 
@@ -494,10 +494,10 @@ const handleDelete = async () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #1a1a1d;
+  background: var(--app-surface-2);
   padding: 10px 14px;
   border-radius: 6px;
-  border: 1px solid #2a2a2d;
+  border: 1px solid var(--app-border-2);
 }
 
 .stars {
@@ -507,20 +507,20 @@ const handleDelete = async () => {
 }
 .star-icon {
   font-size: 1.2rem;
-  color: #444;
+  color: var(--app-border-3);
   transition: color 0.15s;
 }
 .star-icon.active {
   color: #ffc107;
 }
 .rating-num {
-  color: #888;
+  color: var(--app-text-3);
   font-size: 0.85rem;
 }
 
 .info-card {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 16px;
 }
@@ -534,7 +534,7 @@ const handleDelete = async () => {
 
 .card-title {
   font-size: 0.95rem;
-  color: #aaa;
+  color: var(--app-text-2);
   margin: 0;
 }
 
@@ -563,7 +563,7 @@ const handleDelete = async () => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background-color: #242428;
+  background-color: var(--app-surface-3);
   padding-right: 6px;
   border-radius: 4px;
 }
@@ -589,7 +589,7 @@ const handleDelete = async () => {
 
 .remove-tag {
   font-size: 0.75rem;
-  color: #777;
+  color: var(--app-text-3);
   cursor: pointer;
   padding: 0 2px;
   transition: color 0.15s;
@@ -600,7 +600,7 @@ const handleDelete = async () => {
 
 .empty-tag-tip {
   font-size: 0.8rem;
-  color: #555;
+  color: var(--app-text-3);
   font-style: italic;
 }
 
@@ -621,15 +621,15 @@ const handleDelete = async () => {
   align-items: center;
 }
 .info-item .k {
-  color: #888;
+  color: var(--app-text-3);
 }
 .info-item .v {
-  color: #ddd;
+  color: var(--app-text-2);
 }
 
 .path-text {
   font-family: monospace;
-  background: #242428;
+  background: var(--app-surface-3);
   padding: 2px 8px;
   border-radius: 4px;
   color: #007acc;
@@ -641,9 +641,9 @@ const handleDelete = async () => {
 }
 
 .copy-btn {
-  background: #2a2a2e;
-  border: 1px solid #444;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 0.75rem;
@@ -662,8 +662,8 @@ const handleDelete = async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #242428;
-  border: 1px solid #333;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -688,9 +688,9 @@ const handleDelete = async () => {
 }
 
 .add-reading-btn {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 0.88rem;
@@ -700,7 +700,7 @@ const handleDelete = async () => {
 }
 
 .add-reading-btn:hover {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
   color: #007acc;
 }

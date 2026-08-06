@@ -216,9 +216,9 @@ onMounted(() => {
         class="fav-btn"
         :class="{ active: activeFav === i - 1 }"
         :style="{
-          backgroundColor: activeFav === i - 1 ? favColors[i - 1] : '#1a1a1d',
-          borderColor: activeFav === i - 1 ? favColors[i - 1] : '#2a2a2d',
-          color: activeFav === i - 1 ? '#ffffff' : '#aaa',
+          backgroundColor: activeFav === i - 1 ? favColors[i - 1] : 'var(--app-surface-2)',
+          borderColor: activeFav === i - 1 ? favColors[i - 1] : 'var(--app-border-2)',
+          color: activeFav === i - 1 ? '#ffffff' : 'var(--app-text-2)',
         }"
         @click="selectFav(i - 1)"
       >
@@ -277,7 +277,7 @@ onMounted(() => {
   justify-content: center;
   align-items: center;
   height: 300px;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .fav-grid {
@@ -285,7 +285,7 @@ onMounted(() => {
   grid-template-columns: repeat(5, 1fr);
   gap: 8px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .fav-btn {
@@ -294,7 +294,7 @@ onMounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid #2a2a2d;
+  border: 1px solid var(--app-border-2);
   border-radius: 6px;
   font-size: 0.82rem;
   font-weight: 500;
@@ -324,8 +324,8 @@ onMounted(() => {
 
 .pill-btn {
   background: transparent;
-  color: #aaa;
-  border: 1px solid #3a3a3a;
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 20px;
   padding: 6px 18px;
   font-size: 0.82rem;
@@ -335,7 +335,7 @@ onMounted(() => {
 
 .pill-btn:hover:not(:disabled) {
   border-color: #00a896;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .pill-btn:disabled {

@@ -57,6 +57,6 @@ onMounted(() => {
   justify-content: center;
   align-items: center;
   height: 300px;
-  color: #888;
+  color: var(--app-text-3);
 }
 </style>

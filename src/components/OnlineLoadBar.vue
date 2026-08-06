@@ -73,7 +73,7 @@ onUnmounted(() => {
 
 .status-item {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -87,7 +87,7 @@ onUnmounted(() => {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #3a3a3a;
+  border: 2px solid var(--app-border-3);
   border-top-color: #00a896;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -101,8 +101,8 @@ onUnmounted(() => {
 
 .pill-btn {
   background: transparent;
-  color: #aaa;
-  border: 1px solid #3a3a3a;
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
   border-radius: 20px;
   padding: 4px 16px;
   font-size: 0.82rem;
@@ -111,6 +111,6 @@ onUnmounted(() => {
 
 .pill-btn:hover {
   border-color: #00a896;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 </style>

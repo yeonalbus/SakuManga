@@ -285,9 +285,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   font-size: 14px;
 }
 
@@ -303,7 +303,7 @@ onMounted(() => {
 
 .sub-tip {
   font-size: 12px;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .setting-row.clickable {
@@ -314,7 +314,7 @@ onMounted(() => {
 }
 
 .setting-row.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .setting-row.danger:hover {
@@ -323,7 +323,7 @@ onMounted(() => {
 }
 
 .row-label {
-  color: #d0d0d0;
+  color: var(--app-text-2);
 }
 
 .row-value.highlight {
@@ -338,8 +338,8 @@ onMounted(() => {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background-color: #333;
-  color: #aaa;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-2);
 }
 
 .badge.ex {
@@ -349,7 +349,7 @@ onMounted(() => {
 }
 
 .arrow-icon {
-  color: #66666c;
+  color: var(--app-text-muted);
   font-size: 18px;
 }
 
@@ -360,9 +360,9 @@ onMounted(() => {
 .action-btn {
   padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid #36363a;
-  background: #26262a;
-  color: #eee;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.2s;
@@ -374,7 +374,7 @@ onMounted(() => {
 }
 
 .action-btn:hover:not(:disabled) {
-  background: #323236;
+  background: var(--app-surface-3-hover);
 }
 
 .action-btn.primary {
@@ -401,8 +401,8 @@ onMounted(() => {
 }
 
 .modal-box {
-  background: #1a1a1e;
-  border: 1px solid #26262a;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 10px;
   padding: 20px;
   width: 480px;
@@ -414,14 +414,14 @@ onMounted(() => {
 
 .modal-box h3 {
   margin: 0;
-  color: #fff;
+  color: var(--app-text-strong);
   font-size: 16px;
 }
 
 .modal-tip {
   margin: 0;
   font-size: 12px;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .form-group {
@@ -432,7 +432,7 @@ onMounted(() => {
 
 .form-group label {
   font-size: 12px;
-  color: #aaa;
+  color: var(--app-text-2);
 }
 
 .required {
@@ -441,11 +441,11 @@ onMounted(() => {
 
 .form-group input,
 .form-group textarea {
-  background: #121214;
-  border: 1px solid #26262a;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-2);
   border-radius: 6px;
   padding: 8px 10px;
-  color: #eee;
+  color: var(--app-text-2);
   font-size: 13px;
   outline: none;
   font-family: inherit;

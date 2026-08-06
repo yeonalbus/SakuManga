@@ -89,15 +89,15 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  color: #aaa;
+  color: var(--app-text-2);
   cursor: pointer;
   border-radius: 6px;
   font-size: 0.9rem;
   transition: all 0.2s;
 }
 .foldable-header:hover {
-  background-color: #2a2a2a;
-  color: #fff;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
 }
 
 .arrow {
@@ -123,7 +123,7 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 0.85rem !important;
-  color: #888 !important;
+  color: var(--app-text-3) !important;
   transition: all 0.2s;
   text-decoration: none;
   background-color: transparent;
@@ -133,13 +133,13 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 .sub-nav-item.router-link-active,
 .sub-nav-item.router-link-exact-active {
   background-color: transparent !important;
-  color: #888 !important;
+  color: var(--app-text-3) !important;
 }
 
 /* 2. 普通悬浮态 */
 .sub-nav-item:hover {
-  background-color: #242424 !important;
-  color: #fff !important;
+  background-color: var(--app-surface-3) !important;
+  color: var(--app-text-strong) !important;
 }
 
 /* 3. 只有当前 ID 100% 匹配时，我们手绑定的 .active 才独占高亮 */
@@ -164,15 +164,15 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 
 .shelf-count {
   font-size: 0.75rem;
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: var(--app-surface-3);
   padding: 1px 6px;
   border-radius: 10px;
-  color: #ccc;
+  color: var(--app-text-2);
 }
 
 .delete-btn {
   font-size: 0.75rem;
-  color: #aaa;
+  color: var(--app-text-2);
   padding: 0 4px;
   border-radius: 3px;
   opacity: 0;
@@ -192,8 +192,8 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 
 .add-shelf-btn {
   background: transparent;
-  border: 1px dashed #3a3a3a;
-  color: #888;
+  border: 1px dashed var(--app-border-3);
+  color: var(--app-text-3);
   padding: 6px 10px;
   border-radius: 4px;
   cursor: pointer;

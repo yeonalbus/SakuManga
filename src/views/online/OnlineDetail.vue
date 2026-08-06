@@ -726,7 +726,7 @@ onUnmounted(() => {
   padding: 20px;
   max-width: 1100px;
   margin: 0 auto;
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 .loading-state,
@@ -735,7 +735,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   height: 240px;
-  color: #777;
+  color: var(--app-text-3);
   font-size: 14px;
 }
 
@@ -746,7 +746,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 16px;
   height: 300px;
-  color: #e0e0e0;
+  color: var(--app-text-2);
   text-align: center;
   padding: 24px;
 }
@@ -755,7 +755,7 @@ onUnmounted(() => {
 }
 .error-state .error-msg {
   max-width: 560px;
-  color: #aaa;
+  color: var(--app-text-2);
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -771,15 +771,15 @@ onUnmounted(() => {
 
 .back-btn {
   background: transparent;
-  border: 1px solid #333;
-  color: #aaa;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
 }
 .back-btn:hover {
-  color: #fff;
-  border-color: #555;
+  color: var(--app-text-strong);
+  border-color: var(--app-border-3);
 }
 
 .right-actions {
@@ -801,9 +801,9 @@ onUnmounted(() => {
 }
 
 .fav-btn {
-  background: #26262a;
-  color: #ccc;
-  border: 1px solid #444;
+  background: var(--app-border-2);
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
 }
 
 .read-btn {
@@ -841,14 +841,14 @@ onUnmounted(() => {
 .comic-main-title {
   font-size: 1.3rem;
   margin: 0 0 4px 0;
-  color: #fff;
+  color: var(--app-text-strong);
   line-height: 1.4;
 }
 
 .comic-sub-title {
   font-size: 0.95rem;
   margin: 0;
-  color: #88888c;
+  color: var(--app-text-3);
   font-weight: normal;
   line-height: 1.3;
 }
@@ -857,14 +857,14 @@ onUnmounted(() => {
 .detail-tabs {
   display: flex;
   gap: 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
   margin-bottom: 20px;
 }
 
 .tab-item {
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--app-text-3);
   padding: 10px 16px;
   font-size: 0.95rem;
   cursor: pointer;
@@ -882,10 +882,10 @@ onUnmounted(() => {
 .info-layout {
   display: flex;
   gap: 24px;
-  background: #1a1a1d;
+  background: var(--app-surface-2);
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #2a2a2d;
+  border: 1px solid var(--app-border-2);
 }
 
 .cover-box img {
@@ -907,7 +907,7 @@ onUnmounted(() => {
   font-size: 0.9rem;
 }
 .meta-row .label {
-  color: #888;
+  color: var(--app-text-3);
   width: 80px;
   flex-shrink: 0;
 }
@@ -921,7 +921,7 @@ onUnmounted(() => {
 }
 
 .category-badge {
-  background: #2a2a2d;
+  background: var(--app-border-2);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 0.8rem;
@@ -933,7 +933,7 @@ onUnmounted(() => {
 
 .section-title {
   font-size: 0.95rem;
-  color: #aaa;
+  color: var(--app-text-2);
   margin: 0 0 10px 0;
 }
 
@@ -952,7 +952,7 @@ onUnmounted(() => {
 
 .ns-label {
   font-size: 0.8rem;
-  color: #77777c;
+  color: var(--app-text-3);
   width: 75px;
   flex-shrink: 0;
   text-align: right;
@@ -968,7 +968,7 @@ onUnmounted(() => {
 
 .empty-tip {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--app-text-muted);
 }
 
 /* Preview Grid */
@@ -989,7 +989,7 @@ onUnmounted(() => {
   aspect-ratio: 3 / 4;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--app-border-2);
   cursor: pointer;
   transition: all 0.2s ease;
 
@@ -997,7 +997,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #121214;
+  background-color: var(--app-input-bg);
 }
 
 .preview-card img {
@@ -1026,7 +1026,7 @@ onUnmounted(() => {
   padding: 1px 6px;
   font-size: 0.7rem;
   border-radius: 3px;
-  color: #eee;
+  color: var(--app-text-2);
 }
 
 /* 🟢 加载更多按钮样式 */
@@ -1037,8 +1037,8 @@ onUnmounted(() => {
 }
 
 .load-more-btn {
-  background: #202024;
-  border: 1px solid #333338;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   color: #007acc;
   padding: 10px 28px;
   border-radius: 6px;
@@ -1049,7 +1049,7 @@ onUnmounted(() => {
 }
 
 .load-more-btn:hover:not(:disabled) {
-  background-color: #28282e;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
   box-shadow: 0 2px 8px rgba(0, 122, 204, 0.2);
 }
@@ -1067,10 +1067,10 @@ onUnmounted(() => {
 }
 
 .comment-card {
-  background: #1a1a1d;
+  background: var(--app-surface-2);
   padding: 12px 16px;
   border-radius: 6px;
-  border: 1px solid #2a2a2d;
+  border: 1px solid var(--app-border-2);
 }
 
 .comment-header {
@@ -1086,20 +1086,20 @@ onUnmounted(() => {
 }
 
 .comment-time {
-  color: #666;
+  color: var(--app-text-muted);
 }
 
 .comment-body {
   margin: 0;
   font-size: 0.9rem;
-  color: #ccc;
+  color: var(--app-text-2);
   line-height: 1.4;
 }
 
 .add-reading-btn {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 0.88rem;
@@ -1109,7 +1109,7 @@ onUnmounted(() => {
 }
 
 .add-reading-btn:hover {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
   color: #007acc;
 }
@@ -1123,7 +1123,7 @@ onUnmounted(() => {
 
 /* 下载按钮 */
 .download-btn {
-  background: #242428;
+  background: var(--app-surface-3);
   color: #ff7588;
   border: 1px solid #ff7588;
 }
@@ -1146,8 +1146,8 @@ onUnmounted(() => {
 .download-panel {
   width: 420px;
   max-width: 92vw;
-  background: #1a1a1e;
-  border: 1px solid #2a2a2d;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
@@ -1158,13 +1158,13 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .panel-title {
   font-size: 0.98rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--app-text-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1173,13 +1173,13 @@ onUnmounted(() => {
 .panel-close {
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--app-text-3);
   font-size: 1rem;
   cursor: pointer;
   padding: 2px 6px;
 }
 .panel-close:hover {
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .panel-body {
@@ -1193,7 +1193,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  background: #141417;
+  background: var(--app-bg-deep);
   border-radius: 8px;
   padding: 10px;
 }
@@ -1207,18 +1207,18 @@ onUnmounted(() => {
 
 .gp-label {
   font-size: 0.72rem;
-  color: #77777c;
+  color: var(--app-text-3);
 }
 
 .gp-value {
   font-size: 0.88rem;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 .gp-loading {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
   padding: 8px 0;
 }
 
@@ -1229,9 +1229,9 @@ onUnmounted(() => {
 }
 
 .mode-btn {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #aaa;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 10px 8px;
   border-radius: 8px;
   font-size: 0.85rem;
@@ -1256,8 +1256,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #141417;
-  border: 1px solid #2a2a2d;
+  background: var(--app-bg-deep);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
@@ -1271,7 +1271,7 @@ onUnmounted(() => {
 
 .opt-name {
   font-size: 0.88rem;
-  color: #fff;
+  color: var(--app-text-strong);
   font-weight: 500;
   flex: 1;
 }
@@ -1283,18 +1283,18 @@ onUnmounted(() => {
 
 .opt-size {
   font-size: 0.8rem;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .archive-empty {
   font-size: 0.8rem;
-  color: #77777c;
+  color: var(--app-text-3);
   padding: 6px 0;
 }
 
 .gallery-hint {
   font-size: 0.82rem;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
@@ -1303,13 +1303,13 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 16px;
-  border-top: 1px solid #2a2a2d;
+  border-top: 1px solid var(--app-border-2);
 }
 
 .cancel-btn {
   background: transparent;
-  border: 1px solid #3a3a3d;
-  color: #aaa;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 0.88rem;
@@ -1317,8 +1317,8 @@ onUnmounted(() => {
 }
 
 .cancel-btn:hover {
-  color: #fff;
-  border-color: #555;
+  color: var(--app-text-strong);
+  border-color: var(--app-border-3);
 }
 
 .start-btn {

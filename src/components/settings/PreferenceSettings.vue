@@ -248,9 +248,9 @@ const handleReset = () => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -259,7 +259,7 @@ const handleReset = () => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .item-info {
@@ -271,12 +271,12 @@ const handleReset = () => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
@@ -288,7 +288,7 @@ const handleReset = () => {
 
 .arrow-icon {
   font-size: 20px;
-  color: #66666c;
+  color: var(--app-text-muted);
   margin-left: 8px;
 }
 
@@ -296,9 +296,9 @@ const handleReset = () => {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid #88888c;
+  border: 1px solid var(--app-text-3);
   background: transparent;
-  color: #88888c;
+  color: var(--app-text-3);
   font-size: 12px;
   display: flex;
   align-items: center;
@@ -308,20 +308,20 @@ const handleReset = () => {
 }
 
 .info-btn:hover {
-  color: #ffffff;
-  border-color: #ffffff;
+  color: var(--app-text-strong);
+  border-color: var(--app-text-strong);
 }
 
 /* 统一的原生下拉菜单 */
 .setting-select {
   background-color: transparent;
-  color: #ffffff;
+  color: var(--app-text-strong);
   border: none;
   font-size: 14px;
   padding: 4px 8px;
   cursor: pointer;
   outline: none;
-  border-bottom: 1px solid #44444a;
+  border-bottom: 1px solid var(--app-border-3);
   text-align-last: right;
   transition: border-color 0.2s;
 }
@@ -331,8 +331,8 @@ const handleReset = () => {
 }
 
 .setting-select option {
-  background-color: #1a1a1e;
-  color: #ffffff;
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
 }
 
 /* 原生 Switch 开关 */
@@ -356,7 +356,7 @@ const handleReset = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 24px;
 }
@@ -368,7 +368,7 @@ const handleReset = () => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -390,8 +390,8 @@ input:checked + .slider:before {
 
 .reset-btn {
   background: transparent;
-  border: 1px solid #44444a;
-  color: #a0a0a5;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   font-size: 13px;
   padding: 8px 20px;
   border-radius: 6px;
@@ -401,6 +401,6 @@ input:checked + .slider:before {
 
 .reset-btn:hover {
   border-color: #ff7588;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 </style>

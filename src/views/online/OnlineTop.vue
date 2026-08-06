@@ -97,12 +97,12 @@ onMounted(() => {
   justify-content: center;
   align-items: center;
   height: 240px;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .page-title {
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .podium-section {
@@ -111,7 +111,7 @@ onMounted(() => {
   align-items: flex-end;
   gap: 20px;
   padding: 20px 0;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .podium-item {
@@ -129,7 +129,7 @@ onMounted(() => {
 .podium-crown {
   font-size: 0.85rem;
   font-weight: bold;
-  color: #aaa;
+  color: var(--app-text-2);
   margin-bottom: 8px;
 }
 
@@ -141,7 +141,7 @@ onMounted(() => {
 .rank-score {
   margin-top: 8px;
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .gold-text {
@@ -151,7 +151,7 @@ onMounted(() => {
 
 .section-subtitle {
   font-size: 0.95rem;
-  color: #888;
+  color: var(--app-text-3);
   margin-bottom: 12px;
 }
 
@@ -163,7 +163,7 @@ onMounted(() => {
 
 .sub-score {
   font-size: 0.75rem;
-  color: #666;
+  color: var(--app-text-muted);
   text-align: right;
   margin-top: 4px;
 }

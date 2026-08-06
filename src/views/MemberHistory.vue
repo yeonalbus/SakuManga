@@ -183,7 +183,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2e;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .header-left {
@@ -193,9 +193,9 @@ onMounted(() => {
 }
 
 .back-btn {
-  background-color: #2a2a2e;
-  border: 1px solid #3d3d42;
-  color: #ccc;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 0.85rem;
@@ -204,14 +204,14 @@ onMounted(() => {
 }
 
 .back-btn:hover {
-  background-color: #3d3d42;
-  color: #fff;
+  background-color: var(--app-surface-3-hover);
+  color: var(--app-text-strong);
 }
 
 .view-title {
   font-size: 1.2rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
@@ -221,9 +221,9 @@ onMounted(() => {
 }
 
 .filter-select {
-  background-color: #2a2a2e;
-  border: 1px solid #3d3d42;
-  color: #ccc;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 0.85rem;
@@ -232,23 +232,23 @@ onMounted(() => {
 
 .stat-bar {
   font-size: 0.82rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .stat-total {
-  color: #aaa;
+  color: var(--app-text-2);
 }
 
 .loading-tip {
   margin-top: 60px;
   text-align: center;
-  color: #66666c;
+  color: var(--app-text-muted);
 }
 
 .empty-tip {
   margin-top: 60px;
   text-align: center;
-  color: #66666c;
+  color: var(--app-text-muted);
   font-size: 0.95rem;
 }
 </style>

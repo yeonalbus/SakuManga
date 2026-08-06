@@ -206,9 +206,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  background-color: #1a1a1e;
+  background-color: var(--app-surface-2);
   border-radius: 8px;
-  border: 1px solid #26262a;
+  border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
 }
 
@@ -217,7 +217,7 @@ onMounted(() => {
 }
 
 .setting-item.clickable:hover {
-  background-color: #222226;
+  background-color: var(--app-surface-2-hover);
 }
 
 .item-info {
@@ -229,18 +229,18 @@ onMounted(() => {
 .item-title {
   font-size: 15px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .item-subtext {
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.4;
 }
 
 .arrow-icon {
   font-size: 20px;
-  color: #66666c;
+  color: var(--app-text-muted);
   margin-left: 8px;
 }
 
@@ -252,7 +252,7 @@ onMounted(() => {
 
 .quota-text {
   font-size: 14px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
   font-family: monospace;
 }
 
@@ -261,13 +261,13 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
   font-family: monospace;
 }
 
 .refresh-icon {
   font-size: 16px;
-  color: #66666c;
+  color: var(--app-text-muted);
   margin-left: 4px;
 }
 
@@ -283,7 +283,7 @@ onMounted(() => {
 /* 分段选择控制器 */
 .site-segmented {
   display: flex;
-  background-color: #26262a;
+  background-color: var(--app-surface-3);
   padding: 3px;
   border-radius: 6px;
   gap: 2px;
@@ -292,7 +292,7 @@ onMounted(() => {
 .segment-btn {
   border: none;
   background: transparent;
-  color: #88888c;
+  color: var(--app-text-3);
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
@@ -302,8 +302,8 @@ onMounted(() => {
 }
 
 .segment-btn.active {
-  background-color: #38383e;
-  color: #ffffff;
+  background-color: var(--app-border-3);
+  color: var(--app-text-strong);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
@@ -328,7 +328,7 @@ onMounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 24px;
 }
@@ -340,7 +340,7 @@ onMounted(() => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }

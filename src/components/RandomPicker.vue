@@ -264,9 +264,9 @@ const handleStartDraw = async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  background-color: #242428;
-  border: 1px solid #3a3a3d;
-  color: #fff;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   padding: 6px 14px;
   border-radius: 16px;
   font-size: 0.85rem;
@@ -276,7 +276,7 @@ const handleStartDraw = async () => {
 }
 
 .picker-trigger-btn:hover {
-  background-color: #2e2e33;
+  background-color: var(--app-surface-3-hover);
   border-color: #007acc;
   color: #007acc;
 }
@@ -299,15 +299,15 @@ const handleStartDraw = async () => {
   width: 90vw;
   max-width: 980px;
   height: 85vh; /* 强制模态框高度为 85vh */
-  background-color: #161619;
-  border: 1px solid #2d2d32;
+  background-color: var(--app-bg-deep);
+  border: 1px solid var(--app-border-3);
   border-radius: 12px;
   z-index: 2001;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column; /* 垂直对齐：Header -> Control -> Results */
   overflow: hidden; /* 整体绝对不滚动 */
-  color: #e0e0e0;
+  color: var(--app-text-2);
 }
 
 /* 1. Header (固定不滚动) */
@@ -317,8 +317,8 @@ const handleStartDraw = async () => {
   justify-content: space-between;
   align-items: center;
   padding: 14px 20px;
-  background: #1e1e22;
-  border-bottom: 1px solid #2a2a2d;
+  background: var(--app-surface-3);
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .header-title {
@@ -327,31 +327,31 @@ const handleStartDraw = async () => {
   gap: 10px;
   font-size: 1.1rem;
   font-weight: bold;
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 .subtitle {
   font-size: 0.8rem;
-  color: #888;
+  color: var(--app-text-3);
   font-weight: normal;
 }
 
 .close-btn {
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--app-text-3);
   font-size: 1.1rem;
   cursor: pointer;
 }
 .close-btn:hover {
-  color: #fff;
+  color: var(--app-text-strong);
 }
 
 /* 2. 上边栏控制面板 (固定在顶部) */
 .control-panel {
   flex-shrink: 0; /* 绝对不缩放、不随下方列表滚动 */
-  background: #1d1d21;
-  border-bottom: 1px solid #2d2d32;
+  background: var(--app-surface-2);
+  border-bottom: 1px solid var(--app-border-3);
   padding: 14px 20px;
   display: flex;
   flex-direction: column;
@@ -375,7 +375,7 @@ const handleStartDraw = async () => {
 }
 
 .group-label {
-  color: #aaa;
+  color: var(--app-text-2);
   flex-shrink: 0;
 }
 
@@ -386,9 +386,9 @@ const handleStartDraw = async () => {
 }
 
 .pill-btn {
-  background: #28282c;
-  border: 1px solid #38383c;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 3px 10px;
   border-radius: 12px;
   font-size: 0.8rem;
@@ -407,8 +407,8 @@ const handleStartDraw = async () => {
   display: flex;
   align-items: center;
   gap: 2px;
-  background: #000;
-  border: 1px solid #3a3a3d;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -417,7 +417,7 @@ const handleStartDraw = async () => {
   width: 40px;
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--app-text-strong);
   text-align: center;
   font-size: 0.82rem;
   outline: none;
@@ -425,13 +425,13 @@ const handleStartDraw = async () => {
 
 .unit {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .dark-select {
-  background-color: #28282c;
-  color: #fff;
-  border: 1px solid #38383c;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
+  border: 1px solid var(--app-border-3);
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 0.82rem;
@@ -443,7 +443,7 @@ const handleStartDraw = async () => {
   align-items: center;
   gap: 4px;
   font-size: 0.8rem;
-  color: #bbb;
+  color: var(--app-text-2);
   cursor: pointer;
   user-select: none;
 }
@@ -483,7 +483,7 @@ const handleStartDraw = async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--app-text-muted);
   gap: 8px;
   padding: 40px 0;
 }
@@ -530,10 +530,10 @@ const handleStartDraw = async () => {
 /* 抽卡卡片外壳：必须实底 + 裁剪，防止穿透 */
 .drawn-item-card {
   position: relative;
-  background-color: #1a1a1d !important;
+  background-color: var(--app-surface-2) !important;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #2d2d32;
+  border: 1px solid var(--app-border-3);
   cursor: pointer;
   transition:
     transform 0.2s,
@@ -564,7 +564,7 @@ const handleStartDraw = async () => {
   position: relative;
   width: 100%;
   aspect-ratio: 3 / 4;
-  background-color: #26262a;
+  background-color: var(--app-border-2);
   overflow: hidden;
 }
 
@@ -576,7 +576,7 @@ const handleStartDraw = async () => {
 }
 
 :deep(.item-card) {
-  background-color: #1a1a1d !important;
+  background-color: var(--app-surface-2) !important;
   height: 100%;
 }
 </style>

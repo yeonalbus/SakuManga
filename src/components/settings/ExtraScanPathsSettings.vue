@@ -380,13 +380,13 @@ const formatTime = (ts: number) => {
   align-items: center;
   gap: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .back-btn {
-  background: #1a1a1e;
-  border: 1px solid #26262a;
-  color: #a0a0a5;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  color: var(--app-text-2);
   font-size: 24px;
   line-height: 1;
   width: 36px;
@@ -400,26 +400,26 @@ const formatTime = (ts: number) => {
 }
 
 .back-btn:hover {
-  background: #222226;
-  color: #ffffff;
+  background: var(--app-surface-2-hover);
+  color: var(--app-text-strong);
 }
 
 .header-title {
   font-size: 16px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .header-subtext {
   font-size: 12px;
-  color: #88888c;
+  color: var(--app-text-3);
   margin-top: 2px;
 }
 
 /* 卡片容器 */
 .card {
-  background-color: #1a1a1e;
-  border: 1px solid #26262a;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 14px 16px;
 }
@@ -433,7 +433,7 @@ const formatTime = (ts: number) => {
 
 .input-label {
   font-size: 13px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
 }
 
 .input-group {
@@ -444,12 +444,12 @@ const formatTime = (ts: number) => {
 
 .setting-input {
   flex: 1;
-  background-color: #121214;
-  border: 1px solid #38383e;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
-  color: #ffffff;
+  color: var(--app-text-strong);
   outline: none;
   transition: border-color 0.2s;
 }
@@ -502,7 +502,7 @@ const formatTime = (ts: number) => {
   font-size: 14px;
   font-weight: 500;
   font-family: monospace;
-  color: #ffffff;
+  color: var(--app-text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -516,12 +516,12 @@ const formatTime = (ts: number) => {
 .name-edit-input {
   flex: 1;
   min-width: 120px;
-  background-color: #121214;
+  background-color: var(--app-input-bg);
   border: 1px solid #3d5afe;
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 12px;
-  color: #ffffff;
+  color: var(--app-text-strong);
   outline: none;
 }
 
@@ -569,7 +569,7 @@ const formatTime = (ts: number) => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .status-unscanned {
@@ -577,7 +577,7 @@ const formatTime = (ts: number) => {
 }
 
 .count-text {
-  color: #88888c;
+  color: var(--app-text-3);
 }
 
 .scan-badge {
@@ -609,7 +609,7 @@ const formatTime = (ts: number) => {
 
 .toggle-label {
   font-size: 12px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
 }
 
 .toggle-switch {
@@ -632,7 +632,7 @@ const formatTime = (ts: number) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #38383e;
+  background-color: var(--app-border-3);
   transition: 0.3s;
   border-radius: 20px;
 }
@@ -644,7 +644,7 @@ const formatTime = (ts: number) => {
   width: 14px;
   left: 3px;
   bottom: 3px;
-  background-color: #a0a0a5;
+  background-color: var(--app-text-2);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -681,21 +681,21 @@ input:checked + .slider:before {
 }
 
 .btn-primary:disabled {
-  background-color: #26262a;
-  color: #66666c;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-muted);
   cursor: not-allowed;
 }
 
 .btn-icon {
   background: transparent;
-  color: #a0a0a5;
+  color: var(--app-text-2);
   padding: 6px 8px;
   font-size: 15px;
 }
 
 .btn-icon:hover {
-  background-color: #26262a;
-  color: #ffffff;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
 }
 
 .btn-icon.danger:hover {
@@ -705,9 +705,9 @@ input:checked + .slider:before {
 
 /* 扫描模式按钮 */
 .btn-mode {
-  background: #121214;
-  border: 1px solid #38383e;
-  color: #a0a0a5;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 5px 10px;
   font-size: 12px;
 }
@@ -758,7 +758,7 @@ input:checked + .slider:before {
 
 .progress-bar {
   height: 6px;
-  background-color: #26262a;
+  background-color: var(--app-surface-3);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -776,7 +776,7 @@ input:checked + .slider:before {
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
 }
 
 .progress-title {
@@ -813,9 +813,9 @@ input:checked + .slider:before {
 .empty-state {
   text-align: center;
   padding: 32px 16px;
-  border: 1px dashed #26262a;
+  border: 1px dashed var(--app-border-2);
   border-radius: 8px;
-  color: #66666c;
+  color: var(--app-text-muted);
   font-size: 13px;
 }
 </style>

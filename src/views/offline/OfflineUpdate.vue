@@ -260,20 +260,20 @@ onMounted(fetchUpdates)
   justify-content: space-between;
   align-items: center;
   padding-bottom: 12px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--app-border-2);
   gap: 12px;
   flex-wrap: wrap;
 }
 
 .page-title {
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
 .subtitle {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--app-text-3);
   margin: 4px 0 0 0;
   max-width: 640px;
 }
@@ -287,8 +287,8 @@ onMounted(fetchUpdates)
 
 .link-btn {
   background: transparent;
-  border: 1px solid #3a3a3f;
-  color: #aaa;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 8px 14px;
   border-radius: 6px;
   font-size: 0.85rem;
@@ -375,7 +375,7 @@ onMounted(fetchUpdates)
   align-items: center;
   justify-content: center;
   padding: 60px 0;
-  color: #888;
+  color: var(--app-text-3);
   text-align: center;
 }
 .empty-box .icon {
@@ -383,7 +383,7 @@ onMounted(fetchUpdates)
   margin-bottom: 12px;
 }
 .empty-title {
-  color: #ccc;
+  color: var(--app-text-2);
   font-size: 1rem;
   margin: 0;
 }
@@ -401,7 +401,7 @@ onMounted(fetchUpdates)
 
 .summary-bar {
   font-size: 0.85rem;
-  color: #aaa;
+  color: var(--app-text-2);
 }
 .highlight {
   color: #ff7588;
@@ -410,8 +410,8 @@ onMounted(fetchUpdates)
 .update-card {
   display: flex;
   gap: 16px;
-  background-color: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 8px;
   padding: 14px;
   align-items: flex-start;
@@ -422,7 +422,7 @@ onMounted(fetchUpdates)
   height: 90px;
   border-radius: 6px;
   overflow: hidden;
-  background-color: #242428;
+  background-color: var(--app-surface-3);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -453,7 +453,7 @@ onMounted(fetchUpdates)
 }
 .card-title {
   font-size: 0.95rem;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
   font-weight: 600;
   overflow: hidden;
@@ -488,7 +488,7 @@ onMounted(fetchUpdates)
 }
 .meta-text {
   font-size: 0.76rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 .update-note {
@@ -511,7 +511,7 @@ onMounted(fetchUpdates)
   align-items: center;
   gap: 8px;
   font-size: 0.75rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 .new-gid-label {
   flex-shrink: 0;
@@ -534,12 +534,12 @@ onMounted(fetchUpdates)
 }
 .mode-label {
   font-size: 0.7rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 .mode-select {
-  background-color: #242428;
-  border: 1px solid #3a3a3f;
-  color: #ddd;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 7px 8px;
   border-radius: 6px;
   font-size: 0.8rem;

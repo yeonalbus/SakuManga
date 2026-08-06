@@ -59,8 +59,8 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
 <style scoped>
 .top-bar {
   height: 56px;
-  background-color: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  background-color: var(--app-surface);
+  border-bottom: 1px solid var(--app-border);
   display: flex;
   align-items: center;
   padding: 0 16px;
@@ -69,9 +69,9 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
 
 /* 筛选按钮样式 */
 .filter-trigger-btn {
-  background-color: #242428;
-  border: 1px solid #3a3a3d;
-  color: #ccc;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 12px;
   border-radius: 16px;
   font-size: 0.85rem;
@@ -84,9 +84,9 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
 }
 
 .filter-trigger-btn:hover {
-  background-color: #2e2e33;
-  border-color: #007acc;
-  color: #fff;
+  background-color: var(--app-surface-3-hover);
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
 }
 
 /* 搜索栏外壳，自动吸收剩余宽度 */

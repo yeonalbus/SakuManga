@@ -924,6 +924,13 @@ watch(
           <button class="settings-btn" @click.stop="showSettings = !showSettings" title="阅读设置">
             ⚙️
           </button>
+          <button
+            class="settings-btn collapse-btn"
+            @click.stop="showControls = false"
+            title="隐藏控制条"
+          >
+            ✕
+          </button>
         </div>
       </div>
     </Transition>
@@ -1090,6 +1097,19 @@ watch(
           <span>{{ currentPage }} / {{ totalPages }} P</span>
         </div>
       </div>
+    </Transition>
+
+    <!-- ✋ 控制条隐藏时的悬浮呼出按钮（底部居中，层级高于点击热区） -->
+    <Transition name="fade">
+      <button
+        v-if="!showControls"
+        class="controls-reveal"
+        @click="showControls = true"
+        title="显示控制条"
+        aria-label="显示控制条"
+      >
+        ⋯
+      </button>
     </Transition>
 
     <!-- ⚙️ 阅读器内设置抽屉 -->
@@ -1303,6 +1323,53 @@ watch(
   font-size: 1.2rem;
   cursor: pointer;
   padding: 2px 6px;
+}
+/* 顶栏收起控制条按钮 */
+.collapse-btn {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+/* 控制条隐藏时的悬浮呼出按钮（底部居中，层级高于点击热区） */
+.controls-reveal {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + var(--safe-bottom, 0px));
+  z-index: 3015;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.55);
+  color: #ddd;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    opacity 0.2s,
+    background 0.2s;
+}
+.controls-reveal:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+/* 呼出按钮淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* 手柄连接指示器 */

@@ -136,15 +136,15 @@ const handleBack = () => {
   display: flex;
   width: 100%;
   height: 100%;
-  background-color: #121214;
-  color: #e0e0e0;
+  background-color: var(--app-bg-alt);
+  color: var(--app-fg);
   box-sizing: border-box;
 }
 
 .settings-sidebar {
   width: 220px;
-  background-color: #18181c;
-  border-right: 1px solid #2a2a2d;
+  background-color: var(--app-bg-deep);
+  border-right: 1px solid var(--app-border-2);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -158,7 +158,7 @@ const handleBack = () => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .menu-list {
@@ -174,20 +174,20 @@ const handleBack = () => {
   padding: 10px 16px;
   border-radius: 6px;
   cursor: pointer;
-  color: #a0a0a0;
+  color: var(--app-text-2);
   font-size: 14px;
   transition: all 0.2s ease;
   margin-bottom: 2px;
 }
 
 .menu-item:hover {
-  background-color: #26262a;
-  color: #ffffff;
+  background-color: var(--app-surface-2-hover);
+  color: var(--app-text-strong);
 }
 
 .menu-item.active {
-  background-color: #2b2b30;
-  color: #ffffff;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
   font-weight: 500;
 }
 
@@ -199,7 +199,7 @@ const handleBack = () => {
 
 .settings-content {
   flex: 1;
-  background-color: #121214;
+  background-color: var(--app-bg-alt);
   overflow-y: auto;
   padding: 24px 32px;
 }
@@ -213,7 +213,7 @@ const handleBack = () => {
   align-items: center;
   gap: 12px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
   margin-bottom: 20px;
 }
 
@@ -221,14 +221,14 @@ const handleBack = () => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
   flex: 1;
 }
 
 .back-btn {
   background: transparent;
   border: none;
-  color: #a0a0a0;
+  color: var(--app-text-2);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -239,8 +239,8 @@ const handleBack = () => {
 }
 
 .back-btn:hover {
-  color: #ffffff;
-  background-color: #26262a;
+  color: var(--app-text-strong);
+  background-color: var(--app-surface-2-hover);
 }
 
 .panel-body {

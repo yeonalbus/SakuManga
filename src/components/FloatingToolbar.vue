@@ -119,9 +119,9 @@ const handleDateSubmit = () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background-color: rgba(26, 26, 26, 0.92);
+  background-color: var(--app-surface-2);
   backdrop-filter: blur(8px);
-  border: 1px solid #333;
+  border: 1px solid var(--app-border-3);
   padding: 8px;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -133,7 +133,7 @@ const handleDateSubmit = () => {
   gap: 8px;
   background: transparent;
   border: none;
-  color: #ccc;
+  color: var(--app-text-2);
   padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -143,8 +143,8 @@ const handleDateSubmit = () => {
 }
 
 .menu-item:hover {
-  background-color: #2a2a2a;
-  color: #fff;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
 }
 
 .date-item {
@@ -186,8 +186,8 @@ const handleDateSubmit = () => {
 }
 
 .fab-trigger.active {
-  background-color: #2a2a2a;
-  border: 1px solid #444;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   transform: rotate(90deg);
 }
 

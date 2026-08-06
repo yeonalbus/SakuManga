@@ -40,11 +40,11 @@ const { toasts } = useUI()
   min-width: 220px;
   padding: 12px 18px;
   border-radius: 8px;
-  background: #1e1e20;
-  color: #fff;
+  background: var(--app-surface-3);
+  color: var(--app-text-strong);
   font-size: 14px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  border: 1px solid #333;
+  border: 1px solid var(--app-border-3);
 }
 
 .toast-item.info {

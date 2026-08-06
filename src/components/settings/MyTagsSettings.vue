@@ -393,7 +393,7 @@ onMounted(load)
 .back-btn {
   background: transparent;
   border: none;
-  color: #a0a0a0;
+  color: var(--app-text-2);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -404,22 +404,22 @@ onMounted(load)
 }
 
 .back-btn:hover {
-  color: #ffffff;
-  background-color: #26262a;
+  color: var(--app-text-strong);
+  background-color: var(--app-surface-3);
 }
 
 .sub-title {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
   flex: 1;
 }
 
 .refresh-btn {
-  background: #26262a;
-  border: 1px solid #36363a;
-  color: #c0c0c5;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   border-radius: 6px;
   padding: 5px 12px;
   font-size: 12px;
@@ -428,7 +428,7 @@ onMounted(load)
 }
 
 .refresh-btn:hover:not(:disabled) {
-  color: #ffffff;
+  color: var(--app-text-strong);
   border-color: #ff7588;
 }
 
@@ -440,7 +440,7 @@ onMounted(load)
 .desc {
   margin: 0;
   font-size: 13px;
-  color: #88888c;
+  color: var(--app-text-3);
   line-height: 1.5;
 }
 
@@ -458,8 +458,8 @@ onMounted(load)
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background-color: #18181c;
-  border: 1px solid #26262a;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
   border-radius: 10px;
 }
 
@@ -468,19 +468,19 @@ onMounted(load)
   align-items: center;
   gap: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #26262a;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--app-text-strong);
 }
 
 .section-count {
   font-size: 11px;
-  background-color: #2b2b30;
-  color: #a0a0a5;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-2);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -494,15 +494,15 @@ onMounted(load)
 
 .tagset-label {
   font-size: 13px;
-  color: #a0a0a5;
+  color: var(--app-text-2);
   white-space: nowrap;
 }
 
 .tagset-select {
-  background: #1f1f24;
-  border: 1px solid #36363a;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
-  color: #e0e0e0;
+  color: var(--app-text-2);
   font-size: 13px;
   padding: 6px 10px;
   outline: none;
@@ -521,7 +521,7 @@ onMounted(load)
 
 .tagset-hint {
   font-size: 12px;
-  color: #6a6a70;
+  color: var(--app-text-muted);
 }
 
 .tag-list {
@@ -589,11 +589,11 @@ onMounted(load)
 
 .tag-input {
   flex: 1;
-  background: #1f1f24;
-  border: 1px solid #36363a;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 8px 12px;
-  color: #e0e0e0;
+  color: var(--app-text-2);
   font-size: 13px;
   outline: none;
   transition: border-color 0.2s;
@@ -606,9 +606,9 @@ onMounted(load)
 .action-btn {
   padding: 8px 18px;
   border-radius: 6px;
-  border: 1px solid #36363a;
-  background: #26262a;
-  color: #eee;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.2s;
@@ -621,7 +621,7 @@ onMounted(load)
 }
 
 .action-btn:hover:not(:disabled) {
-  background: #323236;
+  background: var(--app-surface-3-hover);
 }
 
 .action-btn.primary {
@@ -653,8 +653,8 @@ onMounted(load)
   z-index: 30;
   max-height: 280px;
   overflow-y: auto;
-  background: #222226;
-  border: 1px solid #3a3a40;
+  background: var(--app-surface-2-hover);
+  border: 1px solid var(--app-border-3);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   padding: 4px;
@@ -669,12 +669,12 @@ onMounted(load)
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #e0e0e0;
+  color: var(--app-text-2);
   transition: background-color 0.15s;
 }
 
 .suggest-item:hover {
-  background-color: #2e2e34;
+  background-color: var(--app-surface-3-hover);
 }
 
 .suggest-text {

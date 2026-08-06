@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -384,6 +386,103 @@ func TestParseContentRangeTotal(t *testing.T) {
 		if got := parseContentRangeTotal(in); got != want {
 			t.Errorf("parseContentRangeTotal(%q)=%d，期望 %d", in, got, want)
 		}
+	}
+}
+
+// TestClassifyArchiveLockBody 覆盖 JHentai _check410Or404Reason 的精确锁定文案分类：
+//   - "This archive session has been used from too many different locations" → IP/会话封锁
+//   - "IP quota exhausted" → IP/会话封锁
+//   - "You have clocked too many downloaded bytes on this gallery" → IP/会话封锁
+//   - "Expired or invalid session" → 会话过期（仅暂停）
+func TestClassifyArchiveLockBody(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want archiveLockReason
+	}{
+		{"多个不同 IP 使用（原文）", "This archive session has been used from too many different locations.", archiveLockIPSession},
+		{"多个不同 IP 使用（小写）", "this archive session has been used from too many different locations", archiveLockIPSession},
+		{"IP 配额耗尽", "IP quota exhausted, wait until tomorrow.", archiveLockIPSession},
+		{"本画廊下载字节超限", "You have clocked too many downloaded bytes on this gallery.", archiveLockIPSession},
+		{"Session 过期/失效", "Expired or invalid session.", archiveLockSessionExpired},
+		{"Session 过期（小写）", "expired or invalid session", archiveLockSessionExpired},
+		{"通用配额提示", "quota exceeded, please try again later", archiveLockQuota},
+		{"通用限流提示", "rate limit exceeded", archiveLockQuota},
+		{"通用封锁提示", "sadpanda too many requests temporarily banned", archiveLockQuota},
+		{"正常响应不锁定", "you have unlocked this gallery's archive", archiveLockNone},
+		{"空响应不锁定", "", archiveLockNone},
+	}
+	for _, c := range cases {
+		if got := classifyArchiveLockBody(c.body); got != c.want {
+			t.Errorf("%s: classifyArchiveLockBody(%q)=%v，期望 %v", c.name, c.body, got, c.want)
+		}
+	}
+}
+
+// TestCancelArchiveSession 验证取消服务端归档 Session：POST invalidate_sessions=1
+func TestCancelArchiveSession(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotBody, gotGID, gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotBody = string(b)
+		gotGID = r.URL.Query().Get("gid")
+		gotToken = r.URL.Query().Get("token")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>archiver page</html>"))
+	}))
+	defer srv.Close()
+
+	client := srv.Client()
+	if err := cancelArchiveSession(client, srv.URL, "4099258", "abc123"); err != nil {
+		t.Fatalf("cancelArchiveSession 失败: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotMethod != http.MethodPost {
+		t.Errorf("请求方法=%s，期望 POST", gotMethod)
+	}
+	if gotPath != "/archiver.php" {
+		t.Errorf("请求路径=%s，期望 /archiver.php", gotPath)
+	}
+	if gotGID != "4099258" || gotToken != "abc123" {
+		t.Errorf("查询参数 gid=%q token=%q，期望 gid=4099258 token=abc123", gotGID, gotToken)
+	}
+	if !strings.Contains(gotBody, "invalidate_sessions=1") {
+		t.Errorf("请求体=%q，应包含 invalidate_sessions=1", gotBody)
+	}
+}
+
+// TestCancelArchiveSessionRetry 验证首次非 2xx/3xx 时自动重试成功
+func TestCancelArchiveSessionRetry(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := srv.Client()
+	if err := cancelArchiveSession(client, srv.URL, "1", "t"); err != nil {
+		t.Fatalf("cancelArchiveSession 重试后仍失败: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 2 {
+		t.Errorf("期望至少重试一次（实际 calls=%d）", calls)
 	}
 }
 

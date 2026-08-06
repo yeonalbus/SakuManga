@@ -44,6 +44,94 @@ type archiverForm struct {
 	position   int               // 表单在页面中的序号（0 起）
 }
 
+// archiveLockReason 归档锁定原因分类（对齐 JHentai archive_download_service.dart 的 _check410Or404Reason 细分）
+type archiveLockReason int
+
+const (
+	archiveLockNone           archiveLockReason = iota // 未检测到锁定
+	archiveLockIPSession                                // IP 变更/多 IP 使用：E 站触发 IP 封锁，需取消原 Session 并从当前 IP 重新解锁
+	archiveLockSessionExpired                           // Session 已过期/失效：仅暂停，重新解锁即可
+	archiveLockQuota                                    // 普通配额/限流
+)
+
+// classifyArchiveLockBody 依据响应体（已小写）分类归档锁定原因。
+// 精确字符串对齐 JHentai 的 _check410Or404Reason：
+//   - "this archive session has been used from too many different locations"
+//   - "ip quota exhausted"
+//   - "you have clocked too many downloaded bytes on this gallery"
+//     → needReUnlock（IP/会话封锁：取消原服务端 Session 后从当前 IP 重新解锁）
+//   - "expired or invalid session" → 仅暂停（Session 过期，重新解锁即可）
+//   其余命中通用锁定提示 → 配额/限流
+func classifyArchiveLockBody(lowerBody string) archiveLockReason {
+	lowerBody = strings.ToLower(lowerBody)
+	switch {
+	case strings.Contains(lowerBody, "this archive session has been used from too many different locations"),
+		strings.Contains(lowerBody, "ip quota exhausted"),
+		strings.Contains(lowerBody, "you have clocked too many downloaded bytes on this gallery"):
+		return archiveLockIPSession
+	case strings.Contains(lowerBody, "expired or invalid session"):
+		return archiveLockSessionExpired
+	}
+	lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
+	for _, h := range lockHints {
+		if strings.Contains(lowerBody, h) {
+			return archiveLockQuota
+		}
+	}
+	return archiveLockNone
+}
+
+// archiveLockErrorMessage 生成带具体原因的锁定错误信息（failOrLock 会追加解锁操作提示）
+func archiveLockErrorMessage(status int, reason archiveLockReason) string {
+	switch reason {
+	case archiveLockIPSession:
+		return fmt.Sprintf("HTTP %d：归档 Session 被多个不同 IP 使用或 IP 配额耗尽（检测到 IP 变更触发的 E 站 IP 封锁）", status)
+	case archiveLockSessionExpired:
+		return fmt.Sprintf("HTTP %d：归档 Session 已过期或失效，请重新解锁后重试", status)
+	default:
+		return fmt.Sprintf("HTTP %d（疑似配额/限流，需解锁后重试）", status)
+	}
+}
+
+// cancelArchiveSession 取消 E 站服务端归档 Session（POST invalidate_sessions=1）。
+// 对齐 JHentai eh_request.requestCancelArchive：POST archivePageUrl FormData({'invalidate_sessions': 1})。
+// 用于 IP 变更/多 IP 触发封锁后，先废弃旧 IP 建立的 Session，再在当前 IP 重新解锁。
+func cancelArchiveSession(client *http.Client, referer, gid, token string) error {
+	base := strings.TrimSuffix(referer, "/") + "/archiver.php"
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "https://e-hentai.org/archiver.php" // referer 异常兜底
+	}
+	target := base + "?gid=" + url.QueryEscape(gid) + "&token=" + url.QueryEscape(token)
+	form := url.Values{}
+	form.Set("invalidate_sessions", "1")
+
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, err := http.NewRequest("POST", target, strings.NewReader(form.Encode()))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("User-Agent", ehReaderUserAgent)
+		req.Header.Set("Referer", target)
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			continue
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		// 2xx/3xx 视为成功（302 会被 http.Client 自动跟随到归档页）
+		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+			return nil
+		}
+		lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+	}
+	return fmt.Errorf("取消归档 Session 失败: %w", lastErr)
+}
+
 // archiveDownloader 单次归档下载的执行上下文
 type archiveDownloader struct {
 	m         *DownloadManager
@@ -59,6 +147,7 @@ type archiveDownloader struct {
 	referer         string
 	limiter         *rateLimiter
 	lockFailed      bool
+	lockReason      archiveLockReason // 最近一次检测到的锁定原因分类
 	chunk           *archiveChunkDownloader // 当前分块下载器（nil 表示单线程路径/未开始分块）
 	chunkMu         sync.Mutex              // 保护 chunk 字段（暂停/取消/线程调整并发访问）
 	stopFlag        atomic.Bool             // 本地停止标记（暂停/取消时置位，避免频繁回查 DB）
@@ -752,14 +841,12 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 		if data, err := io.ReadAll(io.LimitReader(resp.Body, 512)); err == nil {
 			body = strings.ToLower(string(data))
 		}
-		lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
-		for _, h := range lockHints {
-			if strings.Contains(body, h) {
-				g.mu.Lock()
-				g.lockFailed = true
-				g.mu.Unlock()
-				return fmt.Errorf("HTTP %d（疑似配额/限流，需解锁后重试）", resp.StatusCode)
-			}
+		if reason := classifyArchiveLockBody(body); reason != archiveLockNone {
+			g.mu.Lock()
+			g.lockFailed = true
+			g.lockReason = reason
+			g.mu.Unlock()
+			return errors.New(archiveLockErrorMessage(resp.StatusCode, reason))
 		}
 		return fmt.Errorf("HTTP %d（下载 H@H zip 失败）", resp.StatusCode)
 	}
@@ -985,12 +1072,19 @@ func (g *archiveDownloader) failOrLock(err error) {
 	}
 	g.mu.Lock()
 	locked := g.lockFailed
+	reason := g.lockReason
 	g.mu.Unlock()
 	if locked {
 		log.Printf("%s [archive-engine] 任务 %s 因配额/限流进入锁定: %v", dlErrTag, g.task.ID, err)
+		extra := "疑似 E 站配额/限流，请在 E 站处理配额后点击解锁重试"
+		if reason == archiveLockIPSession {
+			extra = "检测到 IP 变更/多 IP 使用触发的 E 站 IP 封锁；点击「解锁」将自动取消原服务端 Session 并从当前 IP 重新解锁"
+		} else if reason == archiveLockSessionExpired {
+			extra = "归档 Session 已过期或失效；点击「解锁」将从当前 IP 重新解锁"
+		}
 		g.mu.Lock()
 		g.task.Status = models.DownloadErrorLock
-		g.task.Error = err.Error() + "；疑似 E 站配额/限流，请在 E 站处理配额后点击解锁重试"
+		g.task.Error = err.Error() + "；" + extra
 		g.task.UpdatedAt = time.Now()
 		g.m.db.Save(g.task)
 		g.mu.Unlock()

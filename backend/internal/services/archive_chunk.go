@@ -351,22 +351,21 @@ func (d *archiveChunkDownloader) setFailed(err error) {
 	d.mu.Unlock()
 }
 
-// lockMessage 检测响应是否为配额/限流锁定（复用 downloadZip 的 lockHints 语义）
+// lockMessage 检测响应是否为配额/限流锁定（分类器与 downloadZip 一致）
 func (d *archiveChunkDownloader) lockMessage(resp *http.Response) (string, bool) {
 	body := ""
 	if data, err := io.ReadAll(io.LimitReader(resp.Body, 512)); err == nil {
 		body = strings.ToLower(string(data))
 	}
-	lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
-	for _, h := range lockHints {
-		if strings.Contains(body, h) {
-			d.g.mu.Lock()
-			d.g.lockFailed = true
-			d.g.mu.Unlock()
-			return fmt.Sprintf("HTTP %d（疑似配额/限流，需解锁后重试）", resp.StatusCode), true
-		}
+	reason := classifyArchiveLockBody(body)
+	if reason == archiveLockNone {
+		return "", false
 	}
-	return "", false
+	d.g.mu.Lock()
+	d.g.lockFailed = true
+	d.g.lockReason = reason
+	d.g.mu.Unlock()
+	return archiveLockErrorMessage(resp.StatusCode, reason), true
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -440,16 +439,15 @@ func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, boo
 
 // probeLockError 若探测响应体命中配额/限流提示，则置锁定标记并返回对应错误；否则返回 nil。
 func (g *archiveDownloader) probeLockError(status int, body string) error {
-	lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
-	for _, h := range lockHints {
-		if strings.Contains(body, h) {
-			g.mu.Lock()
-			g.lockFailed = true
-			g.mu.Unlock()
-			return fmt.Errorf("HTTP %d（疑似配额/限流，需解锁后重试）", status)
-		}
+	reason := classifyArchiveLockBody(body)
+	if reason == archiveLockNone {
+		return nil
 	}
-	return nil
+	g.mu.Lock()
+	g.lockFailed = true
+	g.lockReason = reason
+	g.mu.Unlock()
+	return errors.New(archiveLockErrorMessage(status, reason))
 }
 
 // parseContentRangeTotal 从 "bytes 0-0/12345" 或 "bytes */12345" 解析总大小

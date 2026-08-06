@@ -517,6 +517,7 @@ func (m *DownloadManager) RetryTask(taskID string) (*models.DownloadTask, error)
 	if err := m.db.First(&task, "id = ?", taskID).Error; err != nil {
 		return nil, errors.New("任务不存在")
 	}
+	wasLocked := task.Status == models.DownloadErrorLock
 	switch task.Status {
 	case models.DownloadError, models.DownloadErrorLock, models.DownloadCancelled:
 	default:
@@ -527,6 +528,10 @@ func (m *DownloadManager) RetryTask(taskID string) (*models.DownloadTask, error)
 	task.UpdatedAt = time.Now()
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
+	}
+	// 归档任务 error_lock：先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁
+	if wasLocked && task.Mode == models.DownloadModeArchive {
+		m.cancelArchiveSessionForTask(&task)
 	}
 	m.Enqueue(taskID)
 	log.Printf("%s 重试任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
@@ -558,6 +563,11 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 	log.Printf("%s 解锁任务 %s：GP=%s Credits=%s Hath=%s 配额 %d/%d",
 		dlLogTag, taskID, status.AssetGP, status.AssetCredits, status.AssetHath, status.CurrentQuota, status.MaxQuota)
 
+	// 归档任务：先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁
+	if task.Mode == models.DownloadModeArchive {
+		m.cancelArchiveSessionForTask(&task)
+	}
+
 	task.Status = models.DownloadQueued
 	task.Error = ""
 	task.UpdatedAt = time.Now()
@@ -566,6 +576,33 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 	}
 	m.Enqueue(taskID)
 	return &task, nil
+}
+
+// cancelArchiveSessionForTask 取消任务对应的 E 站服务端归档 Session（invalidate_sessions=1）。
+// 仅归档任务生效：IP 变更/多 IP 使用触发 E 站 IP 封锁后，先废弃旧 IP 建立的 Session，
+// 再从当前 IP 重新解锁（对齐 JHentai cancelArchive + downloadArchive(resume:true, reParse:true) 流程）。
+// 取消失败不阻断解锁流程（E 站通常仍允许重新创建归档），仅记录日志。
+func (m *DownloadManager) cancelArchiveSessionForTask(task *models.DownloadTask) {
+	if task == nil || task.Mode != models.DownloadModeArchive {
+		return
+	}
+	account := loadUserAccount(m.db, task.UserID)
+	if account.IPBMemberID == "" {
+		log.Printf("%s 取消任务 %s 归档 Session 跳过：未绑定 E 站账号凭证", dlWarnTag, task.ID)
+		return
+	}
+	ehSetting := loadEHSetting(m.db, task.UserID)
+	client, err := m.ehService.BuildClient(account)
+	if err != nil {
+		log.Printf("%s 取消任务 %s 归档 Session 失败（构建客户端）: %v", dlErrTag, task.ID, err)
+		return
+	}
+	referer := GetBaseURL(account, ehSetting)
+	if err := cancelArchiveSession(client, referer, task.GID, task.Token); err != nil {
+		log.Printf("%s 取消任务 %s 归档 Session 失败: %v（将继续解锁流程）", dlWarnTag, task.ID, err)
+		return
+	}
+	log.Printf("%s 已取消任务 %s（gid=%s）的服务端归档 Session，将从当前 IP 重新解锁", dlLogTag, task.ID, task.GID)
 }
 
 // ListTasks 查询任务列表（支持状态/模式过滤 + 分页）

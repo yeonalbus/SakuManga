@@ -115,7 +115,7 @@ SakuHentai/
 
 - **[JHentai](https://github.com/jiangtian616/JHenTai)**：感谢其在界面交互与部分业务逻辑实现上提供的灵感与思路。
 - **[EhTagTranslation](https://github.com/EhTagTranslation/Database)**：本项目的标签汉化与翻译数据库来源于 EhTagTranslation 社区。
-- **[e-hentai-tag-count]https://github.com/mokurin000/e-hentai-tag-count**：本项目的标签联想来源于 e-hentai-tag-count 社区。
+- **[e-hentai-tag-count](https://github.com/mokurin000/e-hentai-tag-count)**：本项目的标签联想来源于 e-hentai-tag-count 社区。
 
 ## 数据协议说明 (EhTagTranslation)
 

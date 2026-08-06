@@ -81,6 +81,17 @@ func simulateCheckUpdates(comics []models.OfflineComic, htmlMap map[string]*serv
 	work := make([]models.OfflineComic, len(comics))
 	copy(work, comics)
 
+	// 与 services.CheckUpdates 一致：先从本地漫画构建 gidMap（判断“最新版是否已在本地”）
+	gidMap := map[string]*models.OfflineComic{}
+	fetchedOnline := map[string]bool{}
+	for i := range work {
+		if work[i].GID != "" {
+			if _, ok := gidMap[work[i].GID]; !ok {
+				gidMap[work[i].GID] = &work[i]
+			}
+		}
+	}
+
 	// A 段（逐漫画判定 + 回写 ParentGID）
 	for i := range work {
 		c := &work[i]
@@ -91,21 +102,33 @@ func simulateCheckUpdates(comics []models.OfflineComic, htmlMap map[string]*serv
 		if rel == nil {
 			continue
 		}
-		// A1：newer version 横幅 → 本画廊已被新版取代（A→C 一次更新到最新版）
+		fetchedOnline[c.ID] = true
+		// A1：newer version 横幅 → 本画廊已被新版取代（A→C 一次更新到最新版）。
+		// 最新版已在本地（gidMap 命中）→ 无需下载更新，清除旧标记，交由维护查重删除旧版。
 		if rel.NewVersionGID != "" && rel.NewVersionGID != c.GID {
-			c.NeedsUpdate = true
-			c.NewGID = rel.NewVersionGID
-			c.NewToken = rel.NewVersionToken
-			c.UpdateNote = buildNote(rel.NewVersionGID, rel.Children)
-			fmt.Printf("  A1 %s(gid=%s) → 需要更新到最新版 gid=%s\n", c.Title, c.GID, rel.NewVersionGID)
+			if _, ok := gidMap[rel.NewVersionGID]; ok {
+				fmt.Printf("  A1 %s(gid=%s) 的最新版 gid=%s 本地已存在 → 跳过更新（清除旧标记）\n", c.Title, c.GID, rel.NewVersionGID)
+				clearUpdate(c)
+			} else {
+				c.NeedsUpdate = true
+				c.NewGID = rel.NewVersionGID
+				c.NewToken = rel.NewVersionToken
+				c.UpdateNote = buildNote(rel.NewVersionGID, rel.Children)
+				fmt.Printf("  A1 %s(gid=%s) → 需要更新到最新版 gid=%s\n", c.Title, c.GID, rel.NewVersionGID)
+			}
 		} else if len(rel.Children) > 0 && rel.Children[len(rel.Children)-1].GID != c.GID {
 			// A2：本画廊存在更新版（子画廊关系）→ 更新到最新版（Children 最后一个）
 			latest := rel.Children[len(rel.Children)-1]
-			c.NeedsUpdate = true
-			c.NewGID = latest.GID
-			c.NewToken = latest.Token
-			c.UpdateNote = buildNote(latest.GID, rel.Children)
-			fmt.Printf("  A2 %s(gid=%s) → 需要更新到最新版 gid=%s\n", c.Title, c.GID, latest.GID)
+			if _, ok := gidMap[latest.GID]; ok {
+				fmt.Printf("  A2 %s(gid=%s) 的最新版 gid=%s 本地已存在 → 跳过更新（清除旧标记）\n", c.Title, c.GID, latest.GID)
+				clearUpdate(c)
+			} else {
+				c.NeedsUpdate = true
+				c.NewGID = latest.GID
+				c.NewToken = latest.Token
+				c.UpdateNote = buildNote(latest.GID, rel.Children)
+				fmt.Printf("  A2 %s(gid=%s) → 需要更新到最新版 gid=%s\n", c.Title, c.GID, latest.GID)
+			}
 		}
 		// A3：回写父画廊关系（供 B 段本地查重用）
 		if rel.ParentGID != "" && rel.ParentGID != c.GID {
@@ -114,19 +137,17 @@ func simulateCheckUpdates(comics []models.OfflineComic, htmlMap map[string]*serv
 		}
 	}
 
-	// B 段：父画廊关系本地查重（依赖 A3 回写后的 ParentGID）
-	gidMap := map[string]*models.OfflineComic{}
-	for i := range work {
-		if work[i].GID != "" {
-			gidMap[work[i].GID] = &work[i]
-		}
-	}
+	// B 段：父画廊关系本地查重（依赖 A3 回写后的 ParentGID；父画廊已联网核对则跳过）
 	for i := range work {
 		c := &work[i]
 		if c.ParentGID == "" || c.ParentGID == c.GID {
 			continue
 		}
 		if p, ok := gidMap[c.ParentGID]; ok && p.GID != c.GID {
+			if fetchedOnline[p.ID] {
+				fmt.Printf("  B  %s(gid=%s) 已由 A 段联网核对 → B 段本地兜底跳过\n", p.Title, p.GID)
+				continue
+			}
 			if p.NeedsUpdate {
 				fmt.Printf("  B  %s(gid=%s) 已被 A 段标记更新到最新版 gid=%s，B 段跳过避免降级\n", p.Title, p.GID, p.NewGID)
 				continue
@@ -146,6 +167,14 @@ func simulateCheckUpdates(comics []models.OfflineComic, htmlMap map[string]*serv
 				work[i].Title, work[i].GID, work[i].NewGID, work[i].NewToken, work[i].UpdateNote)
 		}
 	}
+}
+
+// clearUpdate 复刻 services.clearOfflineUpdate：清除漫画的更新标记
+func clearUpdate(c *models.OfflineComic) {
+	c.NeedsUpdate = false
+	c.NewGID = ""
+	c.NewToken = ""
+	c.UpdateNote = ""
 }
 
 // simulateMaintainDedup 复刻 services.MaintainDedup 规则3（3a 在线发现 + 3b 本地查重）
@@ -197,7 +226,9 @@ func simulateMaintainDedup(comics []models.OfflineComic, htmlMap map[string]*ser
 		if successor != nil {
 			removeSet[c.ID] = true
 			reasonMap[c.ID] = fmt.Sprintf("检测到更新版（父画廊关系）%q：旧版可删除", successor.Title)
-			keepSet[successor.ID] = true
+			if !removeSet[successor.ID] {
+				keepSet[successor.ID] = true
+			}
 			fmt.Printf("  3a %s(gid=%s) 被新版 %s(gid=%s) 取代 → 删除旧版\n", c.Title, c.GID, successor.Title, successor.GID)
 		}
 	}
@@ -211,19 +242,25 @@ func simulateMaintainDedup(comics []models.OfflineComic, htmlMap map[string]*ser
 		if p, ok := gidToComic[c.ParentGID]; ok && p.ID != c.ID {
 			removeSet[p.ID] = true
 			reasonMap[p.ID] = fmt.Sprintf("已被更新版（父画廊关系）%q 取代，旧版可删除", c.Title)
-			keepSet[c.ID] = true
+			// 旧版 p 一旦判删，绝不再作为“建议保留”输出
+			delete(keepSet, p.ID)
+			// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
+			if !removeSet[c.ID] {
+				keepSet[c.ID] = true
+			}
 			fmt.Printf("  3b %s(gid=%s) 的父画廊 %s(gid=%s) 被取代 → 删除父画廊\n", c.Title, c.GID, p.Title, p.GID)
 		}
 	}
 
 	fmt.Println("  ── 查重结果 ──")
+	// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删
 	for i := range work {
 		c := work[i]
 		switch {
-		case keepSet[c.ID]:
-			fmt.Printf("    ✅ 保留 %s(gid=%s)\n", c.Title, c.GID)
 		case removeSet[c.ID]:
 			fmt.Printf("    🗑  删除 %s(gid=%s)  原因: %s\n", c.Title, c.GID, reasonMap[c.ID])
+		case keepSet[c.ID]:
+			fmt.Printf("    ✅ 保留 %s(gid=%s)\n", c.Title, c.GID)
 		}
 	}
 }

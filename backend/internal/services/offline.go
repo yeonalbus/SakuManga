@@ -60,6 +60,7 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 	result := &UpdateCheckResult{Checked: len(comics), NeedsUpdate: []models.OfflineComic{}}
 	gidMap := map[string]*models.OfflineComic{} // gid → 本地漫画（父画廊关系查重用）
 	changed := map[string]bool{}                // comic id → 是否被标记
+	fetchedOnline := map[string]bool{}          // comic id → A 段是否成功联网核对（B 段本地兜底跳过）
 
 	log.Printf("%s [update] 开始更新检测：共 %d 个离线漫画（含 gid）", dlLogTag, len(comics))
 
@@ -79,20 +80,38 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 		if err != nil {
 			log.Printf("%s [update] 漫画 %q(gid=%s) 在线详情拉取失败（跳过）: %v", dlWarnTag, c.Title, c.GID, err)
 		} else if detail != nil {
-			// A1. 详情页罗列更新版本（#gnd "newer versions" / #dms）→ 本画廊已被取代，A→C 更新到最新版
+			fetchedOnline[c.ID] = true
+			// A1. 详情页罗列更新版本（#gnd "newer versions" / #dms）→ 本画廊已被取代，A→C 更新到最新版。
+			//     若最新版已在本地（gidMap 命中），无需下载更新：清除旧的更新标记，交由维护查重界面删除旧版。
 			if detail.NewVersionGID != "" && detail.NewVersionGID != c.GID {
-				markOfflineUpdate(c, detail.NewVersionGID, detail.NewVersionToken,
-					buildUpdateNote(detail.NewVersionGID, detail.Children))
-				result.ParentFound++
-				changed[c.ID] = true
-				log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
+				if _, ok := gidMap[detail.NewVersionGID]; ok {
+					log.Printf("%s [update] 漫画 %q(gid=%s) 的最新版 gid=%s 本地已存在，跳过更新标记（交由维护查重）",
+						dlLogTag, c.Title, c.GID, detail.NewVersionGID)
+					if clearOfflineUpdate(c) {
+						changed[c.ID] = true
+					}
+				} else {
+					markOfflineUpdate(c, detail.NewVersionGID, detail.NewVersionToken,
+						buildUpdateNote(detail.NewVersionGID, detail.Children))
+					result.ParentFound++
+					changed[c.ID] = true
+					log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
+				}
 			} else if len(detail.Children) > 0 && detail.Children[len(detail.Children)-1].GID != c.GID {
 				// A2. 兜底：存在更新版 → 标记更新到最新版（Children 最后一个，#gnd 从旧到新排列）
 				latest := detail.Children[len(detail.Children)-1]
-				markOfflineUpdate(c, latest.GID, latest.Token, buildUpdateNote(latest.GID, detail.Children))
-				result.ParentFound++
-				changed[c.ID] = true
-				log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
+				if _, ok := gidMap[latest.GID]; ok {
+					log.Printf("%s [update] 漫画 %q(gid=%s) 的最新版 gid=%s 本地已存在，跳过更新标记（交由维护查重）",
+						dlLogTag, c.Title, c.GID, latest.GID)
+					if clearOfflineUpdate(c) {
+						changed[c.ID] = true
+					}
+				} else {
+					markOfflineUpdate(c, latest.GID, latest.Token, buildUpdateNote(latest.GID, detail.Children))
+					result.ParentFound++
+					changed[c.ID] = true
+					log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
+				}
 			}
 			// A3. 详情页存在父画廊 → 回写 ParentGID（供本地查重规则3 与 B 段复用）
 			if detail.ParentGID != "" && detail.ParentGID != c.GID {
@@ -124,6 +143,13 @@ func CheckUpdates(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, error)
 			continue
 		}
 		if p, ok := gidMap[c.ParentGID]; ok && p.GID != c.GID {
+			// A 段已成功联网核对过父画廊 → 父画廊更新状态已由 A 段决定
+			//（含“最新版本地已存在 → 无需更新”），B 段本地兜底必须跳过，避免降级到中间版本。
+			if fetchedOnline[p.ID] {
+				log.Printf("%s [update] 父画廊 %q(gid=%s) 已由 A 段联网核对，B 段本地兜底跳过",
+					dlLogTag, p.Title, p.GID)
+				continue
+			}
 			if p.NeedsUpdate {
 				log.Printf("%s [update] 父画廊 %q(gid=%s) 已被 A 段标记更新到最新版 gid=%s，B 段跳过避免降级",
 					dlLogTag, p.Title, p.GID, p.NewGID)
@@ -172,6 +198,18 @@ func markOfflineUpdate(c *models.OfflineComic, newGID, newToken, note string) {
 	c.NewGID = newGID
 	c.NewToken = newToken
 	c.UpdateNote = note
+}
+
+// clearOfflineUpdate 清除漫画的更新标记（本地已存在最新版 / 更新已完成）。返回是否发生了清除。
+func clearOfflineUpdate(c *models.OfflineComic) bool {
+	if !c.NeedsUpdate && c.NewGID == "" && c.NewToken == "" && c.UpdateNote == "" {
+		return false
+	}
+	c.NeedsUpdate = false
+	c.NewGID = ""
+	c.NewToken = ""
+	c.UpdateNote = ""
+	return true
 }
 
 // buildUpdateNote 构造 A→C 更新备注：更新目标 = 最新版（latestGID），并附带中间链条
@@ -364,7 +402,9 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 					removeSet[c.ID] = true
 					reasonMap[c.ID] = fmt.Sprintf("检测到更新版（父画廊关系）%q：旧版可删除", successor.Title)
 					totalBytes[c.ID] = c.FileSize
-					keepSet[successor.ID] = true
+					if !removeSet[successor.ID] {
+						keepSet[successor.ID] = true
+					}
 					log.Printf("%s [maintain] 漫画 %q(gid=%s) 被新版 %q(gid=%s) 取代，建议删除旧版",
 						dlLogTag, c.Title, c.GID, successor.Title, successor.GID)
 				}
@@ -385,8 +425,12 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 			removeSet[p.ID] = true
 			reasonMap[p.ID] = fmt.Sprintf("已被更新版（父画廊关系）%q 取代，旧版可删除", c.Title)
 			totalBytes[p.ID] = p.FileSize
-			// 新版建议保留
-			keepSet[c.ID] = true
+			// 旧版 p 一旦判定删除，绝不再作为“建议保留”输出
+			delete(keepSet, p.ID)
+			// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
+			if !removeSet[c.ID] {
+				keepSet[c.ID] = true
+			}
 		}
 	}
 		// ── 4. 文件夹内容签名查重（问题3修复）──
@@ -427,7 +471,7 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 			}
 			keepIdx := -1
 			for i := range group {
-				if keepSet[group[i].ID] {
+				if keepSet[group[i].ID] && !removeSet[group[i].ID] {
 					keepIdx = i
 					break
 				}
@@ -450,14 +494,16 @@ func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 		}
 	
 		// ── 组装结果 ──
+		// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删，
+		// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
 	for i := range comics {
 		c := comics[i]
-		if keepSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: "建议保留", Keep: true})
-			continue
-		}
 		if removeSet[c.ID] {
 			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false})
+			continue
+		}
+		if keepSet[c.ID] {
+			result.Items = append(result.Items, DedupItem{Comic: c, Reason: "建议保留", Keep: true})
 		}
 	}
 

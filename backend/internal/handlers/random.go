@@ -92,6 +92,8 @@ func trimKeywords(kws []string) []string {
 //   - source:      范围 all | online | offline（默认 all）
 //   - keyword:     搜索关键词（在线走 f_search，离线匹配标题/标签）
 //   - keywords:    筛选抽屉的多关键词队列（在线与 keyword 合并进 f_search；离线须全部命中标题/标签）
+//   - excludeTags: 负向 tag（namespace:key 精确匹配，在线采样池丢弃+补位/离线 SQL 排除，多次传递）
+//   - excludeKeywords: 负向关键词（标题/标签/上传者子串匹配，在线采样池丢弃+补位/离线 SQL 排除，多次传递）
 //   - categories:  分类过滤（在线/离线均生效，多次传递）
 //   - minRating:   最低评分（仅离线生效）
 //   - minPages:    最少页数（仅离线生效）
@@ -119,6 +121,9 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 
 	keyword := c.Query("keyword")
 	keywords := c.QueryArray("keywords") // 问题1：筛选抽屉的多关键词队列
+	// Round3-任务6：负向排除（- 前缀解析后的 excludeTags / excludeKeywords，前后端语义一致）
+	excludeTags := c.QueryArray("excludeTags")
+	excludeKeywords := c.QueryArray("excludeKeywords")
 	activeCategories := c.QueryArray("categories")
 	minRating, _ := strconv.ParseFloat(c.DefaultQuery("minRating", "0"), 64)
 	minPages, _ := strconv.Atoi(c.DefaultQuery("minPages", "0"))
@@ -148,6 +153,23 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			}
 			like := "%" + kw + "%"
 			q = q.Where("(title LIKE ? OR tags LIKE ?)", like, like)
+		}
+		// Round3-任务6：离线随机负向排除（与前端 matchExcludes 语义一致）
+		for _, raw := range excludeTags {
+			tag := strings.TrimSpace(raw)
+			if tag == "" {
+				continue
+			}
+			// 离线 tags 为 JSON 字符串数组（namespace:key），负向 tag 对整条目精确匹配
+			q = q.Where("tags NOT LIKE ?", "%\""+tag+"\"%")
+		}
+		for _, raw := range excludeKeywords {
+			kw := strings.TrimSpace(raw)
+			if kw == "" {
+				continue
+			}
+			like := "%" + kw + "%"
+			q = q.Where("(title NOT LIKE ? AND tags NOT LIKE ?)", like, like)
 		}
 		if minRating > 0 {
 			q = q.Where("rating >= ?", minRating)
@@ -209,7 +231,7 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			// 在线映射为 E 站 f_srdd 星级（与 OnlineHome 一致）
 			params.MinRating = strconv.FormatFloat(minRating, 'f', -1, 64)
 		}
-		comics, err := h.ehService.FetchRandomGalleryList(account, params, ehSetting, limit)
+		comics, err := h.ehService.FetchRandomGalleryList(account, params, ehSetting, limit, excludeTags, excludeKeywords)
 		if err != nil {
 			return nil, err
 		}

@@ -69,6 +69,13 @@ export const fetchRandomComicsApi = async (
   if (params.keywords && params.keywords.length > 0) {
     params.keywords.forEach((k) => query.append('keywords', k))
   }
+  // Round3-任务6：负向排除逐项下发（在线由后端采样池负向丢弃并补位，离线由后端 SQL 排除）
+  if (params.excludeTags && params.excludeTags.length > 0) {
+    params.excludeTags.forEach((t) => query.append('excludeTags', t))
+  }
+  if (params.excludeKeywords && params.excludeKeywords.length > 0) {
+    params.excludeKeywords.forEach((k) => query.append('excludeKeywords', k))
+  }
   if (params.categories && params.categories.length > 0) {
     params.categories.forEach((cat) => query.append('categories', cat))
   }

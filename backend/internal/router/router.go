@@ -98,6 +98,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 前端错误日志上报（问题8 诊断辅助：浏览器无法写文件，由后端落盘到 logs/client.log）
 		api.POST("/client/log", handlers.ReportClientLog)
+		// 日志大小查询 / 清除（设置中心「高级 → 清除日志」）
+		api.GET("/client/log/size", handlers.GetClientLogSize)
+		api.DELETE("/client/log", handlers.ClearClientLog)
 
 		// E站账户与偏好设置（绑定当前登录用户自己的 E 站凭证）
 		api.GET("/account/settings", accountHandler.GetAccountSettings)

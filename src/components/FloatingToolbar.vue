@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { preferenceSettings } from '@/stores/preferenceSettings'
 
 // 🟢 1. 增加控制 Props（模板中直接使用 showSort / sortMode）
 withDefaults(
@@ -53,13 +54,37 @@ const handleDateSubmit = () => {
     isOpen.value = false
   }
 }
+
+// 🖥️ 偏好设置：控制「回到顶部」按钮的显隐
+const showScrollTop = ref(preferenceSettings.hideScrollToTopBtn !== 'always')
+
+let lastScrollTop = 0
+const handleMainScroll = (e: Event) => {
+  const el = e.target as HTMLElement
+  const st = el.scrollTop
+  const movingDown = st > lastScrollTop
+  lastScrollTop = st
+  // 'scrolling_down'：向下滚动隐藏、向上滚动显示；其余模式由初始值决定
+  if (preferenceSettings.hideScrollToTopBtn === 'scrolling_down') {
+    showScrollTop.value = !movingDown || st <= 10
+  }
+}
+
+onMounted(() => {
+  const mainEl = document.querySelector('.main-content')
+  mainEl?.addEventListener('scroll', handleMainScroll, { passive: true })
+})
+onUnmounted(() => {
+  const mainEl = document.querySelector('.main-content')
+  mainEl?.removeEventListener('scroll', handleMainScroll)
+})
 </script>
 
 <template>
   <div class="floating-toolbar">
     <Transition name="fab-fade">
       <div v-if="isOpen" class="fab-menu">
-        <button class="menu-item" title="回到顶部" @click="handleScrollTop">
+        <button v-if="showScrollTop" class="menu-item" title="回到顶部" @click="handleScrollTop">
           <span class="icon">⬆️</span>
           <span class="label">回到顶部</span>
         </button>

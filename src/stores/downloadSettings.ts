@@ -46,10 +46,10 @@ const STORAGE_KEY = 'saku_download_settings'
 
 /** 默认值（与后端 defaultDownloadSetting 保持一致） */
 const defaultSettings: DownloadSettings = {
-  // ⚠️ 当前为测试路径（避免与用户既有仓库 Z:\Comics 冲突），真实路径待设置完善后调整
-  archivePath: 'G:\\EhentaiWebProject\\Download_ZIP',
-  extractPath: 'G:\\EhentaiWebProject\\Gallery',
-  singleImageSavePath: 'G:\\EhentaiWebProject\\Gallery',
+  // 默认保存到程序目录下（后端启动时会切换到 exe 所在目录），首次使用建议修改为你自己的下载目录
+  archivePath: 'downloads\\Archive',
+  extractPath: 'downloads\\Gallery',
+  singleImageSavePath: 'downloads\\Gallery',
 
   defaultDownloadOriginal: true,
   concurrentImageDownloads: 10,
@@ -173,6 +173,15 @@ export function resetDownloadPaths(): void {
   downloadSettings.archivePath = defaultSettings.archivePath
   downloadSettings.extractPath = defaultSettings.extractPath
   downloadSettings.singleImageSavePath = defaultSettings.singleImageSavePath
+}
+
+/** 判断三个下载路径是否仍为默认值（用于首次使用引导提示） */
+export function isUsingDefaultDownloadPaths(): boolean {
+  return (
+    downloadSettings.archivePath === defaultSettings.archivePath &&
+    downloadSettings.extractPath === defaultSettings.extractPath &&
+    downloadSettings.singleImageSavePath === defaultSettings.singleImageSavePath
+  )
 }
 
 // 应用启动即拉取一次后端设置，保证任意页面读取到最新值

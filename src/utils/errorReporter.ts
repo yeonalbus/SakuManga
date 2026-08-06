@@ -3,6 +3,7 @@
 // 浏览器无法直接写文件，因此通过新增的 POST /api/v1/client/log 端点让后端追加写盘，
 // 用于诊断「搜索栏输入特定内容时页面消失」等难以本地复现的前端崩溃。
 import { API_BASE } from '@/config/api'
+import { advancedSettings } from '@/stores/advancedSettings'
 
 export interface AppErrorEntry {
   ts: string
@@ -42,6 +43,9 @@ export function reportError(
   stack?: string,
   info?: string,
 ): void {
+  // 高级设置「开启日志」关闭时，不再本地记录与后端上报（1.0 收敛接线）
+  if (!advancedSettings.enableLogs) return
+
   const msg = typeof message === 'string' ? message : String(message ?? 'unknown error')
   const entry: AppErrorEntry = {
     ts: new Date().toISOString(),

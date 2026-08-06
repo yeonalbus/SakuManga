@@ -571,9 +571,9 @@ func (m *DownloadManager) RestoreTasks() (int, error) {
 // defaultDownloadSetting 默认下载设置（与前端 downloadSettings 默认值保持一致）
 func defaultDownloadSetting() models.DownloadSetting {
 	return models.DownloadSetting{
-		ArchivePath:                   `G:\EhentaiWebProject\Download_ZIP`,
-		ExtractPath:                   `G:\EhentaiWebProject\Gallery`,
-		SingleImageSavePath:           `G:\EhentaiWebProject\Gallery`,
+		ArchivePath:                   `downloads\Archive`,
+		ExtractPath:                   `downloads\Gallery`,
+		SingleImageSavePath:           `downloads\Gallery`,
 		DefaultDownloadOriginal:       true,
 		ConcurrentImageDownloads:      10,
 		SpeedLimitImages:              99,

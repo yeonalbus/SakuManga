@@ -1,5 +1,6 @@
 // src/utils/request.ts
 import { API_BASE, TOKEN_KEY } from '@/config/api'
+import { networkSettings } from '@/stores/networkSettings'
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>
@@ -42,12 +43,17 @@ export async function http<T = unknown>(
   }
 
   // 4. 发起请求（默认 60s 超时，防止慢接口导致无限 loading；调用方可通过 signal 覆盖）
+  //    ⚠️ 网络设置收敛后：超时时间由 networkSettings.requestTimeout 控制（合并连接/接收为单一超时）
+  const timeout =
+    Number.isFinite(networkSettings.requestTimeout) && networkSettings.requestTimeout > 0
+      ? networkSettings.requestTimeout
+      : 60_000
   const response = await fetch(url, {
     headers: {
       ...defaultHeaders,
       ...headers,
     },
-    signal: options.signal ?? AbortSignal.timeout(60_000),
+    signal: options.signal ?? AbortSignal.timeout(timeout),
     ...restOptions,
   })
 

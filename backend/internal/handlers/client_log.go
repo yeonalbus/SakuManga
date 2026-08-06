@@ -70,3 +70,22 @@ func appendClientLog(e clientLogEntry) error {
 	_, err = f.Write(append(line, '\n'))
 	return err
 }
+
+// GetClientLogSize 返回前端错误日志文件大小（字节），供设置页展示真实占用。
+func GetClientLogSize(c *gin.Context) {
+	info, err := os.Stat(clientLogPath)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"size": 0})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"size": info.Size()})
+}
+
+// ClearClientLog 清除前端错误日志文件。
+func ClearClientLog(c *gin.Context) {
+	if err := os.Remove(clientLogPath); err != nil && !os.IsNotExist(err) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "清除日志失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}

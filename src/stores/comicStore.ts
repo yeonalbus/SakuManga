@@ -4,8 +4,6 @@
  */
 import { ref, watch, computed } from 'vue'
 import type { OnlineComic, OfflineComic } from '@/types/comic'
-import { generateOnlineComics } from '@/utils/mockData'
-import { loadStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
 import { offlineReadingList } from '@/stores/readingStore'
 // 使用命名空间导入 bookshelfStore / historyStore，避免与本文件产生「值初始化时序」上的循环依赖问题
@@ -13,21 +11,15 @@ import * as bookshelfStore from '@/stores/bookshelfStore'
 import * as historyStore from '@/stores/historyStore'
 
 // --------------------------------------------------
-// 在线 / 离线漫画数据源（支持 localStorage 持久化）
+// 在线 / 离线漫画数据源（在线列表由后端 /comics/online 接口驱动）
 // --------------------------------------------------
 
-/** 在线漫画列表（mock 兜底，正常由后端 /comics/online 接口驱动） */
-export const onlineComics = ref<OnlineComic[]>(
-  loadStorage('app_online_comics', generateOnlineComics(50)),
-)
-
-watch(
-  onlineComics,
-  (val) => {
-    localStorage.setItem('app_online_comics', JSON.stringify(val))
-  },
-  { deep: true },
-)
+/**
+ * 在线漫画列表。
+ * 注意：在线列表的实际数据源是 onlineStore（经 /comics/online 接口加载），
+ * 本 ref 仅用于收藏状态联动（见 historyStore.syncOnlineFavorite），不再作为页面数据源。
+ */
+export const onlineComics = ref<OnlineComic[]>([])
 
 /** 离线漫画列表（从后端 /comics/offline 拉取，本地持久化缓存） */
 export const offlineComics = ref<OfflineComic[]>([])

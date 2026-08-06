@@ -7,6 +7,11 @@
     <!-- ── 下载路径 ── -->
     <div class="section-title">📁 下载路径</div>
 
+    <div v-if="usingDefaultPaths" class="path-hint">
+      ⚠️ 当前使用默认下载目录（程序目录下的 downloads
+      文件夹）。建议点击上方路径，修改为你自己的下载目录。
+    </div>
+
     <div class="setting-item clickable" @click="handleSelectArchivePath">
       <div class="item-info">
         <div class="item-title">压缩包路径</div>
@@ -225,13 +230,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue'
 import {
   downloadSettings,
   fetchDownloadSettings,
+  isUsingDefaultDownloadPaths,
   resetDownloadPaths,
   resetDownloadSettings,
 } from '@/stores/downloadSettings'
@@ -240,6 +246,9 @@ const { toast, modal } = useUI()
 
 // 界面切换：额外画廊扫描路径子组件
 const showExtraScanPaths = ref(false)
+
+// 首次使用引导：三个下载路径仍为默认值时提示用户修改
+const usingDefaultPaths = computed(() => isUsingDefaultDownloadPaths())
 
 const handleExtraScanPaths = () => {
   showExtraScanPaths.value = true
@@ -385,6 +394,17 @@ onUnmounted(() => {
   font-size: 20px;
   color: var(--app-text-muted);
   margin-left: 8px;
+}
+
+/* 首次使用路径引导提示 */
+.path-hint {
+  padding: 10px 14px;
+  background-color: rgba(255, 117, 136, 0.08);
+  border: 1px solid rgba(255, 117, 136, 0.35);
+  border-radius: 8px;
+  color: #ff7588;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* 行内多下拉控件组 */

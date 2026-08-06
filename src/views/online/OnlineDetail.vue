@@ -7,6 +7,7 @@ import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState } from '@/stores/historyStore'
 import { downloadSettings } from '@/stores/downloadSettings'
+import { preferenceSettings } from '@/stores/preferenceSettings'
 import { http } from '@/utils/request'
 
 const route = useRoute()
@@ -551,6 +552,7 @@ onUnmounted(() => {
           🖼️ 预览切片 (已载 {{ comic.previewPages?.length || 0 }} / 共 {{ comic.pageCount || 0 }}P)
         </button>
         <button
+          v-if="preferenceSettings.showGalleryComments"
           class="tab-item"
           :class="{ active: activeTab === 'comments' }"
           @click="activeTab = 'comments'"
@@ -659,7 +661,10 @@ onUnmounted(() => {
       </div>
 
       <!-- Tab 3: 社区评论 -->
-      <div v-if="activeTab === 'comments'" class="tab-content comments-tab">
+      <div
+        v-if="preferenceSettings.showGalleryComments && activeTab === 'comments'"
+        class="tab-content comments-tab"
+      >
         <div v-if="comic.comments?.length" class="comments-list">
           <div v-for="item in comic.comments" :key="item.id" class="comment-card">
             <div class="comment-header">

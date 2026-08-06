@@ -1,9 +1,10 @@
 <template>
   <div class="advanced-settings">
+    <!-- 开启日志：门控前端错误上报（接线 errorReporter） -->
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">开启日志</div>
-        <div class="item-subtext">需要重启</div>
+        <div class="item-subtext">记录前端运行错误并上报到服务端日志</div>
       </div>
       <label class="toggle-switch">
         <input type="checkbox" v-model="advancedSettings.enableLogs" />
@@ -11,96 +12,13 @@
       </label>
     </div>
 
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">记录全部日志</div>
-        <div class="item-subtext">需要重启</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="advancedSettings.recordAllLogs" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item clickable" @click="handleViewLogs">
-      <div class="item-info">
-        <div class="item-title">查看日志</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
-
+    <!-- 清除日志：展示真实占用，调用后端清日志接口 -->
     <div class="setting-item clickable" @click="handleClearLogs">
       <div class="item-info">
         <div class="item-title">清除日志</div>
-        <div class="item-subtext">长按清除</div>
+        <div class="item-subtext">清除服务端收集的前端错误日志</div>
       </div>
       <span class="size-text">{{ logSize }}</span>
-    </div>
-
-    <div class="setting-item clickable" @click="handleClearImageCache">
-      <div class="item-info">
-        <div class="item-title">清除图片缓存</div>
-        <div class="item-subtext">长按清除</div>
-      </div>
-      <span class="size-text">{{ imageCacheSize }}</span>
-    </div>
-
-    <div class="setting-item clickable" @click="handleClearPageCache">
-      <div class="item-info">
-        <div class="item-title">清除页面缓存</div>
-        <div class="item-subtext">长按清除</div>
-      </div>
-    </div>
-
-    <div class="setting-item clickable" @click="handleImageSuperResolution">
-      <div class="item-info">
-        <div class="item-title">图片超分辨率</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">启动应用时检查更新</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="advancedSettings.checkUpdatesOnStartup" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">检测剪切板中的画廊链接</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="advancedSettings.detectClipboardLinks" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">无图模式</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="advancedSettings.noImageMode" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item clickable" @click="handleImportData">
-      <div class="item-info">
-        <div class="item-title">导入数据</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
-
-    <div class="setting-item clickable" @click="handleExportData">
-      <div class="item-info">
-        <div class="item-title">导出数据</div>
-      </div>
-      <span class="arrow-icon">›</span>
     </div>
 
     <div class="reset-row">
@@ -110,60 +28,61 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 import { advancedSettings, resetAdvancedSettings } from '@/stores/advancedSettings'
 
 const { toast, modal } = useUI()
 
-// 运行时显示状态（非持久化设置）
-const logSize = ref('6.25MB')
-const imageCacheSize = ref('535.14KB')
+// 前端错误日志文件大小（后端 logs/client.log 的真实占用）
+const logSize = ref('0B')
 
-// 交互调取
-const handleViewLogs = () => {
-  toast.info('打开实时日志查看窗口')
+/** 字节数 → 人类可读大小 */
+const formatSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = bytes
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v >= 100 ? 0 : 1)}${units[i]}`
 }
 
+/** 拉取后端日志文件大小 */
+const fetchLogSize = async () => {
+  try {
+    const data = await http<{ size: number }>('/client/log/size')
+    logSize.value = formatSize(typeof data.size === 'number' ? data.size : 0)
+  } catch (err) {
+    console.error('获取日志大小失败:', err)
+    logSize.value = '0B'
+  }
+}
+
+/** 清除日志：调用后端 DELETE /client/log */
 const handleClearLogs = async () => {
   const confirm = await modal.confirm('确定要清除所有系统日志文件吗？')
-  if (confirm) {
-    logSize.value = '0B'
+  if (!confirm) return
+  try {
+    await http('/client/log', { method: 'DELETE' })
     toast.success('系统日志已完全清除！')
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '清除日志失败')
   }
-}
-
-const handleClearImageCache = async () => {
-  const confirm = await modal.confirm('确定要清除本地图片缓存吗？')
-  if (confirm) {
-    imageCacheSize.value = '0B'
-    toast.success('图片缓存清理成功！')
-  }
-}
-
-const handleClearPageCache = async () => {
-  const confirm = await modal.confirm('确定要清除页面 HTML 与数据缓存吗？')
-  if (confirm) {
-    toast.success('页面缓存清理成功！')
-  }
-}
-
-const handleImageSuperResolution = () => {
-  toast.info('打开图片超分辨率 (Super Resolution) 设置')
-}
-
-const handleImportData = () => {
-  toast.info('请选择要导入的备份文件 (.json / .zip)')
-}
-
-const handleExportData = () => {
-  toast.success('全量配置与离线数据已成功导出！')
+  fetchLogSize()
 }
 
 const handleReset = () => {
   resetAdvancedSettings()
   toast.success('已恢复默认高级设置')
 }
+
+onMounted(() => {
+  fetchLogSize()
+})
 </script>
 
 <style scoped>

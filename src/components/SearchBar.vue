@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
+import {
+  onlineSearchConfig,
+  offlineSearchConfig,
+  applySearchOptionsInherit,
+} from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import { useModeStore } from '@/stores/modeStore'
 import TagChip from '@/components/TagChip.vue'
@@ -145,6 +149,9 @@ const triggerSearch = (queryText?: string) => {
     router.push({ path: '/online/detail', query: { id: ehLink.id, token: ehLink.token } })
     return
   }
+
+  // 🎯 依据「搜索选项继承」偏好，提交新搜索前重置不应继承的筛选条件
+  applySearchOptionsInherit(currentScope.value)
 
   keyword.value = finalQuery
 

@@ -12,6 +12,7 @@ import { useTagStore } from '@/stores/tagStore'
 import { useUserStore } from '@/stores/userStore'
 import { useModeStore } from '@/stores/modeStore'
 import { useLayoutMode } from '@/composables/useLayoutMode'
+import { preferenceSettings } from '@/stores/preferenceSettings'
 
 const tagStore = useTagStore()
 const userStore = useUserStore()
@@ -48,6 +49,13 @@ const handleMainScroll = (e: Event) => {
 onMounted(() => {
   // 🚀 应用启动时异步获取翻译字典
   tagStore.fetchTagDictionary()
+
+  // 🖥️ 偏好设置：以全屏模式启动（受浏览器用户手势限制，被拦截时静默忽略）
+  if (preferenceSettings.startInFullscreen && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {
+      /* 全屏请求被浏览器拦截时忽略 */
+    })
+  }
 })
 
 const route = useRoute()

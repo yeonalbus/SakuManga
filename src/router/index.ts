@@ -2,6 +2,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { TOKEN_KEY } from '@/config/api'
 import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMemory'
+import { preferenceSettings } from '@/stores/preferenceSettings'
 
 //显式声明 : RouteRecordRaw[]
 const routes: RouteRecordRaw[] = [
@@ -12,7 +13,16 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: '/online/home',
+    redirect: () => {
+      // 依据「启动时默认菜单」偏好选择落地页（见偏好设置）
+      const startupMap: Record<string, string> = {
+        hot: '/online/hot',
+        home: '/online/home',
+        sub: '/online/sub',
+        fav: '/online/favorites',
+      }
+      return startupMap[preferenceSettings.defaultStartupMenu] ?? '/online/home'
+    },
   },
   {
     path: '/online/home',

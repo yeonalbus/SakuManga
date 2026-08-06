@@ -1,17 +1,6 @@
 <template>
   <div class="network-settings">
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">开启域名前置</div>
-        <div class="item-subtext">绕过SNI封锁</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="networkSettings.domainFronting" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <!-- 🟢 代理服务器配置项 -->
+    <!-- 🟢 代理服务器配置项（真实生效：后端 config.json） -->
     <div class="setting-item clickable" @click="handleProxySetting">
       <div class="item-info">
         <div class="item-title">代理服务器地址</div>
@@ -20,49 +9,20 @@
       <span class="arrow-icon">›</span>
     </div>
 
+    <!-- 请求超时时间（接线 request.ts：fetch AbortSignal） -->
     <div class="setting-item">
       <div class="item-info">
-        <div class="item-title">页面缓存时间</div>
-        <div class="item-subtext">你可以通过刷新页面来更新缓存</div>
-      </div>
-      <select v-model="networkSettings.pageCacheTime" class="setting-select">
-        <option value="1d">1d</option>
-        <option value="3d">3d</option>
-        <option value="7d">7d</option>
-        <option value="30d">30d</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">图片缓存时间</div>
-        <div class="item-subtext">App启动时会自动清除过期的图片缓存</div>
-      </div>
-      <select v-model="networkSettings.imageCacheTime" class="setting-select">
-        <option value="7d">7d</option>
-        <option value="15d">15d</option>
-        <option value="30d">30d</option>
-        <option value="90d">90d</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">建立连接超时时间</div>
+        <div class="item-title">请求超时时间</div>
+        <div class="item-subtext">单次请求的最长等待时间，超时自动中断</div>
       </div>
       <div class="input-inline">
-        <input type="number" v-model="networkSettings.connectTimeout" class="setting-input wider" />
-        <span class="unit">ms</span>
-        <span class="check-mark">✓</span>
-      </div>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">接收数据超时时间</div>
-      </div>
-      <div class="input-inline">
-        <input type="number" v-model="networkSettings.receiveTimeout" class="setting-input wider" />
+        <input
+          type="number"
+          v-model="networkSettings.requestTimeout"
+          class="setting-input wider"
+          min="1000"
+          step="1000"
+        />
         <span class="unit">ms</span>
         <span class="check-mark">✓</span>
       </div>

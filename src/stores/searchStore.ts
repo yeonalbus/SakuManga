@@ -4,6 +4,7 @@
  */
 import { ref } from 'vue'
 import type { SearchConfig } from '@/types/comic'
+import { preferenceSettings } from '@/stores/preferenceSettings'
 
 /** 生成一份默认搜索/筛选配置 */
 export const createDefaultSearchConfig = (): SearchConfig => ({
@@ -45,6 +46,30 @@ export const resetSearchConfig = (scope: 'online' | 'offline') => {
   } else {
     offlineSearchConfig.value = createDefaultSearchConfig()
   }
+}
+
+/** 依据「搜索选项继承」偏好，在提交新搜索前将筛选选项重置为策略允许的状态（keyword 由调用方维护） */
+export const applySearchOptionsInherit = (scope: 'online' | 'offline') => {
+  const inherit = preferenceSettings.searchOptionsInherit
+  // 继承全部：保持当前筛选条件不变
+  if (inherit === 'all') return
+  const cfg = scope === 'online' ? onlineSearchConfig.value : offlineSearchConfig.value
+  const d = createDefaultSearchConfig()
+  // 不继承：连分类选择也一并重置
+  if (inherit === 'none') {
+    cfg.activeCategories = d.activeCategories
+  }
+  cfg.minRating = d.minRating
+  cfg.minPages = d.minPages
+  cfg.maxPages = d.maxPages
+  cfg.onlyDownloaded = d.onlyDownloaded
+  cfg.language = d.language
+  cfg.onlyRemoved = d.onlyRemoved
+  cfg.onlyTorrents = d.onlyTorrents
+  cfg.disableLangFilter = d.disableLangFilter
+  cfg.disableUploaderFilter = d.disableUploaderFilter
+  cfg.disableTagFilter = d.disableTagFilter
+  cfg.keywords = []
 }
 
 // 兼容导出（防止旧组件引入 globalFilters 导致语法报错）

@@ -3,7 +3,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">版本</div>
-        <div class="item-subtext">0.1</div>
+        <div class="item-subtext">1.0.0</div>
       </div>
     </div>
 

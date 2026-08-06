@@ -93,9 +93,24 @@ func GetOfflineComics(c *gin.Context) {
 				label = name
 			}
 		}
+
+		// 需求2：为列表填充翻译后的 TagItem(Tags) 与原始 tag 串(TagRaws)，前端据此做本地 tag 搜索/语言过滤。
+		// 注意：OfflineComicResponse.Tags 遮蔽了内嵌的 models.OfflineComic.Tags(string)，必须显式赋值，
+		// 否则 JSON 输出 tags=null，前端离线书库将永远无法按 tag 搜索。
+		onlineTags := services.UnmarshalTagSlice(comic.OnlineTags)
+		offlineAddTags := services.UnmarshalTagSlice(comic.OfflineAddTags)
+		offlineRemoveTags := services.UnmarshalTagSlice(comic.OfflineRemoveTags)
+		merged := services.MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)
+		if len(merged) == 0 && comic.OnlineTags == "" {
+			merged = parseRawTags(comic.Tags)
+		}
+		translatedTags := services.GlobalTagEngine.TranslateTags(merged)
+
 		resp = append(resp, OfflineComicResponse{
 			OfflineComic: comic,
 			SourceLabel:  label,
+			Tags:         translatedTags,
+			TagRaws:      merged,
 		})
 	}
 	c.JSON(http.StatusOK, resp)

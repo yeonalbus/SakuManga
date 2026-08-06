@@ -52,10 +52,11 @@ type OfflineComic struct {
 	ScanPathID     string     `gorm:"index" json:"scanPathID,omitempty"`            // 来源额外路径 ID；空 = 下载导入（问题3 来源识别）
 
 	// ── E 站下载/更新关联字段（扫描/更新/查重用）──
-	GID        string `gorm:"index" json:"gid,omitempty"`        // E 站画廊 GID（来自 metadata/ametadata）
-	Token      string `json:"token,omitempty"`                   // E 站画廊 Token
-	ParentGID  string `gorm:"index" json:"parentGID,omitempty"`  // 父画廊 GID（本画廊是某画廊的更新版）
-	FileHash   string `gorm:"index" json:"fileHash,omitempty"`   // 归档文件 hash（完全相同查重）
+	GID             string `gorm:"index" json:"gid,omitempty"`             // E 站画廊 GID（来自 metadata/ametadata）
+	Token           string `json:"token,omitempty"`                        // E 站画廊 Token
+	ParentGID       string `gorm:"index" json:"parentGID,omitempty"`       // 父画廊 GID（本画廊是某画廊的更新版）
+	ParentCheckedAt int64  `json:"parentCheckedAt,omitempty"`              // 父画廊关系在线核对时间戳(ms)；>0=已核对（需求1 增量兜底，避免每次维护查重重复联网）
+	FileHash        string `gorm:"index" json:"fileHash,omitempty"`        // 归档文件 hash（完全相同查重）
 	SourceMode string `json:"sourceMode,omitempty"`              // gallery | archive（下载来源）
 	NewGID     string `json:"newGID,omitempty"`                  // 检测到的新版本 GID
 	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token

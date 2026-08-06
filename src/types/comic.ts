@@ -52,6 +52,9 @@ export interface OfflineComic extends BaseComic {
   publishedAt?: string | null // 发布时间（问题1 排序）
   scanPathID?: string // 来源额外路径 ID；空=下载导入（问题3）
   sourceLabel?: string // 来源标签（额外路径 Name；空=下载，问题3）
+
+  // ─── 需求2：本地 tag 搜索 ───
+  tagRaws?: string[] // 原始 tag 字符串（含命名空间，如 "female:cat ears"），供本地 tag 搜索/语言过滤精确匹配
 }
 
 /** 本地书架定义 */

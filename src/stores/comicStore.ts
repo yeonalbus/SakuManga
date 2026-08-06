@@ -24,11 +24,12 @@ export const onlineComics = ref<OnlineComic[]>([])
 /** 离线漫画列表（从后端 /comics/offline 拉取，本地持久化缓存） */
 export const offlineComics = ref<OfflineComic[]>([])
 
-/** 后端 /comics/offline 返回的原始行（tags 为 JSON 字符串） */
+/** 后端 /comics/offline 返回的原始行（tags 为 TagItem 对象数组） */
 interface OfflineComicRaw {
   id: string
   title?: string
   tags?: unknown
+  tagRaws?: string[]
   [key: string]: unknown
 }
 
@@ -36,11 +37,34 @@ interface OfflineComicRaw {
 export const fetchOfflineComics = async () => {
   try {
     const rawData = await http<OfflineComicRaw[]>('/comics/offline')
-    offlineComics.value = rawData.map((item) => ({
-      ...item,
-      tags:
-        typeof item.tags === 'string' ? JSON.parse((item.tags as string) || '[]') : item.tags || [],
-    })) as OfflineComic[]
+    offlineComics.value = rawData.map((item) => {
+      const tagItems = Array.isArray(item.tags)
+        ? (item.tags as Array<{ name?: string; key?: string; namespace?: string }>)
+        : []
+      return {
+        ...item,
+        // 需求2：tags 归一化为「翻译名」字符串数组，供卡片展示与 tag 搜索
+        tags:
+          tagItems.length > 0
+            ? tagItems.map((t) => (t && (t.name || t.key)) || '').filter(Boolean)
+            : typeof item.tags === 'string'
+              ? JSON.parse((item.tags as string) || '[]')
+              : [],
+        // 需求2：原始 tag 串（namespace:key，_ 归一为空格并小写），供 tag 搜索/语言过滤精确匹配
+        tagRaws:
+          tagItems.length > 0
+            ? tagItems
+                .map((t) => {
+                  const key = ((t && t.key) || '').replace(/_/g, ' ').toLowerCase()
+                  if (!key) return ''
+                  return `${(t && t.namespace) || 'other'}:${key}`
+                })
+                .filter(Boolean)
+            : Array.isArray(item.tagRaws)
+              ? item.tagRaws.map((r) => r.replace(/_/g, ' ').toLowerCase())
+              : [],
+      } as OfflineComic
+    })
   } catch (err) {
     console.error('拉取离线漫画失败:', err)
   }

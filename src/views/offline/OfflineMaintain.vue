@@ -101,18 +101,29 @@ const pollProgress = () => {
 }
 
 // 异步启动维护查重：接口立即返回，随后轮询进度
-const runMaintain = async () => {
+// full=false 走增量（跳过已核对过父画廊关系的漫画）；full=true 强制全量在线核对（需求1）
+const runMaintain = async (full = false) => {
   if (isScanning.value) return
   isScanning.value = true
   taskState.value = null
   try {
-    await http<{ started: boolean }>('/offline/maintain')
+    await http<{ started: boolean }>(`/offline/maintain?full=${full}`)
     pollProgress()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '启动查重失败，请检查后端是否运行')
     isScanning.value = false
   }
+}
+
+// 强制全量在线核对：忽略 parent_checked_at 增量标记，联网逐本重抓全部画廊详情（可能数十分钟）
+const runFullMaintain = async () => {
+  const confirmed = await modal.confirm(
+    '强制全量在线核对将忽略已核对标记，逐本联网抓取全部离线画廊详情页（每本约 1.2 秒限流退避），可能耗时数十分钟。确定继续吗？',
+    '⚡ 强制全量在线核对',
+  )
+  if (!confirmed) return
+  await runMaintain(true)
 }
 
 const keepItems = computed(() => items.value.filter((i) => i.keep))
@@ -250,9 +261,19 @@ onUnmounted(stopPolling)
         </p>
       </div>
 
-      <button class="scan-btn" :disabled="isScanning" @click="runMaintain">
-        {{ isScanning ? '扫描中...' : '🔍 重新全盘扫描' }}
-      </button>
+      <div class="header-actions">
+        <button
+          class="scan-btn ghost"
+          :disabled="isScanning"
+          title="忽略已核对标记，联网逐本重抓全部画廊详情页，可能耗时数十分钟"
+          @click="runFullMaintain"
+        >
+          ⚡ 强制全量在线核对
+        </button>
+        <button class="scan-btn" :disabled="isScanning" @click="runMaintain(false)">
+          {{ isScanning ? '扫描中...' : '🔍 重新扫描' }}
+        </button>
+      </div>
     </div>
 
     <div class="scope-hint">
@@ -486,6 +507,19 @@ onUnmounted(stopPolling)
 .scan-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scan-btn.ghost {
+  background: transparent;
+  color: #7ec8ff;
+  border: 1px solid #007acc;
+}
+.scan-btn.ghost:hover {
+  opacity: 0.85;
 }
 
 .scanning-banner {

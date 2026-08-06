@@ -279,16 +279,17 @@ type DedupResult struct {
 //     parent/child 关系为空，需联网核对详情页；ehService 为空或未绑账号时退化为纯本地）
 //   - 文件夹内容签名相同（无 gid/hash/parent 元数据的复制型重复）→ 删除复制项（问题3修复）
 func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
-	return maintainDedupWithProgress(db, ehService, nil)
+	return maintainDedupWithProgress(db, ehService, nil, true)
 }
 
 // MaintainDedupWithProgress 带进度回调的维护查重（问题3：长任务进度可感知，供 handler 异步任务使用）
-func MaintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*DedupResult, error) {
-	return maintainDedupWithProgress(db, ehService, onProgress)
+// forceFull=true 时忽略 parent_checked_at 增量标记，强制对全部符合条件的漫画做在线父子关系发现（需求1 兜底）。
+func MaintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn, forceFull bool) (*DedupResult, error) {
+	return maintainDedupWithProgress(db, ehService, onProgress, forceFull)
 }
 
 // maintainDedupWithProgress 带进度回调的本地维护查重（问题3：长任务进度可感知）
-func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*DedupResult, error) {
+func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn, forceFull bool) (*DedupResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("非法参数：db 不能为空")
 	}
@@ -408,7 +409,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			fetchTotal := 0
 			for i := range comics {
 				c := &comics[i]
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] {
+				// 需求1 兜底：已核对过父画廊关系的漫画（parent_checked_at>0）默认增量跳过；
+				// forceFull=true 时忽略该标记，强制全量联网重抓。
+				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] || (!forceFull && c.ParentCheckedAt != 0) {
 					continue
 				}
 				fetchTotal++
@@ -416,7 +419,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			fetchDone := 0
 			for i := range comics {
 				c := &comics[i]
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] {
+				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] || (!forceFull && c.ParentCheckedAt != 0) {
 					continue
 				}
 				fetchDone++
@@ -467,6 +470,12 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 					log.Printf("%s [maintain] 漫画 %q(gid=%s) 被新版 %q(gid=%s) 取代，建议删除旧版",
 						dlLogTag, c.Title, c.GID, successor.Title, successor.GID)
 				}
+				// 需求1 兜底：无论本次是否发现父画廊/新版，都记录在线核对时间戳，
+				// 下次维护查重据此增量跳过已核对漫画，避免对同一批内容重复联网抓取。
+				now := time.Now().UnixMilli()
+				_ = db.Model(c).Update("parent_checked_at", now)
+				c.ParentCheckedAt = now
+
 				// 限流退避
 				time.Sleep(1200 * time.Millisecond)
 			}

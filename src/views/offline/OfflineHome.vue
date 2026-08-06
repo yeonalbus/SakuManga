@@ -7,7 +7,7 @@ import Pagination from '@/components/Pagination.vue'
 import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
-import type { ComicItem } from '@/types/comic'
+import type { ComicItem, OfflineComic } from '@/types/comic'
 
 const { toast, modal } = useUI()
 
@@ -74,6 +74,15 @@ const handleDeleteSelected = async () => {
 
 const route = useRoute()
 
+// 需求2：本地 tag 搜索——同时匹配翻译名(tags)与原始 tag 串(tagRaws)，二者在 store 中均已归一为 string[]
+const comicTagStrings = (comic: ComicItem): string[] => {
+  const out: string[] = []
+  if (Array.isArray(comic.tags)) out.push(...(comic.tags as string[]))
+  const raws = (comic as OfflineComic).tagRaws
+  if (Array.isArray(raws)) out.push(...raws)
+  return out.map((t) => t.toLowerCase()).filter(Boolean)
+}
+
 // 🟢 2. 核心过滤管道：兼顾 URL 中的 ?q= 搜索词 与 TopBar 传进来的离线筛选配置 (求交集)
 const filteredComics = computed(() => {
   const cfg = offlineSearchConfig.value
@@ -93,7 +102,7 @@ const filteredComics = computed(() => {
     if (searchBarKw) {
       const matchTitle = comic.title.toLowerCase().includes(searchBarKw)
       const matchTag =
-        matchTagEnabled && comic.tags?.some((t) => t.toLowerCase().includes(searchBarKw))
+        matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(searchBarKw))
       if (!matchTitle && !matchTag) return false
     }
 
@@ -102,8 +111,7 @@ const filteredComics = computed(() => {
       const allMatched = cfg.keywords.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
         const matchTitle = comic.title.toLowerCase().includes(lowerKw)
-        const matchTag =
-          matchTagEnabled && comic.tags?.some((t) => t.toLowerCase().includes(lowerKw))
+        const matchTag = matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(lowerKw))
         return matchTitle || matchTag
       })
 
@@ -112,7 +120,7 @@ const filteredComics = computed(() => {
 
     // 🟢 关卡 2.5：语言过滤 (仅当语言选择非 All 且未禁用语言过滤时生效)
     if (langTag) {
-      const hasLang = comic.tags?.some((t) => t.toLowerCase() === langTag)
+      const hasLang = (comic as OfflineComic).tagRaws?.some((t) => t.toLowerCase() === langTag)
       if (!hasLang) return false
     }
 

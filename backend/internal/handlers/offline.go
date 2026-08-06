@@ -217,9 +217,11 @@ func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "已有离线维护任务正在运行，请稍后再试"})
 		return
 	}
+	// 需求1：?full=true 强制全量在线核对（忽略 parent_checked_at 增量标记，联网逐本重抓）
+	full := c.DefaultQuery("full", "") == "true"
 
 	go func() {
-		result, err := services.MaintainDedupWithProgress(h.db, h.ehService, services.OfflineMaintainProgressSink)
+		result, err := services.MaintainDedupWithProgress(h.db, h.ehService, services.OfflineMaintainProgressSink, full)
 		if err != nil {
 			services.FinishOfflineTask(err)
 			return

@@ -199,20 +199,39 @@ func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
 
 // removeDedupReq 删除重复项请求体
 type removeDedupReq struct {
-	ComicID    string `json:"comicId"`
-	DeleteFile bool   `json:"deleteFile"` // 是否同时物理删除本地文件
+	ComicID    string   `json:"comicId"`
+	ComicIDs   []string `json:"comicIds"`   // 批量删除：传多个 comicId，一次删除
+	DeleteFile bool     `json:"deleteFile"` // 是否同时物理删除本地文件
 }
 
 // RemoveDedup 删除重复漫画 POST /api/v1/offline/maintain/remove
+//
+// 支持两种删除方式：
+//   - 单个删除：传 comicId（兼容旧版）
+//   - 批量删除：传 comicIds 数组，一次提交多个，避免反复“删除→刷新”
 func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 	var req removeDedupReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.ComicID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误，必需传递 comicId"})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+		return
+	}
+	// 批量删除：comicIds 非空则优先批量
+	if len(req.ComicIDs) > 0 {
+		deleted, err := services.RemoveDedupComics(h.db, req.ComicIDs, req.DeleteFile)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "deleted": deleted})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": deleted})
+		return
+	}
+	if req.ComicID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误，必需传递 comicId 或 comicIds"})
 		return
 	}
 	if err := services.RemoveDedupComic(h.db, req.ComicID, req.DeleteFile); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1})
 }

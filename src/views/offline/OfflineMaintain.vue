@@ -34,6 +34,8 @@ const isScanning = ref(false)
 const isRemoving = ref(false)
 const removingId = ref('')
 const coverFailed = ref<Record<string, boolean>>({})
+// 批量删除：多选“建议删除”项后一次提交，避免反复“删除→刷新”
+const selectedIds = ref<string[]>([])
 
 // 拉取查重结果
 const runMaintain = async () => {
@@ -51,6 +53,9 @@ const runMaintain = async () => {
 
 const keepItems = computed(() => items.value.filter((i) => i.keep))
 const removeItems = computed(() => items.value.filter((i) => !i.keep))
+const isSelectAll = computed(
+  () => removeItems.value.length > 0 && selectedIds.value.length === removeItems.value.length,
+)
 
 // 删除重复项：deleteFile=true 时同时物理删除本地文件
 const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
@@ -89,6 +94,60 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
 
 const onCoverError = (id: string) => {
   coverFailed.value[id] = true
+}
+
+// 勾选/取消勾选单个删除项
+const toggleSelect = (id: string) => {
+  if (isRemoving.value) return
+  const idx = selectedIds.value.indexOf(id)
+  if (idx >= 0) selectedIds.value.splice(idx, 1)
+  else selectedIds.value.push(id)
+}
+
+// 全选/取消全选“建议删除”项
+const toggleSelectAll = () => {
+  if (isRemoving.value) return
+  selectedIds.value = isSelectAll.value ? [] : removeItems.value.map((i) => i.comic.id)
+}
+
+// 批量删除：comicIds 一次提交后端，避免反复“删除→刷新”
+const removeSelected = async (deleteFile: boolean) => {
+  if (isRemoving.value) return
+  if (selectedIds.value.length === 0) {
+    toast.warning('请先勾选要删除的项')
+    return
+  }
+  const ids = [...selectedIds.value]
+  const count = ids.length
+  const confirmed = await modal.confirm(
+    deleteFile
+      ? `确定批量删除选中的 ${count} 项，并同时删除其本地文件吗？\n\n此操作不可恢复！`
+      : `确定批量删除选中的 ${count} 项记录吗？\n\n本地文件将保留。`,
+    deleteFile ? '批量删除记录 + 本地文件' : '批量删除记录（保留文件）',
+  )
+  if (!confirmed) return
+
+  isRemoving.value = true
+  try {
+    const data = await http<{ ok: boolean; deleted?: number }>('/offline/maintain/remove', {
+      method: 'POST',
+      body: JSON.stringify({ comicIds: ids, deleteFile }),
+    })
+    const deleted = data.deleted ?? count
+    toast.success(
+      deleteFile
+        ? `已批量删除 ${deleted} 项（记录 + 本地文件）🗑️`
+        : `已批量删除 ${deleted} 项记录（保留本地文件）`,
+    )
+    selectedIds.value = []
+    // 刷新查重结果（删除后保留/删除关系会变化）
+    await runMaintain()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '批量删除失败')
+  } finally {
+    isRemoving.value = false
+  }
 }
 
 const formatBytes = (bytes?: number) => {
@@ -162,8 +221,51 @@ onMounted(runMaintain)
       <!-- 建议删除区 -->
       <div v-if="removeItems.length > 0" class="section">
         <h3 class="section-title danger">🗑️ 建议删除</h3>
+        <div class="remove-toolbar">
+          <label class="select-all">
+            <input
+              type="checkbox"
+              :checked="isSelectAll"
+              :disabled="isRemoving || removeItems.length === 0"
+              @change="toggleSelectAll"
+            />
+            <span>全选</span>
+          </label>
+          <span class="selected-count"
+            >已选 {{ selectedIds.length }} / {{ removeItems.length }} 项</span
+          >
+          <div class="batch-actions">
+            <button
+              class="action-btn danger-soft"
+              :disabled="isRemoving || selectedIds.length === 0"
+              @click="removeSelected(false)"
+            >
+              {{ isRemoving ? '⏳ 处理中...' : '批量删除（保留文件）' }}
+            </button>
+            <button
+              class="action-btn danger"
+              :disabled="isRemoving || selectedIds.length === 0"
+              @click="removeSelected(true)"
+            >
+              {{ isRemoving ? '⏳ 处理中...' : '批量删除（含文件）' }}
+            </button>
+          </div>
+        </div>
         <div class="item-list">
-          <div v-for="item in removeItems" :key="item.comic.id" class="dedup-card remove-card">
+          <div
+            v-for="item in removeItems"
+            :key="item.comic.id"
+            class="dedup-card remove-card"
+            :class="{ selected: selectedIds.includes(item.comic.id) }"
+          >
+            <label class="select-check" @click.stop>
+              <input
+                type="checkbox"
+                :checked="selectedIds.includes(item.comic.id)"
+                :disabled="isRemoving"
+                @change="toggleSelect(item.comic.id)"
+              />
+            </label>
             <div class="cover-box">
               <img
                 v-if="item.comic.coverUrl && !coverFailed[item.comic.id]"
@@ -580,6 +682,58 @@ onMounted(runMaintain)
   background-color: #14281a;
   padding: 6px 10px;
   border-radius: 6px;
+}
+
+.remove-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background-color: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+  cursor: pointer;
+  user-select: none;
+}
+.select-all input,
+.select-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #ff7588;
+  cursor: pointer;
+}
+.select-check {
+  flex-shrink: 0;
+  padding-top: 2px;
+  cursor: pointer;
+}
+.select-all:has(input:disabled),
+.select-check:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.selected-count {
+  color: #f59e0b;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.batch-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.dedup-card.selected {
+  border-color: #ff7588;
+  box-shadow: 0 0 0 1px rgba(255, 117, 136, 0.4);
 }
 
 @media (max-width: 720px) {

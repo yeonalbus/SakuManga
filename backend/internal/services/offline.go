@@ -581,6 +581,27 @@ func RemoveDedupComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	return DeleteOfflineComic(db, comicID, deleteFile)
 }
 
+// RemoveDedupComics 批量删除重复漫画（查重维护入口）：逐个委托 DeleteOfflineComic，
+// 单项失败不中断整体，返回实际删除数量与首个错误（便于前端展示“删除 N 项，部分失败”）。
+func RemoveDedupComics(db *gorm.DB, comicIDs []string, deleteFile bool) (int, error) {
+	if len(comicIDs) == 0 {
+		return 0, fmt.Errorf("未指定要删除的漫画")
+	}
+	deleted := 0
+	var firstErr error
+	for _, id := range comicIDs {
+		if err := DeleteOfflineComic(db, id, deleteFile); err != nil {
+			log.Printf("%s [maintain] 批量删除失败（comic %s）: %v", dlErrTag, id, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deleted++
+	}
+	return deleted, firstErr
+}
+
 // hashFile 计算文件 md5（归档查重用，分块读取避免大内存占用）
 func hashFile(path string) (string, error) {
 	f, err := os.Open(path)

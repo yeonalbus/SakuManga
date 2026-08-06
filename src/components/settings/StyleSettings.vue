@@ -14,7 +14,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">显示样式</div>
-        <div class="item-subtext">画廊列表的默认展示形态</div>
+        <div class="item-subtext">画廊列表的展示形态：卡片 / 名片</div>
       </div>
 
       <div class="view-mode-segmented">
@@ -35,86 +35,16 @@
       </div>
     </div>
 
-    <div class="setting-item clickable" @click="handleThemeColor">
-      <div class="item-info">
-        <div class="item-title">主题颜色</div>
-        <div class="item-subtext">自定义强调色（开发中）</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">画廊列表样式(全局)</div>
-      </div>
-      <select v-model="styleSettings.globalGalleryStyle" class="setting-select">
-        <option value="card">卡片</option>
-        <option value="compact">名片</option>
-      </select>
-    </div>
-
-    <div class="setting-item clickable" @click="handlePageGalleryStyle">
-      <div class="item-info">
-        <div class="item-title">画廊列表样式(页面)</div>
-      </div>
-      <span class="arrow-icon">›</span>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">下载页网格布局列数(分组)</div>
-      </div>
-      <select v-model="styleSettings.downloadGroupCols" class="setting-select">
-        <option value="auto">自动</option>
-        <option value="2">2 列</option>
-        <option value="3">3 列</option>
-        <option value="4">4 列</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">下载页网格布局列数(画廊)</div>
-      </div>
-      <select v-model="styleSettings.downloadGalleryCols" class="setting-select">
-        <option value="auto">自动</option>
-        <option value="3">3 列</option>
-        <option value="4">4 列</option>
-        <option value="5">5 列</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">详情页缩略图列数</div>
-      </div>
-      <select v-model="styleSettings.detailThumbCols" class="setting-select">
-        <option value="auto">自动</option>
-        <option value="4">4 列</option>
-        <option value="6">6 列</option>
-        <option value="8">8 列</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">移动封面图至右侧</div>
-        <div class="item-subtext">需要重启</div>
-      </div>
-      <div class="switch-control">
-        <label class="toggle-switch">
-          <input type="checkbox" v-model="styleSettings.moveCoverToRight" />
-          <span class="slider"></span>
-        </label>
-      </div>
-    </div>
-
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">布局模式</div>
-        <div class="item-subtext">双列带侧栏，支持键盘操作</div>
+        <div class="item-subtext">自动跟随视口；桌面/移动用于手动强制布局形态</div>
+        <div class="item-subtext device-hint">
+          当前设备：{{ deviceLabel }}，各设备分别记忆、互不干扰
+        </div>
       </div>
-      <select v-model="styleSettings.layoutMode" class="setting-select">
+      <select v-model="currentLayoutMode" class="setting-select">
+        <option value="auto">自动</option>
         <option value="desktop">桌面模式</option>
         <option value="mobile">移动模式</option>
       </select>
@@ -127,20 +57,26 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { viewMode, toggleViewMode } from '@/stores/viewMode'
-import { styleSettings, resetStyleSettings } from '@/stores/styleSettings'
+import {
+  styleSettings,
+  resetStyleSettings,
+  currentDeviceClass,
+  setLayoutMode,
+} from '@/stores/styleSettings'
+import { DEVICE_CLASS_LABELS } from '@/utils/device'
 
 const { toast } = useUI()
 
-// 交互调取
-const handleThemeColor = () => {
-  toast.info('主题颜色自定义功能开发中，敬请期待')
-}
+const deviceLabel = DEVICE_CLASS_LABELS[currentDeviceClass]
 
-const handlePageGalleryStyle = () => {
-  toast.info('独立页面的列表样式当前跟随「全局」设置')
-}
+// 布局模式：get 读镜像字段，set 写入当前设备槽位（setLayoutMode 自动镜像）
+const currentLayoutMode = computed({
+  get: () => styleSettings.layoutMode,
+  set: (mode) => setLayoutMode(mode),
+})
 
 const setViewMode = (targetMode: 'card' | 'compact') => {
   if (viewMode.value !== targetMode) {
@@ -174,14 +110,6 @@ const handleReset = () => {
   transition: background-color 0.2s ease;
 }
 
-.setting-item.clickable {
-  cursor: pointer;
-}
-
-.setting-item.clickable:hover {
-  background-color: var(--app-surface-2-hover);
-}
-
 .item-info {
   display: flex;
   flex-direction: column;
@@ -200,10 +128,9 @@ const handleReset = () => {
   line-height: 1.4;
 }
 
-.arrow-icon {
-  font-size: 20px;
-  color: var(--app-text-muted);
-  margin-left: 8px;
+.device-hint {
+  font-size: 12px;
+  color: #ff7588;
 }
 
 /* 统一的原生下拉菜单排版，去除底层粗黑框 */
@@ -227,53 +154,6 @@ const handleReset = () => {
 .setting-select option {
   background-color: var(--app-surface-2);
   color: var(--app-text-strong);
-}
-
-/* 原生 Switch 开关 */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 24px;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--app-border-3);
-  transition: 0.3s;
-  border-radius: 24px;
-}
-
-.slider:before {
-  position: absolute;
-  content: '';
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: var(--app-text-2);
-  transition: 0.3s;
-  border-radius: 50%;
-}
-
-input:checked + .slider {
-  background-color: #ff7588;
-}
-
-input:checked + .slider:before {
-  transform: translateX(20px);
-  background-color: #ffffff;
 }
 
 /* 接入胶囊分段按钮的专属 CSS 样式 */

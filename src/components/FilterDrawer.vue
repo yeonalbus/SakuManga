@@ -569,8 +569,8 @@ input:checked + .slider:before {
   transform: translateX(100%);
 }
 
-/* 📱 窄屏适配：筛选抽屉占满宽度并适配底部安全区 */
-@media (max-width: 767px) {
+/* 📱 移动形态（<1024px）：筛选抽屉占满宽度并适配底部安全区 */
+@media (max-width: 1024px) {
   .filter-drawer {
     width: 100vw;
     max-width: 100vw;

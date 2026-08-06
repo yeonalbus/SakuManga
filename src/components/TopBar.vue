@@ -39,7 +39,8 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
     <RandomPicker />
 
     <button class="filter-trigger-btn" @click="isFilterOpen = true">
-      <span>⚙️ 筛选</span>
+      <span class="filter-icon">⚙️</span>
+      <span class="filter-label">筛选</span>
     </button>
 
     <FilterDrawer
@@ -96,14 +97,44 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
   justify-content: center;
 }
 
-/* 📱 窄屏适配：顶栏给汉堡按钮让位，并适配 iOS 安全区 */
-@media (max-width: 767px) {
+/* 📱 移动形态（<1024px）：顶栏改两行布局（首行工具按钮、第二行搜索栏占满），并适配 iOS 安全区 */
+@media (max-width: 1024px) {
   .top-bar {
-    height: calc(56px + var(--safe-top));
-    padding-top: var(--safe-top);
-    padding-left: calc(56px + var(--safe-left));
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+    padding-top: calc(4px + var(--safe-top));
     padding-right: calc(12px + var(--safe-right));
-    gap: 6px;
+    padding-bottom: 4px;
+    gap: 4px 8px;
   }
+  /* 搜索栏独占第二行、占满宽度，避免与抽卡/筛选按钮挤成一团 */
+  .search-wrapper {
+    flex: 1 0 100%;
+  }
+  /* 移动端精简：筛选只显示图标 */
+  .filter-label {
+    display: none;
+  }
+}
+
+/* 🖥️ 移动形态：给汉堡按钮让位（仅移动布局；桌面形态侧栏常驻、无汉堡，无需让位） */
+/* ⚠️ :global() 必须包裹完整选择器（含子类名），否则 scoped 编译会丢弃类名、规则直接作用在 <html> 上（曾导致整个页面隐藏/平移出视口白屏） */
+:global(html[data-layout='mobile'] .top-bar) {
+  padding-left: calc(56px + var(--safe-left));
+  /* 搜索栏随滚动显隐：悬浮覆盖在内容上方（配合 App.vue 的 main-content 顶部补偿） */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  transition: transform 0.25s ease;
+}
+:global(html[data-layout='mobile'] .filter-label) {
+  display: none;
+}
+/* 滚动隐藏：仅移动形态下，向下滚动收起顶栏（App.vue 在 main-content 滚动时切换 html.topbar-hidden） */
+:global(html[data-layout='mobile'].topbar-hidden .top-bar) {
+  transform: translateY(-100%);
 }
 </style>

@@ -667,4 +667,45 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--app-text-3);
 }
+
+/* 📱 移动形态（<1024px）：筛选按钮紧凑换行、任务卡片底部操作分两行、封面缩小 */
+@media (max-width: 1024px) {
+  .downloads-page {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  /* 筛选区：分隔竖线换行后易错乱，隐藏；按钮紧凑排布 */
+  .filter-divider {
+    display: none;
+  }
+  .filter-btn {
+    padding: 6px 12px;
+    font-size: 0.78rem;
+  }
+
+  /* 任务卡片：封面缩小、内边距收紧 */
+  .download-card {
+    padding: 10px;
+    gap: 10px;
+  }
+  .cover-box {
+    width: 48px;
+    height: 64px;
+    font-size: 1.2rem;
+  }
+
+  /* 卡片底部：进度文本与操作按钮分两行，避免横向挤压溢出 */
+  .task-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .footer-actions {
+    justify-content: flex-start;
+  }
+  .progress-text {
+    white-space: normal;
+  }
+}
 </style>

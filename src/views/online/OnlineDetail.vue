@@ -1341,4 +1341,99 @@ onUnmounted(() => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* 📱 移动形态（<1024px）：详情页信息区改单列、顶部操作栏收纳换行、标签分组压缩 */
+@media (max-width: 1024px) {
+  .detail-page {
+    padding: 12px;
+  }
+
+  /* 顶部操作栏：返回钮一行，右侧按钮组换行收纳 */
+  .top-action-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .top-action-bar .back-btn {
+    padding: 6px 12px;
+  }
+  .right-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .action-btn,
+  .add-reading-btn {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+  .read-btn {
+    padding: 8px 14px;
+    font-size: 0.84rem;
+  }
+
+  /* 标题与 Tab */
+  .comic-main-title {
+    font-size: 1.1rem;
+  }
+  .comic-sub-title {
+    font-size: 0.85rem;
+  }
+  .detail-tabs {
+    gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab-item {
+    padding: 10px 10px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* 基础信息：封面居中、信息区单列堆叠 */
+  .info-layout {
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+  }
+  .cover-box img {
+    width: 100%;
+    max-width: 220px;
+    margin: 0 auto;
+    display: block;
+  }
+  .metadata-box {
+    width: 100%;
+  }
+  .meta-row .label {
+    width: 70px;
+  }
+
+  /* 标签分组：压缩左侧命名空间标签宽度 */
+  .ns-group-row {
+    gap: 6px;
+  }
+  .ns-label {
+    width: 60px;
+    font-size: 0.75rem;
+  }
+
+  /* 预览切片：缩窄最小卡片宽度，让窄屏多列排布 */
+  .preview-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+  }
+
+  /* 下载面板：窄屏贴边 + 内部可滚动，避免超出视口 */
+  .download-panel {
+    max-width: 100vw;
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+  .gp-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 </style>

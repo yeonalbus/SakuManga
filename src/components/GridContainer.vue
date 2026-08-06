@@ -51,7 +51,6 @@ const emit = defineEmits<{
 .grid-container-wrapper {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
   gap: 20px;
 }
 
@@ -59,7 +58,6 @@ const emit = defineEmits<{
 .card-grid {
   display: grid;
   gap: 16px;
-  flex: 1;
 }
 
 /* 卡片模式 (card)：桌面 4 列网格 */
@@ -105,5 +103,23 @@ const emit = defineEmits<{
   .card-grid.compact {
     grid-template-columns: 1fr;
   }
+}
+
+/* 🖥️ 手动布局模式：仅当用户强制「桌面/移动」时固定列数（覆盖上方 @media 渐进）；
+   自动模式不带 data-layout-force，仍按视口渐进（iPad 横屏 3 列、手机 2 列等） */
+/* ⚠️ :global() 需包裹完整选择器（含子类名），否则 scoped 编译会丢弃类名、grid 规则直接作用在 <html> 上 */
+:global(html[data-layout-force][data-layout='desktop'] .card-grid.card) {
+  grid-template-columns: repeat(4, 1fr);
+}
+:global(html[data-layout-force][data-layout='desktop'] .card-grid.compact) {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+:global(html[data-layout-force][data-layout='mobile'] .card-grid.card) {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+:global(html[data-layout-force][data-layout='mobile'] .card-grid.compact) {
+  grid-template-columns: 1fr;
 }
 </style>

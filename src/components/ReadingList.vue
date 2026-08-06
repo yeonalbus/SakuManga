@@ -424,8 +424,8 @@ const handleQuickImport = async () => {
   opacity: 0;
 }
 
-/* 📱 窄屏适配：右侧抽屉占满宽度，触发器只显示图标 */
-@media (max-width: 767px) {
+/* 📱 移动形态（<1024px）：右侧抽屉占满宽度，触发器只显示图标 */
+@media (max-width: 1024px) {
   .right-drawer {
     width: 100vw;
     max-width: 100vw;
@@ -434,5 +434,11 @@ const handleQuickImport = async () => {
   .trigger-btn .text {
     display: none;
   }
+}
+
+/* 🖥️ 移动形态精简：触发器只显示 📑 图标（覆盖手动移动模式下的宽视口） */
+/* ⚠️ :global() 需包裹完整选择器，否则 scoped 编译会丢失类名、把 display:none 作用在 <html> 上（白屏根因） */
+:global(html[data-layout='mobile'] .trigger-btn .text) {
+  display: none;
 }
 </style>

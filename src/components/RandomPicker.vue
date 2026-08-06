@@ -155,7 +155,7 @@ const handleStartDraw = async () => {
     <!-- 顶部 trigger 按键 -->
     <button class="picker-trigger-btn" @click="isModalOpen = true">
       <span class="dice-icon">🎲</span>
-      <span>手气不错</span>
+      <span class="trigger-text">手气不错</span>
     </button>
 
     <!-- 全屏 Modal 弹窗 -->
@@ -578,5 +578,46 @@ const handleStartDraw = async () => {
 :deep(.item-card) {
   background-color: var(--app-surface-2) !important;
   height: 100%;
+}
+
+/* 📱 移动形态（<1024px）：抽卡 Modal 全屏化 + 控制面板垂直堆叠 + 结果网格固定 2 列 */
+@media (max-width: 1024px) {
+  .random-modal {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+  .modal-header {
+    padding: 14px 20px;
+    padding-top: calc(14px + var(--safe-top));
+  }
+  .control-panel {
+    padding: 10px 12px;
+  }
+  .panel-top-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .control-group {
+    justify-content: space-between;
+  }
+  .count-selector {
+    flex-wrap: wrap;
+  }
+  .results-container {
+    padding: 12px;
+  }
+  .results-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+}
+
+/* 🖥️ 移动形态精简：触发器只显示 🎲 图标（覆盖手动移动模式下的宽视口） */
+/* ⚠️ :global() 需包裹完整选择器，否则 scoped 编译会丢失类名、把 display:none 作用在 <html> 上（白屏根因） */
+:global(html[data-layout='mobile'] .trigger-text) {
+  display: none;
 }
 </style>

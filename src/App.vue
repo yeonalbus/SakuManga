@@ -11,22 +11,39 @@ import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
 import { useTagStore } from '@/stores/tagStore'
 import { useUserStore } from '@/stores/userStore'
 import { useModeStore } from '@/stores/modeStore'
+import { useLayoutMode } from '@/composables/useLayoutMode'
 
 const tagStore = useTagStore()
 const userStore = useUserStore()
 const modeStore = useModeStore()
 
-// 🍔 窄屏汉堡抽屉状态（<768px 生效；桌面端侧边栏常驻，汉堡按钮隐藏）
+// 🍔 窄屏汉堡抽屉状态（<1024px 生效；桌面端侧边栏常驻，汉堡按钮隐藏）
 const isSidebarOpen = ref(false)
 const closeSidebar = () => {
   isSidebarOpen.value = false
 }
 const handleResize = () => {
   // 回到宽屏时强制收起抽屉，避免残留遮罩层挡住内容
-  if (window.innerWidth >= 768) isSidebarOpen.value = false
+  if (window.innerWidth >= 1024) isSidebarOpen.value = false
 }
 onMounted(() => window.addEventListener('resize', handleResize))
 onUnmounted(() => window.removeEventListener('resize', handleResize))
+
+// 🖥️ 布局模式：把 styleSettings.layoutMode 解析为有效形态并写到 <html data-layout>（auto/desktop/mobile）
+useLayoutMode()
+
+// 📱 搜索栏随滚动显隐（ehentaiviewer 参考）：仅移动形态下（data-layout=mobile），
+// main-content 向下滚动收起顶栏、向上滚动呼出；切回桌面形态后 CSS 规则不生效，自动恢复显示
+let lastScrollTop = 0
+const handleMainScroll = (e: Event) => {
+  const el = e.target as HTMLElement
+  const st = el.scrollTop
+  const movingDown = st > lastScrollTop
+  lastScrollTop = st
+  const htmlEl = document.documentElement
+  if (movingDown && st > 80) htmlEl.classList.add('topbar-hidden')
+  else htmlEl.classList.remove('topbar-hidden')
+}
 
 onMounted(() => {
   // 🚀 应用启动时异步获取翻译字典
@@ -109,7 +126,7 @@ watch(
 
       <!-- 页面主体显示区 -->
       <ErrorBoundary>
-        <main id="main-content" class="main-content">
+        <main id="main-content" class="main-content" @scroll="handleMainScroll">
           <router-view v-slot="{ Component }">
             <keep-alive>
               <component :is="Component" :key="$route.fullPath" />
@@ -186,8 +203,8 @@ watch(
 
 /* 响应式断点与 iOS 安全区变量（供全局各组件参考） */
 :root {
-  /* 断点：<768 为平板/手机（侧边栏收进抽屉）；<480 为手机竖屏 */
-  --bp-tablet: 768px;
+  /* 断点：<1024 为移动形态（侧边栏收进抽屉，覆盖 iPad 竖屏）；<480 为手机竖屏 */
+  --bp-tablet: 1024px;
   --bp-phone: 480px;
   /* 安全区：iOS 刘海屏 / 底部 Home 条；非 iOS 或无安全区时为 0 */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -207,6 +224,8 @@ html,
 body {
   touch-action: manipulation;
   overscroll-behavior-y: none;
+  overflow-x: hidden; /* 兜底防横向溢出（iPad 移动模式等） */
+  width: 100%;
 }
 body {
   background-color: var(--app-bg);
@@ -319,6 +338,9 @@ body {
 .main-content {
   flex: 1;
   padding: 24px;
+  /* iOS 橡皮筋回弹修复：contain 阻止滚出容器边缘露出 body 背景（底部超大黑框根因） */
+  overscroll-behavior-y: contain;
+  background-color: var(--app-bg);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -350,9 +372,9 @@ body {
 }
 
 /* ─────────────────────────────────────────
-   📱 窄屏（<768px）：侧边栏收进左侧抽屉
+   📱 移动形态（<1024px）：侧边栏收进左侧抽屉（覆盖 iPad 竖屏 768-1032）
    ───────────────────────────────────────── */
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .menu-toggle {
     display: flex;
     position: fixed;
@@ -399,11 +421,97 @@ body {
 
   .right-wrapper {
     width: 100vw;
+    position: relative; /* 让悬浮的 TopBar 相对该容器定位 */
   }
 
   /* 主内容区减小留白，充分利用屏幕 */
   .main-content {
-    padding: 12px;
+    padding: 8px;
+    /* 顶部补偿悬浮 TopBar（两行：工具行 + 搜索行 ≈ 84px + 安全区）与原有留白 */
+    padding-top: calc(90px + var(--safe-top));
+    padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区，滚动到底不贴屏 */
   }
+}
+
+/* ─────────────────────────────────────────
+   🖥️ 布局模式（<html data-layout>）形态覆盖
+   - html[data-layout='mobile']：手动「移动」时，宽视口也应用抽屉侧栏
+   - html[data-layout='desktop']：手动「桌面」时，窄视口也保持侧栏常驻（覆盖上方 @media）
+   ───────────────────────────────────────── */
+html[data-layout='mobile'] .menu-toggle {
+  display: flex;
+  position: fixed;
+  top: calc(8px + var(--safe-top));
+  left: calc(10px + var(--safe-left));
+  z-index: 70;
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-layout='mobile'] .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 240px;
+  z-index: 65;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease;
+  padding-top: calc(20px + var(--safe-top));
+  padding-bottom: calc(20px + var(--safe-bottom));
+  box-shadow: 4px 0 16px rgba(0, 0, 0, 0.4);
+}
+html[data-layout='mobile'] .app-container.sidebar-open .sidebar {
+  transform: translateX(0);
+}
+html[data-layout='mobile'] .sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 60;
+}
+html[data-layout='mobile'] .right-wrapper {
+  width: 100vw;
+  position: relative; /* 让悬浮的 TopBar 相对该容器定位 */
+}
+html[data-layout='mobile'] .main-content {
+  padding: 8px;
+  padding-top: calc(90px + var(--safe-top)); /* 顶部补偿悬浮 TopBar */
+  padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区 */
+}
+
+/* 手动强制桌面：窄视口下覆盖 @media 的抽屉形态，保持侧栏常驻 */
+html[data-layout='desktop'] .menu-toggle {
+  display: none;
+}
+html[data-layout='desktop'] .sidebar {
+  position: static;
+  top: auto;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 240px;
+  transform: none;
+  padding: 20px 10px;
+  box-shadow: none;
+}
+html[data-layout='desktop'] .app-container.sidebar-open .sidebar {
+  transform: none;
+}
+html[data-layout='desktop'] .sidebar-overlay {
+  display: none;
+}
+html[data-layout='desktop'] .right-wrapper {
+  width: auto;
+}
+html[data-layout='desktop'] .main-content {
+  padding: 24px;
 }
 </style>

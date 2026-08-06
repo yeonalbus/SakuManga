@@ -74,7 +74,7 @@ onMounted(() => {
 
 <style scoped>
 .online-home-view {
-  padding: 20px;
+  padding: 12px 4px;
   min-height: 100%;
 }
 

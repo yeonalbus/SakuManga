@@ -189,13 +189,25 @@ const handleOutsideClick = (e: MouseEvent) => {
   }
 }
 
+// 📱 移动形态（≤1024px）：搜索框提示文案精简，节省横向空间
+const narrowMql = window.matchMedia('(max-width: 1024px)')
+const isNarrow = ref(narrowMql.matches)
+const onNarrowChange = (e: MediaQueryListEvent) => {
+  isNarrow.value = e.matches
+}
+const searchPlaceholder = computed(() =>
+  isNarrow.value ? '搜索标题、作者或 Tag...' : '搜索标题、作者或 Tag (支持中英文联想)...',
+)
+
 onMounted(() => {
   loadSearchHistory()
   window.addEventListener('click', handleOutsideClick)
+  narrowMql.addEventListener('change', onNarrowChange)
 })
 
 onUnmounted(() => {
   window.removeEventListener('click', handleOutsideClick)
+  narrowMql.removeEventListener('change', onNarrowChange)
 })
 </script>
 
@@ -207,7 +219,7 @@ onUnmounted(() => {
         v-model="keyword"
         type="text"
         class="search-input"
-        placeholder="搜索标题、作者或 Tag (支持中英文联想)..."
+        :placeholder="searchPlaceholder"
         @focus="isFocused = true"
         @keyup.enter="triggerSearch()"
       />
@@ -277,7 +289,7 @@ onUnmounted(() => {
   background-color: var(--app-surface-2);
   border: 1px solid var(--app-border-3);
   border-radius: 20px;
-  padding: 4px 6px 4px 12px;
+  padding: 3px 6px 3px 12px;
   transition: all 0.2s ease;
 }
 

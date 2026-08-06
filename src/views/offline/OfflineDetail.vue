@@ -754,4 +754,68 @@ const handleDelete = async () => {
   letter-spacing: 0.5px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
+
+/* 📱 移动形态（<1024px）：详情主体改单列、顶部操作栏收纳换行、属性网格改单列 */
+@media (max-width: 1024px) {
+  .offline-detail-page {
+    padding: 12px;
+  }
+
+  /* 顶部操作栏：返回钮一行，右侧按钮组换行收纳 */
+  .top-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .right-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .add-reading-btn,
+  .delete-btn {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+  .read-btn {
+    padding: 8px 14px;
+    font-size: 0.84rem;
+  }
+
+  /* 详情主体：封面居中、信息区单列堆叠 */
+  .main-layout {
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .left-cover img {
+    width: 100%;
+    max-width: 220px;
+    margin: 0 auto;
+    display: block;
+  }
+  .right-panel {
+    width: 100%;
+  }
+
+  /* 个人评分：允许换行避免挤压 */
+  .rating-box {
+    flex-wrap: wrap;
+  }
+
+  /* 本地文件属性：两列改单列，路径换行完整显示 */
+  .info-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .info-item.full {
+    grid-column: span 1;
+    flex-wrap: wrap;
+  }
+  .path-text {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-all;
+  }
+}
 </style>

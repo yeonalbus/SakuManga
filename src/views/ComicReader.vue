@@ -1913,8 +1913,8 @@ watch(
   color: #fff;
 }
 
-/* 📱 窄屏适配：安全区 + 压缩 UI（手机/iPad 竖屏） */
-@media (max-width: 767px) {
+/* 📱 移动形态（<1024px）：安全区 + 压缩 UI（手机/iPad 竖屏） */
+@media (max-width: 1024px) {
   /* 顶部/底部浮动条避开刘海屏与 Home 条 */
   .floating-header {
     padding: calc(10px + var(--safe-top)) 12px 10px;

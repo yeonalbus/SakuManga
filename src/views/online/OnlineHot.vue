@@ -47,7 +47,7 @@ onMounted(() => {
 
 <style scoped>
 .page-wrapper {
-  padding: 20px;
+  padding: 12px 4px;
   min-height: 100%;
 }
 

@@ -267,7 +267,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px;
+  padding: 12px 4px;
   min-height: 100%;
 }
 

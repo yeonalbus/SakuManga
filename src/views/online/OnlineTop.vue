@@ -4,6 +4,7 @@ import ItemCard from '@/components/ItemCard.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { detectDeviceClass } from '@/utils/device'
 
 interface RankedOnlineComic extends OnlineComic {
   score: number
@@ -32,7 +33,11 @@ const fetchToplist = async () => {
 }
 
 const topThree = computed(() => allItems.value.slice(0, 3))
-const restItems = computed(() => allItems.value.slice(3, 25))
+// 手机端阉割领奖台：隐藏 podium，榜单展示完整 TOP 25；iPad/桌面保留领奖台（第 4-25 名）
+const isMobileDevice = detectDeviceClass() === 'mobile'
+const restItemsForView = computed(() =>
+  isMobileDevice ? allItems.value.slice(0, 25) : allItems.value.slice(3, 25),
+)
 
 onMounted(() => {
   fetchToplist()
@@ -47,7 +52,7 @@ onMounted(() => {
 
     <template v-else-if="allItems.length > 0">
       <!-- 领奖台前 3 名 -->
-      <div class="podium-section">
+      <div v-if="!isMobileDevice" class="podium-section">
         <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
           <div class="podium-crown">🥈 NO.2</div>
           <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" />
@@ -69,9 +74,9 @@ onMounted(() => {
 
       <!-- 第 4 - 25 名 -->
       <div class="rest-section">
-        <h3 class="section-subtitle">第 4 - 25 名</h3>
+        <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
         <div class="card-grid">
-          <div v-for="item in restItems" :key="item.id" class="grid-item-wrapper">
+          <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
             <ItemCard :comic="item" :rank="item.rank" mode="card" />
             <div class="sub-score">{{ item.score }} 热度</div>
           </div>
@@ -166,5 +171,50 @@ onMounted(() => {
   color: var(--app-text-muted);
   text-align: right;
   margin-top: 4px;
+}
+
+/* 📱 窄屏适配：领奖台三卡收紧（flex 均分 + max-width，极端窄屏自动收缩不溢出） */
+@media (max-width: 767px) {
+  .leaderboard-page {
+    padding: 0 12px 24px;
+    gap: 16px;
+  }
+
+  .page-title {
+    font-size: 1.05rem;
+  }
+
+  .podium-section {
+    gap: 8px;
+    padding: 14px 0;
+  }
+  .podium-item {
+    flex: 1;
+    min-width: 0;
+    max-width: 104px;
+  }
+  .rank-1-wrapper {
+    flex: 1;
+    max-width: 124px;
+    transform: translateY(-6px);
+  }
+  .podium-crown {
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .podium-crown.gold {
+    font-size: 0.78rem;
+  }
+  .rank-score {
+    font-size: 0.72rem;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
 }
 </style>

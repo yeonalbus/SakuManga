@@ -4,6 +4,7 @@ import ItemCard from '@/components/ItemCard.vue'
 // 🟢 1. 从 comicStore 引入真实的全局离线漫画数据
 import { offlineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
+import { detectDeviceClass } from '@/utils/device'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
@@ -26,7 +27,11 @@ const rankedComics = computed<RankedOfflineComic[]>(() => {
 
 // 🟢 3. 动态派生前三名与剩余榜单
 const topThree = computed(() => rankedComics.value.slice(0, 3))
-const restItems = computed(() => rankedComics.value.slice(3, 25))
+// 手机端阉割领奖台：隐藏 podium，榜单展示完整 TOP 25；iPad/桌面保留领奖台（第 4-25 名）
+const isMobileDevice = detectDeviceClass() === 'mobile'
+const restItemsForView = computed(() =>
+  isMobileDevice ? rankedComics.value.slice(0, 25) : rankedComics.value.slice(3, 25),
+)
 
 // 辅助展示函数：获取漫画的实际阅读/点击次数
 const getComicReadCount = (item: OfflineComic) => {
@@ -38,7 +43,7 @@ const getComicReadCount = (item: OfflineComic) => {
   <div class="leaderboard-page">
     <h2 class="page-title">📊 本地个人阅读频次榜 (TOP 25)</h2>
 
-    <div class="podium-section">
+    <div v-if="!isMobileDevice" class="podium-section">
       <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
         <div class="podium-crown">🥈 NO.2</div>
         <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" />
@@ -58,10 +63,10 @@ const getComicReadCount = (item: OfflineComic) => {
       </div>
     </div>
 
-    <div v-if="restItems.length > 0" class="rest-section">
-      <h3 class="section-subtitle">第 4 - 25 名</h3>
+    <div v-if="restItemsForView.length > 0" class="rest-section">
+      <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
       <div class="card-grid">
-        <div v-for="item in restItems" :key="item.id" class="grid-item-wrapper">
+        <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
           <ItemCard :comic="item" :rank="item.rank" mode="card" />
           <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
         </div>
@@ -81,7 +86,7 @@ const getComicReadCount = (item: OfflineComic) => {
 
 .page-title {
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--app-text-strong);
   margin: 0;
 }
 
@@ -157,5 +162,51 @@ const getComicReadCount = (item: OfflineComic) => {
   margin-top: 6px;
   font-size: 0.78rem;
   color: var(--app-text-3);
+}
+
+/* 📱 窄屏适配：领奖台三卡收紧（flex 均分 + max-width，极端窄屏自动收缩不溢出） */
+@media (max-width: 767px) {
+  .leaderboard-page {
+    padding: 12px;
+    padding-bottom: 24px;
+    gap: 16px;
+  }
+
+  .page-title {
+    font-size: 1.05rem;
+  }
+
+  .podium-section {
+    gap: 8px;
+    padding: 14px 0;
+  }
+  .podium-item {
+    flex: 1;
+    min-width: 0;
+    max-width: 104px;
+  }
+  .rank-1-wrapper {
+    flex: 1;
+    max-width: 124px;
+    transform: translateY(-6px);
+  }
+  .podium-crown {
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .crown-gold {
+    font-size: 0.78rem;
+  }
+  .read-count {
+    font-size: 0.72rem;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
 }
 </style>

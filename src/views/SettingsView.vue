@@ -247,4 +247,56 @@ const handleBack = () => {
   display: flex;
   flex-direction: column;
 }
+
+/* 📱 移动形态（<1024px）：设置侧栏改为顶部横向 Tab 条，内容区占满全宽（解决侧栏挤压导致显示不全） */
+@media (max-width: 1024px) {
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--app-border-2);
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    display: none;
+  }
+
+  .menu-list {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 6px 8px;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .menu-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 0;
+  }
+
+  .settings-content {
+    padding: 12px 16px;
+  }
+
+  .panel-section {
+    max-width: 100%;
+  }
+
+  .panel-header {
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+  }
+}
 </style>

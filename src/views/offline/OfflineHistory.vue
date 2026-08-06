@@ -55,7 +55,7 @@ const handleClear = () => {
 
 <style scoped>
 .history-view {
-  padding: 20px;
+  padding: 12px 4px;
   min-height: 100%;
   display: flex;
   flex-direction: column;

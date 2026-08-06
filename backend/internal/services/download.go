@@ -682,13 +682,16 @@ func (m *DownloadManager) QueryArchiveInfo(account *models.AccountSetting, ehSet
 		return nil, err
 	}
 
-	archiverURL := "https://e-hentai.org/archiver.php?gid=" + gid + "&token=" + token
+	// Ex-only 画廊在表站 archiver.php 会返回 404（"this gallery is currently unavailable"），
+	// 必须跟随站点配置（GetBaseURL：Site=exhentai && IsEx 时用里站）。
+	base := strings.TrimSuffix(GetBaseURL(account, ehSetting), "/")
+	archiverURL := base + "/archiver.php?gid=" + gid + "&token=" + token
 	req, err := http.NewRequest("GET", archiverURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", "https://e-hentai.org/")
+	req.Header.Set("Referer", base+"/")
 	req.AddCookie(&http.Cookie{Name: "inline_set", Value: "ts_l"})
 
 	resp, err := client.Do(req)

@@ -199,9 +199,21 @@ func (g *archiveDownloader) extractAndFinish() {
 		dlLogTag, g.task.ID, float64(g.task.DoneBytes)/1024/1024, g.extractDir)
 }
 
+// archiverBase 返回 archiver.php 的基础 URL，跟随站点配置（GetBaseURL 的结果 g.referer）。
+// 关键：Ex-only 画廊在表站 e-hentai.org 的 archiver.php 会返回 404
+// （"this gallery is currently unavailable"），必须使用 exhentai.org 才能访问。
+// 账号 Site=exhentai && IsEx 时 GetBaseURL 返回里站，这里随之切换。
+func (g *archiveDownloader) archiverBase() string {
+	base := strings.TrimSuffix(g.referer, "/") + "/archiver.php"
+	if !strings.HasPrefix(base, "https://") {
+		return "https://e-hentai.org/archiver.php" // referer 异常兜底
+	}
+	return base
+}
+
 // resolveArchiveDownloadURL 完成 archiver.php 的「创建归档 → 拿 H@H 链接」流程
 func (g *archiveDownloader) resolveArchiveDownloadURL() (string, *models.ArchiveInfo, error) {
-	base := "https://e-hentai.org/archiver.php"
+	base := g.archiverBase()
 	query := "?gid=" + g.task.GID + "&token=" + g.task.Token
 
 	// ① 首次 GET 归档页
@@ -422,7 +434,7 @@ func (g *archiveDownloader) isAlreadyUnlockedPage() bool {
 //
 // 适用于无 archiver_key 表单的「仅 H@H Downloader」画廊——zip 仍可直接 HTTP 下载，无需本机 H@H 客户端。
 func (g *archiveDownloader) resolveHathdlDownloadURL() (string, error) {
-	base := "https://e-hentai.org/archiver.php"
+	base := g.archiverBase()
 	query := "?gid=" + g.task.GID + "&token=" + g.task.Token
 
 	dltype := "org"
@@ -580,7 +592,7 @@ func (g *archiveDownloader) createArchive(f archiverForm, base string) error {
 // requestDownloadLink POST archiver_key 获取 H@H 下载链接
 // 服务器通常 302 到 H@H 下载地址；个别情况下返回页面内嵌链接。
 func (g *archiveDownloader) requestDownloadLink(f archiverForm) (string, error) {
-	base := "https://e-hentai.org/archiver.php"
+	base := g.archiverBase()
 	form := url.Values{}
 	for k, v := range f.inputs {
 		form.Set(k, v)

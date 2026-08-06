@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
@@ -13,6 +13,20 @@ import { http } from '@/utils/request'
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
+
+// 内嵌面板模式：由列表页通过 props 传入 gid/token，无需路由跳转即可切换画廊
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+    gid?: string
+    token?: string
+  }>(),
+  { embedded: false, gid: '', token: '' },
+)
+
+// 有效 gid/token：内嵌面板优先使用 props，全屏路由则读 route.query
+const effectiveGid = computed(() => props.gid || (route.query.id as string) || '')
+const effectiveToken = computed(() => props.token || (route.query.token as string) || '')
 
 const activeTab = ref<'info' | 'preview' | 'comments'>('info')
 const isLoading = ref(true)
@@ -73,9 +87,10 @@ interface GalleryDetail extends OnlineComic {
   comments: { id: number; user: string; date: string; content: string }[]
 }
 
-const comic = ref<GalleryDetail>({
-  id: (route.query.id as string) || '',
-  token: (route.query.token as string) || '',
+// 空壳详情模板（内嵌面板切换画廊时复用）
+const createEmptyComic = (gid: string, token: string): GalleryDetail => ({
+  id: gid,
+  token,
   title: '加载中...',
   subTitle: '',
   coverUrl: '',
@@ -93,13 +108,15 @@ const comic = ref<GalleryDetail>({
   comments: [],
 })
 
+const comic = ref<GalleryDetail>(createEmptyComic(effectiveGid.value, effectiveToken.value))
+
 // 详情加载失败信息（如画廊已删除/不可用/版权下架），非空时展示错误态
 const detailError = ref('')
 
 // 1. 获取画廊真实详情 (仅抓取 p=0 基础元数据与初始预览图)
 const fetchDetail = async () => {
-  const gid = route.query.id as string
-  const token = route.query.token as string
+  const gid = effectiveGid.value
+  const token = effectiveToken.value
 
   if (!gid || !token) {
     toast.error('画廊 ID 或 Token 参数缺失！')
@@ -443,23 +460,41 @@ onMounted(() => {
 onUnmounted(() => {
   clearPressTimer()
 })
+
+// 内嵌面板：父级切换 gid/token 时，重置状态并重新拉取详情
+watch(
+  () => [props.gid, props.token],
+  () => {
+    if (!props.embedded || !props.gid) return
+    comic.value = createEmptyComic(props.gid, props.token)
+    detailError.value = ''
+    isLoading.value = true
+    activeTab.value = 'info'
+    currentPreviewPage.value = 0
+    maxPreviewPage.value = 1
+    showDownloadPanel.value = false
+    fetchDetail()
+  },
+)
 </script>
 
 <template>
-  <div class="detail-page">
+  <div class="detail-page" :class="{ embedded }">
     <!-- 📱 移动形态：左上角圆形返回悬浮球（fixed，位于悬浮 TopBar 正下方；桌面端隐藏） -->
-    <button class="detail-fab-back" @click="handleBack" title="返回上一页">‹</button>
+    <button v-if="!embedded" class="detail-fab-back" @click="handleBack" title="返回上一页">
+      ‹
+    </button>
     <div v-if="isLoading" class="loading-state">加载中...</div>
 
     <div v-else-if="detailError" class="error-state">
       <div class="error-icon">⚠️</div>
       <p class="error-msg">{{ detailError }}</p>
-      <button class="back-btn" @click="handleBack">‹ 返回</button>
+      <button v-if="!embedded" class="back-btn" @click="handleBack">‹ 返回</button>
     </div>
 
     <template v-else>
       <div class="top-action-bar">
-        <button class="back-btn" @click="handleBack">‹ 返回</button>
+        <button v-if="!embedded" class="back-btn" @click="handleBack">‹ 返回</button>
 
         <div class="right-actions">
           <button
@@ -767,6 +802,94 @@ onUnmounted(() => {
   max-width: 1100px;
   margin: 0 auto;
   color: var(--app-text-2);
+}
+
+/* 内嵌面板模式（左右分栏右侧详情）：自适应容器宽度、面板内独立滚动 */
+.detail-page.embedded {
+  max-width: none;
+  margin: 0;
+  padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* 内嵌面板：返回按钮隐藏后功能按钮右对齐；移动端专用元素一律隐藏 */
+.detail-page.embedded .top-action-bar {
+  justify-content: flex-end;
+}
+
+.detail-page.embedded .detail-fab-back,
+.detail-page.embedded .detail-actions-bar {
+  display: none !important;
+}
+
+/* 内嵌面板（360-420px 窄面板）：强制套用移动端单列布局。
+   CSS 媒体查询基于视口而非容器，宽屏桌面下窄面板仍会命中桌面布局，
+   故在 embedded 下显式复制 <1024px 移动布局的核心规则。 */
+.detail-page.embedded .top-action-bar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.detail-page.embedded .right-actions {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.detail-page.embedded .action-btn,
+.detail-page.embedded .add-reading-btn {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+.detail-page.embedded .read-btn {
+  padding: 8px 14px;
+  font-size: 0.84rem;
+}
+.detail-page.embedded .comic-main-title {
+  font-size: 1.1rem;
+}
+.detail-page.embedded .comic-sub-title {
+  font-size: 0.85rem;
+}
+.detail-page.embedded .detail-tabs {
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.detail-page.embedded .tab-item {
+  padding: 10px 10px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.detail-page.embedded .info-layout {
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+.detail-page.embedded .cover-box img {
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+  display: block;
+}
+.detail-page.embedded .metadata-box {
+  width: 100%;
+}
+.detail-page.embedded .meta-row .label {
+  width: 70px;
+}
+.detail-page.embedded .ns-group-row {
+  gap: 6px;
+}
+.detail-page.embedded .ns-label {
+  width: 60px;
+  font-size: 0.75rem;
+}
+.detail-page.embedded .preview-grid {
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
 }
 
 .loading-state,

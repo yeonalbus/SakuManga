@@ -37,6 +37,28 @@
 
     <div class="setting-item">
       <div class="item-info">
+        <div class="item-title">每行画廊数</div>
+        <div class="item-subtext">卡片 / 名片分别设置，范围 1-5；不设置则按视口自适应</div>
+      </div>
+
+      <div class="columns-config">
+        <label class="columns-row">
+          <span class="columns-label">🎴 卡片</span>
+          <select v-model.number="cardColumns" class="setting-select">
+            <option v-for="n in 5" :key="`card-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+        <label class="columns-row">
+          <span class="columns-label">🪪 名片</span>
+          <select v-model.number="compactColumns" class="setting-select">
+            <option v-for="n in 5" :key="`compact-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
         <div class="item-title">布局模式</div>
         <div class="item-subtext">自动跟随视口；桌面/移动用于手动强制布局形态</div>
         <div class="item-subtext device-hint">
@@ -59,7 +81,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useUI } from '@/composables/useUI'
-import { viewMode, toggleViewMode } from '@/stores/viewMode'
+import { viewMode, toggleViewMode, cardColumns, compactColumns } from '@/stores/viewMode'
 import {
   styleSettings,
   resetStyleSettings,
@@ -163,6 +185,25 @@ const handleReset = () => {
   padding: 3px;
   border-radius: 6px;
   gap: 2px;
+}
+
+/* 每行画廊数：卡片 / 名片两个独立行 */
+.columns-config {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.columns-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.columns-label {
+  font-size: 13px;
+  color: var(--app-text-2);
+  white-space: nowrap;
 }
 
 .segment-btn {

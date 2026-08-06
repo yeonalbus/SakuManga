@@ -3,10 +3,28 @@ import { watch, onMounted } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
+import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
+import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useSubStore } from '@/stores/subStore' // 🟢 对应订阅专用的 Pinia Store
 import { subSearchConfig } from '@/stores/searchStore' // 🟢 对应订阅专用的搜索/分类配置
+import { useBatchSelection } from '@/composables/useBatchSelection'
+import { useDetailPanel } from '@/composables/useDetailPanel'
 
 const subStore = useSubStore()
+
+// 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+
+// 长按多选 → 批量下载
+const {
+  selectMode,
+  selectedIds,
+  selectedTargets,
+  handleLongPress,
+  handleSelect,
+  toggleSelectAll,
+  handleBatchClose,
+} = useBatchSelection(() => subStore.comics)
 
 // 初始化/重新加载订阅数据
 const initSearch = () => {
@@ -33,29 +51,59 @@ onMounted(() => {
 
 <template>
   <div class="page-wrapper">
-    <GridContainer :items="subStore.comics">
-      <!-- 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
-      <template #header>
-        <div v-if="subStore.prevGid" class="top-load-bar">
-          <button class="pill-btn" :disabled="subStore.isLoading" @click="subStore.loadBefore">
-            ⬆️ {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
-          </button>
-        </div>
-      </template>
+    <div class="online-split">
+      <div class="split-main">
+        <GridContainer
+          :items="subStore.comics"
+          :selectable="true"
+          :select-mode="selectMode"
+          :selected-ids="selectedIds"
+          :panel-mode="isWide"
+          @longpress="handleLongPress"
+          @select="handleSelect"
+          @open="openDetail"
+        >
+          <!-- 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
+          <template #header>
+            <div v-if="subStore.prevGid" class="top-load-bar">
+              <button class="pill-btn" :disabled="subStore.isLoading" @click="subStore.loadBefore">
+                ⬆️ {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
+              </button>
+            </div>
+          </template>
 
-      <!-- 2. 底部插槽：向下滑动流式加载 -->
-      <template #footer>
-        <OnlineLoadBar
-          :is-loading="subStore.isLoading"
-          :has-more="subStore.hasMore"
-          :error="subStore.error"
-          @load-more="subStore.loadMore"
+          <!-- 2. 底部插槽：向下滑动流式加载 -->
+          <template #footer>
+            <OnlineLoadBar
+              :is-loading="subStore.isLoading"
+              :has-more="subStore.hasMore"
+              :error="subStore.error"
+              @load-more="subStore.loadMore"
+            />
+          </template>
+        </GridContainer>
+
+        <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) -->
+        <FloatingToolbar @refresh="initSearch" @seek-change="(date) => subStore.seekToDate(date)" />
+
+        <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
+        <BatchDownloadBar
+          v-if="selectMode"
+          :selected="selectedTargets"
+          @select-all="toggleSelectAll"
+          @close="handleBatchClose"
         />
-      </template>
-    </GridContainer>
+      </div>
 
-    <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) -->
-    <FloatingToolbar @refresh="initSearch" @seek-change="(date) => subStore.seekToDate(date)" />
+      <!-- 右侧内嵌详情面板（仅宽屏桌面渲染） -->
+      <OnlineDetailPanel
+        v-if="isWide"
+        :open="isPanelOpen"
+        :gid="panelGid"
+        :token="panelToken"
+        @close="closePanel"
+      />
+    </div>
   </div>
 </template>
 

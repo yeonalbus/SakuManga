@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic, OfflineComic, CardViewMode } from '@/types/comic'
 import { addHistory } from '@/stores/historyStore'
 import TagChip from '@/components/TagChip.vue'
+import { createDownloadTask } from '@/api/download'
+import { useUI } from '@/composables/useUI'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
 // 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
@@ -18,21 +20,26 @@ const props = withDefaults(
     selectable?: boolean
     selectMode?: boolean
     selected?: boolean
+    /** 左右分栏面板模式：宽屏在线列表页开启后，点击卡片改发 open 事件而非跳转路由 */
+    panelMode?: boolean
   }>(),
   {
     size: 'normal',
     selectable: false,
     selectMode: false,
     selected: false,
+    panelMode: false,
   },
 )
 
 const emit = defineEmits<{
   (e: 'longpress', comic: ComicItem): void
   (e: 'select', comic: ComicItem): void
+  (e: 'open', comic: ComicItem): void
 }>()
 
 const router = useRouter()
+const { toast } = useUI()
 
 // 核心交互状态：是否展开 Tag 面板 (点击封面图切换)
 const showTags = ref(false)
@@ -101,8 +108,9 @@ const clearLongPressTimer = () => {
 }
 
 const handlePointerDown = () => {
-  // 选择模式中不做长按检测；非可选中卡片不响应
-  if (props.selectMode || !props.selectable || props.comic.source !== 'offline') return
+  // 选择模式中不做长按检测；非可选中卡片不响应。
+  // 在线与离线卡片均支持长按选择（批量下载/批量删除）
+  if (props.selectMode || !props.selectable) return
   longPressed.value = false
   clearLongPressTimer()
   longPressTimer = setTimeout(() => {
@@ -118,7 +126,21 @@ const handlePointerUp = () => {
 // --------------------------------------------------
 // 4. 点击卡片主体：选择模式切换选中，否则跳转详情页
 // --------------------------------------------------
-const handleCardClick = () => {
+// 🆕 中键 / Ctrl / Meta + 点击 → 新浏览器标签打开详情（web 原生优势）
+const openInNewTab = () => {
+  if (!props.comic?.id) return
+  addHistory(props.comic)
+  let url = ''
+  if (props.comic.source === 'online') {
+    const token = onlineComic.value?.token || ''
+    url = router.resolve({ path: '/online/detail', query: { id: props.comic.id, token } }).href
+  } else {
+    url = router.resolve(`/offline/detail?id=${props.comic.id}`).href
+  }
+  window.open(url, '_blank')
+}
+
+const handleCardClick = (event?: MouseEvent) => {
   // 长按已触发选择 → 抑制随后的 click 导航
   if (longPressed.value) {
     longPressed.value = false
@@ -132,6 +154,20 @@ const handleCardClick = () => {
   }
 
   if (!props.comic || !props.comic.id) return
+
+  // 🆕 中键 / Ctrl / Meta + 点击 → 新标签打开详情
+  if (event && (event.button === 1 || event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    openInNewTab()
+    return
+  }
+
+  // 🆕 左右分栏面板模式（宽屏在线列表页）：交给父级打开内嵌详情面板
+  if (props.panelMode && props.comic.source === 'online') {
+    emit('open', props.comic)
+    return
+  }
+
   addHistory(props.comic)
 
   if (props.comic.source === 'online') {
@@ -143,6 +179,30 @@ const handleCardClick = () => {
     })
   } else {
     router.push(`/offline/detail?id=${props.comic.id}`)
+  }
+}
+
+// --------------------------------------------------
+// 4.1 在线卡片 hover 快捷下载（零弹窗，按「下载设置」默认方案直接入队）
+// 仅在线且带 token 的卡片可用；选择模式中隐藏，避免与勾选框冲突
+// --------------------------------------------------
+const isQuickDownloading = ref(false)
+
+const canQuickDownload = computed(
+  () => props.comic.source === 'online' && !!onlineComic.value?.token && !props.selectMode,
+)
+
+const handleQuickDownload = async () => {
+  if (!canQuickDownload.value || isQuickDownloading.value) return
+  if (!onlineComic.value) return
+  isQuickDownloading.value = true
+  try {
+    await createDownloadTask(onlineComic.value)
+    toast.success('已加入下载队列')
+  } catch (err) {
+    toast.error(`加入下载队列失败：${(err as Error)?.message || '未知错误'}`)
+  } finally {
+    isQuickDownloading.value = false
   }
 }
 
@@ -292,6 +352,20 @@ const comicSourceBadge = computed(() => {
         <span class="tag-indicator" :class="{ active: showTags }">
           {{ showTags ? '▲ 隐' : '🏷️ Tag' }}
         </span>
+
+        <!-- ⬇️ 在线卡片 hover 快捷下载按钮（零弹窗） -->
+        <button
+          v-if="canQuickDownload"
+          class="quick-download-btn compact"
+          :class="{ loading: isQuickDownloading }"
+          :disabled="isQuickDownloading"
+          title="加入下载队列"
+          @click.stop="handleQuickDownload"
+          @pointerdown.stop
+          @pointerup.stop
+        >
+          {{ isQuickDownloading ? '…' : '⬇' }}
+        </button>
       </div>
 
       <div class="compact-main-content">
@@ -362,6 +436,20 @@ const comicSourceBadge = computed(() => {
         <!-- 🟢 补齐下载状态标志 -->
         <span v-if="comic.isDownloaded" class="card-downloaded-badge">✓ 已下载</span>
         <span v-if="comic.pageCount" class="card-pages-badge">{{ comic.pageCount }}P</span>
+
+        <!-- ⬇️ 在线卡片 hover 快捷下载按钮（零弹窗） -->
+        <button
+          v-if="canQuickDownload"
+          class="quick-download-btn"
+          :class="{ loading: isQuickDownloading }"
+          :disabled="isQuickDownloading"
+          title="加入下载队列"
+          @click.stop="handleQuickDownload"
+          @pointerdown.stop
+          @pointerup.stop
+        >
+          {{ isQuickDownloading ? '加入中…' : '⬇ 下载' }}
+        </button>
       </div>
 
       <div class="card-info-footer">
@@ -668,6 +756,58 @@ const comicSourceBadge = computed(() => {
   padding: 1px 5px;
   border-radius: 3px;
   font-family: monospace;
+}
+
+/* 在线 hover 快捷下载按钮：默认居中浮于封面上，hover 时显现 */
+.quick-download-btn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.quick-download-btn:hover {
+  background-color: #ff7588;
+  border-color: rgba(255, 117, 136, 0.6);
+}
+
+.item-card:hover .quick-download-btn,
+.quick-download-btn:focus-visible {
+  opacity: 1;
+}
+
+.quick-download-btn.loading {
+  cursor: wait;
+  opacity: 1;
+}
+
+/* 名片模式的按钮：缩小并置于缩略图右下角 */
+.quick-download-btn.compact {
+  left: auto;
+  top: auto;
+  right: 6px;
+  bottom: 6px;
+  transform: none;
+  padding: 2px 7px;
+  font-size: 10px;
+  border-radius: 4px;
 }
 
 .card-info-footer {

@@ -31,6 +31,9 @@ const (
 	dlArcTag  = "[ARCHIVER]"
 )
 
+// errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
+var errTaskAlreadyExists = errors.New("task already exists")
+
 // CreateDownloadParams 创建下载任务的入参（前端 POST /api/v1/downloads）
 type CreateDownloadParams struct {
 	GID              string              `json:"gid"`
@@ -43,6 +46,33 @@ type CreateDownloadParams struct {
 	Group            string              `json:"group"`
 	UpdateForComicID string              `json:"updateForComicId,omitempty"` // 离线更新下载：被更新漫画 ID
 	UserID           uint                `json:"userId"`                      // 任务发起者（决定执行时使用谁的 E 站凭证）
+}
+
+// BatchCreateParams 批量创建下载任务入参（前端 POST /api/v1/downloads/batch）
+type BatchCreateParams struct {
+	Tasks       []BatchCreateItem   `json:"tasks"`
+	Mode        models.DownloadMode `json:"mode"`        // 统一下载模式：gallery / archive
+	ArchiveType models.ArchiveType  `json:"archiveType"` // 归档类型：original / resample（仅 archive 模式生效）
+	Priority    int                 `json:"priority"`
+	Group       string              `json:"group"`
+	UserID      uint                `json:"userId"` // 任务发起者（决定执行时使用谁的 E 站凭证）
+}
+
+// BatchCreateItem 批量创建中的单个画廊
+type BatchCreateItem struct {
+	GID      string `json:"gid"`
+	Token    string `json:"token"`
+	Title    string `json:"title"`
+	CoverURL string `json:"coverUrl"`
+}
+
+// BatchCreateResult 批量创建统计结果
+type BatchCreateResult struct {
+	Created int      `json:"created"`
+	Skipped int      `json:"skipped"` // 已存在进行中任务（gid 去重）
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors"`
+	TaskIDs []string `json:"taskIds"`
 }
 
 // DownloadListParams 下载任务列表查询参数
@@ -325,7 +355,7 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		string(models.DownloadPaused), string(models.DownloadError), string(models.DownloadErrorLock),
 	}).First(&existing).Error
 	if err == nil {
-		return nil, fmt.Errorf("该画廊（gid=%s）已有进行中的下载任务 %s，请勿重复创建", p.GID, existing.ID)
+		return nil, fmt.Errorf("%w（gid=%s 已有进行中任务 %s）", errTaskAlreadyExists, p.GID, existing.ID)
 	}
 
 	setting := m.GetSettings()
@@ -356,6 +386,43 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 
 	m.Enqueue(task.ID)
 	return task, nil
+}
+
+// CreateTasksBatch 批量创建下载任务并入队（逐条复用 CreateTask，聚合统计）
+func (m *DownloadManager) CreateTasksBatch(p BatchCreateParams) *BatchCreateResult {
+	res := &BatchCreateResult{Errors: []string{}}
+	for i, item := range p.Tasks {
+		if item.GID == "" || item.Token == "" {
+			res.Failed++
+			res.Errors = append(res.Errors, fmt.Sprintf("[%d] gid 与 token 不能为空", i+1))
+			continue
+		}
+		task, err := m.CreateTask(CreateDownloadParams{
+			GID:         item.GID,
+			Token:       item.Token,
+			Title:       item.Title,
+			CoverURL:    item.CoverURL,
+			Mode:        p.Mode,
+			ArchiveType: p.ArchiveType,
+			Priority:    p.Priority,
+			Group:       p.Group,
+			UserID:      p.UserID,
+		})
+		if err != nil {
+			if errors.Is(err, errTaskAlreadyExists) {
+				res.Skipped++
+			} else {
+				res.Failed++
+				res.Errors = append(res.Errors, fmt.Sprintf("[%d] %v", i+1, err))
+			}
+			continue
+		}
+		res.Created++
+		res.TaskIDs = append(res.TaskIDs, task.ID)
+	}
+	log.Printf("%s 批量创建任务：共 %d 条，成功 %d，跳过 %d，失败 %d",
+		dlLogTag, len(p.Tasks), res.Created, res.Skipped, res.Failed)
+	return res
 }
 
 // Enqueue 将任务 ID 放入队列

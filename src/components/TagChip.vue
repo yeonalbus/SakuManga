@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useTagStore } from '@/stores/tagStore'
 import { useModeStore } from '@/stores/modeStore'
 // 🎯 引入全局 SearchConfig Store 状态
-import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
+import { offlineSearchConfig } from '@/stores/searchStore'
 
 export interface TagData {
   namespace: string
@@ -119,10 +119,10 @@ const handleClick = () => {
       router.push('/offline/home')
     }
   } else {
-    onlineSearchConfig.value.keyword = queryTag
-    if (!route.path.startsWith('/online/home')) {
-      router.push('/online/home')
-    }
+    // 🆕 在线：用真实浏览器新标签打开搜索页（URL 携带关键词），
+    // 原标签页的列表位点/详情面板/滚动位置完全不受影响（web 原生多标签优势）
+    const url = router.resolve({ path: '/online/home', query: { kw: queryTag } }).href
+    window.open(url, '_blank')
   }
 }
 </script>

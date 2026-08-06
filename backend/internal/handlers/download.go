@@ -81,6 +81,39 @@ func (h *DownloadHandler) CreateDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
+// BatchCreateDownload 批量创建下载任务 POST /api/v1/downloads/batch
+// 前端用于「批量加入下载队列」：一次提交多个 gid+token，统一按默认方案入队。
+func (h *DownloadHandler) BatchCreateDownload(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if h.requireAccount(c) == nil {
+		return
+	}
+	if !requireDownloadPermission(c) {
+		return
+	}
+
+	var p services.BatchCreateParams
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
+		return
+	}
+	if len(p.Tasks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tasks 列表不能为空"})
+		return
+	}
+	if len(p.Tasks) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "单次批量创建最多 500 条"})
+		return
+	}
+	p.UserID = user.ID
+
+	c.JSON(http.StatusOK, h.manager.CreateTasksBatch(p))
+}
+
 // ListDownloads 下载任务列表 GET /api/v1/downloads
 func (h *DownloadHandler) ListDownloads(c *gin.Context) {
 	var p services.DownloadListParams

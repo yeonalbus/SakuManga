@@ -2,9 +2,30 @@
 import { computed } from 'vue'
 import { onlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
+import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
+import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
+import type { OnlineComic } from '@/types/comic'
+import { useBatchSelection } from '@/composables/useBatchSelection'
+import { useDetailPanel } from '@/composables/useDetailPanel'
 
-// 动态提取在线浏览过的漫画列表
-const comics = computed(() => onlineHistoryList.value.map((item) => item.comic))
+// 动态提取在线浏览过的漫画列表（本页均为 online 来源）
+const comics = computed<OnlineComic[]>(() =>
+  onlineHistoryList.value.map((item) => item.comic as OnlineComic),
+)
+
+// 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+
+// 长按多选 → 批量下载
+const {
+  selectMode,
+  selectedIds,
+  selectedTargets,
+  handleLongPress,
+  handleSelect,
+  toggleSelectAll,
+  handleBatchClose,
+} = useBatchSelection(() => comics.value)
 
 const handleClear = () => {
   clearHistory('online')
@@ -20,8 +41,39 @@ const handleClear = () => {
       </button>
     </div>
 
-    <GridContainer v-if="comics.length > 0" :items="comics" />
-    <div v-else class="empty-tip">暂无在线浏览记录</div>
+    <div class="online-split">
+      <div class="split-main">
+        <GridContainer
+          v-if="comics.length > 0"
+          :items="comics"
+          :selectable="true"
+          :select-mode="selectMode"
+          :selected-ids="selectedIds"
+          :panel-mode="isWide"
+          @longpress="handleLongPress"
+          @select="handleSelect"
+          @open="openDetail"
+        />
+        <div v-else class="empty-tip">暂无在线浏览记录</div>
+
+        <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
+        <BatchDownloadBar
+          v-if="selectMode"
+          :selected="selectedTargets"
+          @select-all="toggleSelectAll"
+          @close="handleBatchClose"
+        />
+      </div>
+
+      <!-- 右侧内嵌详情面板（仅宽屏桌面渲染） -->
+      <OnlineDetailPanel
+        v-if="isWide"
+        :open="isPanelOpen"
+        :gid="panelGid"
+        :token="panelToken"
+        @close="closePanel"
+      />
+    </div>
   </div>
 </template>
 

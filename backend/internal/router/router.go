@@ -176,6 +176,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 下载任务与 GP 面板（许可校验在 handler 内：admin 或 allowDownload）
 		api.POST("/downloads", downloadHandler.CreateDownload)
 		api.GET("/downloads", downloadHandler.ListDownloads)
+		api.POST("/downloads/batch", downloadHandler.BatchCreateDownload)
 		api.GET("/downloads/gp-info", downloadHandler.GetGPInfo)
 		api.GET("/downloads/settings", downloadHandler.GetDownloadSettings)
 		api.POST("/downloads/settings", downloadHandler.SaveDownloadSettings)

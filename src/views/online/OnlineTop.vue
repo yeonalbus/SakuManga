@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import ItemCard from '@/components/ItemCard.vue'
+import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
+import { useBatchSelection } from '@/composables/useBatchSelection'
 import { http } from '@/utils/request'
 import { detectDeviceClass } from '@/utils/device'
+import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
+import { useDetailPanel } from '@/composables/useDetailPanel'
 
 interface RankedOnlineComic extends OnlineComic {
   score: number
@@ -12,11 +16,27 @@ interface RankedOnlineComic extends OnlineComic {
 }
 
 const { toast } = useUI()
+
+// 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
 const allItems = ref<RankedOnlineComic[]>([])
 const isLoading = ref(true)
 
+// 长按多选 → 批量下载
+const {
+  selectMode,
+  selectedIds,
+  selectedTargets,
+  handleLongPress,
+  handleSelect,
+  toggleSelectAll,
+  handleBatchClose,
+  exitSelectMode,
+} = useBatchSelection(() => allItems.value)
+
 // 从 Go 内存缓存读取数据
 const fetchToplist = async () => {
+  exitSelectMode()
   isLoading.value = true
   try {
     // 🟢 将泛型改为 RankedOnlineComic[] 数组类型
@@ -48,43 +68,111 @@ onMounted(() => {
   <div class="leaderboard-page">
     <h2 class="page-title">🏆 官方全站热度榜 (TOP 25)</h2>
 
-    <div v-if="isLoading" class="loading-state">加载热度榜单中...</div>
+    <div class="online-split">
+      <div class="split-main">
+        <div v-if="isLoading" class="loading-state">加载热度榜单中...</div>
 
-    <template v-else-if="allItems.length > 0">
-      <!-- 领奖台前 3 名 -->
-      <div v-if="!isMobileDevice" class="podium-section">
-        <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
-          <div class="podium-crown">🥈 NO.2</div>
-          <ItemCard :comic="topThree[1]" :rank="2" size="large" mode="card" />
-          <div class="rank-score">{{ topThree[1].score }} 热度</div>
-        </div>
+        <template v-else-if="allItems.length > 0">
+          <!-- 领奖台前 3 名 -->
+          <div v-if="!isMobileDevice" class="podium-section">
+            <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
+              <div class="podium-crown">🥈 NO.2</div>
+              <ItemCard
+                :comic="topThree[1]"
+                :rank="2"
+                size="large"
+                mode="card"
+                :selectable="true"
+                :select-mode="selectMode"
+                :selected="selectedIds.includes(topThree[1].id)"
+                :panel-mode="isWide"
+                @longpress="handleLongPress"
+                @select="handleSelect"
+                @open="openDetail"
+              />
+              <div class="rank-score">{{ topThree[1].score }} 热度</div>
+            </div>
 
-        <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
-          <div class="podium-crown gold">👑 NO.1 CHAMPION</div>
-          <ItemCard :comic="topThree[0]" :rank="1" size="large" mode="card" />
-          <div class="rank-score gold-text">{{ topThree[0].score }} 热度</div>
-        </div>
+            <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
+              <div class="podium-crown gold">👑 NO.1 CHAMPION</div>
+              <ItemCard
+                :comic="topThree[0]"
+                :rank="1"
+                size="large"
+                mode="card"
+                :selectable="true"
+                :select-mode="selectMode"
+                :selected="selectedIds.includes(topThree[0].id)"
+                :panel-mode="isWide"
+                @longpress="handleLongPress"
+                @select="handleSelect"
+                @open="openDetail"
+              />
+              <div class="rank-score gold-text">{{ topThree[0].score }} 热度</div>
+            </div>
 
-        <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
-          <div class="podium-crown">🥉 NO.3</div>
-          <ItemCard :comic="topThree[2]" :rank="3" size="large" mode="card" />
-          <div class="rank-score">{{ topThree[2].score }} 热度</div>
-        </div>
-      </div>
-
-      <!-- 第 4 - 25 名 -->
-      <div class="rest-section">
-        <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
-        <div class="card-grid">
-          <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
-            <ItemCard :comic="item" :rank="item.rank" mode="card" />
-            <div class="sub-score">{{ item.score }} 热度</div>
+            <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
+              <div class="podium-crown">🥉 NO.3</div>
+              <ItemCard
+                :comic="topThree[2]"
+                :rank="3"
+                size="large"
+                mode="card"
+                :selectable="true"
+                :select-mode="selectMode"
+                :selected="selectedIds.includes(topThree[2].id)"
+                :panel-mode="isWide"
+                @longpress="handleLongPress"
+                @select="handleSelect"
+                @open="openDetail"
+              />
+              <div class="rank-score">{{ topThree[2].score }} 热度</div>
+            </div>
           </div>
-        </div>
-      </div>
-    </template>
 
-    <div v-else class="empty-tip">暂无榜单数据</div>
+          <!-- 第 4 - 25 名 -->
+          <div class="rest-section">
+            <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
+            <div class="card-grid">
+              <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
+                <ItemCard
+                  :comic="item"
+                  :rank="item.rank"
+                  mode="card"
+                  :selectable="true"
+                  :select-mode="selectMode"
+                  :selected="selectedIds.includes(item.id)"
+                  :panel-mode="isWide"
+                  @longpress="handleLongPress"
+                  @select="handleSelect"
+                  @open="openDetail"
+                />
+                <div class="sub-score">{{ item.score }} 热度</div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div v-else class="empty-tip">暂无榜单数据</div>
+
+        <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
+        <BatchDownloadBar
+          v-if="selectMode"
+          :selected="selectedTargets"
+          @select-all="toggleSelectAll"
+          @close="handleBatchClose"
+        />
+      </div>
+
+      <!-- 右侧内嵌详情面板（仅宽屏桌面渲染） -->
+      <OnlineDetailPanel
+        v-if="isWide"
+        :open="isPanelOpen"
+        :gid="panelGid"
+        :token="panelToken"
+        @close="closePanel"
+      />
+    </div>
   </div>
 </template>
 

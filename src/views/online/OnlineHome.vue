@@ -1,12 +1,40 @@
 <script setup lang="ts">
-import { watch, onMounted } from 'vue'
+import { watch, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬浮球
+import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
+import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useOnlineStore } from '@/stores/onlineStore'
 import { onlineSearchConfig } from '@/stores/searchStore'
+import { useBatchSelection } from '@/composables/useBatchSelection'
+import { useDetailPanel } from '@/composables/useDetailPanel'
 
 const onlineStore = useOnlineStore()
+
+const route = useRoute()
+// 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+
+// 🆕 URL 驱动搜索：进入 /online/home?kw=xxx（新标签页/分享链接等）时，把关键词写入搜索配置
+// 必须在下方 watch 注册之前执行，避免初始设置触发一次多余搜索
+const kwFromUrl = route.query.kw
+if (typeof kwFromUrl === 'string' && kwFromUrl.trim()) {
+  onlineSearchConfig.value.keyword = kwFromUrl.trim()
+  onlineSearchConfig.value.keywords = []
+}
+
+// 长按多选 → 批量下载
+const {
+  selectMode,
+  selectedIds,
+  selectedTargets,
+  handleLongPress,
+  handleSelect,
+  toggleSelectAll,
+  handleBatchClose,
+} = useBatchSelection(() => onlineStore.comics)
 
 const initSearch = () => {
   const cfg = onlineSearchConfig.value
@@ -27,10 +55,30 @@ const initSearch = () => {
   })
 }
 
+// 🆕 把当前关键词写回 URL（history.replaceState）
+// 不能用 router.replace：keep-alive 按 $route.fullPath 缓存，query 变化会触发组件重建
+// → 滚动/面板状态丢失 + 重复请求；replaceState 只改地址栏，不触发重建
+let writeBackTimer: ReturnType<typeof setTimeout> | null = null
+const writeKeywordToUrl = () => {
+  if (writeBackTimer) clearTimeout(writeBackTimer)
+  writeBackTimer = setTimeout(() => {
+    if (route.path !== '/online/home') return
+    const kw = onlineSearchConfig.value.keyword?.trim() || ''
+    const url = new URL(window.location.href)
+    if (kw) {
+      url.searchParams.set('kw', kw)
+    } else {
+      url.searchParams.delete('kw')
+    }
+    window.history.replaceState(null, '', url.pathname + url.search)
+  }, 600)
+}
+
 watch(
   onlineSearchConfig,
   () => {
     initSearch()
+    writeKeywordToUrl()
   },
   { deep: true },
 )
@@ -38,37 +86,74 @@ watch(
 onMounted(() => {
   initSearch()
 })
+
+onUnmounted(() => {
+  if (writeBackTimer) clearTimeout(writeBackTimer)
+})
 </script>
 
 <template>
   <div class="online-home-view">
-    <GridContainer :items="onlineStore.comics">
-      <!-- 🟢 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
-      <template #header>
-        <div v-if="onlineStore.prevGid" class="top-load-bar">
-          <button
-            class="pill-btn"
-            :disabled="onlineStore.isLoading"
-            @click="onlineStore.loadBefore"
-          >
-            ⬆️ {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
-          </button>
-        </div>
-      </template>
+    <div class="online-split">
+      <div class="split-main">
+        <GridContainer
+          :items="onlineStore.comics"
+          :selectable="true"
+          :select-mode="selectMode"
+          :selected-ids="selectedIds"
+          :panel-mode="isWide"
+          @longpress="handleLongPress"
+          @select="handleSelect"
+          @open="openDetail"
+        >
+          <!-- 🟢 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
+          <template #header>
+            <div v-if="onlineStore.prevGid" class="top-load-bar">
+              <button
+                class="pill-btn"
+                :disabled="onlineStore.isLoading"
+                @click="onlineStore.loadBefore"
+              >
+                ⬆️ {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
+              </button>
+            </div>
+          </template>
 
-      <!-- 2. 底部插槽：向下滑动流式加载 -->
-      <template #footer>
-        <OnlineLoadBar
-          :is-loading="onlineStore.isLoading"
-          :has-more="onlineStore.hasMore"
-          :error="onlineStore.error"
-          @load-more="onlineStore.loadMore"
+          <!-- 2. 底部插槽：向下滑动流式加载 -->
+          <template #footer>
+            <OnlineLoadBar
+              :is-loading="onlineStore.isLoading"
+              :has-more="onlineStore.hasMore"
+              :error="onlineStore.error"
+              @load-more="onlineStore.loadMore"
+            />
+          </template>
+        </GridContainer>
+
+        <!-- 右下角悬浮操作球 -->
+        <FloatingToolbar
+          @refresh="initSearch"
+          @seek-change="(date) => onlineStore.seekToDate(date)"
         />
-      </template>
-    </GridContainer>
 
-    <!-- 右下角悬浮操作球 -->
-    <FloatingToolbar @refresh="initSearch" @seek-change="(date) => onlineStore.seekToDate(date)" />
+        <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
+        <BatchDownloadBar
+          v-if="selectMode"
+          :selected="selectedTargets"
+          @select-all="toggleSelectAll"
+          @close="handleBatchClose"
+        />
+      </div>
+
+      <!-- 右侧内嵌详情面板（仅宽屏桌面渲染） -->
+      <OnlineDetailPanel
+        v-if="isWide"
+        :open="isPanelOpen"
+        :gid="panelGid"
+        :token="panelToken"
+        @close="closePanel"
+      />
+    </div>
   </div>
 </template>
 

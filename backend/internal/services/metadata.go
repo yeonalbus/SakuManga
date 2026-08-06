@@ -6,8 +6,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"SakuHentai/internal/models"
@@ -161,19 +163,25 @@ func buildFullComicInfo(task *models.DownloadTask, detail *GalleryDetailResult, 
 		CommunityRating: fmt.Sprintf("%.1f", rating),
 	}
 
+	publishTime := ""
+	if detail != nil {
+		publishTime = detail.UpdatedAt // 在线 Posted 日期（问题1/2 发布时间来源）
+	}
+
 	jsonMeta := EHMetadataJSON{
-		GID:       gid,
-		Token:     token,
-		ParentGID: parentGID,
-		Title:     title,
-		TitleJpn:  titleJpn,
-		Category:  category,
-		Uploader:  uploader,
-		Rating:    rating,
-		FileCount: pageCount,
-		Filesize:  filesize,
-		Expunged:  false,
-		Tags:      tags,
+		GID:         gid,
+		Token:       token,
+		ParentGID:   parentGID,
+		Title:       title,
+		TitleJpn:    titleJpn,
+		Category:    category,
+		Uploader:    uploader,
+		Rating:      rating,
+		FileCount:   pageCount,
+		Filesize:    filesize,
+		Expunged:    false,
+		Tags:        tags,
+		PublishTime: publishTime,
 	}
 
 	return xmlMeta, jsonMeta
@@ -193,18 +201,232 @@ type EHMetadataJSON struct {
 	Filesize  int64       `json:"filesize"`
 	Expunged  bool        `json:"expunged"`
 	Tags      []string    `json:"tags"`
+	// 发布时间，兼容两种序列化 key：
+	// E-H 官方 metadata 用 publish_time；JHentai 序列化（用户贴的样例）用 publishTime
+	PublishTime    string `json:"publish_time,omitempty"`
+	PublishTimeAlt string `json:"publishTime,omitempty"`
 }
 
 // Struct 用于存储解析汇总结果
 type ParsedMetadata struct {
-	Title     string
-	Category  string
-	Tags      []string
-	GID       string // E 站画廊 GID（metadata/ametadata 内）
-	Token     string
-	ParentGID string
-	FileCount int
-	FileSize  int64
+	Title       string
+	TitleJpn    string // 日文原名（问题2，来自 metadata title_jpn / ComicInfo AlternateSeries）
+	Category    string
+	Tags        []string
+	GID         string // E 站画廊 GID（metadata/ametadata 内）
+	Token       string
+	ParentGID   string
+	FileCount   int
+	FileSize    int64
+	PublishTime string // 发布时间字符串（问题1）
+}
+
+// applyJSONMeta 将 EH/JH metadata JSON 合并进解析结果
+func (r *ParsedMetadata) applyJSONMeta(jsonMeta EHMetadataJSON) {
+	if jsonMeta.Title != "" {
+		r.Title = jsonMeta.Title
+	}
+	if jsonMeta.TitleJpn != "" {
+		r.TitleJpn = jsonMeta.TitleJpn
+	}
+	if jsonMeta.Category != "" {
+		r.Category = jsonMeta.Category
+	}
+	if len(jsonMeta.Tags) > 0 {
+		r.Tags = append(r.Tags, jsonMeta.Tags...)
+	}
+	if r.GID == "" {
+		r.GID = jsonMeta.GID
+	}
+	if r.Token == "" {
+		r.Token = jsonMeta.Token
+	}
+	if r.ParentGID == "" {
+		r.ParentGID = jsonMeta.ParentGID
+	}
+	if jsonMeta.FileCount > 0 {
+		r.FileCount = jsonMeta.FileCount
+	}
+	if jsonMeta.Filesize > 0 {
+		r.FileSize = jsonMeta.Filesize
+	}
+	if r.PublishTime == "" {
+		r.PublishTime = jsonMeta.PublishTime
+	}
+	if r.PublishTime == "" {
+		r.PublishTime = jsonMeta.PublishTimeAlt
+	}
+}
+
+// parseEHJSONMetadata 从 metadata / ametadata 字节流中稳健提取字段（读盘路径）。
+//
+// 兼容三种实际格式：
+//  1. 本程序写入的平铺格式：{"gid":1509130,"token":"...","tags":["a","b"],...}
+//  2. JHentai 归档 ametadata（平铺，tags 为逗号分隔字符串、gid 为数字）：
+//     {"gid":4092682,"token":"...","title":"...","pageCount":21,"size":192413696,"publishTime":"...","tags":"a,b,..."}
+//  3. JHentai 画廊 metadata（gallery 包裹层 + images 字符串）：
+//     {"gallery":{"gid":1509130,"token":"...","title":"...","tags":"a,b,...","oldVersionGalleryUrl":"..."},"images":"[...]"}
+//
+// 背景（问题3 根因）：此前用强类型 json.Unmarshal 直接反序列化，而实际文件里
+//   - tags 是「逗号分隔字符串」而结构体是 []string → 类型不匹配 → 整体解析失败；
+//   - gid 是「数字」而结构体是 string → 同样整体失败；
+//   - 画廊版还多一层 gallery 包裹。
+// 任一不匹配都会让 gid/token/title/tags 全部丢失，导致「同 GID 查重 / 更新检测」永远为 0。
+// 因此这里改用 map[string]json.RawMessage + 逐字段类型兼容提取。
+func parseEHJSONMetadata(data []byte) EHMetadataJSON {
+	meta := EHMetadataJSON{Tags: []string{}}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return meta
+	}
+	// 画廊 metadata 存在 gallery 包裹层 → 改从 gallery 内部提取（归档 ametadata 平铺，直接用 root）
+	src := root
+	if raw, ok := root["gallery"]; ok {
+		var g map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &g); err == nil {
+			src = g
+		}
+	}
+
+	// 字符串字段：兼容「gid/token 为数字」「title 为 sanitizedTitle」等别名与类型混用
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			raw, ok := src[k]
+			if !ok {
+				continue
+			}
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil {
+				return strings.TrimSpace(s)
+			}
+			var n json.Number
+			if err := json.Unmarshal(raw, &n); err == nil {
+				return n.String()
+			}
+		}
+		return ""
+	}
+	// 整数字段：兼容 pageCount/filecount、filesize/size 别名，以及字符串数字
+	getInt := func(keys ...string) int {
+		for _, k := range keys {
+			raw, ok := src[k]
+			if !ok {
+				continue
+			}
+			var n int
+			if err := json.Unmarshal(raw, &n); err == nil {
+				return n
+			}
+			if v, err := strconv.Atoi(getStr(k)); err == nil {
+				return v
+			}
+		}
+		return 0
+	}
+	// 标签字段：兼容 JSON 数组与逗号分隔字符串两种形态
+	getTags := func() []string {
+		raw, ok := src["tags"]
+		if !ok {
+			return nil
+		}
+		var arr []string
+		if err := json.Unmarshal(raw, &arr); err == nil {
+			return arr
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			parts := strings.Split(s, ",")
+			out := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if t := strings.TrimSpace(p); t != "" {
+					out = append(out, t)
+				}
+			}
+			return out
+		}
+		return nil
+	}
+
+	meta.GID = getStr("gid")
+	meta.Token = getStr("token")
+	meta.ParentGID = getStr("parent_gid", "parentGID")
+	meta.Title = getStr("title", "sanitizedTitle")
+	meta.TitleJpn = getStr("title_jpn", "titleJpn")
+	meta.Category = getStr("category")
+	meta.Uploader = getStr("uploader")
+	meta.Tags = getTags()
+	meta.FileCount = getInt("pageCount", "filecount")
+	meta.Filesize = int64(getInt("filesize", "size"))
+	meta.PublishTime = getStr("publish_time")
+	meta.PublishTimeAlt = getStr("publishTime")
+	// 画廊下载：父画廊关系编码在 oldVersionGalleryUrl 中（https://.../g/<parent_gid>/<token>/）
+	if meta.ParentGID == "" {
+		if u := getStr("oldVersionGalleryUrl"); u != "" {
+			meta.ParentGID = extractGIDFromURL(u)
+		}
+	}
+	return meta
+}
+
+// extractGIDTokenFromURL 从画廊 URL（https://exhentai.org/g/<gid>/<token>/）提取 gid 与 token。
+func extractGIDTokenFromURL(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, s := range segs {
+		if s == "g" && i+2 < len(segs) {
+			return segs[i+1], segs[i+2]
+		}
+	}
+	return "", ""
+}
+
+func extractGIDFromURL(raw string) string {
+	gid, _ := extractGIDTokenFromURL(raw)
+	return gid
+}
+
+// applyXMLMeta 将 ComicInfo.xml 合并进解析结果
+func (r *ParsedMetadata) applyXMLMeta(xmlMeta ComicInfoXML) {
+	if r.Title == "" && xmlMeta.Title != "" {
+		r.Title = xmlMeta.Title
+	}
+	if r.TitleJpn == "" && xmlMeta.AlternateSeries != "" {
+		r.TitleJpn = xmlMeta.AlternateSeries
+	}
+	if r.Category == "" && xmlMeta.Genre != "" {
+		r.Category = xmlMeta.Genre
+	}
+	if xmlMeta.Tags != "" {
+		xmlTags := strings.Split(xmlMeta.Tags, ",")
+		for _, t := range xmlTags {
+			trimmed := strings.TrimSpace(t)
+			if trimmed != "" {
+				r.Tags = append(r.Tags, trimmed)
+			}
+		}
+	}
+	// 兜底：从 <Web>https://exhentai.org/g/<gid>/<token>/ 提取 gid/token——
+	// 兼容只有 ComicInfo.xml（第三方下载器/EHViewer）而 JSON 元数据缺失的文件夹。
+	if r.GID == "" || r.Token == "" {
+		if gid, token := extractGIDTokenFromURL(xmlMeta.Web); gid != "" {
+			if r.GID == "" {
+				r.GID = gid
+			}
+			if r.Token == "" {
+				r.Token = token
+			}
+		}
+	}
+	if r.FileCount == 0 && xmlMeta.PageCount > 0 {
+		r.FileCount = xmlMeta.PageCount
+	}
 }
 
 // 从散图文件夹中读取元数据
@@ -228,33 +450,8 @@ func ParseDirMetadata(dirPath string) *ParsedMetadata {
 		// A. 匹配 JSON 元数据 (metadata / ametadata / info.json 等)
 		if name == "metadata" || name == "ametadata" || name == "info.json" || strings.HasSuffix(name, ".json") {
 			if data, err := os.ReadFile(fullPath); err == nil {
-				var jsonMeta EHMetadataJSON
-				if err := json.Unmarshal(data, &jsonMeta); err == nil {
-					if jsonMeta.Title != "" {
-						result.Title = jsonMeta.Title
-					}
-					if jsonMeta.Category != "" {
-						result.Category = jsonMeta.Category
-					}
-					if len(jsonMeta.Tags) > 0 {
-						result.Tags = append(result.Tags, jsonMeta.Tags...)
-					}
-					if result.GID == "" {
-						result.GID = jsonMeta.GID
-					}
-					if result.Token == "" {
-						result.Token = jsonMeta.Token
-					}
-					if result.ParentGID == "" {
-						result.ParentGID = jsonMeta.ParentGID
-					}
-					if jsonMeta.FileCount > 0 {
-						result.FileCount = jsonMeta.FileCount
-					}
-					if jsonMeta.Filesize > 0 {
-						result.FileSize = jsonMeta.Filesize
-					}
-				}
+				// 稳健解析：兼容 JHentai 画廊(gallery 包裹层)/归档(平铺)格式与 tags 字符串/数组混用
+				result.applyJSONMeta(parseEHJSONMetadata(data))
 			}
 		}
 
@@ -263,21 +460,7 @@ func ParseDirMetadata(dirPath string) *ParsedMetadata {
 			if data, err := os.ReadFile(fullPath); err == nil {
 				var xmlMeta ComicInfoXML
 				if err := xml.Unmarshal(data, &xmlMeta); err == nil {
-					if result.Title == "" && xmlMeta.Title != "" {
-						result.Title = xmlMeta.Title
-					}
-					if result.Category == "" && xmlMeta.Genre != "" {
-						result.Category = xmlMeta.Genre
-					}
-					if xmlMeta.Tags != "" {
-						xmlTags := strings.Split(xmlMeta.Tags, ",")
-						for _, t := range xmlTags {
-							trimmed := strings.TrimSpace(t)
-							if trimmed != "" {
-								result.Tags = append(result.Tags, trimmed)
-							}
-						}
-					}
+					result.applyXMLMeta(xmlMeta)
 				}
 			}
 		}
@@ -318,52 +501,12 @@ func ParseZipMetadata(zipPath string) *ParsedMetadata {
 
 			// JSON 解析
 			if name != "comicinfo.xml" {
-				var jsonMeta EHMetadataJSON
-				if err := json.Unmarshal(data, &jsonMeta); err == nil {
-					if jsonMeta.Title != "" {
-						result.Title = jsonMeta.Title
-					}
-					if jsonMeta.Category != "" {
-						result.Category = jsonMeta.Category
-					}
-					if len(jsonMeta.Tags) > 0 {
-						result.Tags = append(result.Tags, jsonMeta.Tags...)
-					}
-					if result.GID == "" {
-						result.GID = jsonMeta.GID
-					}
-					if result.Token == "" {
-						result.Token = jsonMeta.Token
-					}
-					if result.ParentGID == "" {
-						result.ParentGID = jsonMeta.ParentGID
-					}
-					if jsonMeta.FileCount > 0 {
-						result.FileCount = jsonMeta.FileCount
-					}
-					if jsonMeta.Filesize > 0 {
-						result.FileSize = jsonMeta.Filesize
-					}
-				}
+				result.applyJSONMeta(parseEHJSONMetadata(data))
 			} else {
 				// XML 解析
 				var xmlMeta ComicInfoXML
 				if err := xml.Unmarshal(data, &xmlMeta); err == nil {
-					if result.Title == "" && xmlMeta.Title != "" {
-						result.Title = xmlMeta.Title
-					}
-					if result.Category == "" && xmlMeta.Genre != "" {
-						result.Category = xmlMeta.Genre
-					}
-					if xmlMeta.Tags != "" {
-						xmlTags := strings.Split(xmlMeta.Tags, ",")
-						for _, t := range xmlTags {
-							trimmed := strings.TrimSpace(t)
-							if trimmed != "" {
-								result.Tags = append(result.Tags, trimmed)
-							}
-						}
-					}
+					result.applyXMLMeta(xmlMeta)
 				}
 			}
 		}

@@ -52,7 +52,7 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 	m.mu.Unlock()
 
 	go func() {
-		count, err := scanDirectory(path, includeSubfolders, mode, progress)
+		count, err := scanDirectory(path, includeSubfolders, mode, progress, pathID)
 		progress.finish(err)
 		if err == nil {
 			// 扫描成功 → 回写路径记录的统计（供列表直接展示）

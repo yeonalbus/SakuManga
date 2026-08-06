@@ -184,7 +184,7 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 		})
 	})
 
-	totalPages := parseTotalPagesByCount(doc)
+	totalPages := parseTotalPages(doc)
 
 	// 8. 提取 Next 游标 (#dnext)
 	nextCursor := ""

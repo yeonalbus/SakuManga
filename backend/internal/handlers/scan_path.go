@@ -21,7 +21,9 @@ func GetScanPaths(c *gin.Context) {
 
 func AddScanPath(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
+		Path                string `json:"path"`
+		Name                string `json:"name,omitempty"`            // 可配置显示名（问题3 来源标签）
+		EnableOfflineUpdate *bool  `json:"enableOfflineUpdate"`        // 是否参与离线更新/维护查重（问题4）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的路径"})
@@ -41,11 +43,19 @@ func AddScanPath(c *gin.Context) {
 		}
 	}
 
+	// 新增路径默认开启离线更新/维护（D7）
+	enableOfflineUpdate := true
+	if req.EnableOfflineUpdate != nil {
+		enableOfflineUpdate = *req.EnableOfflineUpdate
+	}
+
 	newPath := models.ExtraScanPath{
 		// 纳秒时间戳，避免同一秒内添加多条路径时主键冲突被误报为“已存在”
-		ID:                fmt.Sprintf("path-%d", time.Now().UnixNano()),
-		Path:              cleanPath,
-		IncludeSubfolders: true,
+		ID:                  fmt.Sprintf("path-%d", time.Now().UnixNano()),
+		Path:                cleanPath,
+		Name:                req.Name,
+		IncludeSubfolders:   true,
+		EnableOfflineUpdate: enableOfflineUpdate,
 	}
 
 	if err := database.DB.Create(&newPath).Error; err != nil {
@@ -59,14 +69,28 @@ func AddScanPath(c *gin.Context) {
 func UpdateScanPath(c *gin.Context) {
 	id := c.Param("id")
 	var req struct {
-		IncludeSubfolders bool `json:"includeSubfolders"`
+		IncludeSubfolders   *bool  `json:"includeSubfolders"`
+		Name                string `json:"name,omitempty"`
+		EnableOfflineUpdate *bool  `json:"enableOfflineUpdate"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
 		return
 	}
 
-	database.DB.Model(&models.ExtraScanPath{}).Where("id = ?", id).Update("include_subfolders", req.IncludeSubfolders)
+	updates := map[string]interface{}{}
+	if req.IncludeSubfolders != nil {
+		updates["include_subfolders"] = *req.IncludeSubfolders
+	}
+	if req.Name != "" {
+		updates["name"] = req.Name
+	}
+	if req.EnableOfflineUpdate != nil {
+		updates["enable_offline_update"] = *req.EnableOfflineUpdate
+	}
+	if len(updates) > 0 {
+		database.DB.Model(&models.ExtraScanPath{}).Where("id = ?", id).Updates(updates)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 }
 

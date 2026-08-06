@@ -156,9 +156,35 @@ watch(
 
 const totalPages = computed(() => Math.ceil(filteredComics.value.length / pageSize) || 1)
 
+// 🟢 4. 时间排序（问题1：SegmentedControl + 升降序图标，前端本地排序）
+const sortOptions = [
+  { value: 'addedAt', label: '入库时间' },
+  { value: 'publishedAt', label: '发布时间' },
+  { value: 'fileModifiedAt', label: '修改时间' },
+  { value: 'updatedAt', label: '更新时间' },
+] as const
+type SortKey = (typeof sortOptions)[number]['value']
+const sortBy = ref<SortKey>('addedAt')
+const sortDesc = ref(true)
+
+// 空时间字段始终排最后（无论升降序）
+const sortedComics = computed(() => {
+  const dir = sortDesc.value ? 1 : -1
+  return [...filteredComics.value].sort((a, b) => {
+    const ra = (a as unknown as Record<string, unknown>)[sortBy.value]
+    const rb = (b as unknown as Record<string, unknown>)[sortBy.value]
+    const av = ra ? new Date(ra as string).getTime() : Number.NEGATIVE_INFINITY
+    const bv = rb ? new Date(rb as string).getTime() : Number.NEGATIVE_INFINITY
+    if (!isFinite(av) && !isFinite(bv)) return 0
+    if (!isFinite(av)) return 1
+    if (!isFinite(bv)) return -1
+    return (av - bv) * dir
+  })
+})
+
 const currentPageItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  return filteredComics.value.slice(start, start + pageSize)
+  return sortedComics.value.slice(start, start + pageSize)
 })
 
 const handlePageChange = (newPage: number) => {
@@ -181,6 +207,28 @@ const handlePageChange = (newPage: number) => {
         🗑️ 删除
       </button>
       <button class="toolbar-btn" @click="exitSelectMode">取消</button>
+    </div>
+
+    <!-- 时间排序控件（问题1） -->
+    <div class="sort-controls">
+      <div class="segmented-control">
+        <button
+          v-for="opt in sortOptions"
+          :key="opt.value"
+          class="seg-option"
+          :class="{ active: sortBy === opt.value }"
+          @click="((sortBy = opt.value), (currentPage = 1))"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+      <button
+        class="sort-direction"
+        :title="sortDesc ? '切换为升序' : '切换为降序'"
+        @click="((sortDesc = !sortDesc), (currentPage = 1))"
+      >
+        {{ sortDesc ? '↓' : '↑' }}
+      </button>
     </div>
 
     <GridContainer
@@ -259,5 +307,57 @@ const handlePageChange = (newPage: number) => {
 
 .toolbar-btn.danger:hover:not(:disabled) {
   background-color: rgba(255, 117, 136, 0.12);
+}
+
+/* 时间排序控件（问题1） */
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.segmented-control {
+  display: inline-flex;
+  background-color: #26262a;
+  border: 1px solid #3a3a3f;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg-option {
+  background: transparent;
+  border: none;
+  color: #9a9aa2;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.seg-option:hover {
+  color: #e0e0e0;
+}
+
+.seg-option.active {
+  background-color: #3d5afe;
+  color: #ffffff;
+}
+
+.sort-direction {
+  background-color: #26262a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a3f;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.sort-direction:hover {
+  background-color: #333338;
 }
 </style>

@@ -1,1 +1,0 @@
-import{I as e,K as t}from"./_plugin-vue_export-helper-DBPzgIMx.js";import{t as n}from"./storage-DtaEsjM5.js";var r=t(n(`app_view_mode`,`card`));e(r,e=>{localStorage.setItem(`app_view_mode`,JSON.stringify(e))});var i=()=>{r.value=r.value===`card`?`compact`:`card`};export{r as n,i as t};

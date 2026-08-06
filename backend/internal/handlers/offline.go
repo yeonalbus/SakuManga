@@ -189,7 +189,7 @@ func (h *OfflineHandler) DownloadUpdate(c *gin.Context) {
 
 // GetMaintainDedup 运行维护查重 GET /api/v1/offline/maintain
 func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
-	result, err := services.MaintainDedup(h.db)
+	result, err := services.MaintainDedup(h.db, h.ehService)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

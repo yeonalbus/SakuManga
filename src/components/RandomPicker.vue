@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import ItemCard from '@/components/ItemCard.vue'
 import { fetchRandomComicsApi } from '@/api/comic'
@@ -14,7 +14,6 @@ import type {
   RandomComicParams,
 } from '@/types/comic'
 
-const router = useRouter()
 const route = useRoute()
 const modeStore = useModeStore()
 const { toast } = useUI()
@@ -104,9 +103,22 @@ const handleStartDraw = async () => {
     if (useGlobalFilter.value) {
       const kw = (config.keyword || '').trim()
       if (kw) params.keyword = kw
-      // 分类仅在线生效（离线全库随机，避免误过滤）
-      if (scopeType.value !== 'offline' && config.activeCategories.length > 0) {
+      // 问题1：继承筛选抽屉的“多关键词队列”（在线由后端合并 f_search，离线按 AND 匹配）
+      if (config.keywords && config.keywords.length > 0) {
+        params.keywords = config.keywords.filter((k) => k.trim())
+      }
+      // 分类在线/离线均继承（问题6：离线抽卡不再跳过分类过滤）
+      if (config.activeCategories.length > 0) {
         params.categories = [...config.activeCategories]
+      }
+      // 语言筛选：离线按 disableLangFilter 决定是否应用（D11：language 可选继承）
+      if (
+        scopeType.value === 'offline' &&
+        config.language &&
+        config.language !== 'All' &&
+        !config.disableLangFilter
+      ) {
+        params.language = config.language
       }
       if (config.minRating > 0) params.minRating = config.minRating
       if (config.minPages && config.minPages > 0) params.minPages = config.minPages
@@ -134,19 +146,6 @@ const handleStartDraw = async () => {
     isSpinning.value = false
     hasDrawn.value = false
     toast.error(err instanceof Error ? err.message : '抽卡失败，请稍后重试')
-  }
-}
-
-// 点击跳转详情页
-const handleComicClick = (comic: ComicItem) => {
-  if (comic.source === 'online') {
-    // 在线模式：与 ItemCard 一致，同时传递 id (GID) 与 token
-    router.push({
-      path: '/online/detail',
-      query: { id: comic.id, token: comic.token || '' },
-    })
-  } else {
-    router.push(`/offline/detail?id=${comic.id}`)
   }
 }
 </script>
@@ -245,12 +244,7 @@ const handleComicClick = (comic: ComicItem) => {
 
           <!-- 真实抽出的卡片网格 -->
           <div v-else class="results-grid">
-            <div
-              v-for="(comic, index) in drawnComics"
-              :key="comic.id"
-              class="drawn-item-card"
-              @click="handleComicClick(comic)"
-            >
+            <div v-for="(comic, index) in drawnComics" :key="comic.id" class="drawn-item-card">
               <div class="card-badge">NO.{{ index + 1 }}</div>
               <ItemCard :comic="comic" mode="card" />
             </div>

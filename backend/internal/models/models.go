@@ -14,12 +14,14 @@ const (
 
 // ExtraScanPath 额外的画廊扫描路径（对应你之前写的扫描设置）
 type ExtraScanPath struct {
-	ID                string    `gorm:"primaryKey" json:"id"`
-	Path              string    `gorm:"uniqueIndex;not null" json:"path"`
-	IncludeSubfolders bool      `gorm:"default:true" json:"includeSubfolders"`
-	LastScanned       int64     `json:"lastScanned,omitempty"` // Unix 时间戳 (ms)
-	ComicCount        int       `json:"comicCount,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID                  string    `gorm:"primaryKey" json:"id"`
+	Path                string    `gorm:"uniqueIndex;not null" json:"path"`
+	Name                string    `json:"name,omitempty"`     // 可配置的显示名称（问题3：来源栏目标签）
+	IncludeSubfolders   bool      `gorm:"default:true" json:"includeSubfolders"`
+	EnableOfflineUpdate bool      `gorm:"default:true" json:"enableOfflineUpdate"` // 是否参与离线更新检测/本地维护查重（问题4）
+	LastScanned         int64     `json:"lastScanned,omitempty"`                   // Unix 时间戳 (ms)
+	ComicCount          int       `json:"comicCount,omitempty"`
+	CreatedAt           time.Time `json:"createdAt"`
 }
 
 // OfflineComic 本地离线漫画模型 (整合了 BaseComic 与 OfflineComic)
@@ -41,6 +43,13 @@ type OfflineComic struct {
 	FileSize    int64  `json:"fileSize"`              // 文件大小 (Bytes)
 	ReadCount   int    `gorm:"default:0" json:"readCount"`   // 本地阅读次数
 	NeedsUpdate bool   `gorm:"default:false" json:"needsUpdate"` // 需要更新（检测到新版本）
+
+	// ── 标题/时间/来源字段（问题1/2/3）──
+	TitleJpn       string     `gorm:"type:text" json:"titleJpn,omitempty"`          // 日文原名（metadata title_jpn / ComicInfo AlternateSeries），问题2 优先显示
+	AddedAt        time.Time  `json:"addedAt"`                                      // 首次入库时间（不同于 UpdatedAt 会被 CheckUpdates 覆盖，问题1 排序）
+	FileModifiedAt time.Time  `json:"fileModifiedAt,omitempty"`                     // 本地文件夹/归档文件修改时间（问题1 排序）
+	PublishedAt    *time.Time `json:"publishedAt,omitempty"`                        // 发布时间（metadata publishTime / ComicInfo 日期，问题1 排序）
+	ScanPathID     string     `gorm:"index" json:"scanPathID,omitempty"`            // 来源额外路径 ID；空 = 下载导入（问题3 来源识别）
 
 	// ── E 站下载/更新关联字段（扫描/更新/查重用）──
 	GID        string `gorm:"index" json:"gid,omitempty"`        // E 站画廊 GID（来自 metadata/ametadata）

@@ -74,16 +74,30 @@ func fromOfflineModel(c models.OfflineComic) RandomComicItem {
 	}
 }
 
+// trimKeywords 过滤掉多关键词队列中的空串与纯空白项。
+func trimKeywords(kws []string) []string {
+	out := make([]string, 0, len(kws))
+	for _, k := range kws {
+		if t := strings.TrimSpace(k); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // GetRandomComics 随机抽卡接口
 //
 // 查询参数:
-//   - count:      抽卡数量（默认 8，上限 50）
-//   - source:     范围 all | online | offline（默认 all）
-//   - keyword:    搜索关键词（在线走 f_search，离线匹配标题/标签）
-//   - categories: 分类过滤（仅在线生效，多次传递）
-//   - minRating:  最低评分（仅离线生效）
-//   - minPages:   最少页数（仅离线生效）
-//   - maxPages:   最多页数（仅离线生效）
+//   - count:       抽卡数量（默认 8，上限 50）
+//   - source:      范围 all | online | offline（默认 all）
+//   - keyword:     搜索关键词（在线走 f_search，离线匹配标题/标签）
+//   - keywords:    筛选抽屉的多关键词队列（在线与 keyword 合并进 f_search；离线须全部命中标题/标签）
+//   - categories:  分类过滤（在线/离线均生效，多次传递）
+//   - minRating:   最低评分（仅离线生效）
+//   - minPages:    最少页数（仅离线生效）
+//   - maxPages:    最多页数（仅离线生效）
+//   - language:    语言过滤（仅离线生效，All|Chinese|Japanese|English）
+//   - onlyDownloaded: 仅已下载（仅离线生效）
 func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 	account := middleware.CurrentAccount(c)
 
@@ -104,10 +118,13 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 	}
 
 	keyword := c.Query("keyword")
+	keywords := c.QueryArray("keywords") // 问题1：筛选抽屉的多关键词队列
 	activeCategories := c.QueryArray("categories")
 	minRating, _ := strconv.ParseFloat(c.DefaultQuery("minRating", "0"), 64)
 	minPages, _ := strconv.Atoi(c.DefaultQuery("minPages", "0"))
 	maxPages, _ := strconv.Atoi(c.DefaultQuery("maxPages", "0"))
+	language := c.DefaultQuery("language", "All")
+	onlyDownloaded := c.DefaultQuery("onlyDownloaded", "false") == "true"
 
 	// 2. 离线随机：SQL ORDER BY RANDOM() 全库随机
 	randomOffline := func(limit int) []RandomComicItem {
@@ -115,6 +132,15 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 		if kw := strings.TrimSpace(keyword); kw != "" {
 			like := "%" + kw + "%"
 			q = q.Where("title LIKE ? OR tags LIKE ?", like, like)
+		}
+		// 问题1：多关键词队列按 AND 语义匹配（须全部命中标题或标签，与 OfflineHome 一致）
+		for _, raw := range keywords {
+			kw := strings.TrimSpace(raw)
+			if kw == "" {
+				continue
+			}
+			like := "%" + kw + "%"
+			q = q.Where("(title LIKE ? OR tags LIKE ?)", like, like)
 		}
 		if minRating > 0 {
 			q = q.Where("rating >= ?", minRating)
@@ -124,6 +150,18 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 		}
 		if maxPages > 0 {
 			q = q.Where("page_count <= ?", maxPages)
+		}
+		// 问题6：离线随机继承全局筛选
+		if len(activeCategories) > 0 {
+			q = q.Where("category IN ?", activeCategories)
+		}
+		if lang := strings.TrimSpace(language); lang != "" && lang != "All" {
+			// 离线 tags 为 JSON 字符串数组，语言以 "language:xx" 形式存储
+			langTag := "language:" + strings.ToLower(lang)
+			q = q.Where("tags LIKE ?", "%\""+langTag+"\"%")
+		}
+		if onlyDownloaded {
+			q = q.Where("is_downloaded = ?", true)
 		}
 
 		var rows []models.OfflineComic
@@ -143,8 +181,14 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			return nil, fmt.Errorf("请先绑定并保存 E 站账户凭证")
 		}
 		ehSetting := getEHSetting(h.db, account.ID)
+		// 问题1：在线把顶栏主词与筛选抽屉多关键词队列合并为一条 f_search（与 OnlineHome 一致）
+		mergedKw := strings.Join(
+			append([]string{strings.TrimSpace(keyword)}, trimKeywords(keywords)...),
+			" ",
+		)
+		mergedKw = strings.TrimSpace(mergedKw)
 		params := services.SearchParams{
-			Keyword:          keyword,
+			Keyword:          mergedKw,
 			ActiveCategories: activeCategories,
 		}
 		comics, err := h.ehService.FetchRandomGalleryList(account, params, ehSetting, limit)

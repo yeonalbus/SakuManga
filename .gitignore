@@ -50,3 +50,11 @@ backend/data/*.tmp
 
 # 单 exe 打包产物
 /SakuHentai.exe
+
+# 测试用漫画
+/MangaExamlpe
+/Test
+/JHentai
+
+# 编译文件
+backend/webui/dist/assets

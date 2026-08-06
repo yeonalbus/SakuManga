@@ -130,6 +130,11 @@ onMounted(runMaintain)
       </button>
     </div>
 
+    <div class="scope-hint">
+      💡 范围：默认查重所有离线漫画。可在「设置 → 额外扫描路径」中关闭某路径的「离线维护」开关，
+      该路径下的漫画将不参与本查重（下载导入的漫画始终参与）。
+    </div>
+
     <div v-if="isScanning" class="scanning-banner">
       <span class="spinner"></span>
       <div>
@@ -309,6 +314,17 @@ onMounted(runMaintain)
   border: 1px solid #007acc;
   border-radius: 8px;
   padding: 14px 16px;
+}
+.scope-hint {
+  margin: 4px 0 12px;
+  padding: 10px 14px;
+  background-color: rgba(61, 90, 254, 0.08);
+  border: 1px solid rgba(61, 90, 254, 0.35);
+  border-left: 3px solid #3d5afe;
+  border-radius: 6px;
+  color: #a8b0d8;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 .scanning-title {
   color: #fff;

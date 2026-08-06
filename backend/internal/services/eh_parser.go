@@ -123,6 +123,44 @@ func parseTotalPagesByCount(doc *goquery.Document) int {
 	return 1
 }
 
+// parseTotalPagesFromPager 从列表页底部翻页器提取总页数（问题2 根因修复）。
+//
+// E 站翻页器 (.ptt) 的每个页码链接形如 "?p=N"（N 为 0 基页索引），
+// 取其中最大的 N+1 即为总页数。首页（无关键词）不显示 "N results" 文案，
+// 此时这是唯一可靠的总页数来源——缺了它随机翻页永远落回第 1 页。
+func parseTotalPagesFromPager(doc *goquery.Document) int {
+	maxP := -1
+	doc.Find(".ptt a[href], table.ptt a[href]").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		u, err := url.Parse(href)
+		if err != nil {
+			return
+		}
+		p := u.Query().Get("p")
+		if p == "" {
+			return
+		}
+		if n, err := strconv.Atoi(p); err == nil && n > maxP {
+			maxP = n
+		}
+	})
+	if maxP >= 0 {
+		total := maxP + 1
+		log.Printf("[EH-DEBUG] 从底部翻页器提取总页数: %d 页", total)
+		return total
+	}
+	return 0
+}
+
+// parseTotalPages 综合判定总页数：优先翻页器（对首页/无结果文案页可靠），
+// 其次 "N results" 文案，最后回退默认第 1 页。
+func parseTotalPages(doc *goquery.Document) int {
+	if n := parseTotalPagesFromPager(doc); n > 0 {
+		return n
+	}
+	return parseTotalPagesByCount(doc) // 未提取到文案时其内部回退 1
+}
+
 var (
 	cssBgUrlRegex   = regexp.MustCompile(`url\(['"]?(.*?)['"]?\)`)
 	// 🟢 兼容形如 "-100px 0", "-100px 0px", "-100px -130px" 的情况

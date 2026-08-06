@@ -1,1 +1,0 @@
-import{D as e,f as t,l as n,t as r}from"./_plugin-vue_export-helper-DBPzgIMx.js";var i={};function a(r,i){return e(),t(`div`,null,[...i[0]||=[n(`h1`,null,`挖藕，页面找不到惹`,-1)]])}var o=r(i,[[`render`,a]]);export{o as default};

@@ -54,6 +54,12 @@ const modalState = reactive({
  */
 function openModal<T = string | boolean | null>(options: ModalOptions): Promise<T> {
   return new Promise((resolve) => {
+    // 并发打开新弹窗时，先结束上一个仍 pending 的弹窗（以 null 作为取消值），
+    // 避免覆盖 modalState.resolve 导致第一个调用方的 Promise 永久挂起。
+    if (modalState.resolve) {
+      modalState.resolve(null)
+      modalState.resolve = null
+    }
     modalState.title = options.title || (options.mode === 'prompt' ? '请输入' : '提示')
     modalState.message = options.message
     modalState.inputValue = options.defaultValue || ''

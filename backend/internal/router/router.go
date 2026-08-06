@@ -96,6 +96,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/tags/suggest", handlers.QueryTagSuggestions)
 		api.GET("/tags/dictionary", handlers.GetTagDictionary)
 
+		// 前端错误日志上报（问题8 诊断辅助：浏览器无法写文件，由后端落盘到 logs/client.log）
+		api.POST("/client/log", handlers.ReportClientLog)
+
 		// E站账户与偏好设置（绑定当前登录用户自己的 E 站凭证）
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
 		api.POST("/account/settings", accountHandler.SaveAccountSettings)

@@ -12,8 +12,17 @@
 
     <!-- 添加新路径卡片 -->
     <div class="card add-card">
-      <div class="input-label">添加新路径</div>
+      <div class="input-label">
+        添加新路径（可填显示名作为来源标签，如「汉化合集」「自购存档」）
+      </div>
       <div class="input-group">
+        <input
+          v-model="inputName"
+          type="text"
+          placeholder="显示名（可选），留空则使用路径名"
+          class="setting-input name-input"
+          @keyup.enter="handleAdd"
+        />
         <input
           v-model="inputPath"
           type="text"
@@ -36,6 +45,37 @@
             <div class="path-title">
               <span class="folder-icon">📁</span>
               <span class="path-text" :title="item.path">{{ item.path }}</span>
+
+              <!-- 显示名（来源标签）：可设置/重命名（问题3） -->
+              <input
+                v-if="editingNameId === item.id"
+                v-model="editNameValue"
+                class="name-edit-input"
+                placeholder="来源标签，留空则清除"
+                @keyup.enter="saveName(item)"
+                @keyup.esc="cancelEditName"
+                @blur="saveName(item)"
+              />
+              <span v-else-if="item.name" class="path-name-badge" :title="'来源标签：' + item.name">
+                {{ item.name }}
+                <button
+                  class="name-edit-btn"
+                  @mousedown.prevent
+                  @click="startEditName(item)"
+                  title="重命名显示名"
+                >
+                  ✎
+                </button>
+              </span>
+              <button
+                v-else
+                class="name-set-btn"
+                @mousedown.prevent
+                @click="startEditName(item)"
+                title="设置显示名（来源标签），卡片与详情页来源栏目将显示它"
+              >
+                📛 起名
+              </button>
             </div>
 
             <!-- 扫描状态与元信息 -->
@@ -59,6 +99,24 @@
                   :checked="item.includeSubfolders"
                   @change="
                     handleToggleSubfolders(item.id, ($event.target as HTMLInputElement).checked)
+                  "
+                />
+                <span class="slider"></span>
+              </span>
+            </label>
+
+            <!-- 离线维护开关（问题4）：控制该路径是否参与「离线更新检测」与「本地维护查重」 -->
+            <label
+              class="toggle-container"
+              title="参与离线更新检测与本地维护查重；关闭后该路径下的漫画不会出现在「离线更新」与「维护查重」中（下载导入的漫画始终参与）"
+            >
+              <span class="toggle-label">离线维护</span>
+              <span class="toggle-switch">
+                <input
+                  type="checkbox"
+                  :checked="item.enableOfflineUpdate !== false"
+                  @change="
+                    handleToggleOfflineUpdate(item, ($event.target as HTMLInputElement).checked)
                   "
                 />
                 <span class="slider"></span>
@@ -163,6 +221,8 @@ import {
   fetchScanPaths,
   addScanPath,
   toggleSubfolders,
+  updateScanPathName,
+  updateEnableOfflineUpdate,
   removeScanPath,
   startScanPath,
   refreshScanProgress,
@@ -214,16 +274,19 @@ watch(
 )
 
 const inputPath = ref('')
+const inputName = ref('')
 
 // 1. 添加路径（addScanPath 返回 Promise<boolean>，必须 await 才能正确判断）
+//    可选填写「显示名」作为来源标签（问题3：卡片/详情页来源栏目展示该名称）
 const handleAdd = async () => {
   const path = inputPath.value.trim()
   if (!path) return
 
   try {
-    const ok = await addScanPath(path)
+    const ok = await addScanPath(path, inputName.value)
     if (ok) {
       inputPath.value = ''
+      inputName.value = ''
       toast.success('路径已添加')
     }
   } catch (err) {
@@ -234,9 +297,36 @@ const handleAdd = async () => {
   }
 }
 
+// 1.1 显示名编辑（问题3）：铅笔进入编辑态，Enter/失去焦点保存，Esc 取消
+const editingNameId = ref('')
+const editNameValue = ref('')
+
+const startEditName = (item: ExtraScanPath) => {
+  editingNameId.value = item.id
+  editNameValue.value = item.name || ''
+}
+
+const saveName = (item: ExtraScanPath) => {
+  if (editingNameId.value !== item.id) return
+  updateScanPathName(item.id, editNameValue.value)
+  editingNameId.value = ''
+  editNameValue.value = ''
+}
+
+const cancelEditName = () => {
+  editingNameId.value = ''
+  editNameValue.value = ''
+}
+
 // 2. 切换子文件夹开关
 const handleToggleSubfolders = (id: string, value: boolean) => {
   toggleSubfolders(id, value)
+}
+
+// 2.1 切换「离线维护」开关（问题4）：该路径是否参与离线更新检测/本地维护查重
+const handleToggleOfflineUpdate = (item: ExtraScanPath, value: boolean) => {
+  updateEnableOfflineUpdate(item.id, value)
+  toast.success(value ? '该路径已开启离线维护' : '该路径已关闭离线维护')
 }
 
 // 3. 移除路径
@@ -348,6 +438,7 @@ const formatTime = (ts: number) => {
 
 .input-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -417,6 +508,62 @@ const formatTime = (ts: number) => {
   text-overflow: ellipsis;
 }
 
+/* 显示名（来源标签）相关样式（问题3） */
+.name-input {
+  flex: 1 1 100%;
+}
+
+.name-edit-input {
+  flex: 1;
+  min-width: 120px;
+  background-color: #121214;
+  border: 1px solid #3d5afe;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #ffffff;
+  outline: none;
+}
+
+.path-name-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(61, 90, 254, 0.2);
+  border: 1px solid rgba(61, 90, 254, 0.5);
+  color: #9db0ff;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.name-edit-btn {
+  background: transparent;
+  border: none;
+  color: #9db0ff;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  line-height: 1;
+}
+
+.name-set-btn {
+  background: transparent;
+  border: 1px dashed #4a4a52;
+  color: #7a7a82;
+  border-radius: 10px;
+  font-size: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.name-set-btn:hover {
+  border-color: #3d5afe;
+  color: #9db0ff;
+}
+
 .path-meta {
   display: flex;
   align-items: center;
@@ -446,6 +593,8 @@ const formatTime = (ts: number) => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  row-gap: 6px;
   flex-shrink: 0;
 }
 

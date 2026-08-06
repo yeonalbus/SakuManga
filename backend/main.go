@@ -52,6 +52,13 @@ func main() {
 	// 1. 初始化数据库
 	database.InitDB()
 
+	// 1.1 打印数据库实际路径：服务已 chdir 到可执行文件所在目录，manga.db 与 exe 同目录存放。
+	//     ⚠️ 用 `go run` 启动时 exe 在 %TEMP% 临时目录，DB 也落在那里——看到与项目内 backend/manga.db
+	//     不一致属正常现象；如需固定位置，请用打包后的 SakuHentai.exe 启动（见 build-release.bat）。
+	if dbPath, err := filepath.Abs("manga.db"); err == nil {
+		log.Printf("[DB] 数据库路径: %s", dbPath)
+	}
+
 	// 2. 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 

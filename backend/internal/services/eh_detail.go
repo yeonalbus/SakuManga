@@ -1,16 +1,19 @@
 package services
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"SakuHentai/internal/models"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html"
 )
 
 // FetchGalleryDetail 请求并解析画廊详情页 (仅抓取 p=0 初始预览图与元数据)
@@ -65,16 +68,9 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}
 	subTitle := strings.TrimSpace(doc.Find("#gn").Text())
 
-	// 父画廊解析：详情页底部 "Parent gallery" 链接形如 <a id="parent_0" href="/g/1234567/abcdef/">…
-	parentGID := ""
-	doc.Find("a[id^='parent_']").Each(func(_ int, a *goquery.Selection) {
-		if parentGID != "" {
-			return
-		}
-		if href, exists := a.Attr("href"); exists {
-			parentGID = extractParentGID(href)
-		}
-	})
+	// ── 画廊关系解析（更新检测核心）：父画廊 / 子画廊 / 更新版 ──
+	// 磁盘元数据（ametadata/ComicInfo.xml）不含这些关系，必须从在线详情页 HTML 提取（见 parseGalleryRelations）。
+	parentGID, parentToken, newVersionGID, newVersionToken, children := parseGalleryRelations(doc)
 
 	rawCover := extractCoverURL(doc.Find("#gd1"))
 	proxiedCover := ""
@@ -203,24 +199,28 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}
 
 	return &GalleryDetailResult{
-		ID:             gid,
-		Token:          token,
-		ParentGID:      parentGID,
-		Title:          title,
-		SubTitle:       subTitle,
-		CoverURL:       proxiedCover,
-		Source:         "online",
-		Category:       category,
-		Uploader:       uploader,
-		Rating:         rating,
-		PageCount:      pageCount,
-		UpdatedAt:      updatedAt,
-		Tags:           tags,
-		PreviewPages:   previewPages,
-		Comments:       comments,
-		IsFavorite:     isFav,
-		FavIndex:       favIdx,
-		MaxPreviewPage: maxPreviewPage, // 💡 可以在 DTO 中新增此字段，方便前端感知总页数
+		ID:               gid,
+		Token:            token,
+		ParentGID:        parentGID,
+		ParentToken:      parentToken,
+		NewVersionGID:    newVersionGID,
+		NewVersionToken:  newVersionToken,
+		Children:         children,
+		Title:            title,
+		SubTitle:         subTitle,
+		CoverURL:         proxiedCover,
+		Source:           "online",
+		Category:         category,
+		Uploader:         uploader,
+		Rating:           rating,
+		PageCount:        pageCount,
+		UpdatedAt:        updatedAt,
+		Tags:             tags,
+		PreviewPages:     previewPages,
+		Comments:         comments,
+		IsFavorite:       isFav,
+		FavIndex:         favIdx,
+		MaxPreviewPage:   maxPreviewPage, // 💡 可以在 DTO 中新增此字段，方便前端感知总页数
 	}, nil
 }
 
@@ -253,19 +253,142 @@ func parseFavColorStyle(style string) int {
 	return -1
 }
 
-// extractParentGID 从 /g/{gid}/{token}/ 形式的 href 中提取父画廊 gid
-func extractParentGID(href string) string {
+// extractGIDTokenFromHref 从 /g/{gid}/{token}/ 形式的 href 中提取 gid 与 token
+//（兼容绝对 URL 与尾部查询参数，如 https://exhentai.org/g/4051934/1649c84977/?p=0）
+func extractGIDTokenFromHref(href string) (gid, token string) {
 	const prefix = "/g/"
 	idx := strings.Index(href, prefix)
 	if idx < 0 {
-		return ""
+		return "", ""
 	}
 	rest := href[idx+len(prefix):]
-	end := strings.Index(rest, "/")
-	if end <= 0 {
+	if q := strings.IndexAny(rest, "?#"); q >= 0 {
+		rest = rest[:q]
+	}
+	parts := strings.SplitN(rest, "/", 2)
+	gid = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		token = strings.TrimSpace(strings.TrimSuffix(parts[1], "/"))
+	}
+	return gid, token
+}
+
+// addedAtRegex 匹配 "newer versions" 列表中链接后的 ", added 2026-07-30 12:13" 发布时间。
+var addedAtRegex = regexp.MustCompile(`added\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})`)
+
+// parseGalleryRelations 解析详情页中的画廊关系：父画廊 / 更新版列表 / 子画廊。
+//
+// 说明（基于 MangaExamlpe/Page 真实详情页验证）：
+//  1. 父画廊：<a id="parent_0" href="/g/..."> 或 #gdd 元数据表中标签为 "Parent:" 的行。
+//  2. 更新版列表：真实页面中 "There are newer versions of this gallery available:" 横幅
+//     直接位于 <div id="gnd"> 内部（旧版 E 站页面也可能用 #dms 容器），它罗列**所有**更新版本，
+//     且按时间**从旧到新**排列（如 3990907 → [4012290(06-26), 4019697(06-29), 4051934(07-14), 4086937(07-30)]）。
+//     因此：Children = 全部更新版（从旧到新）；NewVersionGID = 最新版（最后一个），实现 A→C 一次到位。
+//  3. 子画廊：a[id^='child_'] 兜底（与 #gnd 更新版按 gid 去重合并）。
+func parseGalleryRelations(doc *goquery.Document) (parentGID, parentToken, newVersionGID, newVersionToken string, children []GalleryRelation) {
+	// 1) 父画廊
+	doc.Find("a[id^='parent_']").Each(func(_ int, a *goquery.Selection) {
+		if parentGID != "" {
+			return
+		}
+		if href, exists := a.Attr("href"); exists {
+			parentGID, parentToken = extractGIDTokenFromHref(href)
+		}
+	})
+	// #gdd 中 "Parent:" 行兜底（JHentai 的 parentGalleryUrl 来源）
+	if parentGID == "" {
+		doc.Find("#gdd tr").Each(func(_ int, tr *goquery.Selection) {
+			if parentGID != "" {
+				return
+			}
+			label := strings.TrimSpace(tr.Find("td.gdt1").Text())
+			if !strings.HasPrefix(label, "Parent") {
+				return
+			}
+			if href, ok := tr.Find("td.gdt2 a[href*='/g/']").First().Attr("href"); ok {
+				parentGID, parentToken = extractGIDTokenFromHref(href)
+			}
+		})
+	}
+
+	// 2) 更新版列表：优先 #gnd（真实页面 "There are newer versions" 容器，从旧到新罗列全部更新版），
+	//    兼容 #dms（旧版 E 站容器）与 a[id^='child_']，按 gid 去重。
+	children = make([]GalleryRelation, 0)
+	childSeen := map[string]bool{}
+	appendRelation := func(href, addedAt string) {
+		g, t := extractGIDTokenFromHref(href)
+		if g == "" || childSeen[g] {
+			return
+		}
+		childSeen[g] = true
+		children = append(children, GalleryRelation{GID: g, Token: t, AddedAt: addedAt})
+	}
+	doc.Find("#gnd").Each(func(_ int, gnd *goquery.Selection) {
+		gnd.Find("a[href*='/g/']").Each(func(_ int, a *goquery.Selection) {
+			href, _ := a.Attr("href")
+			appendRelation(href, extractAddedAt(a))
+		})
+	})
+	doc.Find("#dms a[href*='/g/']").Each(func(_ int, a *goquery.Selection) {
+		href, _ := a.Attr("href")
+		appendRelation(href, extractAddedAt(a))
+	})
+	doc.Find("a[id^='child_']").Each(func(_ int, a *goquery.Selection) {
+		href, _ := a.Attr("href")
+		appendRelation(href, "")
+	})
+
+	// 3) 更新目标 = 最新版（A→C 一次到位）：Children 最后一个（#gnd 从旧到新排列）
+	if newVersionGID == "" && len(children) > 0 {
+		last := children[len(children)-1]
+		newVersionGID, newVersionToken = last.GID, last.Token
+	}
+	return parentGID, parentToken, newVersionGID, newVersionToken, children
+}
+
+// extractAddedAt 提取 "newer versions" 列表中链接后文本节点 "added {date}" 的发布时间。
+// 真实结构：<a href="...">标题</a>, added 2026-07-30 12:13<br />
+func extractAddedAt(a *goquery.Selection) string {
+	if a.Length() == 0 || len(a.Nodes) == 0 {
 		return ""
 	}
-	return rest[:end]
+	if ns := a.Nodes[0].NextSibling; ns != nil && ns.Type == html.TextNode {
+		if m := addedAtRegex.FindStringSubmatch(ns.Data); len(m) > 1 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// GalleryRelationSummary 离线解析详情页 HTML 得到的关系汇总（供调试/测试工具与在线流程复用）
+type GalleryRelationSummary struct {
+	ParentGID       string            `json:"parentGID"`
+	ParentToken     string            `json:"parentToken"`
+	NewVersionGID   string            `json:"newVersionGID"`
+	NewVersionToken string            `json:"newVersionToken"`
+	Children        []GalleryRelation `json:"children"`
+}
+
+// ParseGalleryRelationsFromHTML 从本地 HTML 字节流解析画廊关系（无需网络，用于选择器验证与回归测试）
+func ParseGalleryRelationsFromHTML(data []byte) (*GalleryRelationSummary, error) {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	parentGID, parentToken, newVersionGID, newVersionToken, children := parseGalleryRelations(doc)
+	return &GalleryRelationSummary{
+		ParentGID:       parentGID,
+		ParentToken:     parentToken,
+		NewVersionGID:   newVersionGID,
+		NewVersionToken: newVersionToken,
+		Children:        children,
+	}, nil
+}
+
+// extractParentGID 从 /g/{gid}/{token}/ 形式的 href 中提取父画廊 gid（兼容旧调用）
+func extractParentGID(href string) string {
+	gid, _ := extractGIDTokenFromHref(href)
+	return gid
 }
 
 // FetchGalleryPreviews 抓取指定页码 (p=0, p=1...) 的预览图切片

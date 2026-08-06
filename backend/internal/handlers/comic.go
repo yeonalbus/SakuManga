@@ -15,6 +15,7 @@ import (
 
 type OfflineComicResponse struct {
 	models.OfflineComic
+	SourceLabel           string              `json:"sourceLabel,omitempty"` // 来源标签（问题3：额外路径 Name；空=下载导入）
 	Tags                  []*services.TagItem `json:"tags"`                  // 展示用（合并后的翻译结果）
 	TagRaws               []string            `json:"tagRaws"`               // 与 Tags 一一对应的原始 tag 字符串（删除时精确匹配）
 	TagSources            []string            `json:"tagSources"`            // 与 Tags 一一对应的来源：online | local
@@ -44,9 +45,60 @@ func parseRawTags(tagsStr string) []string {
 
 // GetOfflineComics 获取离线漫画列表
 func GetOfflineComics(c *gin.Context) {
+	// 排序参数（问题1）：白名单映射，防止 SQL 注入
+	sortBy := c.DefaultQuery("sortBy", "updatedAt")
+	sortOrder := c.DefaultQuery("sortOrder", "desc")
+	colMap := map[string]string{
+		"updatedAt":      "updated_at",
+		"addedAt":        "added_at",
+		"publishedAt":    "published_at",
+		"fileModifiedAt": "file_modified_at",
+		"title":          "title",
+		"rating":         "rating",
+		"readCount":      "read_count",
+	}
+	col, ok := colMap[sortBy]
+	if !ok {
+		col = "updated_at"
+	}
+	dir := "DESC"
+	if strings.ToLower(sortOrder) == "asc" {
+		dir = "ASC"
+	}
+	q := database.DB
+	// NULL 时间排最后（旧数据无 added_at/published_at/file_modified_at）
+	if col == "added_at" || col == "published_at" || col == "file_modified_at" {
+		q = q.Order(col + " IS NULL")
+	}
+	q = q.Order(col + " " + dir)
+
 	var comics []models.OfflineComic
-	database.DB.Order("updated_at desc").Find(&comics)
-	c.JSON(http.StatusOK, comics)
+	q.Find(&comics)
+
+	// 额外路径 ID→Name 映射（问题3：来源标签）
+	pathNames := map[string]string{}
+	var paths []models.ExtraScanPath
+	database.DB.Select("id", "name").Find(&paths)
+	for _, p := range paths {
+		if p.Name != "" {
+			pathNames[p.ID] = p.Name
+		}
+	}
+
+	resp := make([]OfflineComicResponse, 0, len(comics))
+	for _, comic := range comics {
+		label := "下载"
+		if comic.ScanPathID != "" {
+			if name, ok := pathNames[comic.ScanPathID]; ok {
+				label = name
+			}
+		}
+		resp = append(resp, OfflineComicResponse{
+			OfflineComic: comic,
+			SourceLabel:  label,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetOfflineComicDetail 获取单个离线画廊详情

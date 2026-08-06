@@ -18,6 +18,9 @@ export interface ExtraScanPath {
   includeSubfolders: boolean
   lastScanned?: number
   comicCount?: number
+  // 问题3/4：可配置显示名（来源标签）+ 是否参与离线更新/维护查重
+  name?: string
+  enableOfflineUpdate?: boolean
 }
 
 /** 扫描模式：full=全文件夹扫描，incremental=增量式更新 */
@@ -140,12 +143,12 @@ export const fetchScanPaths = async () => {
   }
 }
 
-/** 添加新路径，成功返回 true */
-export const addScanPath = async (path: string): Promise<boolean> => {
+/** 添加新路径（可附带显示名），成功返回 true */
+export const addScanPath = async (path: string, name = ''): Promise<boolean> => {
   try {
     const newPath = await http<ExtraScanPath>('/scan-paths', {
       method: 'POST',
-      body: JSON.stringify({ path: path.trim() }),
+      body: JSON.stringify({ path: path.trim(), name: name.trim() }),
     })
     scanPaths.value.push(newPath)
     return true
@@ -167,6 +170,39 @@ export const toggleSubfolders = async (id: string, includeSubfolders: boolean) =
       })
     } catch (err) {
       console.error('更新子文件夹状态失败:', err)
+    }
+  }
+}
+
+/** 更新路径显示名（问题3：来源标签） */
+export const updateScanPathName = async (id: string, name: string) => {
+  const item = scanPaths.value.find((p) => p.id === id)
+  const trimmed = name.trim()
+  if (item) {
+    item.name = trimmed
+    try {
+      await http(`/scan-paths/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: trimmed }),
+      })
+    } catch (err) {
+      console.error('更新路径名称失败:', err)
+    }
+  }
+}
+
+/** 切换该路径是否参与离线更新/维护查重（问题4） */
+export const updateEnableOfflineUpdate = async (id: string, enabled: boolean) => {
+  const item = scanPaths.value.find((p) => p.id === id)
+  if (item) {
+    item.enableOfflineUpdate = enabled
+    try {
+      await http(`/scan-paths/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ enableOfflineUpdate: enabled }),
+      })
+    } catch (err) {
+      console.error('更新离线维护开关失败:', err)
     }
   }
 }

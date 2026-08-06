@@ -7,6 +7,7 @@ import OfflineSidebar from '@/components/OfflineSidebar.vue' // 引入两个侧�
 import TopBar from '@/components/TopBar.vue' // 引入组合好的顶栏
 import GlobalToast from '@/components/common/GlobalToast.vue'
 import GlobalModal from '@/components/common/GlobalModal.vue'
+import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
 import { useTagStore } from '@/stores/tagStore'
 import { useUserStore } from '@/stores/userStore'
 import { useModeStore } from '@/stores/modeStore'
@@ -45,40 +46,46 @@ watch(
   </div>
 
   <div v-if="userStore.isAuthenticated" class="app-container">
-    <!-- 左侧导航栏 -->
-    <aside class="sidebar">
-      <div class="logo-area">
-        <span class="logo">E-Manager</span>
-        <ModeToggle />
-      </div>
-
-      <!-- 导航菜单 -->
-      <nav class="nav-menu">
-        <!-- 在线/离线菜单，用 v-if / v-else 切换对应的组件 -->
-        <OnlineSidebar v-if="modeStore.isOnline" />
-        <OfflineSidebar v-else />
-        <!-- 全局通用的系统菜单与历史记录：放在侧边栏底部或独立组里 -->
-        <div class="nav-group">
-          <span class="group-title">⚙️ 系统</span>
-          <router-link to="/downloads">下载列表</router-link>
-          <router-link to="/settings">系统设置</router-link>
+    <!-- 左侧导航栏（错误边界包裹：单区渲染错误不影响其他区域） -->
+    <ErrorBoundary>
+      <aside class="sidebar">
+        <div class="logo-area">
+          <span class="logo">E-Manager</span>
+          <ModeToggle />
         </div>
-      </nav>
-    </aside>
+
+        <!-- 导航菜单 -->
+        <nav class="nav-menu">
+          <!-- 在线/离线菜单，用 v-if / v-else 切换对应的组件 -->
+          <OnlineSidebar v-if="modeStore.isOnline" />
+          <OfflineSidebar v-else />
+          <!-- 全局通用的系统菜单与历史记录：放在侧边栏底部或独立组里 -->
+          <div class="nav-group">
+            <span class="group-title">⚙️ 系统</span>
+            <router-link to="/downloads">下载列表</router-link>
+            <router-link to="/settings">系统设置</router-link>
+          </div>
+        </nav>
+      </aside>
+    </ErrorBoundary>
 
     <!-- 2. 右侧主体包装层（包含顶栏 + 内容区） -->
     <div class="right-wrapper">
-      <!-- 顶部操作栏 直接调用整合好的顶栏组件 -->
-      <TopBar />
+      <!-- 顶部操作栏 直接调用整合好的顶栏组件（搜索栏在顶栏内，错误边界兜底） -->
+      <ErrorBoundary>
+        <TopBar />
+      </ErrorBoundary>
 
       <!-- 页面主体显示区 -->
-      <main id="main-content" class="main-content">
-        <router-view v-slot="{ Component }">
-          <keep-alive>
-            <component :is="Component" :key="$route.fullPath" />
-          </keep-alive>
-        </router-view>
-      </main>
+      <ErrorBoundary>
+        <main id="main-content" class="main-content">
+          <router-view v-slot="{ Component }">
+            <keep-alive>
+              <component :is="Component" :key="$route.fullPath" />
+            </keep-alive>
+          </router-view>
+        </main>
+      </ErrorBoundary>
     </div>
   </div>
 

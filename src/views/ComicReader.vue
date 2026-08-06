@@ -186,7 +186,12 @@ const loadComicPages = async () => {
         '找不到该漫画',
       )
       if (confirmed) {
-        await fetchOfflineComics()
+        // 刷新失败也要保证能返回，避免阅读器卡死在该错误态
+        try {
+          await fetchOfflineComics()
+        } catch (refreshErr) {
+          console.error('刷新离线列表失败:', refreshErr)
+        }
         router.back()
       }
       isLoading.value = false
@@ -338,7 +343,8 @@ const handleNextInQueue = async () => {
     if (confirmed) {
       toast.success(`自动无缝切入：《${nextComic.title}》`)
 
-      // 使用 push 入栈跳转，返回时可按 1→2→3 栈式回退（replace 会破坏历史栈）
+      // 问题5：连续切本用 replace（阅读器在历史栈上始终只有一帧），
+      // 退出按钮 back() 才能一步回到进入阅读前的页面，而不是逐本回退。
       const query: Record<string, string> = {
         id: nextComic.id,
         source: nextComic.source,
@@ -346,7 +352,7 @@ const handleNextInQueue = async () => {
       if (nextComic.source === 'online') {
         query.token = (nextComic as OnlineComic).token || ''
       }
-      router.push({ path: '/reader', query })
+      router.replace({ path: '/reader', query })
     }
   } else {
     // 队列中已经没有更多本子了

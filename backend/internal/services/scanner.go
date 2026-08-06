@@ -235,8 +235,9 @@ func collectCandidates(rootPath string, includeSubfolders bool) ([]scanCandidate
 // ─────────────────────────────────────────────────────────────
 
 // saveComic 处理单个候选条目：解析元数据并入库。
+// scanPathID 为来源额外扫描路径 ID；空字符串 = 下载导入（问题3 来源识别）。
 // 返回是否真正写入（增量模式下已存在的路径 / 同 gid 冲突跳过的会返回 false）。
-func saveComic(localPath string, isDir bool, incremental bool) bool {
+func saveComic(localPath string, isDir bool, incremental bool, scanPathID string) bool {
 	title := filepath.Base(localPath)
 	if !isDir {
 		title = strings.TrimSuffix(title, filepath.Ext(title))
@@ -250,10 +251,11 @@ func saveComic(localPath string, isDir bool, incremental bool) bool {
 		meta = ParseZipMetadata(localPath)
 	}
 
-	// 优先使用元数据中的标题与分类
+	// 优先使用元数据中的标题与分类（问题2：titleJpn 单独保留，供日语优先显示）
 	if meta.Title != "" {
 		title = meta.Title
 	}
+	titleJpn := meta.TitleJpn
 	category := "Doujinshi"
 	if meta.Category != "" {
 		category = meta.Category
@@ -268,6 +270,7 @@ func saveComic(localPath string, isDir bool, incremental bool) bool {
 
 	pageCount := 0
 	var fileSize int64
+	fileModifiedAt := time.Time{}
 	if isDir {
 		entries, _ := os.ReadDir(localPath)
 		for _, entry := range entries {
@@ -277,12 +280,22 @@ func saveComic(localPath string, isDir bool, incremental bool) bool {
 			if !entry.IsDir() {
 				if fi, err := entry.Info(); err == nil {
 					fileSize += fi.Size()
+					if fi.ModTime().After(fileModifiedAt) {
+						fileModifiedAt = fi.ModTime()
+					}
 				}
+			}
+		}
+		// 目录自身修改时间兜底（问题1）
+		if fileModifiedAt.IsZero() {
+			if fi, err := os.Stat(localPath); err == nil {
+				fileModifiedAt = fi.ModTime()
 			}
 		}
 	} else {
 		if fi, err := os.Stat(localPath); err == nil {
 			fileSize = fi.Size()
+			fileModifiedAt = fi.ModTime()
 		}
 	}
 
@@ -324,26 +337,71 @@ func saveComic(localPath string, isDir bool, incremental bool) bool {
 	if !isDir {
 		sourceMode = "archive"
 	}
-	comic := models.OfflineComic{
-		ID:           comicID,
-		Title:        title,
-		CoverURL:     coverURL,
-		Source:       models.SourceOffline,
-		Category:     category,             // 写入解析出的分类
-		Tags:         string(tagsJSON),     // 写入解析出的多元标签数组 JSON
-		PageCount:    pageCount,
-		UpdatedAt:    time.Now(),
-		IsDownloaded: true,
-		LocalPath:    localPath,
-		FileSize:     fileSize,
-		GID:          meta.GID,
-		Token:        meta.Token,
-		ParentGID:    meta.ParentGID,
-		SourceMode:   sourceMode,
+
+	// 首次入库时间：已存在记录保留原值（AddedAt 与 UpdatedAt 不同，不会被 CheckUpdates 覆盖，问题1）
+	addedAt := time.Now()
+	var existingAdded models.OfflineComic
+	if err := database.DB.Select("added_at").Where("local_path = ?", localPath).First(&existingAdded).Error; err == nil && !existingAdded.AddedAt.IsZero() {
+		addedAt = existingAdded.AddedAt
 	}
 
-	database.DB.Save(&comic)
+	// 发布时间：metadata publishTime / ComicInfo 日期（问题1 排序）
+	publishedAt := parsePublishTime(meta.PublishTime)
+
+	comic := models.OfflineComic{
+		ID:             comicID,
+		Title:          title,
+		TitleJpn:       titleJpn,
+		CoverURL:       coverURL,
+		Source:         models.SourceOffline,
+		Category:       category,             // 写入解析出的分类
+		Tags:           string(tagsJSON),     // 写入解析出的多元标签数组 JSON
+		PageCount:      pageCount,
+		UpdatedAt:      time.Now(),
+		AddedAt:        addedAt,
+		FileModifiedAt: fileModifiedAt,
+		PublishedAt:    publishedAt,
+		IsDownloaded:   true,
+		LocalPath:      localPath,
+		FileSize:       fileSize,
+		ScanPathID:     scanPathID, // 来源额外路径 ID；空 = 下载导入（问题3）
+		GID:            meta.GID,
+		Token:          meta.Token,
+		ParentGID:      meta.ParentGID,
+		SourceMode:     sourceMode,
+	}
+
+	// 问题3修复：捕获入库错误，避免「扫描发现 N 本」与实际落库数量不一致的静默失败
+	if err := database.DB.Save(&comic).Error; err != nil {
+		log.Printf("%s [scan] 入库失败 %q: %v", dlErrTag, localPath, err)
+		return false
+	}
 	return true
+}
+
+// parsePublishTime 尽量解析发布时间字符串（问题1）。支持多种格式：
+// JHentai "2016-05-05 14:00"、E-H Posted "07 June 2016, 14:00"、纯日期等。
+// 解析失败返回 nil（PublishedAt 置空，排序回退到其他时间字段）。
+func parsePublishTime(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	layouts := []string{
+		"2006-01-02 15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		"02 January 2006, 15:04",
+		"02 January 2006",
+		"January 2, 2006",
+		"2006/01/02 15:04",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return &t
+		}
+	}
+	return nil
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -351,8 +409,9 @@ func saveComic(localPath string, isDir bool, incremental bool) bool {
 // ─────────────────────────────────────────────────────────────
 
 // scanDirectory 扫描指定路径并入库，返回入库数量。
-// mode: "full" 全量 | "incremental" 增量；progress 可为 nil（不汇报进度）。
-func scanDirectory(rootPath string, includeSubfolders bool, mode string, progress *ScanProgress) (int, error) {
+// mode: "full" 全量 | "incremental" 增量；progress 可为 nil（不汇报进度）；
+// pathID 为来源额外扫描路径 ID（空 = 下载导入）。
+func scanDirectory(rootPath string, includeSubfolders bool, mode string, progress *ScanProgress, pathID string) (int, error) {
 	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
 		return 0, err
 	}
@@ -376,7 +435,7 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 		if progress != nil {
 			progress.setCurrentTitle(filepath.Base(cand.path))
 		}
-		if saveComic(cand.path, cand.isDir, incremental) {
+		if saveComic(cand.path, cand.isDir, incremental, pathID) {
 			comicCount++
 			if progress != nil {
 				progress.incFound()
@@ -392,7 +451,7 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 	return comicCount, nil
 }
 
-// ScanAndSaveDirectory 兼容旧调用：全量扫描，不汇报进度
+// ScanAndSaveDirectory 兼容旧调用：全量扫描，不汇报进度；pathID 为空（下载导入，问题3）
 func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) {
-	return scanDirectory(rootPath, includeSubfolders, "full", nil)
+	return scanDirectory(rootPath, includeSubfolders, "full", nil, "")
 }

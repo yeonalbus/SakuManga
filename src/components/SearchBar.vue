@@ -74,9 +74,11 @@ const searchHistory = ref<string[]>([])
 const loadSearchHistory = () => {
   try {
     const saved = localStorage.getItem('app_search_history')
-    searchHistory.value = saved
-      ? JSON.parse(saved)
-      : ['female:nun', 'language:chinese', 'full color']
+    const parsed = saved ? JSON.parse(saved) : ['female:nun', 'language:chinese', 'full color']
+    // 防御（问题8）：历史数据可能残留非字符串条目，统一清洗为字符串
+    searchHistory.value = Array.isArray(parsed)
+      ? parsed.filter((h): h is string => typeof h === 'string').slice(0, 10)
+      : []
   } catch {
     searchHistory.value = []
   }
@@ -89,7 +91,24 @@ const saveSearchHistory = () => {
 const filteredHistory = computed(() => {
   const kw = keyword.value.toLowerCase().trim()
   if (!kw) return searchHistory.value
-  return searchHistory.value.filter((h) => h.toLowerCase().includes(kw))
+  return searchHistory.value.filter((h) => typeof h === 'string' && h.toLowerCase().includes(kw))
+})
+
+// 联想渲染防御（问题8）：后端 /tags/suggest 返回异常条目时逐项清洗，
+// 避免 name/count 类型异常导致 TagChip 的 .replace() / toLocaleString() 抛错白屏。
+const safeSuggestedTags = computed<TagItem[]>(() => {
+  if (!Array.isArray(suggestedTags.value)) return []
+  return suggestedTags.value
+    .filter((t): t is TagItem => !!t && typeof t === 'object')
+    .map((t) => ({
+      namespace: typeof t.namespace === 'string' ? t.namespace : 'other',
+      key: typeof t.key === 'string' ? t.key : '',
+      name: typeof t.name === 'string' ? t.name : '',
+      intro: typeof t.intro === 'string' ? t.intro : undefined,
+      count: typeof t.count === 'number' && Number.isFinite(t.count) ? t.count : 0,
+    }))
+    .filter((t) => t.key !== '')
+    .slice(0, 8)
 })
 
 // 🔗 E-Hentai 直链 / 裸 gid/token 解析
@@ -197,7 +216,7 @@ onUnmounted(() => {
     </div>
 
     <div
-      v-if="isFocused && (filteredHistory.length > 0 || suggestedTags.length > 0)"
+      v-if="isFocused && (filteredHistory.length > 0 || safeSuggestedTags.length > 0)"
       class="search-dropdown"
     >
       <div v-if="filteredHistory.length > 0" class="dropdown-section">
@@ -223,11 +242,11 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="suggestedTags.length > 0" class="dropdown-section">
+      <div v-if="safeSuggestedTags.length > 0" class="dropdown-section">
         <div class="section-header">🔥 热门 Tag 推荐</div>
         <div class="vertical-tag-list">
           <div
-            v-for="tag in suggestedTags"
+            v-for="tag in safeSuggestedTags"
             :key="`${tag.namespace}:${tag.key}`"
             class="vertical-tag-item"
             @click="

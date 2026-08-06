@@ -212,7 +212,8 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		})
 	})
 
-	totalPages := parseTotalPagesByCount(doc)
+	// 问题2：优先从底部翻页器提取总页数（首页无 "N results" 文案时旧逻辑恒为 1）
+	totalPages := parseTotalPages(doc)
 
 	// 🟢 提取 Next 游标 (节点 ID 为 #dnext)
 	nextCursor := ""

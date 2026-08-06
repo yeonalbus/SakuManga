@@ -44,6 +44,14 @@ export interface OfflineComic extends BaseComic {
   fileSize?: number // 文件大小 (bytes)
   hasError?: boolean // 修正语义：标记是否有损坏或缺失页面 (原 needsUpdate)
   bookshelfId?: string // 关联的离线书架 ID
+
+  // ─── 问题1/2/3：标题、时间与来源字段 ───
+  titleJpn?: string // 日文原名（优先显示，问题2）
+  addedAt?: string // 首次入库时间（问题1 排序）
+  fileModifiedAt?: string // 本地文件夹/归档文件修改时间（问题1 排序）
+  publishedAt?: string | null // 发布时间（问题1 排序）
+  scanPathID?: string // 来源额外路径 ID；空=下载导入（问题3）
+  sourceLabel?: string // 来源标签（额外路径 Name；空=下载，问题3）
 }
 
 /** 本地书架定义 */
@@ -150,7 +158,8 @@ export interface FilterParams {
   minPages?: number
   maxPages?: number
   onlyDownloaded?: boolean
-  sortBy?: 'updatedAt' | 'title' | 'rating' | 'readCount'
+  sortBy?:
+    'updatedAt' | 'title' | 'rating' | 'readCount' | 'addedAt' | 'publishedAt' | 'fileModifiedAt'
   sortOrder?: 'asc' | 'desc'
 
   // ─── E-Hentai 高级筛选入参 ───
@@ -198,10 +207,13 @@ export interface RandomComicParams {
   count: number
   source: 'all' | 'online' | 'offline'
   keyword?: string
-  categories?: string[] // 仅在线生效
+  keywords?: string[] // 筛选抽屉的多关键词队列（问题1：随机抽卡继承）
+  categories?: string[] // 在线/离线均生效（问题6）
   minRating?: number // 仅离线生效
   minPages?: number // 仅离线生效
   maxPages?: number // 仅离线生效
+  language?: string // 仅离线生效（All|Chinese|Japanese|English，问题6）
+  onlyDownloaded?: boolean // 预留（D11：离线随机忽略）
 }
 
 /** 随机抽卡响应 */

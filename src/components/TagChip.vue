@@ -28,11 +28,22 @@ const tagStore = useTagStore()
 const modeStore = useModeStore()
 
 // 统一转换为 TagData 结构
+// 防御（问题8）：后端数据异常（如 name/key 非字符串或为 null）时强制归一化，
+// 避免后续 .replace() 在非字符串上抛错，导致联想渲染整棵卸载白屏。
 const tagData = computed<TagData>(() => {
+  let base: TagData
   if (typeof props.tag === 'string') {
-    return tagStore.translate(props.tag)
+    base = tagStore.translate(props.tag)
+  } else if (props.tag && typeof props.tag === 'object') {
+    base = props.tag as TagData
+  } else {
+    base = { namespace: 'other', key: '', name: '' }
   }
-  return props.tag
+  return {
+    namespace: typeof base.namespace === 'string' ? base.namespace : 'other',
+    key: typeof base.key === 'string' ? base.key : '',
+    name: typeof base.name === 'string' ? base.name : '',
+  }
 })
 
 // 计算展示文案（含 Markdown 图标语法清洗）

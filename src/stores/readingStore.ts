@@ -67,7 +67,8 @@ export const getNextComicInQueue = (
   const currentIndex = list.findIndex((item) => item.id === currentId)
 
   if (currentIndex === -1) {
-    return list[0]
+    // 当前作品不在阅读清单中：不应错误地续读清单首本，直接返回 null（问题9）
+    return null
   }
 
   if (currentIndex >= list.length - 1) {

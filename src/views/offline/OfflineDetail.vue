@@ -18,6 +18,12 @@ interface OfflineDetailDTO {
   title: string
   coverUrl: string
   category?: string
+  // 问题2/3：日语原名与来源标签
+  titleJpn?: string
+  sourceLabel?: string
+  addedAt?: string
+  publishedAt?: string | null
+  fileModifiedAt?: string
   tags?: string[] | string
   tagRaws?: string[]
   tagSources?: ('online' | 'local')[]
@@ -309,7 +315,12 @@ const handleDelete = async () => {
           </span>
         </div>
 
-        <h1 class="title">{{ comic.title }}</h1>
+        <div class="title-wrap">
+          <h1 class="title">{{ comic.titleJpn || comic.title }}</h1>
+          <span v-if="comic.titleJpn && comic.titleJpn !== comic.title" class="subtitle">
+            {{ comic.title }}
+          </span>
+        </div>
 
         <div class="rating-box">
           <span class="label">我的个人评分：</span>
@@ -370,6 +381,10 @@ const handleDelete = async () => {
             <div class="info-item">
               <span class="k">最后扫描:</span>
               <span class="v">{{ comic.updatedAt }}</span>
+            </div>
+            <div class="info-item">
+              <span class="k">来源:</span>
+              <span class="v">{{ comic.sourceLabel || '下载' }}</span>
             </div>
             <div class="info-item full">
               <span class="k">存储路径:</span>
@@ -457,10 +472,22 @@ const handleDelete = async () => {
   gap: 16px;
 }
 
+.title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .title {
   font-size: 1.3rem;
   margin: 0;
   color: #fff;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #88888c;
+  word-break: break-all;
 }
 
 .rating-box {

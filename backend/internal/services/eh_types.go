@@ -54,25 +54,36 @@ type OnlineComicDTO struct {
 	ClickCount   int      `json:"clickCount,omitempty"`
 }
 
+// GalleryRelation 在线详情页中发现的关系画廊（父/子/新版）
+type GalleryRelation struct {
+	GID     string `json:"gid"`
+	Token   string `json:"token"`
+	AddedAt string `json:"addedAt,omitempty"` // "newer versions" 列表中的 added 发布时间（如 2026-07-30 12:13）
+}
+
 type GalleryDetailResult struct {
-	ID             string           `json:"id"`
-	Token          string           `json:"token"`
-	ParentGID      string           `json:"parentGID,omitempty"` // 父画廊 gid（更新检测用）
-	Title          string           `json:"title"`               // 主标题 (日文/原名)
-	SubTitle       string           `json:"subTitle"`            // 副标题 (英文/译名)
-	CoverURL       string           `json:"coverUrl"`
-	Source         string           `json:"source"` // "online"
-	Category       string           `json:"category"`
-	Uploader       string           `json:"uploader"`
-	Rating         float64          `json:"rating"`
-	PageCount      int              `json:"pageCount"`
-	UpdatedAt      string           `json:"updatedAt"`
-	Tags           []string         `json:"tags"`         // 格式: ["female:big breasts", "artist:okuma"]
-	PreviewPages   []PreviewPageDTO `json:"previewPages"` // 预览切片列表
-	Comments       []CommentDTO     `json:"comments"`     // 社区评论列表
-	IsFavorite     bool             `json:"isFavorite"`
-	FavIndex       *int             `json:"favIndex"`
-	MaxPreviewPage int              `json:"maxPreviewPage"`
+	ID               string            `json:"id"`
+	Token            string            `json:"token"`
+	ParentGID        string            `json:"parentGID,omitempty"` // 父画廊 gid（本画廊是某画廊的更新版）
+	ParentToken      string            `json:"parentToken,omitempty"`
+	NewVersionGID    string            `json:"newVersionGID,omitempty"` // #dms "newer version" 横幅指向的更新版 gid（本画廊已被取代）
+	NewVersionToken  string            `json:"newVersionToken,omitempty"`
+	Children         []GalleryRelation `json:"children,omitempty"` // 子画廊列表（#gnd / child_ 链接，即更新版）
+	Title            string            `json:"title"`              // 主标题 (日文/原名)
+	SubTitle         string            `json:"subTitle"`           // 副标题 (英文/译名)
+	CoverURL         string            `json:"coverUrl"`
+	Source           string            `json:"source"` // "online"
+	Category         string            `json:"category"`
+	Uploader         string            `json:"uploader"`
+	Rating           float64           `json:"rating"`
+	PageCount        int               `json:"pageCount"`
+	UpdatedAt        string            `json:"updatedAt"`
+	Tags             []string          `json:"tags"`         // 格式: ["female:big breasts", "artist:okuma"]
+	PreviewPages     []PreviewPageDTO  `json:"previewPages"` // 预览切片列表
+	Comments         []CommentDTO      `json:"comments"`     // 社区评论列表
+	IsFavorite       bool              `json:"isFavorite"`
+	FavIndex         *int              `json:"favIndex"`
+	MaxPreviewPage   int               `json:"maxPreviewPage"`
 }
 
 type PreviewPageDTO struct {

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
-import type { ComicItem, OnlineComic, CardViewMode } from '@/types/comic'
+import type { ComicItem, OnlineComic, OfflineComic, CardViewMode } from '@/types/comic'
 import { addHistory } from '@/stores/historyStore'
 import TagChip from '@/components/TagChip.vue'
 
@@ -181,6 +181,29 @@ const handleImgError = (e: Event) => {
     target.src = defaultCover
   }
 }
+
+// --------------------------------------------------
+// 5. 问题2：日语标题优先双行显示（titleJpn 为空时回退到原 title）
+// --------------------------------------------------
+const jpnTitle = computed(() => {
+  if (props.comic.source !== 'offline') return ''
+  return ((props.comic as OfflineComic).titleJpn || '').trim()
+})
+
+const displayTitle = computed(() => jpnTitle.value || props.comic.title)
+
+const subTitle = computed(() => {
+  return jpnTitle.value && jpnTitle.value !== props.comic.title ? props.comic.title : ''
+})
+
+// --------------------------------------------------
+// 6. 问题3：来源角标（额外路径 Name；下载导入为「下载」时不在卡片重复标注）
+// --------------------------------------------------
+const comicSourceBadge = computed(() => {
+  if (props.comic.source !== 'offline') return ''
+  const label = ((props.comic as OfflineComic).sourceLabel || '').trim()
+  return label && label !== '下载' ? label : ''
+})
 </script>
 
 <template>
@@ -230,9 +253,10 @@ const handleImgError = (e: Event) => {
       </div>
 
       <div class="compact-main-content">
-        <h4 class="compact-title" :title="comic.title">
-          {{ comic.title }}
-        </h4>
+        <div class="compact-title-wrap">
+          <h4 class="compact-title" :title="displayTitle || comic.title">{{ displayTitle }}</h4>
+          <span v-if="subTitle" class="compact-subtitle" :title="comic.title">{{ subTitle }}</span>
+        </div>
 
         <div v-if="!showTags" class="compact-normal-panel">
           <div class="meta-row">
@@ -257,6 +281,7 @@ const handleImgError = (e: Event) => {
 
           <div class="status-row">
             <span v-if="comic.isDownloaded" class="downloaded-badge"> ✓ 已下载 </span>
+            <span v-if="comicSourceBadge" class="source-label-badge">{{ comicSourceBadge }}</span>
           </div>
         </div>
 
@@ -298,14 +323,17 @@ const handleImgError = (e: Event) => {
       </div>
 
       <div class="card-info-footer">
-        <h4 class="card-title" :title="comic.title">{{ comic.title }}</h4>
+        <div class="card-title-wrap">
+          <h4 class="card-title" :title="displayTitle || comic.title">{{ displayTitle }}</h4>
+          <span v-if="subTitle" class="card-subtitle" :title="comic.title">{{ subTitle }}</span>
+        </div>
         <div class="card-tags-row">
           <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />
         </div>
         <div class="card-bottom-meta">
           <span class="rating">⭐ {{ comic.rating || '5.0' }}</span>
-          <span class="source-tag" :class="comic.source">
-            {{ comic.source === 'online' ? '在线' : '本地' }}
+          <span class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
+            {{ comic.source === 'online' ? '在线' : comicSourceBadge || '本地' }}
           </span>
         </div>
       </div>
@@ -403,6 +431,12 @@ const handleImgError = (e: Event) => {
   min-width: 0;
 }
 
+.compact-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .compact-title {
   margin: 0;
   font-size: 13px;
@@ -413,6 +447,14 @@ const handleImgError = (e: Event) => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.compact-subtitle {
+  font-size: 11px;
+  color: #88888c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .compact-normal-panel {
@@ -463,6 +505,10 @@ const handleImgError = (e: Event) => {
 
 .status-row {
   min-height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
 }
@@ -586,6 +632,12 @@ const handleImgError = (e: Event) => {
   flex: 1;
 }
 
+.card-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .card-title {
   margin: 0;
   font-size: 13px;
@@ -596,6 +648,14 @@ const handleImgError = (e: Event) => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.3;
+}
+
+.card-subtitle {
+  font-size: 11px;
+  color: #88888c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-tags-row {
@@ -619,6 +679,23 @@ const handleImgError = (e: Event) => {
 
 .source-tag.offline {
   color: #ff7588;
+}
+
+.source-tag.extra {
+  background-color: rgba(61, 90, 254, 0.92);
+  color: #ffffff;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.source-label-badge {
+  display: inline-block;
+  background-color: rgba(61, 90, 254, 0.92);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 /* 选择模式：卡片高亮 + 勾选框 */

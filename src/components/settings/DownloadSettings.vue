@@ -64,12 +64,14 @@
 
     <div class="setting-item">
       <div class="item-info">
-        <div class="item-title">默认选中下载原图</div>
+        <div class="item-title">默认下载配置</div>
+        <div class="item-subtext">快捷/批量下载与详情下载面板默认采用的方案</div>
       </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="downloadSettings.defaultDownloadOriginal" />
-        <span class="slider"></span>
-      </label>
+      <select v-model="downloadSettings.defaultDownloadScheme" class="setting-select">
+        <option v-for="opt in DEFAULT_DOWNLOAD_SCHEME_OPTIONS" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
     </div>
 
     <div class="setting-item">
@@ -244,6 +246,7 @@ import {
   isUsingDefaultDownloadPaths,
   resetDownloadPaths,
   resetDownloadSettings,
+  DEFAULT_DOWNLOAD_SCHEME_OPTIONS,
 } from '@/stores/downloadSettings'
 
 const { toast, modal } = useUI()

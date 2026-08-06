@@ -651,7 +651,7 @@ func defaultDownloadSetting() models.DownloadSetting {
 		ArchivePath:                   `downloads\Archive`,
 		ExtractPath:                   `downloads\Gallery`,
 		SingleImageSavePath:           `downloads\Gallery`,
-		DefaultDownloadOriginal:       true,
+		DefaultDownloadScheme:         models.DefaultSchemeArchiveOriginal,
 		ConcurrentImageDownloads:      10,
 		SpeedLimitImages:              99,
 		SpeedLimitInterval:            "1s",
@@ -692,6 +692,22 @@ func (m *DownloadManager) GetSettings() *models.DownloadSetting {
 		} else {
 			log.Printf("%s 已迁移旧下载设置：补齐新字段默认值（archiveThreads=%d 控制归档并发=%v 同优先级并行=%v）",
 				dlLogTag, setting.ArchiveThreads, setting.ControlArchiveConcurrency, setting.DownloadAllGalleriesSamePriority)
+		}
+	}
+
+	// 旧数据迁移：defaultDownloadScheme 替换旧版 defaultDownloadOriginal 布尔值
+	// （旧布尔值 true=归档原图，false=归档压缩，保持用户既有偏好）
+	if setting.DefaultDownloadScheme == "" {
+		if setting.DefaultDownloadOriginal {
+			setting.DefaultDownloadScheme = models.DefaultSchemeArchiveOriginal
+		} else {
+			setting.DefaultDownloadScheme = models.DefaultSchemeArchiveResample
+		}
+		setting.UpdatedAt = time.Now()
+		if err := m.db.Save(&setting).Error; err != nil {
+			log.Printf("%s 迁移默认下载配置失败: %v", dlErrTag, err)
+		} else {
+			log.Printf("%s 已迁移旧下载设置：默认下载配置=%s", dlLogTag, setting.DefaultDownloadScheme)
 		}
 	}
 	return &setting

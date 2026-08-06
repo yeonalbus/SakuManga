@@ -4,6 +4,7 @@
 import { ref, computed } from 'vue'
 import { batchCreateDownloads, type DownloadTarget } from '@/api/download'
 import { useUI } from '@/composables/useUI'
+import { markGidActive } from '@/stores/downloadTasksStore'
 
 const props = withDefaults(
   defineProps<{
@@ -37,6 +38,9 @@ const handleBatchDownload = async () => {
   isBatchDownloading.value = true
   try {
     const res = await batchCreateDownloads(props.selected)
+    if (res.created > 0) {
+      props.selected.forEach((t) => markGidActive(t.gid))
+    }
     if (res.failed > 0) {
       toast.error(`批量加入失败 ${res.failed} 部：${(res.errors || []).join('；')}`)
     } else if (res.skipped > 0) {

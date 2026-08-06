@@ -22,15 +22,22 @@ export interface DownloadTarget {
   coverUrl?: string
 }
 
-/** 按「下载设置」默认方案计算下载模式与归档类型 */
+/** 按「下载设置 → 默认下载配置」计算下载模式与归档类型 */
 export function resolveDefaultDownloadScheme(): {
   mode: 'gallery' | 'archive'
   archiveType: '' | 'original' | 'resample'
 } {
-  const mode = downloadSettings.autoUpdateScheme === 'gallery' ? 'gallery' : 'archive'
-  const archiveType =
-    mode === 'archive' ? (downloadSettings.defaultDownloadOriginal ? 'original' : 'resample') : ''
-  return { mode, archiveType }
+  switch (downloadSettings.defaultDownloadScheme) {
+    case 'gallery':
+    case 'galleryOriginal':
+      // 画廊（逐图）模式始终下载原图，archiveType 不参与
+      return { mode: 'gallery', archiveType: '' }
+    case 'archiveResample':
+      return { mode: 'archive', archiveType: 'resample' }
+    case 'archiveOriginal':
+    default:
+      return { mode: 'archive', archiveType: 'original' }
+  }
 }
 
 /**

@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { viewMode } from '@/stores/viewMode'
 import { useRouter } from 'vue-router'
 import type { ComicItem, OnlineComic, OfflineComic, CardViewMode } from '@/types/comic'
 import { addHistory } from '@/stores/historyStore'
 import TagChip from '@/components/TagChip.vue'
 import { createDownloadTask } from '@/api/download'
+import {
+  isGidDownloading,
+  markGidActive,
+  subscribeActiveDownloads,
+} from '@/stores/downloadTasksStore'
 import { useUI } from '@/composables/useUI'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
@@ -188,16 +193,32 @@ const handleCardClick = (event?: MouseEvent) => {
 // --------------------------------------------------
 const isQuickDownloading = ref(false)
 
+// 该 gid 是否已有进行中下载任务（由 downloadTasksStore 轮询维护）
+const isDownloading = computed(() => {
+  if (props.comic.source !== 'online') return false
+  return isGidDownloading(props.comic.id)
+})
+
 const canQuickDownload = computed(
-  () => props.comic.source === 'online' && !!onlineComic.value?.token && !props.selectMode,
+  () =>
+    props.comic.source === 'online' &&
+    !!onlineComic.value?.token &&
+    !props.selectMode &&
+    !isDownloading.value,
 )
 
 const handleQuickDownload = async () => {
   if (!canQuickDownload.value || isQuickDownloading.value) return
   if (!onlineComic.value) return
+  // 双重防护：轮询状态尚未同步前拦截重复点击
+  if (isDownloading.value) {
+    toast.info('该画廊已在下载中，请勿重复下载')
+    return
+  }
   isQuickDownloading.value = true
   try {
     await createDownloadTask(onlineComic.value)
+    markGidActive(onlineComic.value.id)
     toast.success('已加入下载队列')
   } catch (err) {
     toast.error(`加入下载队列失败：${(err as Error)?.message || '未知错误'}`)
@@ -280,7 +301,18 @@ watch(
   },
 )
 
+// 订阅活动下载轮询（仅在线卡片需要，离线卡片不发起轮询）
+let unsubscribeActiveDownloads: (() => void) | null = null
+
+onMounted(() => {
+  if (props.comic.source === 'online') {
+    unsubscribeActiveDownloads = subscribeActiveDownloads()
+  }
+})
+
 onUnmounted(() => {
+  unsubscribeActiveDownloads?.()
+  unsubscribeActiveDownloads = null
   if (coverRetryTimer) clearTimeout(coverRetryTimer)
 })
 
@@ -396,7 +428,8 @@ const comicSourceBadge = computed(() => {
           </div>
 
           <div class="status-row">
-            <span v-if="comic.isDownloaded" class="downloaded-badge"> ✓ 已下载 </span>
+            <span v-if="isDownloading" class="downloaded-badge downloading"> ⏳ 下载中 </span>
+            <span v-else-if="comic.isDownloaded" class="downloaded-badge"> ✓ 已下载 </span>
             <span v-if="comicSourceBadge" class="source-label-badge">{{ comicSourceBadge }}</span>
           </div>
         </div>
@@ -433,8 +466,9 @@ const comicSourceBadge = computed(() => {
           ★
         </span>
 
-        <!-- 🟢 补齐下载状态标志 -->
-        <span v-if="comic.isDownloaded" class="card-downloaded-badge">✓ 已下载</span>
+        <!-- 🟢 补齐下载状态标志（下载中优先展示，避免重复点击） -->
+        <span v-if="isDownloading" class="card-downloaded-badge downloading">⏳ 下载中</span>
+        <span v-else-if="comic.isDownloaded" class="card-downloaded-badge">✓ 已下载</span>
         <span v-if="comic.pageCount" class="card-pages-badge">{{ comic.pageCount }}P</span>
 
         <!-- ⬇️ 在线卡片 hover 快捷下载按钮（零弹窗） -->
@@ -658,6 +692,24 @@ const comicSourceBadge = computed(() => {
   border-radius: 4px;
 }
 
+/* 下载中：蓝色脉冲，与绿色「已下载」区分 */
+.downloaded-badge.downloading {
+  color: #2196f3;
+  background-color: rgba(33, 150, 243, 0.12);
+  border-color: rgba(33, 150, 243, 0.35);
+  animation: badge-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .compact-tags-panel {
   flex: 1;
   margin-top: 4px;
@@ -744,6 +796,13 @@ const comicSourceBadge = computed(() => {
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
+}
+
+/* 下载中：蓝色脉冲（卡片封面） */
+.card-downloaded-badge.downloading {
+  color: #64b5f6;
+  border-color: rgba(33, 150, 243, 0.5);
+  animation: badge-pulse 1.6s ease-in-out infinite;
 }
 
 .card-pages-badge {

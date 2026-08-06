@@ -6,8 +6,9 @@ import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState } from '@/stores/historyStore'
-import { downloadSettings } from '@/stores/downloadSettings'
 import { preferenceSettings } from '@/stores/preferenceSettings'
+import { resolveDefaultDownloadScheme } from '@/api/download'
+import { markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 
 const route = useRoute()
@@ -306,8 +307,10 @@ const archiveOptions = computed(() => gpInfo.value?.archive?.options || [])
 
 const handleOpenDownloadPanel = async () => {
   showDownloadPanel.value = true
-  selectedMode.value = downloadSettings.autoUpdateScheme === 'gallery' ? 'gallery' : 'archive'
-  selectedArchiveType.value = downloadSettings.defaultDownloadOriginal ? 'original' : 'resample'
+  // 默认方案读取「下载设置 → 默认下载配置」（四选一）
+  const { mode, archiveType } = resolveDefaultDownloadScheme()
+  selectedMode.value = mode
+  selectedArchiveType.value = archiveType === 'resample' ? 'resample' : 'original'
   await fetchGPInfo()
 }
 
@@ -344,6 +347,7 @@ const handleStartDownload = async () => {
       }),
     })
     toast.success('下载任务已创建，可在「下载」页面查看进度')
+    markGidActive(comic.value.id)
     showDownloadPanel.value = false
   } catch (err: unknown) {
     toast.error(err instanceof Error ? err.message : '创建下载任务失败')

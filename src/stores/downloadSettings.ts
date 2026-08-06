@@ -13,6 +13,21 @@ import { http } from '@/utils/request'
 /** 速度限制时间间隔单位 */
 export type SpeedLimitInterval = '1s' | '2s' | '5s'
 
+/** 默认下载配置（四选一，替代旧的「默认选中下载原图」布尔值） */
+export type DownloadDefaultScheme =
+  | 'gallery' // 画廊下载（逐图，原图）
+  | 'galleryOriginal' // 画廊原图（逐图，原图）
+  | 'archiveResample' // 归档压缩（H@H 压缩包）
+  | 'archiveOriginal' // 归档原图（H@H 原图包）
+
+/** 默认下载配置可选列表（设置页下拉用） */
+export const DEFAULT_DOWNLOAD_SCHEME_OPTIONS: { value: DownloadDefaultScheme; label: string }[] = [
+  { value: 'gallery', label: '画廊下载' },
+  { value: 'galleryOriginal', label: '画廊原图' },
+  { value: 'archiveResample', label: '归档压缩' },
+  { value: 'archiveOriginal', label: '归档原图' },
+]
+
 /** 下载设置项集合（与后端 models.DownloadSetting 对齐） */
 export interface DownloadSettings {
   // ── 下载路径 ──
@@ -21,7 +36,7 @@ export interface DownloadSettings {
   singleImageSavePath: string // 单张图片保存路径
 
   // ── 下载行为 ──
-  defaultDownloadOriginal: boolean // 默认选中下载原图
+  defaultDownloadScheme: DownloadDefaultScheme // 默认下载配置（四选一）
   concurrentImageDownloads: number // 同时下载图片数量
   speedLimitImages: number // 速度限制（图片）
   speedLimitInterval: SpeedLimitInterval // 速度限制（间隔）
@@ -51,7 +66,7 @@ const defaultSettings: DownloadSettings = {
   extractPath: 'downloads\\Gallery',
   singleImageSavePath: 'downloads\\Gallery',
 
-  defaultDownloadOriginal: true,
+  defaultDownloadScheme: 'archiveOriginal',
   concurrentImageDownloads: 10,
   speedLimitImages: 99,
   speedLimitInterval: '1s',
@@ -74,7 +89,7 @@ const SETTING_KEYS: (keyof DownloadSettings)[] = [
   'archivePath',
   'extractPath',
   'singleImageSavePath',
-  'defaultDownloadOriginal',
+  'defaultDownloadScheme',
   'concurrentImageDownloads',
   'speedLimitImages',
   'speedLimitInterval',
@@ -101,9 +116,26 @@ function pickSetting(data: Partial<DownloadSettings>): Partial<DownloadSettings>
 }
 
 /** 响应式下载设置（自动持久化到 localStorage + 同步后端） */
+const storedLegacy = loadStorage<Partial<DownloadSettings> & { defaultDownloadOriginal?: boolean }>(
+  STORAGE_KEY,
+  {},
+)
+
+// 旧版 localStorage 迁移：defaultDownloadOriginal(布尔) → defaultDownloadScheme(四选一)
+// （旧版 true=归档原图，false=归档压缩，保持用户既有偏好）
+const storedInit: Partial<DownloadSettings> = pickSetting(storedLegacy)
+if (
+  storedInit.defaultDownloadScheme === undefined &&
+  typeof storedLegacy.defaultDownloadOriginal === 'boolean'
+) {
+  storedInit.defaultDownloadScheme = storedLegacy.defaultDownloadOriginal
+    ? 'archiveOriginal'
+    : 'archiveResample'
+}
+
 export const downloadSettings = reactive<DownloadSettings>({
   ...defaultSettings,
-  ...pickSetting(loadStorage<Partial<DownloadSettings>>(STORAGE_KEY, {})),
+  ...storedInit,
 })
 
 /** 同步后端期间置位，避免 fetch 覆盖触发 watch → save 的循环 */
@@ -127,7 +159,18 @@ watch(
 export async function fetchDownloadSettings(): Promise<void> {
   syncing = true
   try {
-    const data = await http<Partial<DownloadSettings>>('/downloads/settings')
+    const data = await http<Partial<DownloadSettings> & { defaultDownloadOriginal?: boolean }>(
+      '/downloads/settings',
+    )
+    // 兼容旧版后端仍返回 defaultDownloadOriginal 布尔值的情况
+    if (
+      data.defaultDownloadScheme === undefined &&
+      typeof data.defaultDownloadOriginal === 'boolean'
+    ) {
+      data.defaultDownloadScheme = data.defaultDownloadOriginal
+        ? 'archiveOriginal'
+        : 'archiveResample'
+    }
     Object.assign(downloadSettings, pickSetting(data))
   } catch (err) {
     console.warn('[downloadSettings] 拉取后端设置失败，沿用本地缓存:', err)

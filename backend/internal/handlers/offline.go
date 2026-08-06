@@ -141,10 +141,10 @@ func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverr
 
 	archiveType := ""
 	if mode == string(models.DownloadModeArchive) {
-		if setting.DefaultDownloadOriginal {
-			archiveType = string(models.ArchiveTypeOriginal)
-		} else {
+		if setting.DefaultDownloadScheme == models.DefaultSchemeArchiveResample {
 			archiveType = string(models.ArchiveTypeResample)
+		} else {
+			archiveType = string(models.ArchiveTypeOriginal)
 		}
 	}
 

@@ -31,6 +31,16 @@ const (
 	ArchiveTypeResample ArchiveType = "resample" // 压缩图
 )
 
+// DownloadDefaultScheme 默认下载配置（替代旧的 defaultDownloadOriginal 布尔值）
+type DownloadDefaultScheme string
+
+const (
+	DefaultSchemeGallery           DownloadDefaultScheme = "gallery"           // 画廊下载（逐图）
+	DefaultSchemeGalleryOriginal   DownloadDefaultScheme = "galleryOriginal"   // 画廊原图
+	DefaultSchemeArchiveResample   DownloadDefaultScheme = "archiveResample"   // 归档压缩
+	DefaultSchemeArchiveOriginal   DownloadDefaultScheme = "archiveOriginal"   // 归档原图
+)
+
 // DownloadTask 下载任务（对应数据库 download_tasks 表）
 type DownloadTask struct {
 	ID          string             `gorm:"primaryKey" json:"id"`             // 唯一 ID（毫秒时间戳 + 随机字节）
@@ -68,8 +78,9 @@ type DownloadSetting struct {
 	SingleImageSavePath string `json:"singleImageSavePath"` // 单张图片保存路径
 
 	// ── 下载行为 ──
-	DefaultDownloadOriginal         bool   `json:"defaultDownloadOriginal"`         // 默认下载原图
-	ConcurrentImageDownloads        int    `json:"concurrentImageDownloads"`        // 同时下载图片数量
+	DefaultDownloadScheme          DownloadDefaultScheme `json:"defaultDownloadScheme"` // 默认下载配置 gallery | galleryOriginal | archiveResample | archiveOriginal
+	DefaultDownloadOriginal        bool                   `json:"-"`                       // 已废弃，仅用于旧数据迁移（旧版「默认选中下载原图」）
+	ConcurrentImageDownloads       int                    `json:"concurrentImageDownloads"`        // 同时下载图片数量
 	SpeedLimitImages                int    `json:"speedLimitImages"`                // 速度限制（图片）
 	SpeedLimitInterval              string `json:"speedLimitInterval"`              // 速度限制间隔 1s|2s|5s
 	DownloadAllGalleriesSamePriority bool   `json:"downloadAllGalleriesSamePriority"` // 同一优先级下同时下载所有画廊

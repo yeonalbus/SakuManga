@@ -418,6 +418,21 @@ func (g *archiveDownloader) isHathdlOnly(forms []archiverForm) bool {
 	return false
 }
 
+// isHathStreamDownloadURL 判断是否为 H@H「下载页直链」的流式下载链接（URL 带 start 参数）。
+// 这类链接来自 archiver.php「已解锁 / H@H Downloader」流程解析出的 #db > p > a 直链；
+// H@H 节点对带 start 的流式请求不支持 HTTP Range（带 Range 的请求直接返回 404），
+// 只能单线程从头下载（不带 Range）。
+func isHathStreamDownloadURL(downloadURL string) bool {
+	u, err := url.Parse(downloadURL)
+	if err != nil {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(u.Host), "hath.network") {
+		return false
+	}
+	return u.Query().Get("start") != ""
+}
+
 // isAlreadyUnlockedPage 判断最近一次 archiver.php 页面是否为「原画已解锁」变体：
 // 页面含 "You unlocked an original download of this archive on ... [cancel]" 横幅。
 // 此时归档已存在，无需重新创建，直接走 H@H 下载页直链流程即可拿到下载页 URL。
@@ -690,6 +705,13 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 		g.recordBytes(fiSize(g.zipPath))
 		return nil
 	}
+	// H@H 下载页直链（带 start 参数）不支持 Range 续传：残留 .part 直接删除从头下载
+	hathStream := isHathStreamDownloadURL(downloadURL)
+	if hathStream && startOffset > 0 {
+		log.Printf("%s [archive-engine] 任务 %s H@H 直链不支持 Range 续传，删除 .part 从头下载", dlWarnTag, g.task.ID)
+		_ = os.Remove(g.partPath)
+		startOffset = 0
+	}
 
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
@@ -697,7 +719,7 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 	}
 	req.Header.Set("User-Agent", ehReaderUserAgent)
 	req.Header.Set("Referer", g.referer)
-	if startOffset > 0 {
+	if startOffset > 0 && !hathStream {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startOffset))
 		log.Printf("%s [archive-engine] 任务 %s 从 %d 字节续传 zip", dlLogTag, g.task.ID, startOffset)
 	}
@@ -816,6 +838,14 @@ func (g *archiveDownloader) downloadClient() *http.Client {
 // 按「控制并发 + 线程数」决定走分块并发下载还是单线程续传。
 func (g *archiveDownloader) downloadArchiveFile(downloadURL string) error {
 	g.stopFlag.Store(false)
+
+	// H@H 下载页直链（带 start 参数）不支持 Range 探测：直接走单线程下载，
+	// 避免带 Range 的探测请求被 H@H 节点以 404 拒绝导致任务失败。
+	if isHathStreamDownloadURL(downloadURL) {
+		log.Printf("%s [archive-engine] 任务 %s 检测到 H@H 直链（start 流式），跳过 Range 探测，走单线程下载",
+			dlWarnTag, g.task.ID)
+		return g.downloadZip(downloadURL)
+	}
 
 	total, rangeOK, err := g.probeArchiveDownload(downloadURL)
 	if err != nil {

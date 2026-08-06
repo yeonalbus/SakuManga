@@ -312,6 +312,65 @@ func TestArchiveChunkDownloaderSingleThreadFallback(t *testing.T) {
 	}
 }
 
+// TestProbeArchiveDownload404Fallback 模拟 H@H 节点：带 Range 的请求返回 404。
+// 探测应回退为不支持 Range（rangeOK=false），入口走单线程下载仍可成功。
+func TestProbeArchiveDownload404Fallback(t *testing.T) {
+	size := 8 * 1024 * 1024 // 8 MiB
+	data := makeTestZip(t, size)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	total, rangeOK, err := g.probeArchiveDownload(srv.URL + "/file.zip")
+	if err != nil {
+		t.Fatalf("探测 404 应回退而非报错: %v", err)
+	}
+	if rangeOK {
+		t.Fatal("404 探测应返回 rangeOK=false")
+	}
+	if total != 0 {
+		t.Fatalf("404 探测 total=%d，期望 0", total)
+	}
+
+	// 入口应回退到单线程 downloadZip（无 Range 请求），下载成功
+	if err := g.downloadArchiveFile(srv.URL + "/file.zip"); err != nil {
+		t.Fatalf("404 回退单线程下载失败: %v", err)
+	}
+	got, err := os.ReadFile(g.zipPath)
+	if err != nil {
+		t.Fatalf("读取 zip 失败: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("下载内容与源不一致：got=%d 字节，want=%d 字节", len(got), len(data))
+	}
+}
+
+// TestIsHathStreamDownloadURL 验证 H@H「下载页直链」流式链接判定
+func TestIsHathStreamDownloadURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://encvgvvzml.hath.network/archive/4099258/abc/itbb/2?start=1": true,
+		"https://encvgvvzml.hath.network/archive/4099258/abc/itbb/2":         false,
+		"https://encvgvvzml.hath.network/archive/4099258/abc/itbb/2?x=1":     false,
+		"https://e-hentai.org/archiver_download/1/2/3?start=1":               false,
+		"https://node.hath.network/archive/1/2/3/4?start=2":                  true,
+	}
+	for in, want := range cases {
+		if got := isHathStreamDownloadURL(in); got != want {
+			t.Errorf("isHathStreamDownloadURL(%q)=%v，期望 %v", in, got, want)
+		}
+	}
+}
+
 // 验证 parseContentRangeTotal 解析
 func TestParseContentRangeTotal(t *testing.T) {
 	cases := map[string]int64{

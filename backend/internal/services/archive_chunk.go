@@ -413,22 +413,43 @@ func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, boo
 		log.Printf("%s [archive-engine] 任务 %s 探测返回 416，视为文件已下载完整", dlWarnTag, g.task.ID)
 		return 0, false, nil
 
+	case http.StatusNotFound:
+		// H@H 下载页直链等不支持 Range 的服务器：带 Range 的请求返回 404。
+		// 视为不支持分块，回退单线程下载（downloadZip 在无 .part 时不带 Range 请求）。
+		body := ""
+		if data, err := io.ReadAll(io.LimitReader(resp.Body, 512)); err == nil {
+			body = strings.ToLower(string(data))
+		}
+		if err := g.probeLockError(http.StatusNotFound, body); err != nil {
+			return 0, false, err
+		}
+		log.Printf("%s [archive-engine] 任务 %s 探测返回 404（服务器不支持 Range），走单线程下载", dlWarnTag, g.task.ID)
+		return 0, false, nil
+
 	default:
 		body := ""
 		if data, err := io.ReadAll(io.LimitReader(resp.Body, 512)); err == nil {
 			body = strings.ToLower(string(data))
 		}
-		lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
-		for _, h := range lockHints {
-			if strings.Contains(body, h) {
-				g.mu.Lock()
-				g.lockFailed = true
-				g.mu.Unlock()
-				return 0, false, fmt.Errorf("HTTP %d（疑似配额/限流，需解锁后重试）", resp.StatusCode)
-			}
+		if err := g.probeLockError(resp.StatusCode, body); err != nil {
+			return 0, false, err
 		}
 		return 0, false, fmt.Errorf("探测归档下载失败 HTTP %d", resp.StatusCode)
 	}
+}
+
+// probeLockError 若探测响应体命中配额/限流提示，则置锁定标记并返回对应错误；否则返回 nil。
+func (g *archiveDownloader) probeLockError(status int, body string) error {
+	lockHints := []string{"banned", "quota", "rate limit", "exceeded", "sadpanda", "too many", "temporarily", "panda"}
+	for _, h := range lockHints {
+		if strings.Contains(body, h) {
+			g.mu.Lock()
+			g.lockFailed = true
+			g.mu.Unlock()
+			return fmt.Errorf("HTTP %d（疑似配额/限流，需解锁后重试）", status)
+		}
+	}
+	return nil
 }
 
 // parseContentRangeTotal 从 "bytes 0-0/12345" 或 "bytes */12345" 解析总大小

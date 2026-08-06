@@ -111,3 +111,29 @@ SakuHentai/
 ├── go.mod                  # Go 模块依赖（位于 backend/ 下）
 └── README.md               # 项目说明文档
 ```
+
+# 📄 开源协议与致谢
+
+## 致谢 / Acknowledgements
+
+本项目在开发过程中借鉴与使用了以下优秀的开源项目及社区资源：
+
+- **[JHentai](https://github.com/jiangtian616/JHenTai)**：感谢其在界面交互与部分业务逻辑实现上提供的灵感与思路。
+- **[EhTagTranslation](https://github.com/EhTagTranslation/Database)**：本项目的标签汉化与翻译数据库来源于 EhTagTranslation 社区。
+- **[e-hentai-tag-count]https://github.com/mokurin000/e-hentai-tag-count**：本项目的标签联想来源于 e-hentai-tag-count 社区。
+
+## 数据协议说明 (EhTagTranslation)
+
+本项目集成的标签数据库内容由 **EhTagTranslation** 贡献者共同维护，数据依据 **[CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/deed.zh)**（署名-非商业性使用-相同方式共享 3.0）协议提供：
+
+- **非商业性**：本项目及标签数据仅供个人学习与交流使用，严禁任何形式的商业盈利行为。
+- **署名与共享**：对标签数据的二次分发或衍生使用均继承原协议条款。
+
+## 开发者说明 / Notes
+
+- **AI 辅助生成**：本项目的架构设计与绝大部分代码由 AI 辅助编写与重构。
+- **测试状态**：项目目前处于早期快速迭代阶段，可能存在未覆盖的边缘场景或缺陷，欢迎提交 Issue 或 PR 协助完善。
+
+## 开源协议 / License
+
+本项目采用 [AGPL-3.0 License](LICENSE) 开源。

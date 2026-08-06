@@ -79,6 +79,17 @@ const routes: RouteRecordRaw[] = [
     name: 'MemberHistory',
     component: () => import('@/views/MemberHistory.vue'),
   },
+  // 🎲 工具：随机抽卡 + 阅读清单（跨模式全局功能，侧边栏「🎲 工具」栏目入口）
+  {
+    path: '/random',
+    name: 'Random',
+    component: () => import('@/views/RandomView.vue'),
+  },
+  {
+    path: '/reading-list',
+    name: 'ReadingList',
+    component: () => import('@/views/ReadingListView.vue'),
+  },
   {
     path: '/downloads',
     name: 'Downloads',

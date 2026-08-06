@@ -5,7 +5,9 @@ import { onlineSearchConfig, offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import { useModeStore } from '@/stores/modeStore'
 import TagChip from '@/components/TagChip.vue'
+import FilterDrawer from '@/components/FilterDrawer.vue'
 import type { TagItem } from '@/stores/tagStore'
+import type { FilterParams } from '@/types/comic'
 import { http } from '@/utils/request'
 
 const router = useRouter()
@@ -209,6 +211,44 @@ onUnmounted(() => {
   window.removeEventListener('click', handleOutsideClick)
   narrowMql.removeEventListener('change', onNarrowChange)
 })
+
+// 🎛️ 筛选并入搜索：入口在搜索框内（FilterDrawer 全屏抽屉，按当前模式分域保存不串味）
+const isFilterOpen = ref(false)
+
+const currentScope = computed<'online' | 'offline'>(() => modeStore.currentMode)
+
+const activeSearchConfig = computed(() => {
+  return currentScope.value === 'offline' ? offlineSearchConfig.value : onlineSearchConfig.value
+})
+
+// 激活态红点：当前域存在任一非默认筛选条件时点亮（纯搜索词 keyword 不计入筛选）
+const hasActiveFilters = computed(() => {
+  const c = activeSearchConfig.value
+  return (
+    (c.keywords && c.keywords.length > 0) ||
+    (c.activeCategories && c.activeCategories.length < 10) ||
+    (c.minRating && c.minRating > 0) ||
+    (c.minPages && c.minPages > 0) ||
+    (c.maxPages && c.maxPages > 0) ||
+    !!c.onlyDownloaded ||
+    (c.language && c.language !== 'All') ||
+    !!c.onlyRemoved ||
+    !!c.onlyTorrents ||
+    !!c.disableLangFilter ||
+    !!c.disableUploaderFilter ||
+    !!c.disableTagFilter
+  )
+})
+
+// 保存筛选设置到对应的域中，不互相串味
+const handleApplyFilters = (filters: Partial<FilterParams>) => {
+  if (currentScope.value === 'offline') {
+    Object.assign(offlineSearchConfig.value, filters)
+  } else {
+    Object.assign(onlineSearchConfig.value, filters)
+  }
+  toast.success(`[${currentScope.value === 'offline' ? '离线' : '在线'}] 筛选条件已生效`)
+}
 </script>
 
 <template>
@@ -223,9 +263,20 @@ onUnmounted(() => {
         @focus="isFocused = true"
         @keyup.enter="triggerSearch()"
       />
+      <!-- 🎛️ 筛选入口（原 TopBar 齿轮按钮移入搜索框内，激活态显示红点） -->
+      <button class="filter-trigger-btn" title="筛选" @click="isFilterOpen = true">
+        <span class="filter-icon">⚙️</span>
+        <span v-if="hasActiveFilters" class="filter-active-dot"></span>
+      </button>
       <button v-if="keyword" class="clear-input-btn" @click="handleClearInput">✕</button>
       <button class="search-submit-btn" @click="triggerSearch()">搜索</button>
     </div>
+
+    <FilterDrawer
+      v-model:visible="isFilterOpen"
+      :config="activeSearchConfig"
+      @apply="handleApplyFilters"
+    />
 
     <div
       v-if="isFocused && (filteredHistory.length > 0 || safeSuggestedTags.length > 0)"
@@ -339,6 +390,40 @@ onUnmounted(() => {
 }
 .search-submit-btn:hover {
   opacity: 0.85;
+}
+
+/* 🎛️ 筛选入口按钮：搜索框内右侧，激活态红点提示当前有筛选条件 */
+.filter-trigger-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  margin-left: 2px;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.filter-trigger-btn:hover {
+  color: #007acc;
+  background-color: var(--app-surface-3);
+}
+
+.filter-active-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  border: 1px solid var(--app-surface-2);
 }
 
 .search-dropdown {

@@ -81,6 +81,13 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
       </div>
     </div>
   </div>
+
+  <!-- 🎲 工具：跨模式全局功能（骰子支持全库、清单有在线/离线双 tab） -->
+  <div class="nav-group">
+    <span class="group-title">🎲 工具</span>
+    <router-link to="/random">手气不错</router-link>
+    <router-link to="/reading-list">阅读清单</router-link>
+  </div>
 </template>
 
 <style scoped>

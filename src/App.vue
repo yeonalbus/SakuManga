@@ -427,8 +427,8 @@ body {
   /* 主内容区减小留白，充分利用屏幕 */
   .main-content {
     padding: 8px;
-    /* 顶部补偿悬浮 TopBar（两行：工具行 + 搜索行 ≈ 84px + 安全区）与原有留白 */
-    padding-top: calc(90px + var(--safe-top));
+    /* 顶部补偿悬浮 TopBar（重构后单行搜索栏 ≈ 56px + 安全区）与原有留白 */
+    padding-top: calc(56px + var(--safe-top));
     padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区，滚动到底不贴屏 */
   }
 }
@@ -483,7 +483,7 @@ html[data-layout='mobile'] .right-wrapper {
 }
 html[data-layout='mobile'] .main-content {
   padding: 8px;
-  padding-top: calc(90px + var(--safe-top)); /* 顶部补偿悬浮 TopBar */
+  padding-top: calc(56px + var(--safe-top)); /* 顶部补偿悬浮 TopBar（单行搜索栏） */
   padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区 */
 }
 

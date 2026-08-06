@@ -446,6 +446,8 @@ onUnmounted(() => {
 
 <template>
   <div class="detail-page">
+    <!-- 📱 移动形态：左上角圆形返回悬浮球（fixed，位于悬浮 TopBar 正下方；桌面端隐藏） -->
+    <button class="detail-fab-back" @click="handleBack" title="返回上一页">‹</button>
     <div v-if="isLoading" class="loading-state">加载中...</div>
 
     <div v-else-if="detailError" class="error-state">
@@ -497,6 +499,39 @@ onUnmounted(() => {
         <h2 v-if="comic.subTitle && comic.subTitle !== comic.title" class="comic-sub-title">
           {{ comic.subTitle }}
         </h2>
+      </div>
+
+      <!-- 📱 移动形态：功能按钮横向可滚动（标题下方，不换行不撑满；桌面端隐藏） -->
+      <div class="detail-actions-bar">
+        <button
+          class="add-reading-btn"
+          :class="{ active: isInReadingList }"
+          @click="handleAddToReadingList"
+        >
+          {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+        </button>
+
+        <button
+          class="action-btn fav-btn"
+          :style="
+            comic.isFavorite
+              ? { backgroundColor: favColors[comic.favIndex ?? 0], color: '#fff' }
+              : {}
+          "
+          @mousedown="handlePressStart"
+          @mouseup="handlePressEnd"
+          @mouseleave="handlePressEnd"
+          @touchstart="handlePressStart"
+          @touchend="handlePressEnd"
+          @contextmenu.prevent
+          @click="handleFavClick"
+        >
+          ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
+        </button>
+
+        <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
+
+        <button class="action-btn download-btn" @click="handleOpenDownloadPanel">⬇️ 下载</button>
       </div>
 
       <!-- 选项卡导航 -->
@@ -763,10 +798,68 @@ onUnmounted(() => {
 }
 
 .top-action-bar {
+  /* 显式声明回归正常文档流：严禁绝对/固定定位，避免被悬浮全局 Header 覆盖或遮挡封面 */
+  position: static;
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+/* 📱 移动形态（html[data-layout='mobile']）：详情页顶部重设计（方案B改良，2026-08-06）
+   - 返回按钮 → 左上角圆形悬浮球（fixed，位于悬浮 TopBar 正下方、避开汉堡；层级：汉堡70 > TopBar50 > 返回球40）
+   - 功能按钮 → 标题下方横向可滚动按钮条（overflow-x:auto，图标+文字，不换行不撑满）
+   - 原顶部操作栏整行隐藏（返回钮/功能钮已由上述两元素替代）
+   - 桌面端：返回球/功能条默认 display:none，原操作栏保留文档流 */
+.detail-fab-back {
+  display: none;
+}
+
+.detail-actions-bar {
+  display: none;
+}
+
+:global(html[data-layout='mobile'] .detail-page .top-action-bar) {
+  display: none;
+}
+
+:global(html[data-layout='mobile'] .detail-page .detail-fab-back) {
+  display: flex;
+  position: fixed;
+  top: calc(56px + var(--safe-top) + 8px);
+  left: calc(10px + var(--safe-left));
+  z-index: 40;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--app-border-3);
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  flex-wrap: nowrap;
+  margin-bottom: 16px;
+  padding-bottom: 2px;
+}
+
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar .add-reading-btn),
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar .action-btn),
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar .read-btn) {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .back-btn {

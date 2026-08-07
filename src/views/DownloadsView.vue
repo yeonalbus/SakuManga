@@ -2,31 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
-
-// ── 后端 DownloadTask 契约 ──
-export interface DownloadTask {
-  id: string
-  gid: string
-  token: string
-  title: string
-  coverUrl?: string
-  mode: 'gallery' | 'archive'
-  archiveType?: 'original' | 'resample'
-  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'error' | 'error_lock' | 'cancelled'
-  priority: number
-  group?: string
-  totalFiles: number
-  doneFiles: number
-  totalBytes: number
-  doneBytes: number
-  speed: number
-  archivePath?: string
-  extractPath?: string
-  error?: string
-  updateForComicId?: string
-  createdAt: string
-  updatedAt: string
-}
+import { setTaskPriority, type DownloadTask } from '@/api/download'
 
 interface ListResponse {
   tasks: DownloadTask[]
@@ -134,6 +110,25 @@ const handleCancel = async (t: DownloadTask) => {
 }
 const handleRetry = (t: DownloadTask) => callAction(t.id, 'retry', '已重试任务')
 const handleUnlock = (t: DownloadTask) => callAction(t.id, 'unlock', '已解锁任务')
+
+// ── 优先级内联修改（数字越大越优先，0-99；completed/cancelled 不可改） ──
+const PRIORITY_MIN = 0
+const PRIORITY_MAX = 99
+const priorityLocked = (t: DownloadTask) =>
+  t.status === 'completed' || t.status === 'cancelled'
+
+const handlePriorityChange = async (t: DownloadTask, delta: number) => {
+  const next = Math.min(PRIORITY_MAX, Math.max(PRIORITY_MIN, t.priority + delta))
+  if (next === t.priority) return
+  try {
+    const updated = await setTaskPriority(t.id, next)
+    t.priority = updated.priority
+    toast.success(`已设置优先级 ${updated.priority}`)
+    fetchTasks()
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '修改优先级失败')
+  }
+}
 
 // 分页
 const changePage = (delta: number) => {
@@ -247,6 +242,13 @@ onUnmounted(() => {
               }}
             </span>
             <span v-if="task.group" class="meta-tag group">分组 {{ task.group }}</span>
+            <span
+              class="meta-tag priority"
+              :class="{ zero: task.priority === 0 }"
+              title="下载优先级，数字越大越优先（0-99）"
+            >
+              ⭐ 优先级 {{ task.priority }}
+            </span>
             <span v-if="task.updateForComicId" class="meta-tag update">🔄 离线更新</span>
             <span v-if="task.error" class="meta-tag error" :title="task.error">{{
               task.error
@@ -270,6 +272,29 @@ onUnmounted(() => {
             </span>
 
             <div class="footer-actions">
+              <!-- 优先级内联修改 -->
+              <div
+                class="priority-control"
+                :class="{ locked: priorityLocked(task) }"
+                title="下载优先级，数字越大越优先（0-99）"
+              >
+                <button
+                  class="action-btn priority-btn"
+                  :disabled="priorityLocked(task) || task.priority <= PRIORITY_MIN"
+                  @click="handlePriorityChange(task, -1)"
+                >
+                  −
+                </button>
+                <span class="priority-value">{{ task.priority }}</span>
+                <button
+                  class="action-btn priority-btn"
+                  :disabled="priorityLocked(task) || task.priority >= PRIORITY_MAX"
+                  @click="handlePriorityChange(task, 1)"
+                >
+                  ＋
+                </button>
+              </div>
+
               <span class="status-label" :class="statusMeta[task.status]?.cls">
                 {{ statusMeta[task.status]?.label || task.status }}
               </span>
@@ -499,6 +524,15 @@ onUnmounted(() => {
   border-color: var(--app-border-3);
 }
 
+.meta-tag.priority {
+  border-color: #e6a23c;
+  color: #ffc107;
+}
+.meta-tag.priority.zero {
+  border-color: var(--app-border-3);
+  color: var(--app-text-3);
+}
+
 .meta-tag.update {
   border-color: #ff7588;
   color: #ff7588;
@@ -558,6 +592,35 @@ onUnmounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.priority-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.priority-control.locked {
+  opacity: 0.55;
+}
+.priority-btn {
+  border-color: #e6a23c;
+  color: #ffc107;
+  min-width: 24px;
+  padding: 1px 6px;
+  line-height: 1.2;
+}
+.priority-btn:hover:not(:disabled) {
+  background: rgba(230, 162, 60, 0.15);
+}
+.priority-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.priority-value {
+  font-family: monospace;
+  min-width: 18px;
+  text-align: center;
+  color: var(--app-text-strong);
 }
 
 .status-label {

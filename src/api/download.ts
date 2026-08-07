@@ -1,5 +1,5 @@
 // src/api/download.ts
-// 下载任务相关 API：快捷单卡入队 + 批量加入下载队列
+// 下载任务相关 API：快捷单卡入队 + 批量加入下载队列 + 优先级修改
 // 统一使用「下载设置」里的默认方案（零弹窗），与详情页 handleStartDownload 保持一致的取值逻辑。
 import { http } from '@/utils/request'
 import { downloadSettings } from '@/stores/downloadSettings'
@@ -80,5 +80,47 @@ export async function batchCreateDownloads(
       mode,
       archiveType,
     }),
+  })
+}
+
+// ─────────────────────────────────────────────────────────────
+// 任务契约与优先级
+// ─────────────────────────────────────────────────────────────
+
+/** 后端 DownloadTask 契约（GET /downloads 列表项；POST /downloads/:id/priority 返回更新后的任务） */
+export interface DownloadTask {
+  id: string
+  gid: string
+  token: string
+  title: string
+  coverUrl?: string
+  mode: 'gallery' | 'archive'
+  archiveType?: 'original' | 'resample'
+  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'error' | 'error_lock' | 'cancelled'
+  priority: number
+  group?: string
+  totalFiles: number
+  doneFiles: number
+  totalBytes: number
+  doneBytes: number
+  speed: number
+  archivePath?: string
+  extractPath?: string
+  error?: string
+  updateForComicId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 修改任务优先级 POST /downloads/:id/priority
+ * 提升优先级会触发抢占式调度：正在运行的低优先级任务被置回排队（进度保留），
+ * 高优先级任务优先竞争全局线程额度（计划书 5.5）。
+ * @throws 后端错误（completed / cancelled 任务不允许修改）
+ */
+export async function setTaskPriority(id: string, priority: number): Promise<DownloadTask> {
+  return await http<DownloadTask>(`/downloads/${id}/priority`, {
+    method: 'POST',
+    body: JSON.stringify({ priority }),
   })
 }

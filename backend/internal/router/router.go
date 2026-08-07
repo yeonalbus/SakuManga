@@ -82,19 +82,15 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/auth/logout", authHandler.Logout)
 		api.GET("/auth/me", authHandler.Me)
 
-		// 路径管理
+		// 路径管理（读写分离：扫描路径增删改/触发扫描为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/scan-paths", handlers.GetScanPaths)
-		api.POST("/scan-paths", handlers.AddScanPath)
-		api.PUT("/scan-paths/:id", handlers.UpdateScanPath)
-		api.DELETE("/scan-paths/:id", handlers.DeleteScanPath)
-		api.POST("/scan-paths/:id/scan", handlers.TriggerScanPath)
 		api.GET("/scan-paths/:id/scan/progress", handlers.GetScanPathProgress)
 		api.GET("/scan-paths/scan-progress", handlers.GetAllScanProgress)
 
 		// 漫画数据与封面（封面/页图为公开路由，见上方 public 分组）
 		api.GET("/comics/offline", handlers.GetOfflineComics)
 		api.GET("/comics/:id", handlers.GetComicDetail)
-		api.DELETE("/comics/:id", handlers.DeleteOfflineComic)
+		// 删除本地画廊为系统级写操作（仅管理员），见下方 admin 分组
 		// 阅读次数上报（排行榜持久化，问题9）
 		api.POST("/comics/:id/click", handlers.RecordComicClick)
 
@@ -105,17 +101,14 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 前端错误日志上报（问题8 诊断辅助：浏览器无法写文件，由后端落盘到 logs/client.log）
 		api.POST("/client/log", handlers.ReportClientLog)
-		// 日志大小查询 / 清除（设置中心「高级 → 清除日志」）
+		// 日志大小查询（清除为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/client/log/size", handlers.GetClientLogSize)
-		api.DELETE("/client/log", handlers.ClearClientLog)
 
-		// 四类系统日志：查询 / 实时监控 / 精细清理 / 开关设置（Round4 任务六&七）
+		// 四类系统日志：查询 / 实时监控 / 开关设置读取（清理与设置保存为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/logs/categories", handlers.GetLogCategories)
 		api.GET("/logs/query", handlers.QueryLogs)
 		api.GET("/logs/tail", handlers.TailLogs)
-		api.DELETE("/logs", handlers.DeleteLogs)
 		api.GET("/logs/settings", handlers.GetLogSettings)
-		api.POST("/logs/settings", handlers.SaveLogSettings)
 
 		// E站账户与偏好设置（绑定当前登录用户自己的 E 站凭证）
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
@@ -194,8 +187,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/downloads/batch", downloadHandler.BatchCreateDownload)
 		api.GET("/downloads/gp-info", downloadHandler.GetGPInfo)
 		api.GET("/downloads/settings", downloadHandler.GetDownloadSettings)
-		api.POST("/downloads/settings", downloadHandler.SaveDownloadSettings)
-		api.POST("/downloads/restore", downloadHandler.RestoreDownloads)
+		// POST /downloads/settings 保存与 POST /downloads/restore 恢复为系统级操作，见下方 admin 分组
 		api.GET("/downloads/:id", downloadHandler.GetDownload)
 		api.POST("/downloads/:id/pause", downloadHandler.PauseDownload)
 		api.POST("/downloads/:id/resume", downloadHandler.ResumeDownload)
@@ -209,6 +201,18 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		admin := api.Group("")
 		admin.Use(middleware.AdminOnly())
 		{
+			// 系统级写操作（中心制：仅管理员可修改数据库 / 系统配置 / 清理日志）
+			admin.DELETE("/comics/:id", handlers.DeleteOfflineComic) // 删除本地画廊（记录 + 可选物理文件）
+			admin.POST("/scan-paths", handlers.AddScanPath)
+			admin.PUT("/scan-paths/:id", handlers.UpdateScanPath)
+			admin.DELETE("/scan-paths/:id", handlers.DeleteScanPath)
+			admin.POST("/scan-paths/:id/scan", handlers.TriggerScanPath)
+			admin.DELETE("/client/log", handlers.ClearClientLog)
+			admin.DELETE("/logs", handlers.DeleteLogs)
+			admin.POST("/logs/settings", handlers.SaveLogSettings)
+			admin.POST("/downloads/settings", downloadHandler.SaveDownloadSettings)
+			admin.POST("/downloads/restore", downloadHandler.RestoreDownloads)
+
 			// 用户管理
 			admin.GET("/users", userHandler.ListUsers)
 			admin.POST("/users", userHandler.CreateUser)

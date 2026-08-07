@@ -54,15 +54,17 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ## 在线界面
 
-<img width="2418" height="1288" alt="image" src="https://github.com/user-attachments/assets/b58524a2-9f90-45be-90ca-2bdc5f1a735d" />
+<img width="2440" height="1285" alt="image" src="https://github.com/user-attachments/assets/6ad55636-2335-4aac-8e4c-56e6ca637af2" />
 
-## 下载界面
+## 离线界面
 
-<img width="2453" height="1286" alt="image" src="https://github.com/user-attachments/assets/241a67a0-23f6-4dcc-92aa-0fbd9c4656cd" />
+<img width="2447" height="1288" alt="image" src="https://github.com/user-attachments/assets/235923d4-89d8-4f77-a793-44311c28fa64" />
 
-## 阅读界面
 
-<img width="2453" height="1289" alt="image" src="https://github.com/user-attachments/assets/8623608a-4a2a-4199-8d43-3cccbcfc412b" />
+## 客制化抽卡
+
+<img width="2423" height="1285" alt="image" src="https://github.com/user-attachments/assets/07e0d7f9-4c31-4eba-b3c1-8fb805deef3d" />
+
 
 # ⚙️ 设置说明
 

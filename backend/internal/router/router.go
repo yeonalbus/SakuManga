@@ -48,6 +48,11 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	services.StartTagMaintainScheduler(db, tagMaintainService)
 	tagMaintainHandler := handlers.NewTagMaintainHandler(db, tagMaintainService)
 
+	// 每周自动更新扫描（Round4 任务四：周扫描 + Aged Status）：
+	// 按设置周期性运行「更新检测 + 老化判定」，成功后自动入队新版本下载（autoUpdateGallery）
+	updateScanHandler := handlers.NewUpdateScanHandler(db)
+	services.StartUpdateScanScheduler(db, ehService, downloadManager)
+
 	// 装载 admin 账号并启动榜单定时调度器（后台维护任务固定用 admin）
 	toplistService.StartScheduler(services.LoadAdminAccount(db))
 
@@ -90,6 +95,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/comics/offline", handlers.GetOfflineComics)
 		api.GET("/comics/:id", handlers.GetComicDetail)
 		api.DELETE("/comics/:id", handlers.DeleteOfflineComic)
+		// 阅读次数上报（排行榜持久化，问题9）
+		api.POST("/comics/:id/click", handlers.RecordComicClick)
 
 		// 标签 API（只读查询开放给所有用户；数据同步为管理员）
 		api.GET("/tags/status", handlers.GetTagEngineStatus)
@@ -101,6 +108,14 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 日志大小查询 / 清除（设置中心「高级 → 清除日志」）
 		api.GET("/client/log/size", handlers.GetClientLogSize)
 		api.DELETE("/client/log", handlers.ClearClientLog)
+
+		// 四类系统日志：查询 / 实时监控 / 精细清理 / 开关设置（Round4 任务六&七）
+		api.GET("/logs/categories", handlers.GetLogCategories)
+		api.GET("/logs/query", handlers.QueryLogs)
+		api.GET("/logs/tail", handlers.TailLogs)
+		api.DELETE("/logs", handlers.DeleteLogs)
+		api.GET("/logs/settings", handlers.GetLogSettings)
+		api.POST("/logs/settings", handlers.SaveLogSettings)
 
 		// E站账户与偏好设置（绑定当前登录用户自己的 E 站凭证）
 		api.GET("/account/settings", accountHandler.GetAccountSettings)
@@ -232,6 +247,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/updates/check/result", offlineHandler.GetCheckUpdatesResult)
 			admin.GET("/offline/updates", offlineHandler.ListOfflineUpdates)
 			admin.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
+
+			// 每周自动更新扫描设置（Round4 任务四：周扫描 + Aged Status）
+			admin.GET("/offline/update-scan/setting", updateScanHandler.GetSetting)
+			admin.POST("/offline/update-scan/setting", updateScanHandler.SaveSetting)
 			admin.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
 			admin.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
 			admin.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)

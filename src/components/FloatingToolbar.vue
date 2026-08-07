@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { preferenceSettings } from '@/stores/preferenceSettings'
+import { scrollMainToTop } from '@/utils/scrollMemory'
+// Round4 任务八：日期跳转改为弹窗（选择节点 / 指定日期）
+import DateJumpModal from '@/components/DateJumpModal.vue'
 
 // 🟢 1. 增加控制 Props（模板中直接使用 showSort / sortMode）
 withDefaults(
@@ -21,19 +24,16 @@ const emit = defineEmits<{
 }>()
 
 const isOpen = ref(false)
-const selectedDate = ref('')
+// Round4 任务八：日期跳转弹窗显隐
+const dateJumpOpen = ref(false)
 
 const toggleMenu = () => {
   isOpen.value = !isOpen.value
 }
 
 const handleScrollTop = () => {
-  const mainEl = document.querySelector('.main-content')
-  if (mainEl) {
-    mainEl.scrollTo({ top: 0, behavior: 'smooth' })
-  } else {
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
+  // 统一走公共工具：真实滚动容器是 #main-content
+  scrollMainToTop('smooth')
   isOpen.value = false
 }
 
@@ -48,11 +48,16 @@ const handleToggleSort = () => {
   isOpen.value = false
 }
 
-const handleDateSubmit = () => {
-  if (selectedDate.value) {
-    emit('seek-change', selectedDate.value)
-    isOpen.value = false
-  }
+// Round4 任务八：打开日期跳转弹窗
+const handleOpenDateJump = () => {
+  dateJumpOpen.value = true
+  isOpen.value = false
+}
+
+// 弹窗确认后向上抛出日期（YYYY-MM-DD），由页面按各自逻辑 seek
+const handleSeekConfirm = (date: string) => {
+  emit('seek-change', date)
+  dateJumpOpen.value = false
 }
 
 // 🖥️ 偏好设置：控制「回到顶部」按钮的显隐
@@ -107,22 +112,19 @@ onUnmounted(() => {
           <span class="label">刷新列表</span>
         </button>
 
-        <div class="menu-item date-item" title="选择日期后按 Enter 跳转">
+        <!-- Round4 任务八：日期项改为按钮 → 打开日期跳转弹窗 -->
+        <button class="menu-item" title="按日期跳转" @click="handleOpenDateJump">
           <span class="icon">📅</span>
-          <input
-            type="date"
-            class="date-picker-input"
-            min="2007-01-01"
-            v-model="selectedDate"
-            @keyup.enter="handleDateSubmit"
-          />
-        </div>
+          <span class="label">日期跳转</span>
+        </button>
       </div>
     </Transition>
 
     <button class="fab-trigger" :class="{ active: isOpen }" title="操作菜单" @click="toggleMenu">
       <span class="trigger-icon">{{ isOpen ? '✕' : '⚙️' }}</span>
     </button>
+
+    <DateJumpModal :show="dateJumpOpen" @close="dateJumpOpen = false" @confirm="handleSeekConfirm" />
   </div>
 </template>
 
@@ -170,22 +172,6 @@ onUnmounted(() => {
 .menu-item:hover {
   background-color: var(--app-surface-3);
   color: var(--app-text-strong);
-}
-
-.date-item {
-  display: flex;
-  align-items: center;
-}
-
-.date-picker-input {
-  background: transparent;
-  border: none;
-  color: #00a896;
-  font-size: 0.82rem;
-  font-weight: bold;
-  outline: none;
-  cursor: pointer;
-  width: 115px;
 }
 
 /* 圆形悬浮球主按钮 */

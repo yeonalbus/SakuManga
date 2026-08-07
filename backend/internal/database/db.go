@@ -34,6 +34,7 @@ func InitDB() {
 		&models.DownloadTask{},
 		&models.DownloadSetting{},
 		&models.TagMaintainSetting{},
+		&models.UpdateScanSetting{},
 	)
 
 	migrateFavoriteStateTable()

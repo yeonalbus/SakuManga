@@ -23,9 +23,50 @@ export const takeScroll = (path: string): number | undefined => {
   return top
 }
 
+// ─────────────────────────────────────────────────────────────
+// 列表状态记忆（任务五：返回优化）
+// 仅存 scrollTop 不够：列表页有分页（currentPage），返回时若只恢复
+// scrollTop 而页码重置为 1，内容更短会被浏览器钳制到「第一页底部」。
+// 因此列表页离开时额外保存 { top, page }，返回后在数据就绪时再恢复。
+// ─────────────────────────────────────────────────────────────
+
+/** 列表状态：滚动位置 + 分页页码（可选扩展筛选/排序状态） */
+export interface ListState {
+  top: number
+  page?: number
+}
+
+const listStateCache = new Map<string, ListState>()
+
+/** 记录某路由路径离开时的列表状态（覆盖写，最后离开的为准） */
+export const rememberListState = (path: string, state: ListState): void => {
+  listStateCache.set(path, state)
+}
+
+/** 取用并移除某路由路径保存的列表状态（一次性消费） */
+export const takeListState = (path: string): ListState | undefined => {
+  const state = listStateCache.get(path)
+  listStateCache.delete(path)
+  return state
+}
+
 /** 获取主滚动容器元素 */
 export const getMainContent = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('#main-content')
+
+/**
+ * 让主滚动容器平滑回到顶部。
+ * 应用真实滚动容器是 #main-content 而非 window，翻页/列表切换必须用它，
+ * 否则 `window.scrollTo` 无效（问题3）。
+ */
+export const scrollMainToTop = (behavior: ScrollBehavior = 'smooth'): void => {
+  const el = getMainContent()
+  if (el) {
+    el.scrollTo({ top: 0, behavior })
+  } else {
+    window.scrollTo({ top: 0, behavior })
+  }
+}
 
 /** 尝试立即恢复滚动位置；若目标尚未渲染完成（高度为 0），则用 rAF 重试 */
 export const restoreScroll = (path: string, retries = 5): void => {

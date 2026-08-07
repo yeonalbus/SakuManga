@@ -49,6 +49,10 @@ func main() {
 		_ = os.Chdir(filepath.Dir(exe))
 	}
 
+	// 0.1 初始化四类日志存储（Round4 任务六）：清理过期归档 + 安装分流 writer，
+	//     使后续所有 log.Printf 同时写 stdout 与 backend/logs/<cat>_log-YYYY-MM-DD.log
+	services.InitLogStore()
+
 	// 1. 初始化数据库
 	database.InitDB()
 
@@ -84,8 +88,10 @@ func main() {
 	// 8. 读取服务器配置（监听地址 + 端口），无记录则用默认值 0.0.0.0:8081
 	var setting models.ServerSetting
 	if err := database.DB.First(&setting, 1).Error; err != nil {
-		setting = models.ServerSetting{ID: 1, BindHost: "0.0.0.0", Port: 8081, HistoryLimit: 200}
+		setting = models.ServerSetting{ID: 1, BindHost: "0.0.0.0", Port: 8081, HistoryLimit: 200, SystemLogsEnabled: true}
 	}
+	// 应用持久化的系统日志开关（Round4 任务七）
+	services.SetSystemLogsEnabled(setting.SystemLogsEnabled)
 	addr := fmt.Sprintf("%s:%d", setting.BindHost, setting.Port)
 
 	// 9. 监听端口；若被占用则自动回退到随机空闲端口

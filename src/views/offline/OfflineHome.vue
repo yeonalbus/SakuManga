@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
+// Round4 任务八：离线首页新增悬浮球，提供刷新 + 日期跳页入口
+import FloatingToolbar from '@/components/FloatingToolbar.vue'
 // 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
 import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
@@ -10,11 +12,35 @@ import { useUI } from '@/composables/useUI'
 import type { ComicItem, OfflineComic } from '@/types/comic'
 // Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
+// 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
+// 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
+import { scrollMainToTop, rememberListState, takeListState, getMainContent } from '@/utils/scrollMemory'
 
 const { toast, modal } = useUI()
 
-onMounted(() => {
-  fetchOfflineComics()
+// 任务五：进入页面时恢复上次离开的列表状态（页码）；滚动位置在数据就绪后恢复
+onMounted(async () => {
+  const saved = takeListState('/offline/home')
+  if (saved?.page && saved.page > 1) {
+    currentPage.value = saved.page
+  }
+  await fetchOfflineComics()
+  // 数据就绪（列表已渲染）后再恢复滚动位置，避免内容高度为 0 导致恢复失准
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+})
+
+// 任务五：离开列表页时保存「页码 + 滚动位置」，返回时恢复
+onBeforeRouteLeave(() => {
+  rememberListState('/offline/home', {
+    top: getMainContent()?.scrollTop || 0,
+    page: currentPage.value,
+  })
 })
 
 // --------------------------------------------------
@@ -221,7 +247,45 @@ const currentPageItems = computed(() => {
 
 const handlePageChange = (newPage: number) => {
   currentPage.value = newPage
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  // 问题3：真实滚动容器是 #main-content，window.scrollTo 无效
+  scrollMainToTop('smooth')
+}
+
+// Round4 任务八：按日期跳页——基于当前排序（默认发布时间降序）找到首个到达该日期的项并定位其所在页
+const seekToDate = (date: string) => {
+  const target = new Date(date).getTime()
+  if (isNaN(target)) {
+    toast.error('日期无效')
+    return
+  }
+  const timeOf = (c: ComicItem) => {
+    const raw = (c as unknown as Record<string, unknown>)[sortBy.value]
+    return raw ? new Date(raw as string).getTime() : Number.NEGATIVE_INFINITY
+  }
+  const list = sortedComics.value
+  let idx = -1
+  if (sortDesc.value) {
+    // 降序（新→旧）：首个 时间<=目标 的项即该日期的起点
+    idx = list.findIndex((c) => {
+      const t = timeOf(c)
+      return isFinite(t) && t <= target
+    })
+  } else {
+    // 升序（旧→新）：最后一个 时间<=目标 的项
+    for (let i = list.length - 1; i >= 0; i--) {
+      const t = timeOf(list[i])
+      if (isFinite(t) && t <= target) {
+        idx = i
+        break
+      }
+    }
+  }
+  if (idx < 0) {
+    toast.info('未找到该日期之前的作品')
+    return
+  }
+  currentPage.value = Math.floor(idx / pageSize) + 1
+  scrollMainToTop('smooth')
 }
 </script>
 
@@ -281,6 +345,9 @@ const handlePageChange = (newPage: number) => {
         />
       </template>
     </GridContainer>
+
+    <!-- Round4 任务八：悬浮球（刷新 + 日期跳页） -->
+    <FloatingToolbar @refresh="fetchOfflineComics" @seek-change="seekToDate" />
   </div>
 </template>
 

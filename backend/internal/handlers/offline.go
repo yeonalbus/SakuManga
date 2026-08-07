@@ -47,7 +47,8 @@ func (h *OfflineHandler) CheckOfflineUpdates(c *gin.Context) {
 	}
 
 	go func() {
-		result, err := services.CheckUpdatesWithProgress(h.db, h.ehService, services.OfflineUpdateProgressSink)
+		// Round4 任务四：手动触发同样执行「常规更新检测 + 老化判定」完整扫描
+		result, _, err := services.RunUpdateScanWithProgress(h.db, h.ehService, services.OfflineUpdateProgressSink)
 		if err != nil {
 			services.FinishOfflineTask(err)
 			return
@@ -56,7 +57,7 @@ func (h *OfflineHandler) CheckOfflineUpdates(c *gin.Context) {
 
 		// 自动更新画廊（autoUpdateGallery）：检测到新版后立即按所选方案入队下载
 		if h.manager.GetSettings().AutoUpdateGallery {
-			enqueued, skipped := h.autoEnqueueUpdates(result)
+			enqueued, skipped := services.AutoEnqueueUpdates(h.db, h.manager, result)
 			log.Printf("%s [update] 检测完成：需要更新 %d 个，自动入队 %d 个，跳过 %d 个（autoUpdateGallery=true）",
 				dlLogTag, len(result.NeedsUpdate), enqueued, skipped)
 		}
@@ -92,72 +93,11 @@ type downloadUpdateReq struct {
 	Mode    string `json:"mode"` // 可选：gallery | archive（覆盖自动更新方案）
 }
 
-// autoEnqueueUpdates 自动为所有待更新漫画入队下载（autoUpdateGallery=true 时调用）
-func (h *OfflineHandler) autoEnqueueUpdates(result *services.UpdateCheckResult) (enqueued, skipped int) {
-	userID := services.LoadAdminUserID(h.db)
-	for i := range result.NeedsUpdate {
-		comic := result.NeedsUpdate[i]
-		params, err := h.buildUpdateParams(&comic, "", userID)
-		if err != nil {
-			log.Printf("%s [update] 自动更新跳过漫画 %s（%s）: %v", dlWarnTag, comic.ID, comic.Title, err)
-			skipped++
-			continue
-		}
-		if _, err := h.manager.CreateTask(params); err != nil {
-			// 已存在进行中任务或创建失败：跳过但不算致命错误
-			log.Printf("%s [update] 自动更新漫画 %s 入队失败: %v", dlWarnTag, comic.ID, err)
-			skipped++
-			continue
-		}
-		enqueued++
-	}
-	return enqueued, skipped
-}
-
 // buildUpdateParams 根据漫画的更新信息构造下载参数（手动更新与自动更新共用同一套方案选择逻辑）
+//
+// Round4 任务四：方案选择逻辑下沉到 services.BuildUpdateDownloadParams，与自动入队复用同一实现，避免重复。
 func (h *OfflineHandler) buildUpdateParams(comic *models.OfflineComic, modeOverride string, userID uint) (services.CreateDownloadParams, error) {
-	// 优先使用检测到的新版 gid/token；同 gid 扩充时 token 可能已变更
-	gid := comic.NewGID
-	if gid == "" {
-		gid = comic.GID
-	}
-	token := comic.NewToken
-	if token == "" {
-		token = comic.Token
-	}
-	if gid == "" || token == "" {
-		return services.CreateDownloadParams{}, errors.New("该漫画缺少新版 gid/token，无法下载更新")
-	}
-
-	// 选择更新下载方案：请求覆盖 > 自动更新方案 > 归档
-	setting := h.manager.GetSettings()
-	mode := modeOverride
-	if mode == "" {
-		mode = setting.AutoUpdateScheme
-	}
-	if mode != string(models.DownloadModeGallery) && mode != string(models.DownloadModeArchive) {
-		mode = string(models.DownloadModeArchive)
-	}
-
-	archiveType := ""
-	if mode == string(models.DownloadModeArchive) {
-		if setting.DefaultDownloadScheme == models.DefaultSchemeArchiveResample {
-			archiveType = string(models.ArchiveTypeResample)
-		} else {
-			archiveType = string(models.ArchiveTypeOriginal)
-		}
-	}
-
-	return services.CreateDownloadParams{
-		UserID:           userID,
-		GID:              gid,
-		Token:            token,
-		Title:            comic.Title,
-		CoverURL:         comic.CoverURL,
-		Mode:             models.DownloadMode(mode),
-		ArchiveType:      models.ArchiveType(archiveType),
-		UpdateForComicID: comic.ID,
-	}, nil
+	return services.BuildUpdateDownloadParams(h.db, h.manager, comic, modeOverride, userID)
 }
 
 // DownloadUpdate 为需要更新的漫画启动新版下载 POST /api/v1/offline/updates/download
@@ -264,6 +204,8 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 	// 批量删除：comicIds 非空则优先批量
 	if len(req.ComicIDs) > 0 {
 		deleted, err := services.RemoveDedupComics(h.db, req.ComicIDs, req.DeleteFile)
+		// 幽灵文件修复：无论成败都使维护/更新结果缓存失效，避免残留过期数据
+		services.InvalidateMaintainDedupResult(req.ComicIDs)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "deleted": deleted})
 			return
@@ -276,8 +218,16 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 		return
 	}
 	if err := services.RemoveDedupComic(h.db, req.ComicID, req.DeleteFile); err != nil {
+		// 幽灵文件容错：记录已不存在（可能已被其他设备删除）→ 视为删除成功，
+		// 返回 alreadyDeleted=true，前端据此移除本地列表项而非报错。
+		if errors.Is(err, services.ErrComicNotFound) {
+			services.InvalidateMaintainDedupResult([]string{req.ComicID})
+			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1, "alreadyDeleted": true})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	services.InvalidateMaintainDedupResult([]string{req.ComicID})
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1})
 }

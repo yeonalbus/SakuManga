@@ -4,6 +4,7 @@ import (
 	"SakuHentai/internal/models"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -215,6 +216,228 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 	return result, nil
 }
 
+// ─────────────────────────────────────────────────────────────
+// Aged Status 老化判定（Round4 任务四：365 天老化规则）
+//
+// E 站规则：发布超 365 天的画廊无法再通过 Gallery Manager Update 生成子画廊，
+// 此类画廊只扫描一次。本函数遍历 publishedAt < now-365d 且 agedCheckedAt == 0 的漫画：
+//   - 联网核对在线详情，若发现新版本，取最新版的发布时间——
+//     最新版仍在 365 天内 → 正常标记 needsUpdate（不设 AgedStatus）；
+//     无新版本，或最新版也已超 365 天 → 设 AgedStatus=true 并排除后续扫描。
+//   - 无论结果如何都更新 AgedCheckedAt，防止重复扫描。
+// ─────────────────────────────────────────────────────────────
+
+// AgeCheckResult 老化判定结果
+type AgeCheckResult struct {
+	Checked     int `json:"checked"`     // 参与老化判定的漫画数
+	Aged        int `json:"aged"`        // 标记为老化的漫画数
+	NeedsUpdate int `json:"needsUpdate"` // 判定为有可更新新版（仍在窗口内）的漫画数
+}
+
+// AgeCheckWithProgress 带进度回调的老化判定（供周扫描/手动触发共用）
+func AgeCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*AgeCheckResult, error) {
+	return ageCheckWithProgress(db, ehService, onProgress)
+}
+
+// ageCheckWithProgress 老化判定实现（一次性：只处理 publishedAt 超 365 天且从未判定过的漫画）
+func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*AgeCheckResult, error) {
+	if db == nil || ehService == nil {
+		return nil, fmt.Errorf("非法参数：db / ehService 不能为空")
+	}
+	account := LoadAdminAccount(db)
+	if account.IPBMemberID == "" {
+		return nil, fmt.Errorf("请先绑定并保存 E 站账户凭证")
+	}
+	ehSetting := loadEHSetting(db, LoadAdminUserID(db))
+
+	cutoff := time.Now().AddDate(0, 0, -365)
+
+	var comics []models.OfflineComic
+	if err := db.Where("g_id != '' AND aged_status = ? AND aged_checked_at = ? AND published_at < ?",
+		false, 0, cutoff).Order("published_at asc").Find(&comics).Error; err != nil {
+		return nil, fmt.Errorf("读取老化候选漫画失败: %v", err)
+	}
+	// 与常规更新检测一致：已关闭离线维护的额外路径漫画不参与
+	comics = filterOfflineUpdateEnabled(db, comics)
+
+	result := &AgeCheckResult{Checked: len(comics)}
+	nowMs := time.Now().UnixMilli()
+	for i := range comics {
+		c := &comics[i]
+		if onProgress != nil {
+			onProgress(i+1, len(comics), c.Title, "老化判定")
+		}
+
+		aged := false
+		detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
+		if err != nil {
+			log.Printf("%s [update] 老化判定漫画 %q(gid=%s) 在线详情拉取失败（按无新版处理）: %v",
+				dlWarnTag, c.Title, c.GID, err)
+		} else if detail != nil {
+			if latest, has := latestGalleryVersion(detail); has {
+				if pub := parseGalleryAddedAt(latest.AddedAt); pub != nil && pub.Before(cutoff) {
+					// 最新版也已超 365 天 → 老化（此链条已无法再更新）
+					aged = true
+				} else {
+					// 最新版仍在 365 天内（或发布时间未知，保守按可更新处理）→ 正常标记更新
+					markOfflineUpdate(c, latest.GID, latest.Token, buildUpdateNote(latest.GID, detail.Children))
+					result.NeedsUpdate++
+					log.Printf("%s [update] 漫画 %q(gid=%s) 有新版 gid=%s（发布时间 %s），仍在可更新窗口内",
+						dlLogTag, c.Title, c.GID, latest.GID, latest.AddedAt)
+				}
+			} else {
+				// 无新版本 → 老化
+				aged = true
+			}
+		} else {
+			aged = true
+		}
+
+		if aged {
+			if clearOfflineUpdate(c) {
+				log.Printf("%s [update] 清除漫画 %q(gid=%s) 的更新标记（最新版也已超 365 天）",
+					dlLogTag, c.Title, c.GID)
+			}
+			c.AgedStatus = true
+			result.Aged++
+			log.Printf("%s [update] 漫画 %q(gid=%s) 已老化（发布超 365 天且无窗口内新版），标记 AgedStatus 并排除后续扫描",
+				dlLogTag, c.Title, c.GID)
+		}
+
+		c.AgedCheckedAt = nowMs
+		c.UpdatedAt = time.Now()
+		if err := db.Save(c).Error; err != nil {
+			log.Printf("%s [update] 保存漫画 %s 老化状态失败: %v", dlErrTag, c.ID, err)
+		}
+		time.Sleep(1200 * time.Millisecond)
+	}
+
+	log.Printf("%s [update] 老化判定完成：检查 %d 个，标记老化 %d 个，可更新 %d 个",
+		dlLogTag, result.Checked, result.Aged, result.NeedsUpdate)
+	return result, nil
+}
+
+// latestGalleryVersion 取详情页中的最新版画廊关系（Children 从旧到新排列，最后一位为最新版）
+func latestGalleryVersion(detail *GalleryDetailResult) (GalleryRelation, bool) {
+	if detail.NewVersionGID != "" && detail.NewVersionGID != detail.ID {
+		for _, ch := range detail.Children {
+			if ch.GID == detail.NewVersionGID {
+				return ch, true
+			}
+		}
+		return GalleryRelation{GID: detail.NewVersionGID, Token: detail.NewVersionToken}, true
+	}
+	if n := len(detail.Children); n > 0 {
+		return detail.Children[n-1], true
+	}
+	return GalleryRelation{}, false
+}
+
+// parseGalleryAddedAt 解析详情页关系列表中的发布时间字符串（如 "2026-07-30 12:13"）
+func parseGalleryAddedAt(s string) *time.Time {
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
+// RunUpdateScanWithProgress 执行一轮完整更新扫描：常规更新检测 + 老化判定，供周调度与手动触发共用。
+// 老化判定可能清除部分 needsUpdate（最新版也已超 365 天），故结束后从 DB 重建真实待更新列表。
+func RunUpdateScanWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn) (*UpdateCheckResult, *AgeCheckResult, error) {
+	result, err := checkUpdatesWithProgress(db, ehService, onProgress)
+	if err != nil {
+		return nil, nil, err
+	}
+	aged, aerr := ageCheckWithProgress(db, ehService, onProgress)
+	if aerr != nil {
+		log.Printf("%s [update] 老化判定失败: %v", dlErrTag, aerr)
+	}
+	var fresh []models.OfflineComic
+	if rerr := db.Where("needs_update = ? AND aged_status = ?", true, false).Order("updated_at desc").Find(&fresh).Error; rerr == nil {
+		result.NeedsUpdate = fresh
+	}
+	return result, aged, nil
+}
+
+// RunUpdateScan 无进度回调版本（等价于 RunUpdateScanWithProgress(db, eh, nil)）
+func RunUpdateScan(db *gorm.DB, ehService *EHService) (*UpdateCheckResult, *AgeCheckResult, error) {
+	return RunUpdateScanWithProgress(db, ehService, nil)
+}
+
+// AutoEnqueueUpdates 自动为所有待更新漫画入队下载（autoUpdateGallery=true 时调用）。
+// 手动触发与周扫描共用同一套方案选择逻辑，返回 (入队数, 跳过数)。
+func AutoEnqueueUpdates(db *gorm.DB, manager *DownloadManager, result *UpdateCheckResult) (enqueued, skipped int) {
+	if manager == nil || result == nil {
+		return 0, 0
+	}
+	userID := LoadAdminUserID(db)
+	for i := range result.NeedsUpdate {
+		comic := result.NeedsUpdate[i]
+		params, err := BuildUpdateDownloadParams(db, manager, &comic, "", userID)
+		if err != nil {
+			log.Printf("%s [update] 自动更新跳过漫画 %s（%s）: %v", dlWarnTag, comic.ID, comic.Title, err)
+			skipped++
+			continue
+		}
+		if _, err := manager.CreateTask(params); err != nil {
+			// 已存在进行中任务或创建失败：跳过但不算致命错误
+			log.Printf("%s [update] 自动更新漫画 %s 入队失败: %v", dlWarnTag, comic.ID, err)
+			skipped++
+			continue
+		}
+		enqueued++
+	}
+	return enqueued, skipped
+}
+
+// BuildUpdateDownloadParams 根据漫画的更新信息构造下载参数（手动更新与自动更新共用同一套方案选择逻辑）
+func BuildUpdateDownloadParams(db *gorm.DB, manager *DownloadManager, comic *models.OfflineComic, modeOverride string, userID uint) (CreateDownloadParams, error) {
+	// 优先使用检测到的新版 gid/token；同 gid 扩充时 token 可能已变更
+	gid := comic.NewGID
+	if gid == "" {
+		gid = comic.GID
+	}
+	token := comic.NewToken
+	if token == "" {
+		token = comic.Token
+	}
+	if gid == "" || token == "" {
+		return CreateDownloadParams{}, errors.New("该漫画缺少新版 gid/token，无法下载更新")
+	}
+
+	// 选择更新下载方案：请求覆盖 > 自动更新方案 > 归档
+	setting := manager.GetSettings()
+	mode := modeOverride
+	if mode == "" {
+		mode = setting.AutoUpdateScheme
+	}
+	if mode != string(models.DownloadModeGallery) && mode != string(models.DownloadModeArchive) {
+		mode = string(models.DownloadModeArchive)
+	}
+
+	archiveType := ""
+	if mode == string(models.DownloadModeArchive) {
+		if setting.DefaultDownloadScheme == models.DefaultSchemeArchiveResample {
+			archiveType = string(models.ArchiveTypeResample)
+		} else {
+			archiveType = string(models.ArchiveTypeOriginal)
+		}
+	}
+
+	return CreateDownloadParams{
+		UserID:           userID,
+		GID:              gid,
+		Token:            token,
+		Title:            comic.Title,
+		CoverURL:         comic.CoverURL,
+		Mode:             models.DownloadMode(mode),
+		ArchiveType:      models.ArchiveType(archiveType),
+		UpdateForComicID: comic.ID,
+	}, nil
+}
+
 // markOfflineUpdate 标记漫画需要更新到新版
 func markOfflineUpdate(c *models.OfflineComic, newGID, newToken, note string) {
 	c.NeedsUpdate = true
@@ -259,16 +482,23 @@ func buildUpdateNote(latestGID string, children []GalleryRelation) string {
 }
 
 // DedupItem 查重建议项
+// Round4 任务一：新增 PairComic —— 成对对象（对比视图双列展示：同 GID 保留↔删除、父子版本 新版↔旧版）。
 type DedupItem struct {
-	Comic  models.OfflineComic `json:"comic"`
-	Reason string              `json:"reason"` // 重复原因
-	Keep   bool                `json:"keep"`   // 是否建议保留（true=保留，false=建议删除）
+	Comic     models.OfflineComic  `json:"comic"`
+	Reason    string               `json:"reason"` // 重复原因
+	Keep      bool                 `json:"keep"`   // 是否建议保留（true=保留，false=建议删除）
+	PairComic *models.OfflineComic `json:"pairComic,omitempty"` // 成对对象（Round4 任务一）
 }
 
 // DedupResult 查重结果
 type DedupResult struct {
-	Items []DedupItem `json:"items"` // 需要处理的项（含建议保留项与建议删除项）
+	Items      []DedupItem `json:"items"`      // 需要处理的项（含建议保留项与建议删除项）
+	FinishedAt int64       `json:"finishedAt"` // 结果生成时间戳(ms)
+	Stale      bool        `json:"stale"`      // 是否已过期（删除操作后置 true，提示前端重新扫描）
 }
+
+// ErrComicNotFound 漫画记录不存在（幽灵文件容错：记录可能已被其他设备删除）
+var ErrComicNotFound = errors.New("未找到漫画记录")
 
 // MaintainDedup 本地维护查重
 //
@@ -306,6 +536,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	removeSet := map[string]bool{} // 建议删除的 comic id
 	reasonMap := map[string]string{}
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
+	pairID := map[string]string{}        // Round4 任务一：comic id → 成对对象 comic id（对比视图双列展示）
 
 	// ── 1. 同 GID 分组查重 ──
 	gidGroups := map[string][]models.OfflineComic{}
@@ -338,6 +569,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			removeSet[group[i].ID] = true
 			reasonMap[group[i].ID] = fmt.Sprintf("同 GID(%s) 重复：建议保留文件夹形态，删除该重复项", gid)
 			totalBytes[group[i].ID] = group[i].FileSize
+			// Round4 任务一：记录成对关系（保留项 ↔ 删除项），对比视图双列展示
+			pairID[group[i].ID] = group[keepIdx].ID
+			if pairID[group[keepIdx].ID] == "" {
+				pairID[group[keepIdx].ID] = group[i].ID
+			}
 		}
 	}
 
@@ -385,6 +621,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			removeSet[c.ID] = true
 			reasonMap[c.ID] = fmt.Sprintf("归档内容完全相同（hash=%s）：删除重复项", c.FileHash)
 			totalBytes[c.ID] = c.FileSize
+			// Round4 任务一：与同组首个归档互为成对对象（对比视图双列展示）
+			pairID[c.ID] = group[0].ID
+			if pairID[group[0].ID] == "" {
+				pairID[group[0].ID] = c.ID
+			}
 		}
 	}
 
@@ -467,6 +708,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 					if !removeSet[successor.ID] {
 						keepSet[successor.ID] = true
 					}
+					// Round4 任务一：旧版 ↔ 新版 互为成对对象（对比视图双列展示）
+					pairID[c.ID] = successor.ID
+					if pairID[successor.ID] == "" {
+						pairID[successor.ID] = c.ID
+					}
 					log.Printf("%s [maintain] 漫画 %q(gid=%s) 被新版 %q(gid=%s) 取代，建议删除旧版",
 						dlLogTag, c.Title, c.GID, successor.Title, successor.GID)
 				}
@@ -498,6 +744,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
 			if !removeSet[c.ID] {
 				keepSet[c.ID] = true
+			}
+			// Round4 任务一：旧版 p ↔ 新版 c 互为成对对象（对比视图双列展示）
+			pairID[p.ID] = c.ID
+			if pairID[c.ID] == "" {
+				pairID[c.ID] = p.ID
 			}
 		}
 	}
@@ -574,6 +825,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				removeSet[group[i].ID] = true
 				reasonMap[group[i].ID] = fmt.Sprintf("文件夹内容完全相同（%s，共 %d 份）：删除复制项", shortHash(sig), len(group))
 				totalBytes[group[i].ID] = group[i].FileSize
+				// Round4 任务一：与同组保留项互为成对对象（对比视图双列展示）
+				pairID[group[i].ID] = group[keepIdx].ID
+				if pairID[group[keepIdx].ID] == "" {
+					pairID[group[keepIdx].ID] = group[i].ID
+				}
 			}
 		}
 	
@@ -582,12 +838,16 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
 	for i := range comics {
 		c := comics[i]
+		var pair *models.OfflineComic
+		if pid := pairID[c.ID]; pid != "" {
+			pair = findComicByID(comics, pid)
+		}
 		if removeSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false})
+			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false, PairComic: pair})
 			continue
 		}
 		if keepSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: "建议保留", Keep: true})
+			result.Items = append(result.Items, DedupItem{Comic: c, Reason: "建议保留", Keep: true, PairComic: pair})
 		}
 	}
 
@@ -604,11 +864,22 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	return result, nil
 }
 
+// findComicByID 在 comics 切片中按 id 查找漫画（返回最新值指针；成对对象解析用，Round4 任务一）。
+func findComicByID(comics []models.OfflineComic, id string) *models.OfflineComic {
+	for i := range comics {
+		if comics[i].ID == id {
+			return &comics[i]
+		}
+	}
+	return nil
+}
+
 // filterOfflineUpdateEnabled 过滤掉「已关闭离线维护」的额外路径下的漫画（问题4）。
 //
 // 规则：
 //   - 下载导入的漫画（ScanPathID == ""）始终参与更新检测/查重；
 //   - 额外路径的漫画仅当其路径 EnableOfflineUpdate == true 时参与；
+//   - 已老化漫画（AgedStatus=true）不参与更新检测（Round4 任务四，只扫描一次）；
 //   - 读取路径配置失败时保守处理：按全量参与（不静默丢数据）。
 func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []models.OfflineComic {
 	var paths []models.ExtraScanPath
@@ -627,6 +898,9 @@ func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []mod
 		if c.ScanPathID != "" && disabled[c.ScanPathID] {
 			continue
 		}
+		if c.AgedStatus {
+			continue // 已老化：排除后续扫描
+		}
 		filtered = append(filtered, c)
 	}
 	return filtered
@@ -641,6 +915,10 @@ func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []mod
 func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	var comic models.OfflineComic
 	if err := db.First(&comic, "id = ?", comicID).Error; err != nil {
+		// 幽灵文件容错：记录不存在（可能已被其他设备删除）→ 返回哨兵错误，调用方视为「已删除」
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrComicNotFound
+		}
 		return fmt.Errorf("未找到漫画记录: %v", err)
 	}
 
@@ -675,6 +953,12 @@ func RemoveDedupComics(db *gorm.DB, comicIDs []string, deleteFile bool) (int, er
 	var firstErr error
 	for _, id := range comicIDs {
 		if err := DeleteOfflineComic(db, id, deleteFile); err != nil {
+			// 幽灵文件容错：记录已不存在（可能已由其他设备删除）→ 视为已删除，不计为失败
+			if errors.Is(err, ErrComicNotFound) {
+				log.Printf("%s [maintain] 漫画 %s 记录已不存在（视为已删除）", dlWarnTag, id)
+				deleted++
+				continue
+			}
 			log.Printf("%s [maintain] 批量删除失败（comic %s）: %v", dlErrTag, id, err)
 			if firstErr == nil {
 				firstErr = err

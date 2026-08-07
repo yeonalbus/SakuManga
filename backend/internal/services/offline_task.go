@@ -126,10 +126,15 @@ func FinishOfflineTask(err error) {
 	}
 }
 
-// StoreMaintainDedupResult 缓存维护查重结果
+// StoreMaintainDedupResult 缓存维护查重结果（记录生成时间并清除过期标记，
+// 前端据此判断结果是否可信：删除操作后结果会被标记为过期）
 func StoreMaintainDedupResult(res *DedupResult) {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
+	if res != nil {
+		res.FinishedAt = time.Now().UnixMilli()
+		res.Stale = false
+	}
 	offlineMaintainRes = res
 }
 
@@ -138,6 +143,32 @@ func GetMaintainDedupResult() *DedupResult {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
 	return offlineMaintainRes
+}
+
+// InvalidateMaintainDedupResult 使维护查重结果缓存失效（幽灵文件修复）：
+// 删除漫画后调用，将已删除的 id 从结果 items 中移除并标记 stale=true，
+// 同时清空更新检测结果缓存（被删漫画可能仍残留在更新列表中）。
+// 前端下次读取结果时会发现 stale=true，提示用户重新扫描以获取一致的最新数据。
+func InvalidateMaintainDedupResult(removedIDs []string) {
+	offlineTaskMu.Lock()
+	defer offlineTaskMu.Unlock()
+	if offlineMaintainRes != nil {
+		if len(removedIDs) > 0 {
+			idSet := make(map[string]struct{}, len(removedIDs))
+			for _, id := range removedIDs {
+				idSet[id] = struct{}{}
+			}
+			kept := offlineMaintainRes.Items[:0]
+			for _, item := range offlineMaintainRes.Items {
+				if _, hit := idSet[item.Comic.ID]; !hit {
+					kept = append(kept, item)
+				}
+			}
+			offlineMaintainRes.Items = kept
+		}
+		offlineMaintainRes.Stale = true
+	}
+	offlineUpdateRes = nil
 }
 
 // StoreUpdateCheckResult 缓存更新检测结果

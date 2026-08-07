@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 
 const { modal, toast } = useUI()
+const router = useRouter()
 
 // 后端 GET /offline/maintain 返回的离线漫画 DTO
 interface OfflineComicDTO {
@@ -27,9 +29,12 @@ interface DedupItemDTO {
 
 interface DedupResultDTO {
   items: DedupItemDTO[]
+  finishedAt?: number // 结果生成时间戳(ms)
+  stale?: boolean // 结果是否已过期（删除操作后置 true，提示重新扫描）
 }
 
 const items = ref<DedupItemDTO[]>([])
+const resultStale = ref(false) // 幽灵文件修复：结果过期标记（跨设备删除后旧缓存不可信）
 const isScanning = ref(false)
 const isRemoving = ref(false)
 const removingId = ref('')
@@ -73,6 +78,7 @@ const loadResult = async () => {
   try {
     const data = await http<DedupResultDTO>('/offline/maintain/result')
     items.value = data?.items || []
+    resultStale.value = !!data?.stale
   } catch {
     // 结果暂未就绪，交给轮询下一轮
   }
@@ -149,16 +155,23 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
   isRemoving.value = true
   removingId.value = c.id
   try {
-    await http<{ ok: boolean }>('/offline/maintain/remove', {
+    const data = await http<{ ok: boolean; alreadyDeleted?: boolean }>('/offline/maintain/remove', {
       method: 'POST',
       body: JSON.stringify({ comicId: c.id, deleteFile }),
     })
-    toast.success(
-      deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
-    )
+    if (data.alreadyDeleted) {
+      // 幽灵文件容错：记录已不存在（可能已在其他设备删除）→ 视为删除成功并同步刷新列表
+      toast.info(`《${title}》记录已不存在（可能已在其他设备删除），已同步刷新列表`)
+    } else {
+      toast.success(
+        deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
+      )
+    }
     // 本地过滤该项（保留/删除关系在结果里已固定，无需重新全盘扫描）
     items.value = items.value.filter((i) => i.comic.id !== c.id)
     selectedIds.value = selectedIds.value.filter((id) => id !== c.id)
+    // 本地列表已与后端一致，清除过期标记避免误报
+    resultStale.value = false
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '删除失败')
@@ -170,6 +183,11 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
 
 const onCoverError = (id: string) => {
   coverFailed.value[id] = true
+}
+
+// Round4 任务一：点击卡片进入双列对比视图（左=建议保留，右=建议删除）
+const openCompare = (comicId: string) => {
+  router.push({ path: '/offline/compare', query: { type: 'maintain', id: comicId } })
 }
 
 // 勾选/取消勾选单个删除项
@@ -205,19 +223,28 @@ const removeSelected = async (deleteFile: boolean) => {
 
   isRemoving.value = true
   try {
-    const data = await http<{ ok: boolean; deleted?: number }>('/offline/maintain/remove', {
-      method: 'POST',
-      body: JSON.stringify({ comicIds: ids, deleteFile }),
-    })
-    const deleted = data.deleted ?? count
-    toast.success(
-      deleteFile
-        ? `已批量删除 ${deleted} 项（记录 + 本地文件）🗑️`
-        : `已批量删除 ${deleted} 项记录（保留本地文件）`,
+    const data = await http<{ ok: boolean; deleted?: number; alreadyDeleted?: boolean }>(
+      '/offline/maintain/remove',
+      {
+        method: 'POST',
+        body: JSON.stringify({ comicIds: ids, deleteFile }),
+      },
     )
+    const deleted = data.deleted ?? count
+    if (data.alreadyDeleted) {
+      toast.info(`已处理 ${deleted} 项（部分记录已不存在，视为已删除），已同步刷新列表`)
+    } else {
+      toast.success(
+        deleteFile
+          ? `已批量删除 ${deleted} 项（记录 + 本地文件）🗑️`
+          : `已批量删除 ${deleted} 项记录（保留本地文件）`,
+      )
+    }
     selectedIds.value = []
     // 本地过滤已删除项（保留/删除关系在结果里已固定，无需重新全盘扫描）
     items.value = items.value.filter((i) => !ids.includes(i.comic.id))
+    // 本地列表已与后端一致，清除过期标记避免误报
+    resultStale.value = false
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '批量删除失败')
@@ -297,6 +324,17 @@ onUnmounted(stopPolling)
       该路径下的漫画将不参与本查重（下载导入的漫画始终参与）。
     </div>
 
+    <!-- 幽灵文件修复：结果已过期（跨设备删除后旧缓存不可信），提示重新扫描 -->
+    <div v-if="resultStale" class="stale-banner">
+      <span class="stale-icon">⚠️</span>
+      <div class="stale-info">
+        <p class="stale-title">查重结果已过期</p>
+        <p class="stale-sub">
+          本地书库可能已在其他设备上发生变化，当前列表可能不再准确。建议点击「重新扫描」获取最新结果。
+        </p>
+      </div>
+    </div>
+
     <div v-if="isScanning" class="scanning-banner">
       <span class="spinner"></span>
       <div class="scanning-info">
@@ -320,9 +358,17 @@ onUnmounted(stopPolling)
     </div>
 
     <div v-else-if="items.length === 0" class="empty-box">
-      <span class="icon">🎉</span>
-      <p class="empty-title">恭喜！本地画库暂无重复或异常项</p>
-      <p class="empty-sub">若刚导入新内容，可点击「重新全盘扫描」再次核对。</p>
+      <span class="icon">{{ resultStale ? '🔄' : '🎉' }}</span>
+      <p class="empty-title">
+        {{ resultStale ? '查重结果已过期，请重新扫描' : '恭喜！本地画库暂无重复或异常项' }}
+      </p>
+      <p class="empty-sub">
+        {{
+          resultStale
+            ? '本地书库可能已发生变化（如已在其他设备删除），重新扫描可获取最新一致的结果。'
+            : '若刚导入新内容，可点击「重新全盘扫描」再次核对。'
+        }}
+      </p>
     </div>
 
     <template v-else>
@@ -374,6 +420,8 @@ onUnmounted(stopPolling)
             :key="item.comic.id"
             class="dedup-card remove-card"
             :class="{ selected: selectedIds.includes(item.comic.id) }"
+            title="点击查看双列对比（左=建议保留，右=建议删除）"
+            @click="openCompare(item.comic.id)"
           >
             <label class="select-check" @click.stop>
               <input
@@ -398,6 +446,7 @@ onUnmounted(stopPolling)
               <div class="card-top">
                 <h4 class="card-title">{{ item.comic.title }}</h4>
                 <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
+                <span class="compare-hint">⇄ 对比</span>
               </div>
               <div class="reason-box">
                 <span class="reason-icon">⚠️</span>
@@ -411,7 +460,7 @@ onUnmounted(stopPolling)
               <div class="card-path">📁 {{ item.comic.localPath || '—' }}</div>
             </div>
 
-            <div class="card-actions">
+            <div class="card-actions" @click.stop>
               <button
                 class="action-btn danger-soft"
                 :disabled="isRemoving"
@@ -437,7 +486,13 @@ onUnmounted(stopPolling)
       <div v-if="keepItems.length > 0" class="section">
         <h3 class="section-title ok">✔ 建议保留</h3>
         <div class="item-list">
-          <div v-for="item in keepItems" :key="item.comic.id" class="dedup-card keep-card">
+          <div
+            v-for="item in keepItems"
+            :key="item.comic.id"
+            class="dedup-card keep-card"
+            title="点击查看双列对比（左=建议保留，右=建议删除）"
+            @click="openCompare(item.comic.id)"
+          >
             <div class="cover-box">
               <img
                 v-if="item.comic.coverUrl && !coverFailed[item.comic.id]"
@@ -453,6 +508,7 @@ onUnmounted(stopPolling)
               <div class="card-top">
                 <h4 class="card-title">{{ item.comic.title }}</h4>
                 <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
+                <span class="compare-hint">⇄ 对比</span>
               </div>
               <div class="keep-box">
                 <span class="keep-icon">✔</span>
@@ -536,6 +592,38 @@ onUnmounted(stopPolling)
 }
 .scan-btn.ghost:hover {
   opacity: 0.85;
+}
+
+.stale-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  background-color: rgba(255, 193, 7, 0.08);
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  border-left: 3px solid #ffc107;
+  border-radius: 6px;
+}
+.stale-icon {
+  font-size: 1.1rem;
+  line-height: 1.4;
+}
+.stale-info {
+  flex: 1;
+  min-width: 0;
+}
+.stale-title {
+  color: #ffd54f;
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.stale-sub {
+  color: #b8a26a;
+  margin: 4px 0 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .scanning-banner {
@@ -685,6 +773,12 @@ onUnmounted(stopPolling)
   border-radius: 8px;
   padding: 14px;
   align-items: flex-start;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.dedup-card:hover {
+  border-color: #00a896;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 .remove-card {
   border-left: 3px solid #ff7588;
@@ -692,6 +786,17 @@ onUnmounted(stopPolling)
 .keep-card {
   border-left: 3px solid #4caf50;
   opacity: 0.92;
+}
+
+.compare-hint {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #00a896;
+  border: 1px solid rgba(0, 168, 150, 0.4);
+  background: rgba(0, 168, 150, 0.1);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .cover-box {

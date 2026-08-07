@@ -80,6 +80,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
+    path: '/offline/compare',
+    name: 'OfflineCompare',
+    component: () => import('@/views/offline/OfflineCompare.vue'),
+    // Round4-任务1：双列对比视图（仅管理员可访问；query 携带 type=update|maintain 与 id=<comicId>）
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/offline/toplist',
     name: 'OfflineToplist',
     component: () => import('@/views/offline/OfflineToplist.vue'),

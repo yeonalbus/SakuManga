@@ -5,12 +5,14 @@ import (
 	"SakuHentai/internal/models"
 	"SakuHentai/internal/services"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type OfflineComicResponse struct {
@@ -271,20 +273,37 @@ func GetComicPageImage(c *gin.Context) {
 // DeleteOfflineComic 删除本地画廊。
 // 查询参数 deleteFile=true 时同时物理删除本地文件；默认仅删除记录。
 // 删除时自动清理书架与历史记录中的引用。
+// 幽灵文件容错：记录不存在（可能已被其他设备删除）→ 视为删除成功，返回 alreadyDeleted=true。
 func DeleteOfflineComic(c *gin.Context) {
 	id := c.Param("id")
 	deleteFile := c.Query("deleteFile") == "true"
 
-	var comic models.OfflineComic
-	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
-		return
-	}
-
 	if err := services.DeleteOfflineComic(database.DB, id, deleteFile); err != nil {
+		if errors.Is(err, services.ErrComicNotFound) {
+			c.JSON(http.StatusOK, gin.H{"message": "删除成功", "alreadyDeleted": true})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+// RecordComicClick 记录离线漫画阅读次数自增（排行榜持久化）。
+// 前端阅读按钮进入阅读器后 fire-and-forget 上报；DB 原子自增，多设备并发安全。
+func RecordComicClick(c *gin.Context) {
+	id := c.Param("id")
+	res := database.DB.Model(&models.OfflineComic{}).
+		Where("id = ?", id).
+		UpdateColumn("read_count", gorm.Expr("read_count + 1"))
+	if res.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": res.Error.Error()})
+		return
+	}
+	if res.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该漫画记录"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "readCount": res.RowsAffected})
 }

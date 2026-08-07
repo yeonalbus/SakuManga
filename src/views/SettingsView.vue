@@ -34,7 +34,9 @@
           <NetworkSettings v-else-if="activeTab === 'network'" />
           <DownloadSettings v-else-if="activeTab === 'download'" />
           <TagMaintainSettings v-else-if="activeTab === 'tag-maintain'" />
+          <UpdateScanSettings v-else-if="activeTab === 'update-scan'" />
           <AdvancedSettings v-else-if="activeTab === 'advanced'" />
+          <LogSettings v-else-if="activeTab === 'logs'" />
           <SecuritySettings v-else-if="activeTab === 'security'" />
           <AboutSettings v-else-if="activeTab === 'about'" />
         </div>
@@ -57,7 +59,9 @@ import PreferenceSettings from '@/components/settings/PreferenceSettings.vue'
 import NetworkSettings from '@/components/settings/NetworkSettings.vue'
 import DownloadSettings from '@/components/settings/DownloadSettings.vue'
 import TagMaintainSettings from '@/components/settings/TagMaintainSettings.vue'
+import UpdateScanSettings from '@/components/settings/UpdateScanSettings.vue'
 import AdvancedSettings from '@/components/settings/AdvancedSettings.vue'
+import LogSettings from '@/components/settings/LogSettings.vue'
 import SecuritySettings from '@/components/settings/SecuritySettings.vue'
 import AboutSettings from '@/components/settings/AboutSettings.vue'
 
@@ -75,7 +79,9 @@ const allMenuItems = [
   { id: 'network', label: '网络', icon: '📶', title: '网络设置', adminOnly: true },
   { id: 'download', label: '下载', icon: '📥', title: '下载设置', adminOnly: true },
   { id: 'tag-maintain', label: 'Tag 维护', icon: '🏷️', title: 'Tag 维护', adminOnly: true },
+  { id: 'update-scan', label: '更新扫描', icon: '🔄', title: '更新扫描', adminOnly: true },
   { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置', adminOnly: true },
+  { id: 'logs', label: '日志', icon: '📜', title: '日志', adminOnly: true },
   { id: 'security', label: '安全', icon: '🛡️', title: '安全设置', adminOnly: true },
   { id: 'about', label: '关于', icon: 'ℹ️', title: '关于软件', adminOnly: false },
 ]

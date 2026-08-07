@@ -62,6 +62,12 @@ type OfflineComic struct {
 	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token
 	UpdateNote string `json:"updateNote,omitempty"`              // 更新提示文案
 
+	// ── Aged 老化状态（Round4 任务四：365 天老化规则）──
+	// E 站规则：发布超 365 天的画廊无法再通过 Gallery Manager Update 生成子画廊，
+	// 此类画廊只扫描一次；若无可更新新版（或最新版也超 365 天），标记本状态位并排除后续扫描。
+	AgedStatus    bool  `gorm:"default:false" json:"agedStatus"`       // 已老化（发布超 365 天且无可更新新版）
+	AgedCheckedAt int64 `json:"agedCheckedAt,omitempty"`               // 上次老化判定时间戳(ms)；>0=已判定（一次性，防止重复扫描）
+
 	// ── Tag 双轨维护字段（本地漫画 Tag 维护系统）──
 	OnlineTags        string `gorm:"type:text" json:"onlineTags,omitempty"`        // E站官方 tag JSON 数组（每日刷新覆盖）
 	OfflineAddTags    string `gorm:"type:text" json:"offlineAddTags,omitempty"`    // 本地新增 tag JSON 数组（用户客制化）
@@ -81,6 +87,17 @@ type TagMaintainSetting struct {
 	LastDailyRunAt      int64     `json:"lastDailyRunAt,omitempty"`                 // 上次每日刷新执行时间(ms)
 	LastWeeklyRunAt     int64     `json:"lastWeeklyRunAt,omitempty"`                // 上次每周写回执行时间(ms)
 	UpdatedAt           time.Time `json:"updatedAt"`
+}
+
+// UpdateScanSetting 每周自动更新扫描设置（单例 ID=1，Round4 任务四）
+// 仿 TagMaintainSetting：提供「每周固定时刻自动更新扫描」+ Aged Status 老化判定开关。
+type UpdateScanSetting struct {
+	ID               uint      `gorm:"primaryKey;default:1" json:"id"`
+	EnableWeeklyScan bool      `gorm:"default:false" json:"enableWeeklyScan"` // 开启每周自动更新扫描
+	ScanWeekday      int       `gorm:"default:0" json:"scanWeekday"`          // 扫描日（0=周日）
+	ScanHour         int       `gorm:"default:6" json:"scanHour"`             // 扫描时刻（东八区，默认 6）
+	LastWeeklyScanAt int64     `json:"lastWeeklyScanAt,omitempty"`            // 上次自动扫描执行时间(ms)
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // Bookshelf 本地书架（按用户隔离）

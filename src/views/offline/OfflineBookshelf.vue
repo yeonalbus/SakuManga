@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 // 🟢 1. 按领域引入：漫画数据源来自 comicStore，书架信息来自 bookshelfStore
 import { offlineComics, deleteOfflineComics } from '@/stores/comicStore'
 import { computedBookshelves } from '@/stores/bookshelfStore'
@@ -8,6 +8,14 @@ import type { Bookshelf, OfflineComic, ComicItem } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 import { useUI } from '@/composables/useUI'
+// 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
+// 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
+import {
+  scrollMainToTop,
+  rememberListState,
+  takeListState,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const { toast, modal } = useUI()
 
@@ -62,8 +70,32 @@ const currentPageItems = computed(() => {
 
 const handlePageChange = (page: number) => {
   currentPage.value = page
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  // 问题3：真实滚动容器是 #main-content，window.scrollTo 无效
+  scrollMainToTop('smooth')
 }
+
+// 任务五：进入页面时恢复页码；滚动位置在渲染后恢复
+onMounted(async () => {
+  const saved = takeListState('/offline/bookshelf')
+  if (saved?.page && saved.page > 1) {
+    currentPage.value = saved.page
+  }
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+})
+
+// 任务五：离开列表页时保存「页码 + 滚动位置」
+onBeforeRouteLeave(() => {
+  rememberListState('/offline/bookshelf', {
+    top: getMainContent()?.scrollTop || 0,
+    page: currentPage.value,
+  })
+})
 
 // --------------------------------------------------
 // 长按选择 / 批量删除

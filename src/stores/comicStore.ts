@@ -109,12 +109,17 @@ watch(
 // 阅读统计与排行榜
 // --------------------------------------------------
 
-/** 记录离线漫画阅读频次自增（详情页阅读按钮调用） */
+/** 记录离线漫画阅读频次自增（详情页阅读按钮调用）。
+ * 本地自增保证界面即时反馈；同时 fire-and-forget 上报后端 DB 原子自增，
+ * 确保刷新/换设备后排行榜计数不归零（问题9）。
+ */
 export const recordComicClick = (comicId: string) => {
   const comic = offlineComics.value.find((c) => c.id === comicId)
   if (comic) {
     comic.readCount = (comic.readCount || 0) + 1
   }
+  // 上报后端持久化；失败静默（不阻塞阅读流程）
+  http(`/comics/${comicId}/click`, { method: 'POST' }).catch(() => {})
 }
 
 /** 本地排行榜计算属性：按阅读次数降序 */

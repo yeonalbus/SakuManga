@@ -163,6 +163,11 @@ const goDownloads = () => {
   router.push('/downloads')
 }
 
+// Round4 任务一：点击卡片进入双列对比视图（左=本地原版，右=线上最新版）
+const openCompare = (comicId: string) => {
+  router.push({ path: '/offline/compare', query: { type: 'update', id: comicId } })
+}
+
 const formatBytes = (bytes?: number) => {
   if (!bytes || bytes <= 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -258,7 +263,13 @@ onUnmounted(stopPolling)
         >
       </div>
 
-      <div v-for="comic in updates" :key="comic.id" class="update-card">
+      <div
+        v-for="comic in updates"
+        :key="comic.id"
+        class="update-card"
+        title="点击查看双列对比（左=本地原版，右=线上最新版）"
+        @click="openCompare(comic.id)"
+      >
         <div class="cover-box">
           <img
             v-if="comic.coverUrl && !coverFailed[comic.id]"
@@ -276,6 +287,7 @@ onUnmounted(stopPolling)
             <span class="mode-chip">{{
               comic.sourceMode === 'gallery' ? '📁 画廊' : '🗜️ 归档'
             }}</span>
+            <span class="compare-hint">⇄ 对比</span>
           </div>
 
           <div class="card-tags">
@@ -296,7 +308,7 @@ onUnmounted(stopPolling)
           </div>
         </div>
 
-        <div class="card-actions">
+        <div class="card-actions" @click.stop>
           <label class="mode-label" for="mode">下载方案</label>
           <select
             :id="`mode-${comic.id}`"
@@ -515,6 +527,24 @@ onUnmounted(stopPolling)
   border-radius: 8px;
   padding: 14px;
   align-items: flex-start;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.update-card:hover {
+  border-color: #00a896;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.compare-hint {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #00a896;
+  border: 1px solid rgba(0, 168, 150, 0.4);
+  background: rgba(0, 168, 150, 0.1);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .cover-box {

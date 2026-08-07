@@ -87,6 +87,21 @@ func (h *OfflineHandler) ListOfflineUpdates(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": comics, "total": len(comics)})
 }
 
+// DismissOfflineUpdate 将漫画移出更新列表 POST /api/v1/offline/updates/:id/dismiss
+// 仅清除更新标记（保留本地文件与记录），供「画廊已被删除/移除」项清理列表。需求 3(2)
+func (h *OfflineHandler) DismissOfflineUpdate(c *gin.Context) {
+	id := c.Param("id")
+	if _, err := services.ClearOfflineUpdateByComicID(h.db, id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "未找到漫画记录"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"dismissed": true})
+}
+
 // downloadUpdateReq 更新下载请求体
 type downloadUpdateReq struct {
 	ComicID string `json:"comicId"`

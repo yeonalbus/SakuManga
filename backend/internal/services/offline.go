@@ -102,7 +102,18 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 		// 因此「子孙关系 / 更新版本」必须从在线详情页 HTML 提取（见 FetchGalleryDetail）。
 		detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 		if err != nil {
-			log.Printf("%s [update] 漫画 %q(gid=%s) 在线详情拉取失败（跳过）: %v", dlWarnTag, c.Title, c.GID, err)
+			// 需求 3(2)：区分「画廊被删」与「网络故障」——removed/copyright 持久化标记并跳过，
+			// 其余 HTTP/网络错误为临时故障，仅 log（下次重试）。
+			var gu *ErrGalleryUnavailable
+			if errors.As(err, &gu) && (gu.Kind == "removed" || gu.Kind == "copyright") {
+				c.RemovedStatus = true
+				c.RemovedAt = time.Now().UnixMilli()
+				changed[c.ID] = true
+				log.Printf("%s [update] 漫画 %q(gid=%s) 已被删除/移除（%s），标记 RemovedStatus 并排除后续扫描",
+					dlLogTag, c.Title, c.GID, gu.Kind)
+			} else {
+				log.Printf("%s [update] 漫画 %q(gid=%s) 在线详情拉取失败（跳过）: %v", dlWarnTag, c.Title, c.GID, err)
+			}
 		} else if detail != nil {
 			fetchedOnline[c.ID] = true
 			// A1. 详情页罗列更新版本（#gnd "newer versions" / #dms）→ 本画廊已被取代，A→C 更新到最新版。
@@ -271,6 +282,20 @@ func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineP
 		aged := false
 		detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 		if err != nil {
+			// 需求 3(2)：removed/copyright → 持久化标记删除并跳过本次老化判定（后续扫描已过滤）。
+			var gu *ErrGalleryUnavailable
+			if errors.As(err, &gu) && (gu.Kind == "removed" || gu.Kind == "copyright") {
+				c.RemovedStatus = true
+				c.RemovedAt = time.Now().UnixMilli()
+				c.UpdatedAt = time.Now()
+				if err := db.Save(c).Error; err != nil {
+					log.Printf("%s [update] 保存漫画 %s 删除标记失败: %v", dlErrTag, c.ID, err)
+				}
+				log.Printf("%s [update] 漫画 %q(gid=%s) 已被删除/移除（%s），标记 RemovedStatus 并排除后续扫描",
+					dlLogTag, c.Title, c.GID, gu.Kind)
+				time.Sleep(1200 * time.Millisecond)
+				continue
+			}
 			log.Printf("%s [update] 老化判定漫画 %q(gid=%s) 在线详情拉取失败（按无新版处理）: %v",
 				dlWarnTag, c.Title, c.GID, err)
 		} else if detail != nil {
@@ -456,6 +481,177 @@ func clearOfflineUpdate(c *models.OfflineComic) bool {
 	c.NewToken = ""
 	c.UpdateNote = ""
 	return true
+}
+
+// ClearOfflineUpdateByGID 按下载任务的新 GID 反向匹配更新列表并清除更新标记（需求 2）。
+// 覆盖两种场景：
+//   - 漫画自身 gid = 下载 gid：用户在「更新」页手动下载了标记需要更新的漫画本体；
+//   - 漫画 new_gid = 下载 gid：用户下载了检测到的新版本，父画廊的更新标记应一并消除。
+// 复用 clearOfflineUpdate 的字段清空语义，避免与维护查重、老化判定产生新状态冲突。
+// 返回清除的记录数。
+func ClearOfflineUpdateByGID(db *gorm.DB, gid string) (int64, error) {
+	if gid == "" {
+		return 0, nil
+	}
+	// 仅拉取标记了需要更新的漫画（数量少），gid 匹配在 Go 层按字段判断，
+	// 避免依赖 gorm 对 GID/NewGID 的列名映射（g_id / new_g_id）导致的 SQL 耦合。
+	var comics []models.OfflineComic
+	if err := db.Where("needs_update = ?", true).Find(&comics).Error; err != nil {
+		return 0, err
+	}
+	cleared := int64(0)
+	for i := range comics {
+		if comics[i].GID != gid && comics[i].NewGID != gid {
+			continue
+		}
+		if !clearOfflineUpdate(&comics[i]) {
+			continue
+		}
+		comics[i].UpdatedAt = time.Now()
+		if err := db.Save(&comics[i]).Error; err != nil {
+			return cleared, err
+		}
+		cleared++
+	}
+	if cleared > 0 {
+		log.Printf("%s [update] 下载完成 gid=%s：清除 %d 个漫画的更新标记（需求 2）", dlLogTag, gid, cleared)
+	}
+	return cleared, nil
+}
+
+// ClearOfflineUpdateByComicID 清除指定漫画的更新标记（需求 3(2) 前端「移出列表」）。
+// 仅清除更新标记（保留本地文件与记录），供「画廊已被删除/移除」项清理列表；
+// 保留 RemovedStatus 标记，使后续更新检测/维护查重仍跳过该画廊（避免重复联网）。
+// 返回是否发生了清除。
+func ClearOfflineUpdateByComicID(db *gorm.DB, comicID string) (bool, error) {
+	if db == nil || comicID == "" {
+		return false, nil
+	}
+	var comic models.OfflineComic
+	if err := db.First(&comic, "id = ?", comicID).Error; err != nil {
+		return false, err
+	}
+	if !clearOfflineUpdate(&comic) {
+		return false, nil
+	}
+	comic.UpdatedAt = time.Now()
+	if err := db.Save(&comic).Error; err != nil {
+		return false, err
+	}
+	log.Printf("%s [update] 移出更新列表：comic=%s gid=%s（需求 3(2)）", dlLogTag, comic.ID, comic.GID)
+	return true, nil
+}
+
+// ReconcileResult 下载完成后数据对账结果（需求 3(1)）
+type ReconcileResult struct {
+	DedupItems         []DedupItem `json:"dedupItems"`         // GID 去重建议（复用 DedupItem，供维护页提示）
+	ParentGIDWritten   int         `json:"parentGIDWritten"`   // 回写 ParentGID 的条数
+	PageCountCorrected int         `json:"pageCountCorrected"` // 校正 PageCount 的条数
+	AgedReset          int         `json:"agedReset"`          // 复位 Aged 状态的条数
+}
+
+// ReconcileOfflineAfterDownload 下载完成后主动对账数据库（需求 3(1)）。
+//
+// 下载任务 completed 收尾调用。下载引擎已通过 ScanAndSaveDirectory 将本次下载的漫画入库
+// （download_gallery.go / download_archive.go），metadata / ametadata / ComicInfo.xml 已落在
+// 落地目录或压缩包内。这里按 task.GID 查询数据库中全部同 GID 本地记录，读取其落地
+// 目录/压缩包内的元数据做四步轻量对账（不重复扫描）：
+//  1. GID 去重：同 GID 且 local_path 不同 → 判定为重复来源，复用维护查重规则 2 的
+//     「保留文件夹形态」语义生成去重建议（DedupItem），提示用户去维护页处理。
+//  2. ParentGID 回写：metadata 的 parent_gid 非空且本地为空 → 回写，供维护规则 3 与更新 B 段复用。
+//  3. PageCount 校正：metadata filecount > 本地 PageCount → 更新。
+//  4. Aged 复位：曾标记 AgedStatus=true → 复位 AgedStatus/AgedCheckedAt，重新参与后续扫描。
+func ReconcileOfflineAfterDownload(db *gorm.DB, task *models.DownloadTask) (*ReconcileResult, error) {
+	result := &ReconcileResult{DedupItems: []DedupItem{}}
+	if db == nil || task == nil || task.GID == "" {
+		return result, nil
+	}
+
+	var comics []models.OfflineComic
+	if err := db.Where("g_id = ?", task.GID).Find(&comics).Error; err != nil {
+		return result, fmt.Errorf("下载后对账：读取同 GID(%s) 记录失败: %v", task.GID, err)
+	}
+	if len(comics) == 0 {
+		return result, nil
+	}
+
+	// ── 2/3/4 步：逐条读取落地元数据做字段对账 ──
+	for i := range comics {
+		c := &comics[i]
+		meta := readOfflineMetadataFromPath(c)
+		changed := false
+
+		// 2. ParentGID 回写：metadata parent_gid 非空且本地为空 → 回写
+		if c.ParentGID == "" && meta.ParentGID != "" {
+			c.ParentGID = meta.ParentGID
+			result.ParentGIDWritten++
+			changed = true
+		}
+		// 3. PageCount 校正：metadata filecount 更完整时采用
+		if meta.FileCount > c.PageCount {
+			c.PageCount = meta.FileCount
+			result.PageCountCorrected++
+			changed = true
+		}
+		// 4. Aged 复位：本次成功下载新版（或确认该 GID 仍存在），复位老化状态
+		if c.AgedStatus {
+			c.AgedStatus = false
+			c.AgedCheckedAt = 0
+			result.AgedReset++
+			changed = true
+		}
+
+		if changed {
+			c.UpdatedAt = time.Now()
+			if err := db.Save(c).Error; err != nil {
+				return result, err
+			}
+		}
+	}
+
+	// ── 1. GID 去重：同 GID 且 local_path 不同 → 复用规则 2「保留文件夹形态」语义 ──
+	keepIdx := -1
+	for i := range comics {
+		if comics[i].SourceMode == "gallery" || !IsArchive(comics[i].LocalPath) {
+			keepIdx = i
+			break
+		}
+	}
+	if keepIdx == -1 {
+		keepIdx = 0
+	}
+	for i := range comics {
+		if i == keepIdx {
+			continue
+		}
+		result.DedupItems = append(result.DedupItems, DedupItem{
+			Comic:     comics[i],
+			Reason:    fmt.Sprintf("同 GID(%s) 重复：建议保留文件夹形态，删除该重复项", task.GID),
+			Keep:      false,
+			PairComic: &comics[keepIdx],
+		})
+	}
+
+	if len(result.DedupItems) > 0 {
+		log.Printf("%s [reconcile] 下载完成 gid=%s：发现 %d 条同 GID 重复记录，建议去维护页处理",
+			dlLogTag, task.GID, len(result.DedupItems))
+	}
+	if result.ParentGIDWritten > 0 || result.PageCountCorrected > 0 || result.AgedReset > 0 {
+		log.Printf("%s [reconcile] 下载完成 gid=%s：回写 ParentGID=%d 校正 PageCount=%d 复位 Aged=%d",
+			dlLogTag, task.GID, result.ParentGIDWritten, result.PageCountCorrected, result.AgedReset)
+	}
+	return result, nil
+}
+
+// readOfflineMetadataFromPath 读取落地记录内的元数据（目录 → ParseDirMetadata；归档 → ParseZipMetadata）。
+func readOfflineMetadataFromPath(c *models.OfflineComic) *ParsedMetadata {
+	if c == nil || c.LocalPath == "" {
+		return &ParsedMetadata{Tags: []string{}}
+	}
+	if IsArchive(c.LocalPath) {
+		return ParseZipMetadata(c.LocalPath)
+	}
+	return ParseDirMetadata(c.LocalPath)
 }
 
 // buildUpdateNote 构造 A→C 更新备注：更新目标 = 最新版（latestGID），并附带中间链条
@@ -900,6 +1096,9 @@ func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []mod
 		}
 		if c.AgedStatus {
 			continue // 已老化：排除后续扫描
+		}
+		if c.RemovedStatus {
+			continue // 画廊已被删除/移除：排除后续扫描（需求 3(2)，避免重复联网）
 		}
 		filtered = append(filtered, c)
 	}

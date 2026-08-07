@@ -10,10 +10,14 @@ import { preferenceSettings } from '@/stores/preferenceSettings'
 import { resolveDefaultDownloadScheme } from '@/api/download'
 import { markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/userStore'
 
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
+const userStore = useUserStore()
+// 下载权限：管理员或有 allowDownload 许可才展示下载入口（中心制：无许可用户不展示下载能力）
+const canDownload = computed(() => userStore.isAdmin || !!userStore.user?.allowDownload)
 
 // 内嵌面板模式：由列表页通过 props 传入 gid/token，无需路由跳转即可切换画廊
 const props = withDefaults(
@@ -529,7 +533,13 @@ watch(
 
           <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
 
-          <button class="action-btn download-btn" @click="handleOpenDownloadPanel">⬇️ 下载</button>
+          <button
+            v-if="canDownload"
+            class="action-btn download-btn"
+            @click="handleOpenDownloadPanel"
+          >
+            ⬇️ 下载
+          </button>
         </div>
       </div>
 
@@ -571,7 +581,13 @@ watch(
 
         <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
 
-        <button class="action-btn download-btn" @click="handleOpenDownloadPanel">⬇️ 下载</button>
+        <button
+          v-if="canDownload"
+          class="action-btn download-btn"
+          @click="handleOpenDownloadPanel"
+        >
+          ⬇️ 下载
+        </button>
       </div>
 
       <!-- 选项卡导航 -->

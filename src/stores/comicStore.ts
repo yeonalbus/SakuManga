@@ -9,6 +9,7 @@ import { offlineReadingList } from '@/stores/readingStore'
 // 使用命名空间导入 bookshelfStore / historyStore，避免与本文件产生「值初始化时序」上的循环依赖问题
 import * as bookshelfStore from '@/stores/bookshelfStore'
 import * as historyStore from '@/stores/historyStore'
+import { useUserStore } from '@/stores/userStore'
 
 // --------------------------------------------------
 // 在线 / 离线漫画数据源（在线列表由后端 /comics/online 接口驱动）
@@ -130,6 +131,9 @@ export const rankedOfflineComics = computed(() => {
  * 返回删除成功的数量。
  */
 export const deleteOfflineComics = async (ids: string[], deleteFile = false): Promise<number> => {
+  // 中心制兜底：仅管理员可删除本地画廊（前端按钮已按角色隐藏，此处做防御性校验）
+  const userStore = useUserStore()
+  if (!userStore.isAdmin) return 0
   let okCount = 0
   for (const id of ids) {
     try {

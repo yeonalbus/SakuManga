@@ -10,6 +10,7 @@ import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/userStore'
 
 // 后端 GetOfflineComicDetail 返回的离线漫画 DTO
 // tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
@@ -41,6 +42,7 @@ interface OfflineDetailDTO {
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
+const userStore = useUserStore()
 
 const comic = ref<OfflineComic>({
   id: (route.query.id as string) || '',
@@ -303,7 +305,12 @@ const handleDelete = async () => {
 
         <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
 
-        <button class="delete-btn" :disabled="deleting" @click="handleDelete">
+        <button
+          v-if="userStore.isAdmin"
+          class="delete-btn"
+          :disabled="deleting"
+          @click="handleDelete"
+        >
           {{ deleting ? '删除中…' : '🗑️ 删除' }}
         </button>
       </div>
@@ -321,7 +328,12 @@ const handleDelete = async () => {
 
       <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
 
-      <button class="delete-btn" :disabled="deleting" @click="handleDelete">
+      <button
+        v-if="userStore.isAdmin"
+        class="delete-btn"
+        :disabled="deleting"
+        @click="handleDelete"
+      >
         {{ deleting ? '删除中…' : '🗑️ 删除' }}
       </button>
     </div>

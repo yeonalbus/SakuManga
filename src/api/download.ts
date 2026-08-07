@@ -108,6 +108,8 @@ export interface DownloadTask {
   extractPath?: string
   error?: string
   updateForComicId?: string
+  // 任务发起者用户名（仅管理员可见；后端由 ListTasks 批量填充，非持久化字段）
+  username?: string
   createdAt: string
   updatedAt: string
 }

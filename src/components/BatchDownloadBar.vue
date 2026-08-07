@@ -5,6 +5,7 @@ import { ref, computed } from 'vue'
 import { batchCreateDownloads, type DownloadTarget } from '@/api/download'
 import { useUI } from '@/composables/useUI'
 import { markGidActive } from '@/stores/downloadTasksStore'
+import { useUserStore } from '@/stores/userStore'
 
 const props = withDefaults(
   defineProps<{
@@ -25,6 +26,9 @@ const emit = defineEmits<{
 }>()
 
 const { toast } = useUI()
+const userStore = useUserStore()
+// 下载权限：管理员或有 allowDownload 许可才展示批量下载入口（中心制：无许可用户不展示下载能力）
+const canDownload = computed(() => userStore.isAdmin || !!userStore.user?.allowDownload)
 const isBatchDownloading = ref(false)
 
 const count = computed(() => props.selected.length)
@@ -58,7 +62,7 @@ const handleBatchDownload = async () => {
 </script>
 
 <template>
-  <div class="batch-download-bar">
+  <div v-if="canDownload" class="batch-download-bar">
     <span class="bar-count">已选 {{ count }} 部</span>
     <button class="bar-btn" :disabled="isBatchDownloading" @click="emit('select-all')">
       全选本页

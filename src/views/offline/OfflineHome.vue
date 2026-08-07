@@ -9,6 +9,7 @@ import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
+import { useUserStore } from '@/stores/userStore'
 import type { ComicItem, OfflineComic } from '@/types/comic'
 // Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
@@ -17,6 +18,7 @@ import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 import { scrollMainToTop, rememberListState, takeListState, getMainContent } from '@/utils/scrollMemory'
 
 const { toast, modal } = useUI()
+const userStore = useUserStore()
 
 // 任务五：进入页面时恢复上次离开的列表状态（页码）；滚动位置在数据就绪后恢复
 onMounted(async () => {
@@ -306,6 +308,7 @@ const seekToDate = (date: string) => {
       <span class="select-count">已选 {{ selectedIds.length }} 部</span>
       <button class="toolbar-btn" @click="toggleSelectAllPage">全选本页</button>
       <button
+        v-if="userStore.isAdmin"
         class="toolbar-btn danger"
         :disabled="selectedIds.length === 0"
         @click="handleDeleteSelected"

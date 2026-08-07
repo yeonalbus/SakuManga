@@ -5,6 +5,7 @@
 import { ref } from 'vue'
 import { http } from '@/utils/request'
 import { fetchOfflineComics } from '@/stores/comicStore'
+import { useUserStore } from '@/stores/userStore'
 
 /** 活动下载任务（仅需要 gid 等少量字段用于角标判定） */
 interface ActiveDownloadTask {
@@ -38,6 +39,9 @@ function refreshOfflineComicsAfterTask(): void {
 
 /** 拉取一次活动任务列表（失败静默保留上次状态，避免抖动报错） */
 export async function fetchActiveDownloads(): Promise<void> {
+  // 无下载许可用户不轮询（中心制：无许可用户隐藏下载能力，避免无意义请求）
+  const userStore = useUserStore()
+  if (!userStore.isAdmin && !userStore.user?.allowDownload) return
   try {
     const res = await http<{ tasks?: ActiveDownloadTask[] }>('/downloads', {
       params: { status: 'active', page: 1, size: 200 },

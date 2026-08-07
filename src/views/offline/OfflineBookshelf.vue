@@ -8,6 +8,7 @@ import type { Bookshelf, OfflineComic, ComicItem } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 import { useUI } from '@/composables/useUI'
+import { useUserStore } from '@/stores/userStore'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
 // 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
 import {
@@ -18,6 +19,7 @@ import {
 } from '@/utils/scrollMemory'
 
 const { toast, modal } = useUI()
+const userStore = useUserStore()
 
 const route = useRoute()
 
@@ -170,6 +172,7 @@ const handleDeleteSelected = async () => {
       <span class="select-count">已选 {{ selectedIds.length }} 部</span>
       <button class="toolbar-btn" @click="toggleSelectAllPage">全选本页</button>
       <button
+        v-if="userStore.isAdmin"
         class="toolbar-btn danger"
         :disabled="selectedIds.length === 0"
         @click="handleDeleteSelected"

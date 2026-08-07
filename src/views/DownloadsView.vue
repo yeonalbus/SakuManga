@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { setTaskPriority, type DownloadTask } from '@/api/download'
+import { useUserStore } from '@/stores/userStore'
 
 interface ListResponse {
   tasks: DownloadTask[]
@@ -12,6 +13,10 @@ interface ListResponse {
 }
 
 const { toast, modal } = useUI()
+
+const userStore = useUserStore()
+// 下载权限：管理员始终可下载；普通用户需 allowDownload 许可（中心制：无许可用户直接隐藏下载列表）
+const canDownload = computed(() => userStore.isAdmin || !!userStore.user?.allowDownload)
 
 const tasks = ref<DownloadTask[]>([])
 const total = ref(0)
@@ -152,6 +157,7 @@ const setStatusFilter = (s: string) => {
 }
 
 onMounted(() => {
+  if (!canDownload.value) return // 无下载权限：不发起轮询
   fetchTasks()
   timer = window.setInterval(fetchTasks, 2000) // 2s 轮询
 })
@@ -166,6 +172,11 @@ onUnmounted(() => {
 
 <template>
   <div class="downloads-page">
+    <!-- 无下载权限：直接隐藏任务列表与筛选区（中心制：无许可用户不展示下载功能） -->
+    <div v-if="!canDownload" class="no-permission-box">
+      🔒 无下载权限，请联系管理员开启
+    </div>
+    <template v-else>
     <div class="page-header">
       <h2 class="page-title">⬇️ 下载任务列表</h2>
       <span class="total-count">共 {{ total }} 个任务</span>
@@ -250,6 +261,7 @@ onUnmounted(() => {
               ⭐ 优先级 {{ task.priority }}
             </span>
             <span v-if="task.updateForComicId" class="meta-tag update">🔄 离线更新</span>
+            <span v-if="userStore.isAdmin && task.username" class="meta-tag user">发起者：{{ task.username }}</span>
             <span v-if="task.error" class="meta-tag error" :title="task.error">{{
               task.error
             }}</span>
@@ -351,6 +363,7 @@ onUnmounted(() => {
         下一页 ›
       </button>
     </div>
+    </template>
   </div>
 </template>
 
@@ -431,6 +444,22 @@ onUnmounted(() => {
   height: 160px;
   color: var(--app-text-3);
   font-size: 0.9rem;
+}
+
+.no-permission-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  font-size: 1rem;
+  color: var(--app-text-2);
+  border: 1px dashed var(--app-border-3);
+  border-radius: 12px;
+}
+
+.meta-tag.user {
+  border-color: rgba(156, 39, 176, 0.5);
+  color: #ab47bc;
 }
 
 .task-list {

@@ -3,8 +3,10 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
+for /f "delims=" %%v in ('node -p "require('./package.json').version"') do set "APP_VERSION=%%v"
+
 echo ============================================
-echo   SakuHentai v1.0.0 一键打包脚本
+echo   SakuHentai v%APP_VERSION% 一键打包脚本
 echo ============================================
 
 echo.

@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v1.0.0 · 最近更新：2026-08
+> 版本：v1.2.0 · 最近更新：2026-08
 
 ## 一、目录总览
 
@@ -13,14 +13,15 @@ SakuHentai/
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── plans/                          # 功能开发方案文档（下载/标签维护/多用户）
+├── plans/                          # 功能开发方案文档（Round1~5）
 ├── 计划书/                          # 项目规划文档（已弃用）
 ├── 学习笔记/                        # 学习笔记（已弃用）
 ├── .roo/                           # Roo 自定义配置
-├── package.json                    # 前端依赖与脚本（type-check / lint / dev / build）
+├── package.json                    # 前端依赖与脚本 + 【版本号唯一来源】（About/打包脚本自动读取）
 ├── vite.config.ts                  # Vite 构建与代理配置
-├── eslint.config.ts / .oxlintrc.json / .prettierrc.json   # 代码规范配置
-├── build-release.bat               # 一键打包单 exe（前端构建 → 拷贝 dist → go build）
+├── tsconfig*.json / env.d.ts / index.html        # TS / 前端工程配置
+├── eslint.config.ts / .oxlintrc.json / .prettierrc.json / .editorconfig / .gitattributes   # 代码规范配置
+├── build-release.bat               # 一键打包单 exe（版本号自动读取 package.json）
 ├── dist/                           # 前端 Vite 构建产物（已 gitignore，打包时拷入 webui/dist）
 ├── SakuHentai.exe                  # 打包产物（已 gitignore，双击运行即托盘）
 └── PROJECT_TREE.md                 # 本文件
@@ -37,21 +38,27 @@ src/
 ├── env.d.ts                        # Vite 环境变量类型声明
 │
 ├── api/                            # 领域 API 封装（薄层，基于 utils/request）
-│   └── comic.ts                    # 在线漫画列表 / 随机抽卡 API 封装
+│   ├── comic.ts                    # 在线漫画列表 / 随机抽卡 API 封装
+│   └── download.ts                 # 下载任务 API 封装（创建/列表/优先级/设置）
 │
 ├── components/                     # 通用 UI 组件
-│   ├── ItemCard.vue                # 漫画卡片（card/compact 两种模式）
+│   ├── ItemCard.vue                # 漫画卡片（card/compact 两种模式，隐藏副标题开关）
 │   ├── GridContainer.vue           # 通用网格容器（items 插槽渲染卡片）
-│   ├── FilterDrawer.vue            # 筛选抽屉（分类/评分/语言/页数）
+│   ├── FilterDrawer.vue            # 筛选抽屉（分类/评分/语言/页数 + 正负向关键词）
 │   ├── SearchBar.vue               # 顶栏搜索框（含标签建议）
 │   ├── TopBar.vue                  # 顶栏（搜索/筛选/阅读清单/模式切换）
 │   ├── ModeToggle.vue              # 在线/离线模式切换
 │   ├── OnlineSidebar.vue           # 在线侧边栏（导航菜单）
-│   ├── OfflineSidebar.vue          # 离线侧边栏（书架管理）
+│   ├── OfflineSidebar.vue          # 离线侧边栏（书架管理，权限控制入口）
 │   ├── OnlineLoadBar.vue           # 在线加载条（游标加载状态）
 │   ├── Pagination.vue              # 分页组件（离线数字分页）
 │   ├── FloatingToolbar.vue         # 悬浮操作球（回顶/快捷键）
 │   ├── TagChip.vue                 # 标签胶囊（字典翻译 + 配色）
+│   ├── BatchDownloadBar.vue        # 批量下载操作条（多选后批量加入下载）
+│   ├── DateJumpModal.vue           # 日期跳页弹窗（订阅/离线首页按日期跳转）
+│   ├── ToplistTypeModal.vue        # 排行榜类型选择弹窗（昨日/月/年/All-Time）
+│   ├── OnlineDetailPanel.vue       # 在线详情紧凑面板（宽屏右分栏/窄屏全屏）
+│   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
 │   ├── common/
 │   │   ├── ErrorBoundary.vue       # 错误边界（页面级异常兜底）
 │   │   ├── GlobalModal.vue         # 全局弹窗（alert/confirm/prompt）
@@ -61,38 +68,43 @@ src/
 ├── composables/
 │   ├── useUI.ts                    # UI 组合式函数：toast / modal（类型安全泛型）
 │   ├── useGamepad.ts               # 手柄输入（阅读器/抽卡等按键映射）
-│   └── useLayoutMode.ts            # 布局模式（响应式排版）
+│   ├── useLayoutMode.ts            # 布局模式（响应式排版）
+│   ├── useBatchSelection.ts        # 长按多选 + 批量操作（批量下载）
+│   ├── useDetailPanel.ts           # 左右分栏详情面板开关（宽屏/窄屏自适应）
+│   └── useTagSuggest.ts            # tag 联想补全（筛选/抽卡共用，支持 - 前缀排除候选）
 │
 ├── config/
 │   └── api.ts                      # API_BASE（VITE_API_BASE 或 /api/v1）+ TOKEN_KEY
 │
 ├── router/
-│   └── index.ts                    # 路由表 + 登录守卫 + 滚动记忆（404 兜底）
+│   └── index.ts                    # 路由表 + 登录守卫 + 管理员校验 + 滚动记忆（404 兜底）
 │
 ├── stores/                         # Pinia 状态（按领域拆分，无上帝文件）
 │   ├── userStore.ts                # 登录会话（token/user/登录/登出/恢复/401 清理）
 │   ├── modeStore.ts                # 在线/离线模式单一数据源
 │   ├── libraryInit.ts              # 登录后用户库数据初始化 + 旧 localStorage 数据迁移
 │   ├── bookshelfStore.ts           # 本地书架 CRUD + 动态数量统计
-│   ├── historyStore.ts             # 阅读历史（在线/离线）+ 收藏状态联动
+│   ├── historyStore.ts             # 阅读历史（在线/离线）+ 收藏状态联动 + 进度回传
 │   ├── readingStore.ts             # 阅读清单队列（在线/离线）
 │   ├── ratingStore.ts              # 个人评分映射（1-5 星，按用户隔离）
 │   ├── comicStore.ts               # 离线漫画数据源 + 阅读统计 + 删除管理
-│   ├── searchStore.ts              # 在线/离线搜索筛选配置（作用域隔离）
+│   ├── searchStore.ts              # 在线/离线/订阅搜索筛选配置（作用域隔离）
 │   ├── onlineStore.ts              # 在线画廊主列表（游标加载）
-│   ├── subStore.ts                 # 订阅列表（OnlineSub 专用）
+│   ├── subStore.ts                 # 订阅列表（OnlineSub 专用，独立抓取）
 │   ├── scanPathStore.ts            # 额外扫描路径
 │   ├── tagStore.ts                 # 标签字典与翻译
 │   ├── viewMode.ts                 # 卡片视图模式（card/compact）
+│   ├── detailPanelStore.ts         # 详情面板状态（gid/token/开关）
+│   ├── downloadTasksStore.ts       # 下载任务列表状态
 │   ├── styleSettings.ts            # 样式设置（主题/视图模式，localStorage 持久化）
 │   ├── readerSettings.ts           # 阅读器设置（方向/翻页/界面/持久化）
 │   ├── preferenceSettings.ts       # 偏好设置（localStorage 持久化）
 │   ├── networkSettings.ts          # 网络/代理设置
-│   ├── downloadSettings.ts         # 下载设置
+│   ├── downloadSettings.ts         # 下载设置（线程/并发/归档并发/优先级/更新方案）
 │   └── advancedSettings.ts         # 高级设置
 │
 ├── types/                          # 数据契约类型
-│   ├── comic.ts                    # 漫画核心契约（BaseComic/Online/Offline/FilterParams...）
+│   ├── comic.ts                    # 漫画核心契约（BaseComic/Online/Offline/FilterParams/排除项）
 │   ├── account.ts                  # 账户类型
 │   ├── eh.ts                       # E 站设置/UConfig 相关类型
 │   └── user.ts                     # 用户信息/登录结果类型
@@ -100,55 +112,61 @@ src/
 ├── utils/
 │   ├── request.ts                  # http() 统一请求封装（自动前缀/参数/token/401/超时）
 │   ├── storage.ts                  # localStorage 安全读写
-│   ├── scrollMemory.ts             # 路由切换滚动位置记忆
+│   ├── scrollMemory.ts             # 路由切换滚动位置记忆 + 主容器回顶工具
 │   ├── errorReporter.ts            # 前端错误上报（受高级设置「开启日志」门控）
 │   ├── device.ts                   # 设备/触控检测
+│   ├── tagFilter.ts                # 负向排除引擎（excludeTags/excludeKeywords 匹配）
 │   └── mockData.ts                 # 生成 mock 数据（SVG/离线示例等，仅开发用）
 │
 └── views/                          # 页面级组件
-    ├── ComicReader.vue             # 漫画阅读器（在线/离线、RTL/Webtoon、阅读设置联动）
-    ├── DownloadsView.vue           # 下载管理页
+    ├── ComicReader.vue             # 漫画阅读器（在线/离线、RTL/Webtoon、进度续看、设置联动）
+    ├── DownloadsView.vue           # 下载管理页（任务列表 + 优先级 + 并发控制）
     ├── LoginView.vue               # 登录页
     ├── MemberHistory.vue           # 成员历史（管理员，查看任意成员阅读记录）
-    ├── RandomView.vue              # 随机抽卡页（在线/离线混合抽卡）
+    ├── RandomView.vue              # 随机抽卡页（在线/离线混合 + 负向排除 + 联想）
     ├── ReadingListView.vue         # 阅读清单页（在线/离线队列管理）
-    ├── SettingsView.vue            # 设置中心容器（11 个面板按角色过滤）
+    ├── SettingsView.vue            # 设置中心容器（8 大分组按角色过滤）
     ├── NotFound.vue                # 404 页面
     ├── online/
-    │   ├── OnlineHome.vue          # 在线首页
+    │   ├── OnlineHome.vue          # 在线首页（负向排除本地丢弃）
     │   ├── OnlineFavorites.vue     # 在线收藏夹（0~9 分类 + 游标加载）
     │   ├── OnlineHistory.vue       # 在线历史
     │   ├── OnlineHot.vue           # 在线热门
-    │   ├── OnlineSub.vue           # 在线订阅
-    │   ├── OnlineTop.vue           # 在线榜单
+    │   ├── OnlineSub.vue           # 在线订阅（独立抓取 + 日期跳页）
+    │   ├── OnlineTop.vue           # 在线榜单（4 种类型 + 批量下载）
     │   └── OnlineDetail.vue        # 在线详情（预览/评论/收藏）
     └── offline/
-        ├── OfflineHome.vue         # 离线首页
+        ├── OfflineHome.vue         # 离线首页（翻页回顶 + 日期跳页）
         ├── OfflineBookshelf.vue    # 离线书架
+        ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片）
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
-        ├── OfflineMaintain.vue     # 离线书目维护（查重/移除）
+        ├── OfflineMaintain.vue     # 离线书目维护（查重/移除 + 双列对比入口）
         ├── OfflineToplist.vue      # 离线排行榜
-        └── OfflineUpdate.vue       # 离线更新检测
+        └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
 
-### 设置面板 `components/settings/` 细分
+### 设置面板 `components/settings/` 细分（v1.2.0 八分组）
 
-| 文件                      | 职责                                         | 管理员可见 |
-| ------------------------- | -------------------------------------------- | :--------: |
-| `AccountSettings.vue`     | E 站账号登录/登出、Cookie 保存               |     —      |
-| `EHSettings.vue`          | E 站站点偏好（Profile/uconfig/我的标签）     |     —      |
-| `StyleSettings.vue`       | 样式/主题/卡片视图模式                       |     —      |
-| `ReaderSettings.vue`      | 阅读器方向/翻页/界面                         |     —      |
-| `PreferenceSettings.vue`  | 偏好设置（默认菜单/回顶/评论/全屏/搜索继承） |     —      |
-| `NetworkSettings.vue`     | 网络/代理配置                                |     ✔      |
-| `DownloadSettings.vue`    | 下载设置                                     |     ✔      |
-| `TagMaintainSettings.vue` | Tag 维护（双轨三态：设置/刷新/写回/进度）    |     ✔      |
-| `AdvancedSettings.vue`    | 高级设置（服务器/日志等入口）                |     ✔      |
-| `SecuritySettings.vue`    | 安全设置（用户管理/密码）                    |     ✔      |
-| `AboutSettings.vue`       | 关于软件                                     |     —      |
+| 分组         | 文件                         | 职责                                             | 管理员可见 |
+| ------------ | ---------------------------- | ------------------------------------------------ | :--------: |
+| 账户与安全   | `AccountSettings.vue`        | E 站账号登录/登出、Cookie 保存                   |     —      |
+|              | `ProfileSettings.vue`        | E 站 Profile（独立子面板，含返回按钮）           |     —      |
+|              | `SecuritySettings.vue`       | 安全设置（用户管理/密码）                        |     ✔      |
+| E 站连接     | `EHSettings.vue`             | E 站站点偏好（Profile/uconfig/我的标签）         |     —      |
+|              | `NetworkSettings.vue`        | 网络/代理配置                                    |     ✔      |
+| 阅读体验     | `StyleSettings.vue`          | 样式/主题/卡片视图模式                           |     —      |
+|              | `ReaderSettings.vue`         | 阅读器方向/翻页/界面                             |     —      |
+|              | `PreferenceSettings.vue`     | 偏好设置（默认菜单/回顶/评论/全屏/搜索继承）     |     —      |
+| 下载管理     | `DownloadSettings.vue`       | 下载设置（含并发/归档并发/优先级，内嵌子面板）   |     ✔      |
+| 离线维护     | `UpdateScanSettings.vue`     | 更新扫描（周扫描时刻/老化规则）                  |     ✔      |
+| 标签管理     | `MyTagsSettings.vue`         | 我的标签（独立子面板，含返回按钮）               |     —      |
+|              | `TagMaintainSettings.vue`    | Tag 维护（双轨三态：设置/刷新/写回/进度）        |     ✔      |
+| 高级与日志   | `AdvancedSettings.vue`       | 高级设置（服务器/日志等入口）                    |     ✔      |
+|              | `LogSettings.vue`            | 日志（四类日志查看/尾随/清除）                   |     ✔      |
+| 关于         | `AboutSettings.vue`          | 关于软件（版本号自动读取 package.json）          |     —      |
 
-> 另有 3 个**嵌入子面板**（非独立 Tab）：`ProfileSettings.vue`、`MyTagsSettings.vue`（EHSettings 子视图）、`ExtraScanPathsSettings.vue`（DownloadSettings 子视图）。
+> 另有 1 个**嵌入子面板**（非独立 Tab）：`ExtraScanPathsSettings.vue`（DownloadSettings 子视图）；`ProfileSettings.vue`、`MyTagsSettings.vue` 为**独立子面板**（自身含返回按钮，回所在分组默认项）。
 
 ---
 
@@ -180,7 +198,7 @@ backend/
     ├── database/
     │   └── db.go                   # SQLite 初始化（GORM AutoMigrate）+ 旧表结构迁移
     ├── models/                     # GORM 数据模型
-    │   ├── models.go               # 通用模型（Base/枚举/常量）
+    │   ├── models.go               # 通用模型（Base/枚举/常量）+ OfflineComic（含删除/老化状态）
     │   ├── account.go              # 账户设置模型
     │   ├── user.go                 # 用户/会话模型
     │   ├── server_setting.go       # 服务器设置模型
@@ -188,7 +206,7 @@ backend/
     │   ├── favorite.go             # 收藏状态模型
     │   ├── comic_rating.go         # 个人评分模型
     │   ├── reading_list.go         # 阅读清单模型
-    │   └── download.go             # 下载任务/设置模型
+    │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
     ├── router/
@@ -203,25 +221,27 @@ backend/
     │   ├── user.go                 # 用户管理（CRUD/重置密码，管理员）
     │   ├── server.go               # 服务器设置（监听地址/端口/历史上限）
     │   ├── comic.go                # 离线漫画/封面/详情/删除/页图
-    │   ├── library.go              # 书架/历史/评分/阅读清单（按用户隔离）
+    │   ├── library.go              # 书架/历史/评分/阅读清单（按用户隔离 + 进度查询）
     │   ├── online.go               # 在线画廊列表/详情/预览/热门/订阅/封面代理
-    │   ├── random.go               # 随机抽卡（在线/离线混合）
+    │   ├── random.go               # 随机抽卡（在线/离线混合 + 排除项）
     │   ├── favorites.go            # 在线收藏（列表/排序/增删）
-    │   ├── toplist.go              # 在线榜单
-    │   ├── download.go             # 下载任务（创建/列表/GP/设置/暂停/恢复/取消）
+    │   ├── toplist.go              # 在线榜单（4 种类型）
+    │   ├── download.go             # 下载任务（创建/列表/GP/设置/暂停/恢复/取消/优先级）
     │   ├── offline.go              # 离线更新检测 + 维护查重
+    │   ├── update_scan.go          # 更新扫描（周扫描调度/进度/结果/自动入队下载）
     │   ├── scan_path.go            # 扫描路径管理
     │   ├── tag.go                  # 标签引擎状态/建议/词典/同步
     │   ├── tag_maintain.go         # Tag 维护（设置/刷新/写回/进度/单本编辑）
     │   ├── eh_setting.go           # EH 设置/Profile/我的标签/uconfig 代理
     │   ├── eh_uconfig.go           # uconfig.php 代理
     │   ├── client_log.go           # 前端错误日志上报/大小查询/清除
+    │   ├── log.go                  # 服务端日志（四类日志查询/监控）
     │   └── network_handler.go      # 网络/代理配置
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
         ├── eh_auth.go              # E 站登录认证
         ├── eh_gallery.go           # 在线画廊列表抓取
-        ├── eh_detail.go            # 画廊详情抓取
+        ├── eh_detail.go            # 画廊详情抓取（含父子/更新版关系解析）
         ├── eh_parser.go            # HTML 解析（goquery）
         ├── eh_sub.go               # 订阅抓取
         ├── eh_reader.go            # 在线原图 URL 抓取（gdata API + 逐页 fallback）
@@ -232,23 +252,32 @@ backend/
         ├── bootstrap.go            # 初始管理员创建 + 数据迁移
         ├── proxy.go                # 代理配置加载
         ├── cover.go                # 封面生成/代理
+        ├── cover_health.go         # 封面健康检查（失效封面修复）
         ├── metadata.go             # 本地漫画元数据解析（zip/xml）
         ├── extract.go              # 压缩包解压
         ├── reader.go               # 离线阅读器页/图
         ├── scanner.go              # 本地扫描
         ├── scan_manager.go         # 扫描任务管理器（内存态进度，异步轮询）
         ├── favorites.go            # 在线收藏服务
-        ├── toplist.go              # 榜单定时调度
-        ├── download.go             # 下载管理器
-        ├── download_archive.go     # 下载压缩包归档（最大文件）
-        ├── download_gallery.go     # 下载画廊抓取
-        ├── download_scheduler.go   # 下载调度
-        ├── offline.go              # 离线更新/查重
+        ├── toplist.go              # 榜单（4 种类型 + 定时刷新缓存）
+        ├── download.go             # 下载管理器（收尾：更新标记消除/DB 比对）
+        ├── download_archive.go     # 下载压缩包归档（H@H 直链/解锁/分块）
+        ├── download_gallery.go     # 下载画廊抓取（逐图并发）
+        ├── download_scheduler.go   # 下载调度（优先级 + 抢占式）
+        ├── archive_chunk.go        # 归档分块下载（Range 探测/断点续传/.bits）
+        ├── archive_thread_pool.go  # 全局下载并发额度池（归档+画廊统一门控）
+        ├── offline.go              # 离线更新/查重/老化判定/删除持久化
+        ├── offline_task.go         # 离线维护任务结果缓存（stale 失效机制）
+        ├── offline_removed.go      # 画廊被删/版权移除状态持久化与过滤
+        ├── maintain_auto.go        # 维护自动比对（下载后 Reconcile）
+        ├── update_scheduler.go     # 更新扫描定时调度（周扫描）
+        ├── log_store.go            # 服务端日志存储（四类日志日归档）
         ├── tag_engine.go           # 标签翻译引擎（下载/进度/建议）
         ├── tag_maintain.go         # Tag 维护服务
-        ├── tag_scheduler.go        # Tag 维护定时调度
-        └── eh_setting_mytags_test.go  # 我的标签测试
+        └── tag_scheduler.go        # Tag 维护定时调度
 ```
+
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go` 等。
 
 ---
 
@@ -261,21 +290,26 @@ backend/
 | 需求                                              | 定位文件                                                                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | 改首页/列表卡片布局                               | `src/views/online/OnlineHome.vue`、`src/views/offline/OfflineHome.vue`、`src/components/ItemCard.vue`、`GridContainer.vue` |
-| 改搜索/筛选逻辑                                   | `src/components/SearchBar.vue`、`FilterDrawer.vue`、`stores/searchStore.ts`、`types/comic.ts`（FilterParams）              |
-| 改阅读器（在线/离线、翻页/方向/Webtoon/设置联动） | `src/views/ComicReader.vue`、`stores/readerSettings.ts`、`components/settings/ReaderSettings.vue`                          |
-| 改在线详情/预览/收藏                              | `src/views/online/OnlineDetail.vue`                                                                                        |
-| 改离线详情/打分/标签                              | `src/views/offline/OfflineDetail.vue`                                                                                      |
+| 改搜索/筛选/负向排除                              | `src/components/SearchBar.vue`、`FilterDrawer.vue`、`stores/searchStore.ts`、`utils/tagFilter.ts`、`types/comic.ts`       |
+| 改 tag 联想补全                                   | `src/composables/useTagSuggest.ts`、`backend/internal/services/tag_engine.go`（Suggest）                                   |
+| 改阅读器（在线/离线、翻页/方向/Webtoon/进度续看） | `src/views/ComicReader.vue`、`stores/readerSettings.ts`、`components/settings/ReaderSettings.vue`、`stores/historyStore.ts` |
+| 改在线详情/预览/收藏                              | `src/views/online/OnlineDetail.vue`、`src/components/OnlineDetailPanel.vue`、`composables/useDetailPanel.ts`              |
+| 改离线详情/打分/标签                              | `src/views/offline/OfflineDetail.vue`、`src/components/OfflineDetailPanel.vue`                                             |
+| 改双列对比（更新/维护）                           | `src/views/offline/OfflineCompare.vue`、`backend/internal/services/offline.go`（pairComic）                                |
 | 改收藏夹                                          | `src/views/online/OnlineFavorites.vue`                                                                                     |
-| 改随机抽卡（在线/离线混合）                       | `src/views/RandomView.vue`、`backend/internal/handlers/random.go`、`services/eh_random.go`                                 |
+| 改随机抽卡（在线/离线混合 + 排除项）              | `src/views/RandomView.vue`、`backend/internal/handlers/random.go`、`services/eh_random.go`                                 |
+| 改订阅（独立抓取/日期跳页）                       | `src/views/online/OnlineSub.vue`、`stores/subStore.ts`、`components/DateJumpModal.vue`                                     |
+| 改榜单（4 种类型）                                | `src/views/online/OnlineTop.vue`、`components/ToplistTypeModal.vue`、`backend/internal/services/toplist.go`               |
 | 改阅读清单                                        | `src/views/ReadingListView.vue`、`stores/readingStore.ts`                                                                  |
 | 改历史记录                                        | `stores/historyStore.ts`、`views/online/OnlineHistory.vue`、`views/offline/OfflineHistory.vue`、`views/MemberHistory.vue`  |
 | 改书架                                            | `stores/bookshelfStore.ts`、`views/offline/OfflineBookshelf.vue`、`components/OfflineSidebar.vue`                          |
+| 改批量下载                                        | `src/composables/useBatchSelection.ts`、`components/BatchDownloadBar.vue`                                                  |
 | 改登录/会话                                       | `views/LoginView.vue`、`stores/userStore.ts`、`main.ts`（会话恢复）、`utils/request.ts`（401）                             |
-| 改请求封装/接口地址                               | `src/utils/request.ts`、`src/config/api.ts`、`src/api/comic.ts`                                                            |
+| 改请求封装/接口地址                               | `src/utils/request.ts`、`src/config/api.ts`、`src/api/comic.ts`、`src/api/download.ts`                                     |
 | 改全局弹窗/Toast                                  | `src/composables/useUI.ts`、`components/common/GlobalModal.vue`、`GlobalToast.vue`                                         |
-| 改路由/404/登录守卫                               | `src/router/index.ts`                                                                                                      |
+| 改路由/404/登录守卫/管理员校验                    | `src/router/index.ts`                                                                                                      |
 | 改数据契约类型                                    | `src/types/comic.ts`、`types/account.ts`、`types/eh.ts`、`types/user.ts`                                                   |
-| 改设置中心                                        | `src/views/SettingsView.vue` + `components/settings/*`                                                                     |
+| 改设置中心（8 分组）                              | `src/views/SettingsView.vue` + `components/settings/*`                                                                     |
 | 改标签翻译/展示                                   | `stores/tagStore.ts`、`components/TagChip.vue`                                                                             |
 | 改用户数据初始化/迁移                             | `stores/libraryInit.ts`                                                                                                    |
 
@@ -289,11 +323,15 @@ backend/
 | 改随机抽卡接口             | `backend/internal/handlers/random.go`、`services/eh_random.go`                                        |
 | 改收藏接口                 | `backend/internal/handlers/favorites.go`、`services/favorites.go`                                     |
 | 改订阅接口                 | `backend/internal/handlers/online.go`（GetWatchedComics）、`services/eh_sub.go`                       |
-| 改榜单                     | `backend/internal/handlers/toplist.go`、`services/toplist.go`                                         |
+| 改榜单（4 类型）           | `backend/internal/handlers/toplist.go`、`services/toplist.go`                                         |
 | 改 E 站账号/设置/我的标签  | `backend/internal/handlers/account.go`、`eh_setting.go`、`eh_uconfig.go` + 对应 services              |
 | 改标签引擎/词典同步        | `backend/internal/handlers/tag.go`、`services/tag_engine.go`                                          |
 | 改 Tag 维护                | `backend/internal/handlers/tag_maintain.go`、`services/tag_maintain.go`、`tag_scheduler.go`           |
-| 改下载系统                 | `backend/internal/handlers/download.go`、`services/download*.go`                                      |
+| 改下载系统                 | `backend/internal/handlers/download.go`、`services/download*.go`、`archive_chunk.go`、`archive_thread_pool.go` |
+| 改下载并发/优先级调度      | `services/download_scheduler.go`、`archive_thread_pool.go`、`models/download.go`                      |
+| 改更新扫描（周扫描/老化）  | `backend/internal/handlers/update_scan.go`、`services/update_scheduler.go`、`offline.go`（AgedStatus） |
+| 改离线更新/维护/删除标记   | `backend/internal/handlers/offline.go`、`services/offline.go`、`offline_task.go`、`offline_removed.go` |
+| 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |
 | 改用户管理/权限            | `backend/internal/handlers/user.go`、`middleware/auth.go`、`services/auth_service.go`、`bootstrap.go` |
 | 改扫描                     | `backend/internal/handlers/scan_path.go`、`services/scanner.go`、`scan_manager.go`                    |
@@ -301,7 +339,6 @@ backend/
 | 改数据模型                 | `backend/internal/models/*.go`                                                                        |
 | 改数据库初始化/迁移        | `backend/internal/database/db.go`                                                                     |
 | 改本地元数据解析           | `backend/internal/services/metadata.go`、`extract.go`                                                 |
-| 改离线更新/维护            | `backend/internal/handlers/offline.go`、`services/offline.go`                                         |
 
 ### 构建 / 校验
 
@@ -324,12 +361,14 @@ backend/
 - **前端**：`views`（页面）→ `components`（复用组件）→ `stores`（Pinia 状态，按领域一个文件）→ `utils` / `api`（基础设施）→ `types`（契约类型）。
 - **后端**：`handlers`（HTTP 层，负责参数解析与响应）→ `services`（业务逻辑与 E 站抓取）→ `models`（GORM 模型）→ `database`（DB 连接）。路由集中注册在 `router` 包，中间件在 `middleware` 包。
 - **前后端契约**：前端 `types/comic.ts` 与后端 `handlers` 返回的 JSON 字段需保持一致（例如 `readCount` 统一替代旧的 `clickCount`）。
+- **版本号唯一来源**：`package.json` 的 `version` 字段为唯一版本来源；前端「关于」页（`AboutSettings.vue`）与打包脚本（`build-release.bat`）均自动读取，发版时只需改 `package.json`。
 
 ---
 
-## 六、发布注意（v1.0.0）
+## 六、发布注意（v1.2.0）
 
-- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘）。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
+- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘），脚本标题自动读取 `package.json` 版本号。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
+- **版本号**：仅需修改 `package.json` 的 `version` 字段（如 `1.2.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题会自动跟随，无需再手动同步多处。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
 - `manga.db`、`data/` 为**运行时数据**，已加入 `.gitignore`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。

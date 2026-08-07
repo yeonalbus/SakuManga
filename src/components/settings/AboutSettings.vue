@@ -3,7 +3,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">版本</div>
-        <div class="item-subtext">1.0.0</div>
+        <div class="item-subtext">{{ version }}</div>
       </div>
     </div>
 
@@ -27,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import { version } from '../../../package.json'
 import { useUI } from '@/composables/useUI'
 
 const { toast } = useUI()

@@ -5,6 +5,8 @@
   "compilerOptions": {
     // Extra safety for array and object lookups, but may have false positives.
     "noUncheckedIndexedAccess": true,
+    // 允许从 package.json 读取版本号（单一来源，前端「关于」页显示）
+    "resolveJsonModule": true,
 
     // Path mapping for cleaner imports.
     "paths": {

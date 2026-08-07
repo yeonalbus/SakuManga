@@ -57,37 +57,41 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ## 在线界面
 
-<img width="2418" height="1288" alt="image" src="https://github.com/user-attachments/assets/b58524a2-9f90-45be-90ca-2bdc5f1a735d" />
+<img width="2440" height="1285" alt="image" src="https://github.com/user-attachments/assets/6ad55636-2335-4aac-8e4c-56e6ca637af2" />
 
-## 下载界面
+## 离线界面
 
-<img width="2453" height="1286" alt="image" src="https://github.com/user-attachments/assets/241a67a0-23f6-4dcc-92aa-0fbd9c4656cd" />
+<img width="2447" height="1288" alt="image" src="https://github.com/user-attachments/assets/235923d4-89d8-4f77-a793-44311c28fa64" />
 
-## 阅读界面
+## 快速筛选下载
 
-<img width="2453" height="1289" alt="image" src="https://github.com/user-attachments/assets/8623608a-4a2a-4199-8d43-3cccbcfc412b" />
+<img width="2452" height="1275" alt="image" src="https://github.com/user-attachments/assets/d98244ff-b37d-459f-8e6a-14d549af2586" />
+
+## 客制化抽卡
+
+<img width="2423" height="1285" alt="image" src="https://github.com/user-attachments/assets/07e0d7f9-4c31-4eba-b3c1-8fb805deef3d" />
 
 # ⚙️ 设置说明
 
 设置页按主题分为 **8 大分组**，「账户与安全 / E 站连接 / 阅读体验 / 标签管理（我的标签）」全员可见，带 ⚠️ 标记的栏目仅管理员可见：
 
-| 分组 | 栏目 | 说明 |
-| --- | --- | --- |
-| 账户与安全 | 账户 | E 站账号与 Cookie 配置 |
-| | Profile ⚠️ | E 站 Profile 配置 |
-| | 安全 ⚠️ | 用户管理 / 密码 |
-| E 站连接 | EH 网站 | EH 站点访问配置 |
-| | 网络 ⚠️ | 代理服务器地址、请求超时时间 |
-| 阅读体验 | 样式 | 界面主题与外观 |
-| | 阅读 | 阅读方向等阅读体验 |
-| | 偏好 | 默认启动菜单、隐藏快速回顶、显示评论、全屏启动、搜索选项继承 |
-| 下载管理 | 下载 ⚠️ | 保存路径、线程数、归档并发、下载优先级、更新方案 |
-| 离线维护 | 更新扫描 ⚠️ | 每周自动更新扫描时刻、365 天老化规则 |
-| 标签管理 | 我的标签 | 我的标签维护 |
-| | Tag 维护 ⚠️ | 本地 Tag 字典维护（双轨三态） |
-| 高级与日志 | 高级 ⚠️ | 开启日志、清除日志 |
-| | 日志 ⚠️ | 更新 / 维护 / 下载 / 错误日志查看与实时尾随 |
-| 关于 | 关于软件 | 版本信息（自动读取）、GitHub 链接 |
+| 分组       | 栏目        | 说明                                                         |
+| ---------- | ----------- | ------------------------------------------------------------ |
+| 账户与安全 | 账户        | E 站账号与 Cookie 配置                                       |
+|            | Profile ⚠️  | E 站 Profile 配置                                            |
+|            | 安全 ⚠️     | 用户管理 / 密码                                              |
+| E 站连接   | EH 网站     | EH 站点访问配置                                              |
+|            | 网络 ⚠️     | 代理服务器地址、请求超时时间                                 |
+| 阅读体验   | 样式        | 界面主题与外观                                               |
+|            | 阅读        | 阅读方向等阅读体验                                           |
+|            | 偏好        | 默认启动菜单、隐藏快速回顶、显示评论、全屏启动、搜索选项继承 |
+| 下载管理   | 下载 ⚠️     | 保存路径、线程数、归档并发、下载优先级、更新方案             |
+| 离线维护   | 更新扫描 ⚠️ | 每周自动更新扫描时刻、365 天老化规则                         |
+| 标签管理   | 我的标签    | 我的标签维护                                                 |
+|            | Tag 维护 ⚠️ | 本地 Tag 字典维护（双轨三态）                                |
+| 高级与日志 | 高级 ⚠️     | 开启日志、清除日志                                           |
+|            | 日志 ⚠️     | 更新 / 维护 / 下载 / 错误日志查看与实时尾随                  |
+| 关于       | 关于软件    | 版本信息（自动读取）、GitHub 链接                            |
 
 # 🌲 项目结构图
 

@@ -88,6 +88,7 @@ type DownloadSetting struct {
 	// ── 归档设置 ──
 	ArchiveThreads                int  `json:"archiveThreads"`                // 单个归档文件分片下载的并发线程数（全局线程配额池统一调度，上限 10）
 	ControlArchiveConcurrency     bool `json:"controlArchiveConcurrency"`      // 控制归档下载并发：开启后归档任务需先获取全局线程配额（不足则排队等待）
+	MaxArchiveConcurrency         int  `gorm:"default:1" json:"maxArchiveConcurrency"` // 最大归档并发数（1-10，且 ≤ ArchiveThreads；默认 1=单归档全线程，需多归档并行时调高）
 	DeleteZipAfterArchiveDownload bool `json:"deleteZipAfterArchiveDownload"` // 归档下载完成后删除原压缩包
 
 	// ── 下载任务 ──

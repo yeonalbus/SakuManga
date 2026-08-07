@@ -68,6 +68,10 @@ type OfflineComic struct {
 	AgedStatus    bool  `gorm:"default:false" json:"agedStatus"`       // 已老化（发布超 365 天且无可更新新版）
 	AgedCheckedAt int64 `json:"agedCheckedAt,omitempty"`               // 上次老化判定时间戳(ms)；>0=已判定（一次性，防止重复扫描）
 
+	// ── 画廊可用性（需求 3(2)：区分「画廊被删」与「网络故障」）──
+	RemovedStatus bool  `gorm:"default:false" json:"removedStatus"`    // 画廊被删除/版权移除（removed/copyright）；网络故障不得标记
+	RemovedAt     int64 `json:"removedAt,omitempty"`                   // 标记时间戳(ms)
+
 	// ── Tag 双轨维护字段（本地漫画 Tag 维护系统）──
 	OnlineTags        string `gorm:"type:text" json:"onlineTags,omitempty"`        // E站官方 tag JSON 数组（每日刷新覆盖）
 	OfflineAddTags    string `gorm:"type:text" json:"offlineAddTags,omitempty"`    // 本地新增 tag JSON 数组（用户客制化）

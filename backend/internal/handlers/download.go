@@ -48,6 +48,36 @@ func requireDownloadPermission(c *gin.Context) bool {
 	return true
 }
 
+// requireTaskAccess 校验当前用户对任务可访问/可操作（管理员或发起者本人）。
+// 多用户权限：下载任务按发起者隔离，仅发起者本人可暂停/取消/改优先级等；
+// 管理员作为中心制兜底可管理全部用户的任务。
+func requireTaskAccess(c *gin.Context, task *models.DownloadTask) bool {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return false
+	}
+	if user.Role != services.RoleAdmin && task.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "只能操作自己发起的下载任务"})
+		return false
+	}
+	return true
+}
+
+// requireAdmin 校验当前用户为管理员（handler 内嵌校验，用于 GET/POST 同路径权限不同的接口）
+func requireAdmin(c *gin.Context) bool {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return false
+	}
+	if user.Role != services.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅管理员可执行此操作"})
+		return false
+	}
+	return true
+}
+
 // ─────────────────────────────────────────────────────────────
 // 任务 CRUD
 // ─────────────────────────────────────────────────────────────
@@ -115,13 +145,28 @@ func (h *DownloadHandler) BatchCreateDownload(c *gin.Context) {
 }
 
 // ListDownloads 下载任务列表 GET /api/v1/downloads
+// 权限：无下载许可用户直接拒绝（隐藏下载列表）；普通成员仅返回自己发起的任务；管理员返回全部。
 func (h *DownloadHandler) ListDownloads(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if user.Role != services.RoleAdmin && !user.AllowDownload {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无下载权限，请联系管理员开启"})
+		return
+	}
 	var p services.DownloadListParams
 	if err := c.ShouldBindQuery(&p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法请求参数"})
 		return
 	}
-	tasks, total, err := h.manager.ListTasks(p)
+	// 普通成员只看自己的任务；管理员查看全部（userID=0 不过滤）
+	var userID uint
+	if user.Role != services.RoleAdmin {
+		userID = user.ID
+	}
+	tasks, total, err := h.manager.ListTasks(p, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -136,6 +181,9 @@ func (h *DownloadHandler) GetDownload(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
 	c.JSON(http.StatusOK, task)
 }
 
@@ -145,7 +193,15 @@ func (h *DownloadHandler) GetDownload(c *gin.Context) {
 
 // PauseDownload 暂停 POST /api/v1/downloads/:id/pause
 func (h *DownloadHandler) PauseDownload(c *gin.Context) {
-	task, err := h.manager.PauseTask(c.Param("id"))
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.PauseTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -158,7 +214,15 @@ func (h *DownloadHandler) ResumeDownload(c *gin.Context) {
 	if !requireDownloadPermission(c) {
 		return
 	}
-	task, err := h.manager.ResumeTask(c.Param("id"))
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.ResumeTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -168,7 +232,15 @@ func (h *DownloadHandler) ResumeDownload(c *gin.Context) {
 
 // CancelDownload 取消 POST /api/v1/downloads/:id/cancel
 func (h *DownloadHandler) CancelDownload(c *gin.Context) {
-	task, err := h.manager.CancelTask(c.Param("id"))
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.CancelTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -178,7 +250,15 @@ func (h *DownloadHandler) CancelDownload(c *gin.Context) {
 
 // RetryDownload 重试 POST /api/v1/downloads/:id/retry
 func (h *DownloadHandler) RetryDownload(c *gin.Context) {
-	task, err := h.manager.RetryTask(c.Param("id"))
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.RetryTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -188,7 +268,15 @@ func (h *DownloadHandler) RetryDownload(c *gin.Context) {
 
 // UnlockDownload GP 解锁 POST /api/v1/downloads/:id/unlock
 func (h *DownloadHandler) UnlockDownload(c *gin.Context) {
-	task, err := h.manager.UnlockTask(c.Param("id"))
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.UnlockTask(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -210,7 +298,15 @@ func (h *DownloadHandler) SetDownloadPriority(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
 		return
 	}
-	task, err := h.manager.SetTaskPriority(c.Param("id"), req.Priority)
+	task, err := h.manager.GetTask(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !requireTaskAccess(c, task) {
+		return
+	}
+	task, err = h.manager.SetTaskPriority(c.Param("id"), req.Priority)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -219,7 +315,11 @@ func (h *DownloadHandler) SetDownloadPriority(c *gin.Context) {
 }
 
 // RestoreDownloads 恢复历史任务 POST /api/v1/downloads/restore
+// 恢复会重新入队全部未完成任务（可能触发他人任务重跑），仅管理员可执行。
 func (h *DownloadHandler) RestoreDownloads(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	count, err := h.manager.RestoreTasks()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -265,7 +365,11 @@ func (h *DownloadHandler) GetDownloadSettings(c *gin.Context) {
 }
 
 // SaveDownloadSettings 保存下载设置 POST /api/v1/downloads/settings
+// 下载设置为系统级配置（路径/并发/归档等），仅管理员可修改（GET 保持登录可读）。
 func (h *DownloadHandler) SaveDownloadSettings(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	var s models.DownloadSetting
 	if err := c.ShouldBindJSON(&s); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})

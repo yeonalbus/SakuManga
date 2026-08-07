@@ -849,8 +849,14 @@ func (m *DownloadManager) cancelArchiveSessionForTask(task *models.DownloadTask)
 }
 
 // ListTasks 查询任务列表（支持状态/模式过滤 + 分页）
-func (m *DownloadManager) ListTasks(p DownloadListParams) ([]models.DownloadTask, int64, error) {
+// userID>0 时仅返回该用户发起的任务（普通成员隔离）；userID=0 不过滤（管理员查看全部）。
+// 查询后按 UserID 批量填充 Username（管理员多用户管理时展示发起者）。
+func (m *DownloadManager) ListTasks(p DownloadListParams, userID uint) ([]models.DownloadTask, int64, error) {
 	q := m.db.Model(&models.DownloadTask{})
+
+	if userID > 0 {
+		q = q.Where("user_id = ?", userID)
+	}
 
 	if p.Status != "" {
 		if p.Status == "active" {
@@ -885,7 +891,37 @@ func (m *DownloadManager) ListTasks(p DownloadListParams) ([]models.DownloadTask
 	if err := q.Order("created_at desc").Offset((p.Page - 1) * p.Size).Limit(p.Size).Find(&tasks).Error; err != nil {
 		return nil, 0, err
 	}
+
+	// 批量填充发起者用户名（仅展示用，非 DB 字段）
+	m.fillTaskUsernames(tasks)
+
 	return tasks, total, nil
+}
+
+// fillTaskUsernames 按任务 UserID 批量查询 users 表并填充 Username 展示字段
+func (m *DownloadManager) fillTaskUsernames(tasks []models.DownloadTask) {
+	seen := map[uint]bool{}
+	ids := make([]uint, 0, len(tasks))
+	for i := range tasks {
+		if tasks[i].UserID > 0 && !seen[tasks[i].UserID] {
+			seen[tasks[i].UserID] = true
+			ids = append(ids, tasks[i].UserID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var users []models.User
+	if err := m.db.Select("id, username").Where("id IN ?", ids).Find(&users).Error; err != nil {
+		return
+	}
+	nameMap := make(map[uint]string, len(users))
+	for _, u := range users {
+		nameMap[u.ID] = u.Username
+	}
+	for i := range tasks {
+		tasks[i].Username = nameMap[tasks[i].UserID]
+	}
 }
 
 // GetTask 查询单个任务

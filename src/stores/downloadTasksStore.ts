@@ -4,6 +4,7 @@
 // 供 ItemCard 展示「下载中」角标并禁用快捷下载，避免用户对同一画廊反复点击。
 import { ref } from 'vue'
 import { http } from '@/utils/request'
+import { fetchOfflineComics } from '@/stores/comicStore'
 
 /** 活动下载任务（仅需要 gid 等少量字段用于角标判定） */
 interface ActiveDownloadTask {
@@ -21,6 +22,20 @@ const POLL_INTERVAL = 4000 // 比「下载」页 2s 放慢，避免在线列表�
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let subscriberCount = 0
 
+/** 上一次轮询的活动任务 gid 集合（用于检测任务完成/取消，触发离线书库缓存刷新） */
+let lastActiveGids = new Set<string>()
+/** 离线书库刷新防重入：避免多个任务同时完成导致并发重复请求 */
+let refreshPending = false
+
+/** 任务完成/取消后刷新离线书库缓存（需求2：下载新版本后删除旧版本，前端需及时反映） */
+function refreshOfflineComicsAfterTask(): void {
+  if (refreshPending) return
+  refreshPending = true
+  fetchOfflineComics().finally(() => {
+    refreshPending = false
+  })
+}
+
 /** 拉取一次活动任务列表（失败静默保留上次状态，避免抖动报错） */
 export async function fetchActiveDownloads(): Promise<void> {
   try {
@@ -28,7 +43,18 @@ export async function fetchActiveDownloads(): Promise<void> {
       params: { status: 'active', page: 1, size: 200 },
     })
     const tasks = res.tasks || []
-    activeGids.value = new Set(tasks.map((t) => String(t.gid)).filter(Boolean))
+    const current = new Set(tasks.map((t) => String(t.gid)).filter(Boolean))
+    // 检测任务完成/取消：gid 从 active 集合消失（completed/cancelled 不在 active 内）→ 刷新离线书库缓存
+    if (lastActiveGids.size > 0) {
+      for (const gid of lastActiveGids) {
+        if (!current.has(gid)) {
+          refreshOfflineComicsAfterTask()
+          break
+        }
+      }
+    }
+    lastActiveGids = current
+    activeGids.value = current
   } catch {
     // 静默：保持上次状态，等待下次轮询
   }

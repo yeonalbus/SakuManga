@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
@@ -33,6 +33,16 @@ onMounted(async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
+})
+
+// 需求2：App.vue 用 keep-alive 缓存路由，重新进入书库页（相同 fullPath）不会触发 onMounted，
+// 导致「下载新版本后删除旧版本」等后端变更不反映到前端。改为每次重新激活书库页时刷新离线数据源。
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) {
+    fetchOfflineComics()
+  }
+  activatedOnce = true
 })
 
 // 任务五：离开列表页时保存「页码 + 滚动位置」，返回时恢复

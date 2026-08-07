@@ -116,6 +116,12 @@ const fetchUpdates = async () => {
     const data = await http<UpdateListResponse>('/offline/updates')
     updates.value = data.items || []
     total.value = data.total || 0
+    // 需求3：新出现的漫画「下载方案」默认选中「按设置（默认）」（''），已手动选择的保留用户覆盖
+    for (const item of updates.value) {
+      if (modeFor.value[item.id] === undefined) {
+        modeFor.value[item.id] = ''
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '获取更新列表失败')

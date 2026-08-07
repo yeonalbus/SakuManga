@@ -2,7 +2,7 @@
  * 漫画数据 Store：在线/离线漫画列表、本地数据拉取与阅读统计
  * 由原 appStore 拆分而来，负责漫画相关数据源与派生计算
  */
-import { ref, watch, computed } from 'vue'
+import { ref, computed } from 'vue'
 import type { OnlineComic, OfflineComic } from '@/types/comic'
 import { http } from '@/utils/request'
 import { offlineReadingList } from '@/stores/readingStore'
@@ -21,7 +21,7 @@ import * as historyStore from '@/stores/historyStore'
  */
 export const onlineComics = ref<OnlineComic[]>([])
 
-/** 离线漫画列表（从后端 /comics/offline 拉取，本地持久化缓存） */
+/** 离线漫画列表（从后端 /comics/offline 拉取，仅存内存态；持久化由后端数据库负责） */
 export const offlineComics = ref<OfflineComic[]>([])
 
 /**
@@ -96,14 +96,6 @@ export const fetchOfflineComics = async () => {
     console.error('拉取离线漫画失败:', err)
   }
 }
-
-watch(
-  offlineComics,
-  (val) => {
-    localStorage.setItem('app_offline_comics', JSON.stringify(val))
-  },
-  { deep: true },
-)
 
 // --------------------------------------------------
 // 阅读统计与排行榜

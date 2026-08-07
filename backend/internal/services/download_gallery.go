@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"SakuHentai/internal/models"
@@ -46,16 +48,25 @@ type galleryDownloader struct {
 	mu         sync.Mutex // 保护 task 进度字段与并发计数
 	startedAt  time.Time  // 开始时间（速度计算基准）
 	lockFailed bool       // 是否检测到配额/限流（决定 error_lock 还是 error）
+	stopFlag   atomic.Bool // 本地停止标记（暂停/取消/抢占时置位，避免频繁回查 DB）
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 // runGalleryEngine 画廊下载引擎入口（由任务管理器分派）
 func (m *DownloadManager) runGalleryEngine(task *models.DownloadTask) {
 	g := &galleryDownloader{m: m, task: task}
+	m.registerGallery(g)
+	defer m.unregisterGallery(task.ID)
 	g.run()
 }
 
 // run 执行完整画廊下载流程
 func (g *galleryDownloader) run() {
+	// 共享请求 context：暂停/取消/抢占时取消以中断进行中图片请求（.part 保留供续传）
+	g.initContext()
+	defer g.cancelContext()
+
 	log.Printf("%s [gallery-engine] 任务 %s 开始画廊下载 gid=%s title=%q", dlLogTag, g.task.ID, g.task.GID, g.task.Title)
 
 	// 1. 账号 / 设置 / 客户端（使用任务发起者的 E 站账号）
@@ -134,6 +145,18 @@ func (g *galleryDownloader) downloadAll(urls []string, detail *GalleryDetailResu
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+
+	// 接入全局线程配额池：多画廊并行总线程 ≤ 10（修复路径一 N×10 超限）。
+	// acquirePartial 取 min(ConcurrentImageDownloads, 全局余量)；全局额度不足时阻塞（假死，不耗 GP），
+	// 暂停/取消/抢占时通过 stop 回调返回 0 放弃（配合 stopGalleryDownload + wakeAll）。
+	g.initContext()
+	got := g.m.archivePool.acquirePartial(g.task.ID, concurrency, func() bool { return g.stopped() })
+	defer g.m.archivePool.releaseAll(g.task.ID)
+	if got <= 0 {
+		log.Printf("%s [gallery-engine] 任务 %s 等待额度期间被暂停/取消，中止下载", dlWarnTag, g.task.ID)
+		return
+	}
+	concurrency = got
 
 	// 文件名位数：<100 用 3 位，<1000 用 4 位，否则 5 位
 	width := 3
@@ -267,9 +290,36 @@ func (g *galleryDownloader) locked() bool {
 	return g.lockFailed
 }
 
-// stopped 任务是否已被取消/暂停（回查 DB，引擎内存状态不会更新）
+// stopped 任务是否已被取消/暂停/抢占（本地停止标记 + 回查 DB，避免频繁回查）
 func (g *galleryDownloader) stopped() bool {
-	return g.m.taskStopped(g.task.ID)
+	return g.stopFlag.Load() || g.m.taskStopped(g.task.ID)
+}
+
+// initContext 初始化共享请求 context（幂等：run() 或 downloadAll 中调用）
+func (g *galleryDownloader) initContext() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ctx == nil {
+		g.ctx, g.cancel = context.WithCancel(context.Background())
+	}
+}
+
+// cancelContext 取消共享请求 context（幂等）
+func (g *galleryDownloader) cancelContext() {
+	g.mu.Lock()
+	c := g.cancel
+	g.mu.Unlock()
+	if c != nil {
+		c()
+	}
+}
+
+// stopDownload 立即中断当前下载（暂停/取消/抢占时由 DownloadManager 调用）：
+// 置位本地停止标记 + 取消共享 context，进行中的图片请求即刻中止；
+// .part 保留供恢复续传。
+func (g *galleryDownloader) stopDownload() {
+	g.stopFlag.Store(true)
+	g.cancelContext()
 }
 
 // downloadOneOnce 单次下载单页图片（断点续传：目标存在跳过 / .part + Range 续传）
@@ -280,7 +330,7 @@ func (g *galleryDownloader) downloadOneOnce(idx int, imageURL string, width int,
 		startOffset = fi.Size()
 	}
 
-	req, err := http.NewRequest("GET", imageURL, nil)
+	req, err := http.NewRequestWithContext(g.ctx, "GET", imageURL, nil)
 	if err != nil {
 		return err
 	}

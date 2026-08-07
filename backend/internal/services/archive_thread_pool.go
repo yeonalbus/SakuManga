@@ -26,11 +26,12 @@ const defaultMaxArchiveThreads = 10
 
 // archiveThreadPool 全局归档下载线程配额池
 type archiveThreadPool struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	max     int            // 全局线程上限（默认 10）
-	active  int            // 当前已分配的活跃线程总数
-	perTask map[string]int // 任务ID -> 该任务当前持有的线程数
+	mu       sync.Mutex
+	cond     *sync.Cond
+	max      int            // 全局线程上限（默认 10）
+	active   int            // 当前已分配的活跃线程总数
+	perTask  map[string]int // 任务ID -> 该任务当前持有的线程数
+	archives []string       // 按启动顺序的活跃归档任务（5.2 并发窗口）
 }
 
 // newArchiveThreadPool 构造线程配额池
@@ -146,4 +147,139 @@ func (p *archiveThreadPool) releaseLocked(taskID string, n int) {
 	}
 	log.Printf("%s [archive-thread] 任务 %s 释放 %d 个线程（active=%d/%d）",
 		dlLogTag, taskID, n, p.active, p.max)
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5.2 归档并发窗口 + 每归档额度分配（全局额度池升级）
+//
+// MaxArchiveConcurrency 控制「同时运行的归档任务数」上限（默认 1=单归档全线程）。
+// 每归档额度按 5.2 规则分配：
+//   base = ArchiveThreads / MaxArchiveConcurrency（向下取整）
+//   remainder = ArchiveThreads % MaxArchiveConcurrency
+//   前 remainder 个归档各 (base+1) 线程，其余 base 线程
+//   MaxArchiveConcurrency >= ArchiveThreads 时每归档 1 线程、归档数上限 = ArchiveThreads
+// ─────────────────────────────────────────────────────────────
+
+// archiveEffConcurrency 计算实际允许的归档并发数上限
+func archiveEffConcurrency(threads, maxConcurrency int) int {
+	if maxConcurrency <= 1 {
+		return 1
+	}
+	if maxConcurrency >= threads {
+		return threads
+	}
+	return maxConcurrency
+}
+
+// archiveQuota 计算并发窗口内下标 idx 的归档应分配的线程数
+func archiveQuota(threads, maxConcurrency, idx int) int {
+	if maxConcurrency <= 1 {
+		return threads // 单归档拿满全部线程
+	}
+	if maxConcurrency >= threads {
+		return 1 // 每归档 1 线程
+	}
+	base := threads / maxConcurrency
+	rem := threads % maxConcurrency
+	if idx < rem {
+		return base + 1
+	}
+	return base
+}
+
+// archiveSlot 归档任务申请额度（并发窗口 + 每归档配额 + 假死阻塞）：
+//   - 活跃归档数达到并发上限时阻塞（即使线程有余额）——对应 MaxArchiveConcurrency 上限
+//   - 线程不足时阻塞（假死，不耗 GP）——对应 JHentai ArchiveStatus.waitingIsolate
+//   - stop 返回 true 时立即放弃并返回 0
+// 返回实际分配的线程数。
+func (p *archiveThreadPool) archiveSlot(taskID string, threads, maxConcurrency int, stop func() bool) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	eff := archiveEffConcurrency(threads, maxConcurrency)
+	for {
+		if stop != nil && stop() {
+			return 0
+		}
+		idx := -1
+		for i, id := range p.archives {
+			if id == taskID {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			if len(p.archives) >= eff {
+				log.Printf("%s [archive-thread] 任务 %s 归档并发数已满（%d/%d），排队等待…",
+					dlWarnTag, taskID, len(p.archives), eff)
+				p.cond.Wait()
+				continue
+			}
+			p.archives = append(p.archives, taskID)
+			idx = len(p.archives) - 1
+		}
+		need := archiveQuota(threads, maxConcurrency, idx)
+		if need <= 0 {
+			need = 1
+		}
+		if p.active+need <= p.max {
+			p.active += need
+			p.perTask[taskID] += need
+			log.Printf("%s [archive-thread] 任务 %s 获取归档额度 %d 线程（并发窗口 %d/%d，active=%d/%d）",
+				dlLogTag, taskID, need, idx+1, eff, p.active, p.max)
+			return need
+		}
+		log.Printf("%s [archive-thread] 任务 %s 线程不足（active=%d/%d，需要 %d），排队等待…",
+			dlWarnTag, taskID, p.active, p.max, need)
+		p.cond.Wait()
+	}
+}
+
+// releaseArchive 归档任务结束/暂停时释放额度并从并发窗口移除
+func (p *archiveThreadPool) releaseArchive(taskID string) {
+	p.mu.Lock()
+	for i, id := range p.archives {
+		if id == taskID {
+			p.archives = append(p.archives[:i], p.archives[i+1:]...)
+			break
+		}
+	}
+	p.releaseLocked(taskID, p.perTask[taskID])
+	p.cond.Broadcast()
+	p.mu.Unlock()
+}
+
+// acquirePartial 画廊任务尽力获取额度：取 min(n, 余量)；余量为 0 时阻塞（假死）等待空位。
+// stop 返回 true 时立即放弃并返回 0。画廊用返回值作为内部逐图并发信号量上限。
+func (p *archiveThreadPool) acquirePartial(taskID string, n int, stop func() bool) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for {
+		if stop != nil && stop() {
+			return 0
+		}
+		avail := p.max - p.active
+		if avail <= 0 {
+			log.Printf("%s [archive-thread] 画廊任务 %s 全局额度已满（active=%d/%d），排队等待…",
+				dlWarnTag, taskID, p.active, p.max)
+			p.cond.Wait()
+			continue
+		}
+		got := n
+		if got > avail {
+			got = avail
+		}
+		p.active += got
+		p.perTask[taskID] += got
+		log.Printf("%s [archive-thread] 画廊任务 %s 获取额度 %d（active=%d/%d）",
+			dlLogTag, taskID, got, p.active, p.max)
+		return got
+	}
+}
+
+// currentActive 返回当前活跃线程总数（供调度/日志）
+func (p *archiveThreadPool) currentActive() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.active
 }

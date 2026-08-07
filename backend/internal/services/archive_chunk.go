@@ -373,6 +373,11 @@ func (d *archiveChunkDownloader) lockMessage(resp *http.Response) (string, bool)
 // ─────────────────────────────────────────────────────────────
 
 // probeArchiveDownload 探测归档下载链接：是否支持 Range、文件总大小。
+// 采用「GET + 小 Range（bytes=0-1023）」实测（对齐 JHentai 多 Isolate Range 分片可行）：
+//   - 之前用单字节 Range（bytes=0-0）对 H@H 下载页直链返回 404 而误判「不支持分块」→ 单线程
+//   - 改为 1KB 小 Range 后，H@H 直链返回 206 即启用分块多线程；仍 404 则容错回退单线程
+//   - 206 由 Content-Range 同时取得总大小，一次请求完成探测
+//
 // 返回 (total, rangeOK, err)。
 func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, bool, error) {
 	req, err := http.NewRequest("GET", downloadURL, nil)
@@ -381,7 +386,7 @@ func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, boo
 	}
 	req.Header.Set("User-Agent", ehReaderUserAgent)
 	req.Header.Set("Referer", g.referer)
-	req.Header.Set("Range", "bytes=0-0")
+	req.Header.Set("Range", "bytes=0-1023")
 
 	resp, err := g.downloadClient().Do(req)
 	if err != nil {
@@ -413,7 +418,7 @@ func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, boo
 		return 0, false, nil
 
 	case http.StatusNotFound:
-		// H@H 下载页直链等不支持 Range 的服务器：带 Range 的请求返回 404。
+		// H@H 下载页直链等节点可能拒绝 Range 探测请求（404）：
 		// 视为不支持分块，回退单线程下载（downloadZip 在无 .part 时不带 Range 请求）。
 		body := ""
 		if data, err := io.ReadAll(io.LimitReader(resp.Body, 512)); err == nil {
@@ -422,7 +427,7 @@ func (g *archiveDownloader) probeArchiveDownload(downloadURL string) (int64, boo
 		if err := g.probeLockError(http.StatusNotFound, body); err != nil {
 			return 0, false, err
 		}
-		log.Printf("%s [archive-engine] 任务 %s 探测返回 404（服务器不支持 Range），走单线程下载", dlWarnTag, g.task.ID)
+		log.Printf("%s [archive-engine] 任务 %s 探测返回 404（节点拒绝 Range 探测），走单线程下载", dlWarnTag, g.task.ID)
 		return 0, false, nil
 
 	default:

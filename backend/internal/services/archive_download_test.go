@@ -3,9 +3,11 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -89,13 +91,20 @@ func newRangeServer(data []byte, supportRange bool) *httptest.Server {
 	}))
 }
 
-// newTestDownloadManager 构造带内存 sqlite 的 DownloadManager（仅用于归档引擎测试）
+// newTestDownloadManager 构造带内存 sqlite 的 DownloadManager（仅用于下载引擎测试）
 func newTestDownloadManager(t *testing.T) *DownloadManager {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开内存库失败: %v", err)
 	}
+	// 内存库需固定为单连接：glebarez/sqlite 的 :memory: 是「每连接独立」，
+	// 若走连接池，迁移建的表现在其他连接上不可见（no such table）。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(&models.DownloadSetting{}, &models.DownloadTask{}); err != nil {
 		t.Fatalf("迁移模型失败: %v", err)
 	}
@@ -486,4 +495,407 @@ func TestCancelArchiveSessionRetry(t *testing.T) {
 	}
 }
 
-var _ = io.Discard // 占位：确保 io 导入被使用（供未来扩展）
+// ─────────────────────────────────────────────────────────────
+// 全局额度池升级（5.2 归档并发窗口 + 每归档配额 + 画廊尽力获取）测试
+// ─────────────────────────────────────────────────────────────
+
+// TestArchiveEffConcurrency 验证实际允许的归档并发数上限
+func TestArchiveEffConcurrency(t *testing.T) {
+	cases := []struct {
+		threads, maxConc, want int
+	}{
+		{10, 0, 1},
+		{10, 1, 1},
+		{10, 3, 3},
+		{10, 6, 6},
+		{10, 10, 10},
+		{10, 15, 10}, // 上限不能超过线程数
+		{6, 10, 6},
+		{0, 2, 0}, // 边界：maxConc>=threads → threads
+	}
+	for _, c := range cases {
+		if got := archiveEffConcurrency(c.threads, c.maxConc); got != c.want {
+			t.Errorf("archiveEffConcurrency(%d,%d)=%d，期望 %d", c.threads, c.maxConc, got, c.want)
+		}
+	}
+}
+
+// TestArchiveQuota 验证 5.2 每归档额度分配规则
+func TestArchiveQuota(t *testing.T) {
+	// 单归档拿满全部线程
+	if got := archiveQuota(10, 1, 0); got != 10 {
+		t.Errorf("archiveQuota(10,1,0)=%d，期望 10", got)
+	}
+	// maxConc >= threads → 每归档 1 线程
+	if got := archiveQuota(10, 10, 5); got != 1 {
+		t.Errorf("archiveQuota(10,10,5)=%d，期望 1", got)
+	}
+	// threads=10, maxConc=6 → 前 4 个 2 线程、后 2 个 1 线程
+	want := []int{2, 2, 2, 2, 1, 1}
+	for idx, w := range want {
+		if got := archiveQuota(10, 6, idx); got != w {
+			t.Errorf("archiveQuota(10,6,%d)=%d，期望 %d", idx, got, w)
+		}
+	}
+	// threads=10, maxConc=3 → 4,3,3
+	want2 := []int{4, 3, 3}
+	for idx, w := range want2 {
+		if got := archiveQuota(10, 3, idx); got != w {
+			t.Errorf("archiveQuota(10,3,%d)=%d，期望 %d", idx, got, w)
+		}
+	}
+	// 边界：threads=0 → maxConc>=threads 分支返回 1（兜底，避免 0 线程死锁）
+	if got := archiveQuota(0, 2, 0); got != 1 {
+		t.Errorf("archiveQuota(0,2,0)=%d，期望 1", got)
+	}
+}
+
+// TestArchiveSlotSingleArchiveFullThreads 验证 MaxArchiveConcurrency=1 时：
+// 单归档拿满全部线程，第二个归档在并发窗口假死阻塞，释放后唤醒并拿满。
+func TestArchiveSlotSingleArchiveFullThreads(t *testing.T) {
+	p := newArchiveThreadPool(10)
+
+	if got := p.archiveSlot("a", 10, 1, nil); got != 10 {
+		t.Fatalf("单归档期望拿满 10 线程，实际 %d", got)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- p.archiveSlot("b", 10, 1, nil)
+	}()
+	select {
+	case g := <-done:
+		t.Fatalf("b 不应立即获得额度（并发窗口 1/1 已满，g=%d）", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	p.releaseArchive("a")
+	select {
+	case g := <-done:
+		if g != 10 {
+			t.Errorf("b 在 a 释放后应获得 10 线程，实际 %d", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("b 在 a 释放后未获得额度")
+	}
+
+	if active := p.currentActive(); active != 10 {
+		t.Errorf("释放后 active 应为 10（b 持有），实际 %d", active)
+	}
+	p.releaseArchive("b")
+	if active := p.currentActive(); active != 0 {
+		t.Errorf("全部释放后 active 应为 0，实际 %d", active)
+	}
+}
+
+// TestArchiveSlotQuotaDistribution 验证并发窗口内每归档额度的 5.2 分配
+// 与第 7 个归档在并发窗口（eff=6）阻塞、释放后按末位配额获得 1 线程。
+func TestArchiveSlotQuotaDistribution(t *testing.T) {
+	p := newArchiveThreadPool(10)
+	want := []int{2, 2, 2, 2, 1, 1}
+	var got []int
+	for i := 0; i < 6; i++ {
+		got = append(got, p.archiveSlot(fmt.Sprintf("a%d", i), 10, 6, nil))
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("归档 %d 期望 %d 线程，实际 %d", i, w, got[i])
+		}
+	}
+
+	// 第 7 个归档阻塞在并发窗口（eff=6）
+	done := make(chan int, 1)
+	go func() {
+		done <- p.archiveSlot("a6", 10, 6, nil)
+	}()
+	select {
+	case g := <-done:
+		t.Fatalf("a6 不应立即获得额度（并发窗口 6/6 已满，g=%d）", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	p.releaseArchive("a0")
+	select {
+	case g := <-done:
+		if g != 1 {
+			t.Errorf("a6 在 a0 释放后应获得 1 线程（末位配额），实际 %d", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a6 在释放后未获得额度")
+	}
+}
+
+// TestArchiveSlotStopCallback 验证归档任务在并发窗口阻塞期间被停止时
+// 立即放弃（返回 0），不占用窗口与线程。
+func TestArchiveSlotStopCallback(t *testing.T) {
+	p := newArchiveThreadPool(10)
+	if got := p.archiveSlot("a", 10, 1, nil); got != 10 {
+		t.Fatalf("a 期望 10 线程，实际 %d", got)
+	}
+
+	var mu sync.Mutex
+	stopped := false
+	stop := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return stopped
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- p.archiveSlot("b", 10, 1, stop)
+	}()
+	select {
+	case g := <-done:
+		t.Fatalf("b 不应立即获得额度（g=%d）", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	mu.Lock()
+	stopped = true
+	mu.Unlock()
+	p.wakeAll()
+	select {
+	case g := <-done:
+		if g != 0 {
+			t.Errorf("b 停止后应返回 0，实际 %d", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("b 未在停止后退出")
+	}
+
+	// a 不受影响，仍持有 10 线程
+	if got := p.acquired("a"); got != 10 {
+		t.Errorf("a 仍应持有 10 线程，实际 %d", got)
+	}
+}
+
+// TestAcquirePartialBestEffort 验证画廊任务尽力获取：余量足够取满、
+// 余量不足取余量、余量 0 时假死阻塞、释放后唤醒。
+func TestAcquirePartialBestEffort(t *testing.T) {
+	p := newArchiveThreadPool(10)
+
+	if got := p.acquirePartial("g1", 5, nil); got != 5 {
+		t.Fatalf("g1 期望 5 线程，实际 %d", got)
+	}
+	if got := p.acquirePartial("g1", 5, nil); got != 5 {
+		t.Fatalf("g1 第二次期望 5 线程，实际 %d", got)
+	}
+
+	// 余量 0，g2 应假死阻塞
+	done := make(chan int, 1)
+	go func() {
+		done <- p.acquirePartial("g2", 3, nil)
+	}()
+	select {
+	case g := <-done:
+		t.Fatalf("g2 不应立即获得额度（余量 0，g=%d）", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	p.release("g1", 7)
+	select {
+	case g := <-done:
+		if g != 3 {
+			t.Errorf("g2 在释放后应获得 3 线程，实际 %d", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("g2 在释放后未获得额度")
+	}
+
+	if active := p.currentActive(); active != 6 {
+		t.Errorf("active 应为 6（g1 3 + g2 3），实际 %d", active)
+	}
+}
+
+// TestAcquirePartialStop 验证画廊任务在余量 0 阻塞期间被停止时立即放弃。
+func TestAcquirePartialStop(t *testing.T) {
+	p := newArchiveThreadPool(10)
+	if got := p.acquirePartial("g1", 10, nil); got != 10 {
+		t.Fatalf("g1 期望 10 线程，实际 %d", got)
+	}
+
+	var mu sync.Mutex
+	stopped := false
+	stop := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return stopped
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- p.acquirePartial("g2", 2, stop)
+	}()
+	select {
+	case g := <-done:
+		t.Fatalf("g2 不应立即获得额度（g=%d）", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	mu.Lock()
+	stopped = true
+	mu.Unlock()
+	p.wakeAll()
+	select {
+	case g := <-done:
+		if g != 0 {
+			t.Errorf("g2 停止后应返回 0，实际 %d", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("g2 未在停止后退出")
+	}
+}
+
+// TestHathStreamURLProbeChunkPath 验证现象 A 关键修复：
+// 带 start 参数的 H@H「下载页直链」不再短路为单线程，而是参与 Range 探测分块多线程下载
+// （对齐 JHentai 同一套 start=1 直链 + 多 Isolate Range 分片，archive_download_service.dart）。
+//
+// 修复前：isHathStreamDownloadURL 判定为真 → 直接单线程 downloadZip（全程无 Range 请求）。
+// 修复后：一律 probeArchiveDownload（GET + bytes=0-1023）→ 206 则分块并发（Range 请求 >= 2）。
+func TestHathStreamURLProbeChunkPath(t *testing.T) {
+	size := 8 * 1024 * 1024 // 8 MiB（>= minChunkSize*2，满足分块条件）
+	data := makeTestZip(t, size)
+
+	var mu sync.Mutex
+	var rangeReqs, plainReqs int
+
+	// 支持 Range 的测试服务器：带 Range 请求返回 206，无 Range 返回 200 完整数据；
+	// 统计两类请求数以区分「分块路径」与「单线程短路路径」。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			mu.Lock()
+			plainReqs++
+			mu.Unlock()
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		mu.Lock()
+		rangeReqs++
+		mu.Unlock()
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if end <= 0 || end >= int64(len(data)) {
+			end = int64(len(data)) - 1
+		}
+		if start >= int64(len(data)) {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[start : end+1])
+	}))
+	defer srv.Close()
+
+	// 构造 H@H 下载页直链（host 含 hath.network + start=1，isHathStreamDownloadURL 判定为真），
+	// 通过自定义 Transport 的 DialContext 将请求重定向到 httptest 测试服务器（免真实 DNS/网络）。
+	srvAddr := strings.TrimPrefix(srv.URL, "http://")
+	customTransport := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, srvAddr)
+		},
+	}
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+	g.client = &http.Client{Transport: customTransport}
+
+	downloadURL := "http://eh-archive-1234.hath.network/archive/file.zip?start=1"
+	if !isHathStreamDownloadURL(downloadURL) {
+		t.Fatal("测试 URL 应被判定为 H@H 直链（带 start 参数）")
+	}
+
+	if err := g.downloadArchiveFile(downloadURL); err != nil {
+		t.Fatalf("带 start 直链下载失败: %v", err)
+	}
+
+	got, err := os.ReadFile(g.zipPath)
+	if err != nil {
+		t.Fatalf("读取 zip 失败: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("下载内容与源不一致：got=%d 字节，want=%d 字节", len(got), len(data))
+	}
+
+	mu.Lock()
+	r, p := rangeReqs, plainReqs
+	mu.Unlock()
+	if r < 2 {
+		t.Fatalf("带 start 直链应参与 Range 探测分块（探测 1 次 + 至少 1 个分块请求），实际 Range 请求=%d", r)
+	}
+	if p != 0 {
+		t.Fatalf("带 start 直链不应走无 Range 的单线程短路下载，实际无 Range 请求=%d", p)
+	}
+}
+
+// TestArchiveEngineAcquireSlot 验证步骤 4：acquire 提前到解锁前 + 每归档额度按 5.2 规则。
+// 引擎 acquireSlot 读取设置调用 archiveSlot（MaxArchiveConcurrency=2、ArchiveThreads=10
+// → 每个归档分配 5 线程），releaseSlot 幂等释放；并发窗口满时第 3 个归档阻塞，
+// 空位出现（releaseSlot）后被唤醒并进入新窗口拿满配额。
+func TestArchiveEngineAcquireSlot(t *testing.T) {
+	mgr := newTestDownloadManager(t)
+
+	setting := mgr.GetSettings()
+	setting.ArchiveThreads = 10
+	setting.MaxArchiveConcurrency = 2
+	setting.ControlArchiveConcurrency = true
+	if _, err := mgr.SaveSettings(setting); err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+
+	mk := func(id string) *archiveDownloader {
+		return &archiveDownloader{m: mgr, task: &models.DownloadTask{ID: id}}
+	}
+	g1 := mk("arch-1")
+	g2 := mk("arch-2")
+	g3 := mk("arch-3")
+
+	// 前两个归档各占 5 线程（并发窗口 2/2，active=10/10 满）
+	if !g1.acquireSlot() || g1.threads != 5 {
+		t.Fatalf("arch-1 应获 5 线程，实际 ok=%v threads=%d", g1.threads > 0, g1.threads)
+	}
+	if !g2.acquireSlot() || g2.threads != 5 {
+		t.Fatalf("arch-2 应获 5 线程，实际 ok=%v threads=%d", g2.threads > 0, g2.threads)
+	}
+	if got := mgr.archivePool.currentActive(); got != 10 {
+		t.Fatalf("两个归档应占满 10 线程，实际 active=%d", got)
+	}
+
+	// 并发窗口已满：arch-3 阻塞假死（不耗 GP）
+	done := make(chan bool, 1)
+	go func() { done <- g3.acquireSlot() }()
+	select {
+	case <-done:
+		t.Fatal("arch-3 不应立即获得额度（并发窗口已满）")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	// 释放 arch-1 → 空位唤醒 arch-3（新窗口 idx=0 → 5 线程）
+	g1.releaseSlot()
+	select {
+	case ok := <-done:
+		if !ok || g3.threads != 5 {
+			t.Fatalf("arch-3 应获 5 线程，实际 ok=%v threads=%d", ok, g3.threads)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("arch-1 释放后 arch-3 未被唤醒")
+	}
+
+	// releaseSlot 幂等：重复释放无副作用；全部释放后 active=0
+	g1.releaseSlot()
+	g2.releaseSlot()
+	g3.releaseSlot()
+	if got := mgr.archivePool.currentActive(); got != 0 {
+		t.Fatalf("全部释放后 active 应为 0，实际 %d", got)
+	}
+}

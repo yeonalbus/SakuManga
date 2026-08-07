@@ -150,6 +150,7 @@ type archiveDownloader struct {
 	lockReason      archiveLockReason // 最近一次检测到的锁定原因分类
 	chunk           *archiveChunkDownloader // 当前分块下载器（nil 表示单线程路径/未开始分块）
 	chunkMu         sync.Mutex              // 保护 chunk 字段（暂停/取消/线程调整并发访问）
+	threads         int                     // 本任务从全局额度池获取的线程数（run() 提前获取；0=未获取）
 	stopFlag        atomic.Bool             // 本地停止标记（暂停/取消时置位，避免频繁回查 DB）
 	lastArchiveInfo *models.ArchiveInfo     // 最近一次解析到的归档报价（含 SizeBytes 预估）
 	lastPlain       string              // 最近一次 archiver.php 页面去标签文本（用于识别「已解锁」变体）
@@ -222,7 +223,15 @@ func (g *archiveDownloader) run() {
 		_ = os.Remove(g.zipPath)
 	}
 
-	// 4. archiver.php 全流程：获取 H@H 下载链接
+	// 4. 全局线程配额：提前到 archiver.php 解锁之前获取——
+	//    额度不足时阻塞假死（不耗 GP），空位出现由 releaseArchive/wakeAll 唤醒；
+	//    解锁阶段（消耗 GP 的创建归档/提交 key）只在额度到手后才开始。
+	if !g.acquireSlot() {
+		return // 等待额度期间被暂停/取消
+	}
+	defer g.releaseSlot()
+
+	// 5. archiver.php 全流程：获取 H@H 下载链接
 	downloadURL, arcInfo, err := g.resolveArchiveDownloadURL()
 	if err != nil {
 		// 仅支持 H@H Downloader 的画廊：无法直接 HTTP 下载 zip，自动降级为画廊逐图下载
@@ -248,13 +257,13 @@ func (g *archiveDownloader) run() {
 	}
 	log.Printf("%s [archive-engine] 任务 %s 已获取 H@H 下载链接: %s", dlLogTag, g.task.ID, truncateForLog(downloadURL, 200))
 
-	// 5. 下载 zip：探测 Range 支持与总大小后，按线程数分流（分块并发 / 单线程续传）
+	// 6. 下载 zip：探测 Range 支持与总大小后，按线程数分流（分块并发 / 单线程续传）
 	if err := g.downloadArchiveFile(downloadURL); err != nil {
 		g.failOrLock(err)
 		return
 	}
 
-	// 6. 解压落地
+	// 7. 解压落地
 	g.extractAndFinish()
 }
 
@@ -507,10 +516,12 @@ func (g *archiveDownloader) isHathdlOnly(forms []archiverForm) bool {
 	return false
 }
 
-// isHathStreamDownloadURL 判断是否为 H@H「下载页直链」的流式下载链接（URL 带 start 参数）。
-// 这类链接来自 archiver.php「已解锁 / H@H Downloader」流程解析出的 #db > p > a 直链；
-// H@H 节点对带 start 的流式请求不支持 HTTP Range（带 Range 的请求直接返回 404），
-// 只能单线程从头下载（不带 Range）。
+// isHathStreamDownloadURL 判断是否为 H@H「下载页直链」（URL 带 start 参数）。
+// 这类链接来自 archiver.php「已解锁 / H@H Downloader」流程解析出的 #db > p > a 直链。
+// 注意：带 start 的 H@H 直链并非必然不支持 Range 分片——JHentai 即用同一套
+// start=1 直链 + 多 Isolate Range 分片成功下载单归档（archive_download_service.dart）。
+// 是否支持 Range 一律以 probeArchiveDownload 探测为准（206→分块，404→容错回退单线程）。
+// 本函数仅用于 downloadZip 单线程路径决定续传方式（H@H 直链避免 Range 续传）。
 func isHathStreamDownloadURL(downloadURL string) bool {
 	u, err := url.Parse(downloadURL)
 	if err != nil {
@@ -921,17 +932,65 @@ func (g *archiveDownloader) downloadClient() *http.Client {
 	return dlClient
 }
 
+// acquireSlot 在 archiver.php 解锁之前获取全局线程配额（按 5.2 每归档额度规则）。
+// 额度不足时阻塞假死（不消耗 GP），空位出现由 releaseArchive/wakeAll 唤醒；
+// 等待期间被暂停/取消时返回 false。
+// ControlArchiveConcurrency=false 时按旧行为：无并发上限，本任务拿满 ArchiveThreads。
+func (g *archiveDownloader) acquireSlot() bool {
+	setting := g.m.GetSettings()
+	threads := setting.ArchiveThreads
+	if threads < 1 {
+		threads = 1
+	}
+	if !setting.ControlArchiveConcurrency {
+		g.threads = threads
+		log.Printf("%s [archive-engine] 任务 %s 未启用全局并发控制，直接使用 %d 线程", dlLogTag, g.task.ID, threads)
+		return true
+	}
+	got := g.m.archivePool.archiveSlot(g.task.ID, threads, setting.MaxArchiveConcurrency,
+		func() bool { return g.stopped() })
+	if got <= 0 {
+		g.threads = 0
+		log.Printf("%s [archive-engine] 任务 %s 等待额度期间被停止", dlWarnTag, g.task.ID)
+		return false
+	}
+	g.threads = got
+	return true
+}
+
+// releaseSlot 释放本任务占用的全局线程配额（幂等；run 结束时 defer 调用）。
+// 解压落地是本地 IO，不占用网络线程，故在下载完成后即释放，避免空占额度。
+func (g *archiveDownloader) releaseSlot() {
+	if g.threads <= 0 {
+		return
+	}
+	g.m.archivePool.releaseArchive(g.task.ID)
+	g.threads = 0
+}
+
 // downloadArchiveFile 归档 zip 下载入口：探测 Range 支持与总大小，
-// 按「控制并发 + 线程数」决定走分块并发下载还是单线程续传。
+// 按「实际分配线程数」决定走分块并发下载还是单线程续传。
 func (g *archiveDownloader) downloadArchiveFile(downloadURL string) error {
 	g.stopFlag.Store(false)
 
-	// H@H 下载页直链（带 start 参数）不支持 Range 探测：直接走单线程下载，
-	// 避免带 Range 的探测请求被 H@H 节点以 404 拒绝导致任务失败。
+	// 线程配额通常已由 run() 在 archiver.php 解锁前提前获取（acquireSlot，5.2 每归档额度）。
+	// 此处兜底：独立调用本入口（如单元测试/直接使用）且未预先获取时，临时获取一次并在返回时释放。
+	if g.threads <= 0 {
+		if !g.acquireSlot() {
+			return errTaskStopped // 等待额度期间被暂停/取消
+		}
+		defer g.releaseSlot()
+	}
+	threads := g.threads
+	if threads < 1 {
+		threads = 1
+	}
+
+	// 注：H@H 下载页直链（带 start 参数）不再短路为单线程——一律参与 Range 探测分块：
+	// 探测 206 则分块多线程（JHentai 实证同一套 start=1 直链可行），404 由探测容错回退单线程。
+	// downloadZip 内部仍按 isHathStreamDownloadURL 决定单线程路径的续传方式。
 	if isHathStreamDownloadURL(downloadURL) {
-		log.Printf("%s [archive-engine] 任务 %s 检测到 H@H 直链（start 流式），跳过 Range 探测，走单线程下载",
-			dlWarnTag, g.task.ID)
-		return g.downloadZip(downloadURL)
+		log.Printf("%s [archive-engine] 任务 %s 检测到 H@H 直链（带 start 参数），参与 Range 探测分块", dlLogTag, g.task.ID)
 	}
 
 	total, rangeOK, err := g.probeArchiveDownload(downloadURL)
@@ -939,28 +998,12 @@ func (g *archiveDownloader) downloadArchiveFile(downloadURL string) error {
 		return err
 	}
 
-	setting := g.m.GetSettings()
-	threads := setting.ArchiveThreads
-	if threads < 1 {
-		threads = 1
-	}
-
-	// 分块条件：支持 Range、线程数 > 1、文件足够大（至少 2 块）
+	// 分块条件：支持 Range、分配线程数 > 1（5.2 每归档额度）、文件足够大（至少 2 块）
 	useChunk := rangeOK && total > 0 && threads > 1 && total >= minChunkSize*2
 	if !useChunk {
 		log.Printf("%s [archive-engine] 任务 %s 走单线程下载（rangeOK=%v total=%d threads=%d）",
 			dlLogTag, g.task.ID, rangeOK, total, threads)
 		return g.downloadZip(downloadURL)
-	}
-
-	// 全局线程配额：全有或全无，不足则阻塞排队等待其他任务释放（对应 JHentai waitingIsolate 排队机制）
-	if setting.ControlArchiveConcurrency {
-		got := g.m.archivePool.acquire(g.task.ID, threads, func() bool { return g.stopped() })
-		if got <= 0 {
-			return errTaskStopped // 等待期间被暂停/取消
-		}
-		threads = got
-		defer g.m.archivePool.releaseAll(g.task.ID)
 	}
 
 	return g.runChunkDownload(downloadURL, total, threads)

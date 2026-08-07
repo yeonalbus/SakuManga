@@ -288,6 +288,118 @@ func TestArchiveChunkDownloaderResume(t *testing.T) {
 	}
 }
 
+// TestArchiveChunkDownloaderEOFBitmapResume 验证 EOF/暂停后「伴生位图」断点续传：
+// 预写非前缀高位块（块 1、3）并持久化位图，重启下载应复用已完成块、不重复请求，
+// 且完成后 .bits 被清理。这是修复 .part 被截断为 0B 无法续传问题的回归测试。
+func TestArchiveChunkDownloaderEOFBitmapResume(t *testing.T) {
+	size := 8 * 1024 * 1024 // 8 MiB
+	data := makeTestZip(t, size)
+	total := int64(len(data))
+
+	// 跟踪每个 Range 请求的 start（检测已完成块是否被重复请求）
+	var mu sync.Mutex
+	reqStarts := make(map[int64]int)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", total))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if end <= 0 || end >= total {
+			end = total - 1
+		}
+		if start >= total {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		mu.Lock()
+		reqStarts[start]++
+		mu.Unlock()
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[start : end+1])
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	// 以与生产一致的分块参数取 chunk/count（块大小/块数由设置线程数决定）
+	d := newArchiveChunkDownloader(g, srv.URL+"/file.zip", total)
+	chunk, count := d.chunk, d.count
+	d.cancel()
+	if count < 4 {
+		t.Fatalf("测试数据块数不足（count=%d），无法构造高位块场景", count)
+	}
+
+	// 预写块 1、3（跳过前缀块 0 与块 2），模拟 EOF/暂停后保留的高位完成块
+	done := []int64{1, 3}
+	f, err := os.OpenFile(g.partPath, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("打开 .part 失败: %v", err)
+	}
+	for _, idx := range done {
+		lo := idx * chunk
+		hi := lo + chunk
+		if hi > total {
+			hi = total
+		}
+		if _, werr := f.WriteAt(data[lo:hi], lo); werr != nil {
+			_ = f.Close()
+			t.Fatalf("预写块 %d 失败: %v", idx, werr)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("关闭 .part 失败: %v", err)
+	}
+	// 持久化位图标记块 1、3 完成
+	bits := make([]uint64, (count+63)/64)
+	for _, idx := range done {
+		bits[idx/64] |= 1 << (uint(idx) % 64)
+	}
+	if err := writeArchiveBitmap(g.partPath, chunk, count, bits); err != nil {
+		t.Fatalf("写位图失败: %v", err)
+	}
+
+	// 执行分块并发下载：应按位图续传，跳过已完成块 1、3
+	if err := g.runChunkDownload(srv.URL+"/file.zip", total, 5); err != nil {
+		t.Fatalf("位图断点续传失败: %v", err)
+	}
+
+	// 1) 最终文件与源一致
+	got, err := os.ReadFile(g.zipPath)
+	if err != nil {
+		t.Fatalf("读取 zip 失败: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("续传结果与源不一致：got=%d 字节，want=%d 字节", len(got), len(data))
+	}
+
+	// 2) 已完成块 1、3 不应被重新请求（位图复用生效）
+	mu.Lock()
+	defer mu.Unlock()
+	for _, idx := range done {
+		start := idx * chunk
+		if n := reqStarts[start]; n != 0 {
+			t.Fatalf("块 %d（start=%d）应被位图复用跳过，但被重新请求 %d 次", idx, start, n)
+		}
+	}
+
+	// 3) 下载完成后伴生位图应被清理
+	if _, err := os.Stat(archiveBitmapPath(g.partPath)); err == nil {
+		t.Fatal("下载完成后伴生位图 .bits 应被清理")
+	}
+}
+
 func TestArchiveChunkDownloaderSingleThreadFallback(t *testing.T) {
 	size := 8 * 1024 * 1024 // 8 MiB
 	data := makeTestZip(t, size)

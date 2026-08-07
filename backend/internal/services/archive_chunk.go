@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,6 +67,100 @@ func isEOFNetworkError(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
+// archiveBitmapPath .part 的伴生位图文件路径（记录各块完成状态，供断点续传复用高位已完成块）。
+// 说明：旧版在 EOF/暂停后把 .part 截断到「连续完成前缀」，前缀为 0 时 .part 变成 0B 导致无法续传；
+// 新版改为保留全部已完成块并持久化位图，续传时跳过已完成块。
+func archiveBitmapPath(part string) string { return part + ".bits" }
+
+// archiveBitmapMu 串行化伴生位图写入：多个 worker 并发 markDone 时，对同一目标
+// 并发 os.Rename 在 Windows 上会报 "Access is denied"（目标被短暂锁定）。
+var archiveBitmapMu sync.Mutex
+
+// writeArchiveBitmap 将块完成位图持久化到伴生 .bits 文件（原子替换，避免半写）。
+// 格式：magic(4) + chunk(8) + count(8) + bitmapLen(8) + 位图字节（每块 1 bit，64bit 对齐）。
+func writeArchiveBitmap(part string, chunk, count int64, doneBits []uint64) error {
+	archiveBitmapMu.Lock()
+	defer archiveBitmapMu.Unlock()
+
+	bitLen := (count + 63) / 64
+	if int64(len(doneBits)) < bitLen {
+		return fmt.Errorf("位图长度不足: got=%d want=%d", len(doneBits), bitLen)
+	}
+	buf := make([]byte, 4+8*3+int(bitLen)*8)
+	copy(buf[0:4], "ABIT")
+	binary.LittleEndian.PutUint64(buf[4:12], uint64(chunk))
+	binary.LittleEndian.PutUint64(buf[12:20], uint64(count))
+	binary.LittleEndian.PutUint64(buf[20:28], uint64(bitLen))
+	for i := int64(0); i < bitLen; i++ {
+		binary.LittleEndian.PutUint64(buf[28+int(i)*8:36+int(i)*8], doneBits[i])
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(part), filepath.Base(part)+".bits.tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(buf); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, archiveBitmapPath(part)); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// readArchiveBitmap 读取并校验伴生位图；chunk/count 与当前任务不一致（布局变化）时返回 false。
+func readArchiveBitmap(part string, wantChunk, wantCount int64) ([]uint64, bool) {
+	data, err := os.ReadFile(archiveBitmapPath(part))
+	if err != nil {
+		return nil, false
+	}
+	if len(data) < 4+8*3 || string(data[0:4]) != "ABIT" {
+		return nil, false
+	}
+	chunk := int64(binary.LittleEndian.Uint64(data[4:12]))
+	count := int64(binary.LittleEndian.Uint64(data[12:20]))
+	bitLen := int64(binary.LittleEndian.Uint64(data[20:28]))
+	wantBitLen := (wantCount + 63) / 64
+	if chunk != wantChunk || count != wantCount || bitLen != wantBitLen {
+		return nil, false
+	}
+	if bitLen < 0 || bitLen > int64(len(data)-28)/8 {
+		return nil, false
+	}
+	bits := make([]uint64, bitLen)
+	for i := int64(0); i < bitLen; i++ {
+		bits[i] = binary.LittleEndian.Uint64(data[28+int(i)*8 : 36+int(i)*8])
+	}
+	return bits, true
+}
+
+// removeArchiveBitmap 删除伴生位图（.part 被 rename/删除时同步清理）
+func removeArchiveBitmap(part string) {
+	_ = os.Remove(archiveBitmapPath(part))
+}
+
+// chunkDone 判断块 idx 是否已完成
+func chunkDone(bits []uint64, idx int64) bool {
+	return bits[idx/64]&(1<<(uint(idx)%64)) != 0
+}
+
+// chunkEnd 块 idx 的结束偏移（末块截到 total）
+func (d *archiveChunkDownloader) chunkEnd(idx int64) int64 {
+	end := (idx + 1) * d.chunk
+	if end > d.total {
+		end = d.total
+	}
+	return end
+}
+
 // newArchiveChunkDownloader 构造分块下载器
 func newArchiveChunkDownloader(g *archiveDownloader, downloadURL string, total int64) *archiveChunkDownloader {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -113,29 +209,59 @@ func (d *archiveChunkDownloader) run(threads int) error {
 		}
 	}()
 
-	// 断点续传：.part 当前大小即「连续完成前缀」字节数（上次结束/暂停时被截断到前缀）
+	// 断点续传：
+	//  1) 若存在伴生位图（.bits，本版本起 EOF/暂停后保留全部已完成块），按位图恢复，
+	//     已完成的块（含前缀之后的高位块）不再重复下载，修复 .part 被截断为 0B 无法续传的问题。
+	//  2) 否则回退旧逻辑：.part 当前大小即「连续完成前缀」字节数。
 	existing := fiSize(d.part)
-	if existing >= d.total {
+	if bits, ok := readArchiveBitmap(d.part, d.chunk, d.count); ok {
+		d.mu.Lock()
+		d.doneBits = bits
+		d.prefix = 0
+		for d.prefix < d.count && chunkDone(d.doneBits, d.prefix) {
+			d.prefix++
+		}
+		d.nextIdx = d.prefix
+		done := d.prefix * d.chunk
+		doneCount := d.prefix
+		for i := d.prefix; i < d.count; i++ {
+			if chunkDone(d.doneBits, i) {
+				done += d.chunkEnd(i) - i*d.chunk
+				doneCount++
+			}
+		}
+		d.doneBytes = done
+		full := d.prefix >= d.count
+		d.mu.Unlock()
+		if full {
+			log.Printf("%s [archive-engine] 任务 %s 分块并发下载：按位图全部完成，直接校验", dlLogTag, d.g.task.ID)
+			return d.finalize()
+		}
+		log.Printf("%s [archive-engine] 任务 %s 分块并发下载：按位图续传（已完成 %d/%d 块，连续前缀=%d 块）",
+			dlLogTag, d.g.task.ID, doneCount, d.count, d.prefix)
+	} else if existing >= d.total {
 		log.Printf("%s [archive-engine] 任务 %s .part 已下载完整（%d 字节），直接校验", dlLogTag, d.g.task.ID, existing)
 		return d.finalize()
+	} else {
+		// 旧版截断式续传：.part 大小即连续前缀字节数
+		startIdx := existing / d.chunk
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > d.count {
+			startIdx = d.count
+		}
+		d.mu.Lock()
+		d.nextIdx = startIdx
+		d.prefix = startIdx
+		d.doneBytes = startIdx * d.chunk
+		d.mu.Unlock()
+		_ = f.Truncate(startIdx * d.chunk) // 截断高位残留，保证续传点一致
 	}
-	startIdx := existing / d.chunk
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	if startIdx > d.count {
-		startIdx = d.count
-	}
-	d.mu.Lock()
-	d.nextIdx = startIdx
-	d.prefix = startIdx
-	d.doneBytes = startIdx * d.chunk
-	d.mu.Unlock()
-	_ = f.Truncate(startIdx * d.chunk) // 截断高位残留，保证续传点一致
 
 	log.Printf("%s [archive-engine] 任务 %s 分块并发下载：total=%.2f MiB 块=%d 块大小=%.2f MiB 线程=%d 续传@%.2f MiB",
 		dlLogTag, d.g.task.ID, float64(d.total)/1048576, d.count, float64(d.chunk)/1048576,
-		threads, float64(startIdx*d.chunk)/1048576)
+		threads, float64(d.prefix*d.chunk)/1048576)
 
 	d.setTarget(threads)
 	d.wg.Wait()
@@ -146,12 +272,18 @@ func (d *archiveChunkDownloader) run(threads int) error {
 	prefix := d.prefix
 	d.mu.Unlock()
 
-	// 未完整完成：截断到「连续完成前缀」，保证 .part 大小即续传点。
-	// 注意不能在 markDone 中逐块截断——并发 worker 可能已写入更高偏移的数据，截断会破坏已下载块。
+	// 未完整完成：保留全部已写入的完成块（含前缀之后的高位块），并持久化完成位图，
+	// 使断点续传能复用所有已下载数据（修复 EOF/暂停导致 .part 被截断为 0B 无法续传的问题）。
+	// 注：.part 未截断时高位可能残留中断块的半截数据，但位图只标记完整完成块，
+	// 续传时未完成块会被重新下载并整体覆盖，最终文件仍一致。
 	if prefix < d.count {
 		d.mu.Lock()
-		_ = d.f.Truncate(prefix * d.chunk)
+		bits := make([]uint64, len(d.doneBits))
+		copy(bits, d.doneBits)
 		d.mu.Unlock()
+		if err := writeArchiveBitmap(d.part, d.chunk, d.count, bits); err != nil {
+			log.Printf("%s [archive-engine] 任务 %s 写伴生位图失败: %v（后续将从连续前缀续传）", dlWarnTag, d.g.task.ID, err)
+		}
 	}
 
 	if failed {
@@ -198,6 +330,7 @@ func (d *archiveChunkDownloader) finalize() error {
 	if err := os.Rename(d.part, d.g.zipPath); err != nil {
 		return err
 	}
+	removeArchiveBitmap(d.part) // 下载完成，清理伴生位图
 	d.g.recordBytes(fiSize(d.g.zipPath))
 	log.Printf("%s [archive-engine] 任务 %s zip 分块下载完成（%.2f MiB）",
 		dlLogTag, d.g.task.ID, float64(fiSize(d.g.zipPath))/1048576)
@@ -249,16 +382,22 @@ func (d *archiveChunkDownloader) worker() {
 	}
 }
 
-// takeChunk 领取下一个待下载块索引；无块可领或已失败返回 -1
+// takeChunk 领取下一个待下载块索引；跳过位图中已完成的块（位图续传复用），无块可领或已失败返回 -1
 func (d *archiveChunkDownloader) takeChunk() int64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.failed || d.nextIdx >= d.count {
+	if d.failed {
 		return -1
 	}
-	idx := d.nextIdx
-	d.nextIdx++
-	return idx
+	for d.nextIdx < d.count {
+		idx := d.nextIdx
+		d.nextIdx++
+		if d.doneBits[idx/64]&(1<<(uint(idx)%64)) != 0 {
+			continue // 该块已下载完成（位图续传），跳过
+		}
+		return idx
+	}
+	return -1
 }
 
 // downloadChunk 通过 Range 请求下载单个块并写入 .part 对应偏移
@@ -353,8 +492,14 @@ func (d *archiveChunkDownloader) markDone(idx int64) {
 		d.prefix++
 	}
 	done := d.doneBytes
+	bits := make([]uint64, len(d.doneBits))
+	copy(bits, d.doneBits)
 	d.mu.Unlock()
 	d.g.recordBytes(done)
+	// 每完成一块即持久化位图：即使进程崩溃/EOF 中断，也能按位图复用已下载的高位块
+	if err := writeArchiveBitmap(d.part, d.chunk, d.count, bits); err != nil {
+		log.Printf("%s [archive-engine] 任务 %s 写伴生位图失败: %v", dlWarnTag, d.g.task.ID, err)
+	}
 }
 
 // setFailed 记录首个错误并终止后续取块

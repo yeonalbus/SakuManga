@@ -796,6 +796,16 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 	if fi, err := os.Stat(g.partPath); err == nil {
 		startOffset = fi.Size()
 	}
+	// 若 .part 来自分块并发下载（存在伴生位图），其内部是稀疏分块布局，单线程顺序续传无法安全拼接，
+	// 直接删除从头下载（并清理伴生位图）。
+	if _, err := os.Stat(archiveBitmapPath(g.partPath)); err == nil {
+		if startOffset > 0 {
+			log.Printf("%s [archive-engine] 任务 %s .part 为分块布局（含 .bits），单线程续传不安全，删除从头下载", dlWarnTag, g.task.ID)
+			_ = os.Remove(g.partPath)
+			startOffset = 0
+		}
+		removeArchiveBitmap(g.partPath)
+	}
 	// 已有部分文件且为完整 zip → 直接 rename
 	if startOffset > 0 && isValidZip(g.partPath) {
 		if err := os.Rename(g.partPath, g.zipPath); err != nil {
@@ -927,6 +937,17 @@ func (g *archiveDownloader) downloadClient() *http.Client {
 	if tr, ok := g.client.Transport.(*http.Transport); ok {
 		cl := tr.Clone()
 		cl.ResponseHeaderTimeout = 30 * time.Second
+		// 归档分块并发下载需放开单 Host 连接数上限：共享 transport 的 MaxConnsPerHost=6
+		// 会把 N 线程分块下载限制在 6 条并发连接（实测 10 线程由 3.37 → 6.34 MiB/s）。
+		// 按归档线程数（下限 6、上限 32）放开，避免过多连接触发 H@H 节点限流。
+		n := g.m.GetSettings().ArchiveThreads
+		if n < 6 {
+			n = 6
+		}
+		if n > 32 {
+			n = 32
+		}
+		cl.MaxConnsPerHost = n
 		dlClient.Transport = cl
 	}
 	return dlClient

@@ -45,6 +45,7 @@ export interface DownloadSettings {
   // ── 归档设置 ──
   archiveThreads: number // 归档下载线程数
   controlArchiveConcurrency: boolean // 控制归档下载并发数
+  maxArchiveConcurrency: number // 最大归档并发数（1-10，且 ≤ archiveThreads；默认 1）
   deleteZipAfterArchiveDownload: boolean // 归档下载完成后删除原压缩包
 
   // ── 下载任务 ──
@@ -74,6 +75,7 @@ const defaultSettings: DownloadSettings = {
 
   archiveThreads: 10,
   controlArchiveConcurrency: true,
+  maxArchiveConcurrency: 1,
   deleteZipAfterArchiveDownload: true,
 
   autoResumeTasks: true,
@@ -96,6 +98,7 @@ const SETTING_KEYS: (keyof DownloadSettings)[] = [
   'downloadAllGalleriesSamePriority',
   'archiveThreads',
   'controlArchiveConcurrency',
+  'maxArchiveConcurrency',
   'deleteZipAfterArchiveDownload',
   'autoResumeTasks',
   'autoUpdateGallery',

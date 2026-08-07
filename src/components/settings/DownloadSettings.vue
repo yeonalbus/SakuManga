@@ -137,6 +137,9 @@
       </select>
     </div>
 
+    <!-- ── 并发控制 ── -->
+    <div class="section-title">⚙️ 并发控制</div>
+
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">控制归档下载并发数</div>
@@ -148,6 +151,30 @@
         <input type="checkbox" v-model="downloadSettings.controlArchiveConcurrency" />
         <span class="slider"></span>
       </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">最大归档并发数</div>
+        <div class="item-subtext">
+          同时下载的归档任务上限（1-10，且 ≤ 归档线程数 {{ downloadSettings.archiveThreads }}）。
+          默认 1=单归档全线程；需要多归档并行时调高。
+          <template v-if="!downloadSettings.controlArchiveConcurrency"
+            >需开启上方「控制归档下载并发数」后生效。</template
+          >
+        </div>
+      </div>
+      <div class="concurrency-control">
+        <input
+          type="range"
+          min="1"
+          :max="maxArchiveLimit"
+          v-model.number="downloadSettings.maxArchiveConcurrency"
+          :disabled="!downloadSettings.controlArchiveConcurrency"
+          class="concurrency-slider"
+        />
+        <span class="concurrency-value">{{ downloadSettings.maxArchiveConcurrency }}</span>
+      </div>
     </div>
 
     <div class="setting-item">
@@ -236,7 +263,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue'
@@ -327,6 +354,19 @@ const handleReset = () => {
   resetDownloadSettings()
   toast.success('已恢复默认下载设置')
 }
+
+// ── 并发控制：最大归档并发数滑块上限 = min(10, 归档线程数)，保证每归档至少 1 线程 ──
+const maxArchiveLimit = computed(() => Math.min(10, downloadSettings.archiveThreads))
+
+// 归档线程数下调时，自动收敛最大归档并发数（避免滑块值超出上限）
+watch(
+  () => downloadSettings.archiveThreads,
+  (threads) => {
+    if (downloadSettings.maxArchiveConcurrency > threads) {
+      downloadSettings.maxArchiveConcurrency = Math.max(1, Math.min(10, threads))
+    }
+  },
+)
 
 // 挂载时从后端拉取最新设置（后端为唯一事实来源）
 onMounted(() => {
@@ -517,5 +557,36 @@ input:checked + .slider:before {
   background-color: var(--app-surface-3-hover);
   border-color: #ff7588;
   color: #ff7588;
+}
+
+/* 并发控制：最大归档并发数滑块 */
+.concurrency-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.concurrency-slider {
+  width: 140px;
+  accent-color: #ff7588;
+  cursor: pointer;
+}
+
+.concurrency-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.concurrency-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #ff7588;
+  background-color: rgba(255, 117, 136, 0.12);
+  border: 1px solid rgba(255, 117, 136, 0.35);
+  border-radius: 6px;
+  padding: 2px 8px;
 }
 </style>

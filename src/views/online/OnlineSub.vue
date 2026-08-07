@@ -13,7 +13,8 @@ import { useDetailPanel } from '@/composables/useDetailPanel'
 const subStore = useSubStore()
 
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
+  useDetailPanel()
 
 // 长按多选 → 批量下载
 const {
@@ -59,6 +60,7 @@ onMounted(() => {
           :select-mode="selectMode"
           :selected-ids="selectedIds"
           :panel-mode="isWide"
+          :panel-open="isPanelOpen"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"
@@ -83,8 +85,13 @@ onMounted(() => {
           </template>
         </GridContainer>
 
-        <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) -->
-        <FloatingToolbar @refresh="initSearch" @seek-change="(date) => subStore.seekToDate(date)" />
+        <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) + 详情页面切换 -->
+        <FloatingToolbar
+          :show-detail="true"
+          @refresh="initSearch"
+          @seek-change="(date) => subStore.seekToDate(date)"
+          @detail-toggle="togglePanel"
+        />
 
         <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
         <BatchDownloadBar

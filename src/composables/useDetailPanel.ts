@@ -9,6 +9,11 @@ import { getDetailPanelState, openDetailPanel, closeDetailPanel } from '@/stores
  *   列表滚动位点由 keep-alive / 原生 DOM 天然保留，无需额外处理。
  * - 窄屏 / 强制移动形态：回退为全屏详情路由（与旧行为一致）。
  *
+ * 交互约定（Round5 优化）：
+ * - 面板「✕ 收起」仅隐藏面板，保留 gid/token，可随时通过操作菜单「详情页面」重新唤起。
+ * - 面板已关闭时点击卡片：不再打开面板，而是用 window.open 新标签打开完整详情页
+ *   （与面板标题「画廊详情 ↗」行为完全一致）。
+ *
  * 面板开启状态按 route.path 存入 detailPanelStore，供组件因查询变化重建时恢复。
  */
 const WIDE_QUERY = '(min-width: 1025px)'
@@ -48,6 +53,10 @@ export function useDetailPanel() {
       panelGid.value = saved.gid
       panelToken.value = saved.token
       isPanelOpen.value = true
+    } else if (saved?.gid) {
+      // 面板处于收起状态：保留 gid/token 以便「详情页面」重新唤起
+      panelGid.value = saved.gid
+      panelToken.value = saved.token
     }
   })
 
@@ -58,26 +67,54 @@ export function useDetailPanel() {
     layoutObserver = null
   })
 
-  /** 打开详情：宽屏 → 内嵌面板；否则 → 全屏详情路由 */
+  /**
+   * 打开详情：
+   * - 窄屏 / 强制移动 → 全屏详情路由
+   * - 宽屏且面板已打开 → 切换面板内容
+   * - 宽屏且面板已关闭 → window.open 新标签打开完整详情（与「画廊详情 ↗」一致），
+   *   同时记录 gid/token，便于操作菜单「详情页面」重新唤起
+   */
   const openDetail = (comic: { id: string; token?: string }) => {
     if (!comic?.id) return
     if (isWide.value && comic.token) {
       panelGid.value = comic.id
       panelToken.value = comic.token
-      isPanelOpen.value = true
-      openDetailPanel(route.path, comic.id, comic.token)
+      if (isPanelOpen.value) {
+        isPanelOpen.value = true
+        openDetailPanel(route.path, comic.id, comic.token)
+      } else {
+        const href = router.resolve({
+          path: '/online/detail',
+          query: { id: comic.id, token: comic.token },
+        }).href
+        window.open(href, '_blank')
+      }
     } else {
       router.push({ path: '/online/detail', query: { id: comic.id, token: comic.token || '' } })
     }
   }
 
-  /** 收起面板 */
+  /**
+   * 收起面板：仅隐藏，保留 gid/token（供「详情页面」重新唤起）
+   */
   const closePanel = () => {
     isPanelOpen.value = false
-    panelGid.value = ''
-    panelToken.value = ''
     closeDetailPanel(route.path)
   }
 
-  return { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel }
+  /**
+   * 切换面板显隐（操作菜单「详情页面」栏目）：
+   * - 已打开 → 收起
+   * - 已关闭且有上次内容 → 重新唤起
+   */
+  const togglePanel = () => {
+    if (isPanelOpen.value) {
+      closePanel()
+    } else if (panelGid.value) {
+      isPanelOpen.value = true
+      openDetailPanel(route.path, panelGid.value, panelToken.value)
+    }
+  }
+
+  return { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel }
 }

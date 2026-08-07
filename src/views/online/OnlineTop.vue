@@ -1,26 +1,45 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import ItemCard from '@/components/ItemCard.vue'
+import GridContainer from '@/components/GridContainer.vue'
+import Pagination from '@/components/Pagination.vue'
+import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
+import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
 import { useBatchSelection } from '@/composables/useBatchSelection'
-import { http } from '@/utils/request'
-import { detectDeviceClass } from '@/utils/device'
-import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+import { http } from '@/utils/request'
 
 interface RankedOnlineComic extends OnlineComic {
   score: number
   rank: number
 }
 
+// 排行榜类型（与后端 toplist.php 的 tl 参数对应；默认 Yesterday tl=15）
+const TOPLIST_TYPES: { tl: string; label: string }[] = [
+  { tl: '15', label: 'Galleries Yesterday' },
+  { tl: '13', label: 'Galleries Past Month' },
+  { tl: '12', label: 'Galleries Past Year' },
+  { tl: '11', label: 'Galleries All-Time' },
+]
+
 const { toast } = useUI()
 
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
-const allItems = ref<RankedOnlineComic[]>([])
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
+  useDetailPanel()
+
+const comics = ref<RankedOnlineComic[]>([])
 const isLoading = ref(true)
+const currentTl = ref('15') // 当前排行榜类型（默认 Yesterday）
+const currentPage = ref(1)
+const totalPages = ref(1)
+
+// 当前排行榜类型显示标签
+const currentLabel = computed(
+  () => TOPLIST_TYPES.find((t) => t.tl === currentTl.value)?.label ?? 'Galleries Yesterday',
+)
 
 // 长按多选 → 批量下载
 const {
@@ -32,18 +51,21 @@ const {
   toggleSelectAll,
   handleBatchClose,
   exitSelectMode,
-} = useBatchSelection(() => allItems.value)
+} = useBatchSelection(() => comics.value)
 
-// 从 Go 内存缓存读取数据
+// 从 Go 后端按 (tl, page) 读取排行榜（每页 50 条，1~200 页）
 const fetchToplist = async () => {
   exitSelectMode()
   isLoading.value = true
   try {
-    // 🟢 将泛型改为 RankedOnlineComic[] 数组类型
-    const data = await http<{ comics: RankedOnlineComic[] }>('/comics/online/toplist')
+    const data = await http<{
+      comics: RankedOnlineComic[]
+      totalPages: number
+      currentPage: number
+    }>(`/comics/online/toplist?tl=${currentTl.value}&page=${currentPage.value}`)
 
-    // 这样 data.comics 的类型就带上了 rank 和 score 属性，完美匹配 allItems.value
-    allItems.value = data.comics || []
+    comics.value = data.comics || []
+    totalPages.value = data.totalPages || 1
   } catch (err) {
     toast.error('网络连接失败')
     console.error(err)
@@ -52,12 +74,25 @@ const fetchToplist = async () => {
   }
 }
 
-const topThree = computed(() => allItems.value.slice(0, 3))
-// 手机端阉割领奖台：隐藏 podium，榜单展示完整 TOP 25；iPad/桌面保留领奖台（第 4-25 名）
-const isMobileDevice = detectDeviceClass() === 'mobile'
-const restItemsForView = computed(() =>
-  isMobileDevice ? allItems.value.slice(0, 25) : allItems.value.slice(3, 25),
-)
+// 分页组件触发切页
+const handlePageChange = (page: number) => {
+  if (page === currentPage.value) return
+  currentPage.value = page
+  fetchToplist()
+}
+
+// 操作菜单「排行榜选择」切换类型：重置到第 1 页重新加载
+const handleToplistSelect = (tl: string) => {
+  if (tl === currentTl.value) return
+  currentTl.value = tl
+  currentPage.value = 1
+  fetchToplist()
+}
+
+// 操作菜单「刷新列表」
+const handleRefresh = () => {
+  fetchToplist()
+}
 
 onMounted(() => {
   fetchToplist()
@@ -66,94 +101,46 @@ onMounted(() => {
 
 <template>
   <div class="leaderboard-page">
-    <h2 class="page-title">🏆 官方全站热度榜 (TOP 25)</h2>
+    <h2 class="page-title">🏆 官方排行榜 · {{ currentLabel }}</h2>
 
     <div class="online-split">
       <div class="split-main">
-        <div v-if="isLoading" class="loading-state">加载热度榜单中...</div>
+        <div v-if="isLoading" class="loading-state">加载排行榜中...</div>
 
-        <template v-else-if="allItems.length > 0">
-          <!-- 领奖台前 3 名 -->
-          <div v-if="!isMobileDevice" class="podium-section">
-            <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
-              <div class="podium-crown">🥈 NO.2</div>
-              <ItemCard
-                :comic="topThree[1]"
-                :rank="2"
-                size="large"
-                mode="card"
-                :selectable="true"
-                :select-mode="selectMode"
-                :selected="selectedIds.includes(topThree[1].id)"
-                :panel-mode="isWide"
-                @longpress="handleLongPress"
-                @select="handleSelect"
-                @open="openDetail"
+        <template v-else-if="comics.length > 0">
+          <GridContainer
+            :items="comics"
+            :selectable="true"
+            :select-mode="selectMode"
+            :selected-ids="selectedIds"
+            :panel-mode="isWide"
+            :panel-open="isPanelOpen"
+            @longpress="handleLongPress"
+            @select="handleSelect"
+            @open="openDetail"
+          >
+            <!-- 底部：离线式页码分页（1~200，每页 50 条） -->
+            <template #footer>
+              <Pagination
+                :current-page="currentPage"
+                :total-pages="totalPages"
+                @change="handlePageChange"
               />
-              <div class="rank-score">{{ topThree[1].score }} 热度</div>
-            </div>
-
-            <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
-              <div class="podium-crown gold">👑 NO.1 CHAMPION</div>
-              <ItemCard
-                :comic="topThree[0]"
-                :rank="1"
-                size="large"
-                mode="card"
-                :selectable="true"
-                :select-mode="selectMode"
-                :selected="selectedIds.includes(topThree[0].id)"
-                :panel-mode="isWide"
-                @longpress="handleLongPress"
-                @select="handleSelect"
-                @open="openDetail"
-              />
-              <div class="rank-score gold-text">{{ topThree[0].score }} 热度</div>
-            </div>
-
-            <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
-              <div class="podium-crown">🥉 NO.3</div>
-              <ItemCard
-                :comic="topThree[2]"
-                :rank="3"
-                size="large"
-                mode="card"
-                :selectable="true"
-                :select-mode="selectMode"
-                :selected="selectedIds.includes(topThree[2].id)"
-                :panel-mode="isWide"
-                @longpress="handleLongPress"
-                @select="handleSelect"
-                @open="openDetail"
-              />
-              <div class="rank-score">{{ topThree[2].score }} 热度</div>
-            </div>
-          </div>
-
-          <!-- 第 4 - 25 名 -->
-          <div class="rest-section">
-            <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
-            <div class="card-grid">
-              <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
-                <ItemCard
-                  :comic="item"
-                  :rank="item.rank"
-                  mode="card"
-                  :selectable="true"
-                  :select-mode="selectMode"
-                  :selected="selectedIds.includes(item.id)"
-                  :panel-mode="isWide"
-                  @longpress="handleLongPress"
-                  @select="handleSelect"
-                  @open="openDetail"
-                />
-                <div class="sub-score">{{ item.score }} 热度</div>
-              </div>
-            </div>
-          </div>
+            </template>
+          </GridContainer>
         </template>
 
         <div v-else class="empty-tip">暂无榜单数据</div>
+
+        <!-- 右下角悬浮操作球：排行榜选择（替换日期跳转）+ 详情页面 -->
+        <FloatingToolbar
+          :show-toplist="true"
+          :toplist-current="currentTl"
+          :show-detail="true"
+          @toplist-select="handleToplistSelect"
+          @detail-toggle="togglePanel"
+          @refresh="handleRefresh"
+        />
 
         <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
         <BatchDownloadBar
@@ -198,70 +185,7 @@ onMounted(() => {
   color: var(--app-text-strong);
 }
 
-.podium-section {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 20px;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--app-border-2);
-}
-
-.podium-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 170px;
-}
-
-.rank-1-wrapper {
-  width: 210px;
-  transform: translateY(-10px);
-}
-
-.podium-crown {
-  font-size: 0.85rem;
-  font-weight: bold;
-  color: var(--app-text-2);
-  margin-bottom: 8px;
-}
-
-.podium-crown.gold {
-  color: #ffd700;
-  font-size: 1rem;
-}
-
-.rank-score {
-  margin-top: 8px;
-  font-size: 0.85rem;
-  color: var(--app-text-3);
-}
-
-.gold-text {
-  color: #ffd700;
-  font-weight: bold;
-}
-
-.section-subtitle {
-  font-size: 0.95rem;
-  color: var(--app-text-3);
-  margin-bottom: 12px;
-}
-
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-}
-
-.sub-score {
-  font-size: 0.75rem;
-  color: var(--app-text-muted);
-  text-align: right;
-  margin-top: 4px;
-}
-
-/* 📱 窄屏适配：领奖台三卡收紧（flex 均分 + max-width，极端窄屏自动收缩不溢出） */
+/* 📱 窄屏适配 */
 @media (max-width: 767px) {
   .leaderboard-page {
     padding: 0 12px 24px;
@@ -270,39 +194,6 @@ onMounted(() => {
 
   .page-title {
     font-size: 1.05rem;
-  }
-
-  .podium-section {
-    gap: 8px;
-    padding: 14px 0;
-  }
-  .podium-item {
-    flex: 1;
-    min-width: 0;
-    max-width: 104px;
-  }
-  .rank-1-wrapper {
-    flex: 1;
-    max-width: 124px;
-    transform: translateY(-6px);
-  }
-  .podium-crown {
-    font-size: 0.72rem;
-    margin-bottom: 6px;
-    white-space: nowrap;
-  }
-  .podium-crown.gold {
-    font-size: 0.78rem;
-  }
-  .rank-score {
-    font-size: 0.72rem;
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  .card-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
   }
 }
 </style>

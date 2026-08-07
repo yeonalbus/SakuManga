@@ -57,6 +57,54 @@
       </div>
     </div>
 
+    <!-- 自动适配详情面板列数（仅宽屏桌面在线列表生效） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">自动适配详情面板列数</div>
+        <div class="item-subtext">开启后，宽屏桌面在线列表会按详情面板「收起 / 展开」自动切换每行画廊数</div>
+      </div>
+      <button
+        class="toggle-btn"
+        :class="{ active: styleSettings.autoPanelColumns }"
+        @click="toggleAutoPanelColumns"
+      >
+        {{ styleSettings.autoPanelColumns ? '已开启' : '已关闭' }}
+      </button>
+    </div>
+
+    <div v-if="styleSettings.autoPanelColumns" class="setting-item">
+      <div class="item-info">
+        <div class="item-title">面板列数</div>
+        <div class="item-subtext">卡片 / 名片分别设置「收起 / 展开」时的每行画廊数，范围 1-5</div>
+      </div>
+      <div class="columns-config panel-cols">
+        <label class="columns-row">
+          <span class="columns-label">🎴 卡片·收起</span>
+          <select v-model.number="styleSettings.cardPanelClosedCols" class="setting-select">
+            <option v-for="n in 5" :key="`cc-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+        <label class="columns-row">
+          <span class="columns-label">🎴 卡片·展开</span>
+          <select v-model.number="styleSettings.cardPanelOpenCols" class="setting-select">
+            <option v-for="n in 5" :key="`co-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+        <label class="columns-row">
+          <span class="columns-label">🪪 名片·收起</span>
+          <select v-model.number="styleSettings.compactPanelClosedCols" class="setting-select">
+            <option v-for="n in 5" :key="`mpc-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+        <label class="columns-row">
+          <span class="columns-label">🪪 名片·展开</span>
+          <select v-model.number="styleSettings.compactPanelOpenCols" class="setting-select">
+            <option v-for="n in 5" :key="`mpo-${n}`" :value="n">{{ n }} 个</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">布局模式</div>
@@ -105,6 +153,16 @@ const setViewMode = (targetMode: 'card' | 'compact') => {
     toggleViewMode()
     toast.info(`已切换显示样式为：${targetMode === 'card' ? '卡片' : '名片'}`)
   }
+}
+
+// 自动适配详情面板列数开关
+const toggleAutoPanelColumns = () => {
+  styleSettings.autoPanelColumns = !styleSettings.autoPanelColumns
+  toast.info(
+    styleSettings.autoPanelColumns
+      ? '已开启自动适配详情面板列数'
+      : '已关闭自动适配详情面板列数',
+  )
 }
 
 // 恢复默认样式设置
@@ -204,6 +262,35 @@ const handleReset = () => {
   font-size: 13px;
   color: var(--app-text-2);
   white-space: nowrap;
+}
+
+/* 面板列数子配置：行距更紧凑 */
+.panel-cols {
+  gap: 4px;
+}
+
+/* 自动适配详情面板列数开关（胶囊按钮） */
+.toggle-btn {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-3);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  color: var(--app-text-strong);
+}
+
+.toggle-btn.active {
+  background-color: #00a896;
+  border-color: #00a896;
+  color: #fff;
+  font-weight: 600;
 }
 
 .segment-btn {

@@ -22,6 +22,15 @@ export type ThemeMode = 'system' | 'dark' | 'light'
 /** 布局模式：自动（跟随视口自适应）/ 桌面（强制桌面形态）/ 移动（强制移动形态） */
 export type LayoutMode = 'auto' | 'desktop' | 'mobile'
 
+/** 自动适配详情面板列数的取值范围（1~5） */
+export const MIN_PANEL_COLS = 1
+export const MAX_PANEL_COLS = 5
+
+const clampPanelCols = (n: number): number => {
+  if (!Number.isFinite(n)) return 5
+  return Math.min(MAX_PANEL_COLS, Math.max(MIN_PANEL_COLS, Math.round(n)))
+}
+
 /** 样式设置项集合 */
 export interface StyleSettings {
   // ── 主题 ──
@@ -30,6 +39,13 @@ export interface StyleSettings {
   // ── 布局 ──
   layoutMode: LayoutMode // 当前设备生效的布局模式（镜像，兼容旧代码）
   layoutModeByDevice: Record<DeviceClass, LayoutMode> // 按设备分类记忆的布局模式
+
+  // ── 自动适配详情面板列数（仅宽屏桌面在线列表生效）──
+  autoPanelColumns: boolean // 开关：开启后按详情面板开/关注入列数
+  cardPanelClosedCols: number // 卡片模式 · 面板收起列数（默认 5）
+  cardPanelOpenCols: number // 卡片模式 · 面板展开列数（默认 3）
+  compactPanelClosedCols: number // 名片模式 · 面板收起列数（默认 3）
+  compactPanelOpenCols: number // 名片模式 · 面板展开列数（默认 2）
 }
 
 const STORAGE_KEY = 'saku_style_settings'
@@ -43,6 +59,11 @@ const defaultSettings: StyleSettings = {
     tablet: 'auto',
     desktop: 'auto',
   },
+  autoPanelColumns: true,
+  cardPanelClosedCols: 5,
+  cardPanelOpenCols: 3,
+  compactPanelClosedCols: 3,
+  compactPanelOpenCols: 2,
 }
 
 /** 当前设备类别（应用加载时检测一次，运行期不变） */
@@ -72,6 +93,18 @@ const loaded = migrateLegacy(loadStorage<Partial<StyleSettings>>(STORAGE_KEY, {}
 export const styleSettings = reactive<StyleSettings>({
   ...defaultSettings,
   ...loaded,
+  // 新字段：旧数据缺失时回落默认值；越界（<1 或 >5）时钳制
+  autoPanelColumns: loaded.autoPanelColumns ?? defaultSettings.autoPanelColumns,
+  cardPanelClosedCols: clampPanelCols(
+    loaded.cardPanelClosedCols ?? defaultSettings.cardPanelClosedCols,
+  ),
+  cardPanelOpenCols: clampPanelCols(loaded.cardPanelOpenCols ?? defaultSettings.cardPanelOpenCols),
+  compactPanelClosedCols: clampPanelCols(
+    loaded.compactPanelClosedCols ?? defaultSettings.compactPanelClosedCols,
+  ),
+  compactPanelOpenCols: clampPanelCols(
+    loaded.compactPanelOpenCols ?? defaultSettings.compactPanelOpenCols,
+  ),
   layoutMode: loaded.layoutModeByDevice?.[currentDeviceClass] ?? defaultSettings.layoutMode,
   // 深拷贝 layoutModeByDevice，避免写操作污染 defaultSettings
   layoutModeByDevice: {

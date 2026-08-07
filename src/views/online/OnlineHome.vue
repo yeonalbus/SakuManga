@@ -38,7 +38,8 @@ const filteredComics = computed(() => {
 
 const route = useRoute()
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
+  useDetailPanel()
 
 // 🆕 URL 驱动搜索：进入 /online/home?kw=xxx（新标签页/分享链接等）时，把关键词写入搜索配置
 // 必须在下方 watch 注册之前执行，避免初始设置触发一次多余搜索
@@ -132,6 +133,7 @@ onUnmounted(() => {
           :select-mode="selectMode"
           :selected-ids="selectedIds"
           :panel-mode="isWide"
+          :panel-open="isPanelOpen"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"
@@ -162,8 +164,10 @@ onUnmounted(() => {
 
         <!-- 右下角悬浮操作球 -->
         <FloatingToolbar
+          :show-detail="true"
           @refresh="initSearch"
           @seek-change="(date) => onlineStore.seekToDate(date)"
+          @detail-toggle="togglePanel"
         />
 
         <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->

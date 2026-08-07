@@ -4,16 +4,24 @@ import { preferenceSettings } from '@/stores/preferenceSettings'
 import { scrollMainToTop } from '@/utils/scrollMemory'
 // Round4 任务八：日期跳转改为弹窗（选择节点 / 指定日期）
 import DateJumpModal from '@/components/DateJumpModal.vue'
+// 优化排行榜：排行榜类型选择弹窗
+import ToplistTypeModal from '@/components/ToplistTypeModal.vue'
 
 // 🟢 1. 增加控制 Props（模板中直接使用 showSort / sortMode）
 withDefaults(
   defineProps<{
     showSort?: boolean // 是否显示排序按钮（仅收藏夹传 true）
     sortMode?: 'favorited' | 'published' // 当前排序模式
+    showDetail?: boolean // 是否显示「详情页面」栏目（在线列表小详情页）
+    showToplist?: boolean // 是否显示「排行榜选择」栏目（替换日期跳转）
+    toplistCurrent?: string // 当前排行榜类型 tl
   }>(),
   {
     showSort: false,
     sortMode: 'favorited',
+    showDetail: false,
+    showToplist: false,
+    toplistCurrent: '15',
   },
 )
 
@@ -21,11 +29,15 @@ const emit = defineEmits<{
   (e: 'refresh'): void
   (e: 'seek-change', date: string): void
   (e: 'toggle-sort'): void // 🟢 触发排序切换事件
+  (e: 'detail-toggle'): void // 🟢 触发小详情页展开/收起切换
+  (e: 'toplist-select', tl: string): void // 🟢 触发排行榜类型切换
 }>()
 
 const isOpen = ref(false)
 // Round4 任务八：日期跳转弹窗显隐
 const dateJumpOpen = ref(false)
+// 优化排行榜：排行榜类型选择弹窗显隐
+const toplistOpen = ref(false)
 
 const toggleMenu = () => {
   isOpen.value = !isOpen.value
@@ -58,6 +70,24 @@ const handleOpenDateJump = () => {
 const handleSeekConfirm = (date: string) => {
   emit('seek-change', date)
   dateJumpOpen.value = false
+}
+
+// 优化排行榜：打开排行榜类型选择弹窗
+const handleOpenToplist = () => {
+  toplistOpen.value = true
+  isOpen.value = false
+}
+
+// 弹窗确认后向上抛出所选类型 tl，由页面加载对应榜单
+const handleToplistSelect = (tl: string) => {
+  emit('toplist-select', tl)
+  toplistOpen.value = false
+}
+
+// 优化在线小详情页：触发详情面板展开/收起切换
+const handleDetailToggle = () => {
+  emit('detail-toggle')
+  isOpen.value = false
 }
 
 // 🖥️ 偏好设置：控制「回到顶部」按钮的显隐
@@ -112,10 +142,37 @@ onUnmounted(() => {
           <span class="label">刷新列表</span>
         </button>
 
+        <!-- 优化排行榜：排行榜选择替换日期跳转位置（显示当前类型 tl） -->
+        <button
+          v-if="showToplist"
+          class="menu-item"
+          title="选择排行榜类型"
+          @click="handleOpenToplist"
+        >
+          <span class="icon">🏆</span>
+          <span class="label">排行榜选择 {{ toplistCurrent }}</span>
+        </button>
+
         <!-- Round4 任务八：日期项改为按钮 → 打开日期跳转弹窗 -->
-        <button class="menu-item" title="按日期跳转" @click="handleOpenDateJump">
+        <button
+          v-else
+          class="menu-item"
+          title="按日期跳转"
+          @click="handleOpenDateJump"
+        >
           <span class="icon">📅</span>
           <span class="label">日期跳转</span>
+        </button>
+
+        <!-- 优化在线小详情页：详情页面栏目（置于日期跳转/排行榜选择下方） -->
+        <button
+          v-if="showDetail"
+          class="menu-item"
+          title="展开/收起详情页面"
+          @click="handleDetailToggle"
+        >
+          <span class="icon">📄</span>
+          <span class="label">详情页面</span>
         </button>
       </div>
     </Transition>
@@ -125,6 +182,12 @@ onUnmounted(() => {
     </button>
 
     <DateJumpModal :show="dateJumpOpen" @close="dateJumpOpen = false" @confirm="handleSeekConfirm" />
+    <ToplistTypeModal
+      :show="toplistOpen"
+      :current="toplistCurrent"
+      @close="toplistOpen = false"
+      @select="handleToplistSelect"
+    />
   </div>
 </template>
 

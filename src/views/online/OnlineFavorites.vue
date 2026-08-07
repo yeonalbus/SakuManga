@@ -15,7 +15,8 @@ import { useDetailPanel } from '@/composables/useDetailPanel'
 const { toast } = useUI()
 
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
+  useDetailPanel()
 
 // 长按多选 → 批量下载
 const {
@@ -296,6 +297,7 @@ onMounted(() => {
           :select-mode="selectMode"
           :selected-ids="selectedIds"
           :panel-mode="isWide"
+          :panel-open="isPanelOpen"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"
@@ -321,15 +323,17 @@ onMounted(() => {
         <div v-else-if="isLoading" class="loading-state">加载收藏夹数据中...</div>
         <div v-else class="empty-tip">该收藏夹下暂无作品</div>
 
-        <!-- 🟢 传入 showSort、sortMode，绑定 toggle-sort 事件 -->
+        <!-- 🟢 传入 showSort、sortMode，绑定 toggle-sort 事件 + 详情页面切换 -->
         <FloatingToolbar
           :show-sort="true"
           :sort-mode="sortMode"
+          :show-detail="true"
           @refresh="() => fetchFavInitial()"
           @seek-change="(date) => fetchFavInitial(date)"
           @toggle-sort="
             () => handleChangeSortOrder(sortMode === 'favorited' ? 'published' : 'favorited')
           "
+          @detail-toggle="togglePanel"
         />
 
         <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->

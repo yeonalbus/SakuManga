@@ -15,7 +15,8 @@ const hotComics = ref<OnlineComic[]>([])
 const isLoading = ref(true)
 
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
+  useDetailPanel()
 
 // 长按多选 → 批量下载
 const {
@@ -66,6 +67,7 @@ onMounted(() => {
           :select-mode="selectMode"
           :selected-ids="selectedIds"
           :panel-mode="isWide"
+          :panel-open="isPanelOpen"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"
@@ -74,8 +76,12 @@ onMounted(() => {
         <!-- 空数据状态 -->
         <div v-else class="empty-tip">暂无热门数据</div>
 
-        <!-- 右下角悬浮球：提供一键刷新与回到顶部 -->
-        <FloatingToolbar @refresh="fetchPopularComics" />
+        <!-- 右下角悬浮球：提供一键刷新与回到顶部 + 详情页面切换 -->
+        <FloatingToolbar
+          :show-detail="true"
+          @refresh="fetchPopularComics"
+          @detail-toggle="togglePanel"
+        />
 
         <!-- 批量下载工具条（长按卡片进入选择模式后出现） -->
         <BatchDownloadBar

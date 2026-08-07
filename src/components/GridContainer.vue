@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   viewMode,
   cardColumns,
@@ -7,10 +7,11 @@ import {
   DEFAULT_CARD_COLUMNS,
   DEFAULT_COMPACT_COLUMNS,
 } from '@/stores/viewMode'
+import { styleSettings } from '@/stores/styleSettings'
 import type { ComicItem } from '@/types/comic'
 import ItemCard from './ItemCard.vue'
 
-defineProps<{
+const props = defineProps<{
   items: ComicItem[]
   /** 是否允许长按卡片进入选择模式（仅离线漫画生效） */
   selectable?: boolean
@@ -20,6 +21,8 @@ defineProps<{
   selectedIds?: string[]
   /** 左右分栏面板模式：开启后点击在线卡片发 open 事件而非跳转路由 */
   panelMode?: boolean
+  /** 小详情面板是否展开：宽屏在线列表 + 开启自动适配时，按面板开/关注入对应列数 */
+  panelOpen?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,10 +31,52 @@ const emit = defineEmits<{
   (e: 'open', comic: ComicItem): void
 }>()
 
-/** 用户自定义「每行画廊数」时注入 CSS 变量覆盖各断点列数；
-    保持默认则不注入，交由视口媒体查询渐进降级 */
+// 宽屏判定：视口 > 1025px 且非强制移动形态（与 useDetailPanel 一致）
+const WIDE_QUERY = '(min-width: 1025px)'
+const isWideScreen = ref(false)
+let mql: MediaQueryList | null = null
+let layoutObserver: MutationObserver | null = null
+
+const syncWide = () => {
+  const layout = document.documentElement.getAttribute('data-layout')
+  const wideViewport = window.matchMedia(WIDE_QUERY).matches
+  isWideScreen.value = wideViewport && layout !== 'mobile'
+}
+
+onMounted(() => {
+  mql = window.matchMedia(WIDE_QUERY)
+  mql.addEventListener('change', syncWide)
+  layoutObserver = new MutationObserver(syncWide)
+  layoutObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-layout'],
+  })
+  syncWide()
+})
+onUnmounted(() => {
+  mql?.removeEventListener('change', syncWide)
+  mql = null
+  layoutObserver?.disconnect()
+  layoutObserver = null
+})
+
+/** 列数注入优先级：
+    1. 面板自动适配（宽屏在线列表 + 开启自动适配 + 传入 panelOpen）→ 按面板开/关注入列数
+    2. 用户自定义「每行画廊数」→ 覆盖各断点列数
+    3. 均未生效 → 交由视口媒体查询渐进降级 */
 const gridStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {}
+  const panelAdapt =
+    styleSettings.autoPanelColumns && isWideScreen.value && props.panelOpen !== undefined
+  if (panelAdapt) {
+    style['--card-cols'] = String(
+      props.panelOpen ? styleSettings.cardPanelOpenCols : styleSettings.cardPanelClosedCols,
+    )
+    style['--compact-cols'] = String(
+      props.panelOpen ? styleSettings.compactPanelOpenCols : styleSettings.compactPanelClosedCols,
+    )
+    return style
+  }
   if (cardColumns.value !== DEFAULT_CARD_COLUMNS) style['--card-cols'] = String(cardColumns.value)
   if (compactColumns.value !== DEFAULT_COMPACT_COLUMNS) {
     style['--compact-cols'] = String(compactColumns.value)

@@ -50,6 +50,7 @@ const handleClear = () => {
           :select-mode="selectMode"
           :selected-ids="selectedIds"
           :panel-mode="isWide"
+          :panel-open="isPanelOpen"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"

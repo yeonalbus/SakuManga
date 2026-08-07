@@ -172,4 +172,8 @@ func (m *DownloadManager) preemptOne(taskID string) {
 	// 立即中断运行中的引擎（归档分块请求 / 画廊图片请求取消，.part 保留供恢复续传）
 	m.stopArchiveDownload(taskID)
 	m.stopGalleryDownload(taskID)
+	// 等待被抢占引擎完全退出（释放线程配额与槽位），避免高优先级任务启动时
+	// 仍占用线程配额导致其排队等待（"线程不足"）。
+	m.waitArchiveStopped(taskID)
+	m.waitGalleryStopped(taskID)
 }

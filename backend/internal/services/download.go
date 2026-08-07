@@ -35,6 +35,12 @@ const (
 	// queueIdleTriggerDelay 下载队列变空后，延迟触发自动增量维护查重的时间（需求4）。
 	// 队列保持空且无新任务超过该时长、且书库存在未反映变更时才触发；新任务入队即顺延。
 	queueIdleTriggerDelay = 1 * time.Minute
+	// engineStopWaitTimeout 暂停/取消/抢占后等待引擎完全退出的超时兜底。
+	// stopDownload 的中断机制（context 取消 + 停止标记）应使引擎快速退出；
+	// 超时仅作为保险，避免调用方（HTTP 处理）无限阻塞。
+	engineStopWaitTimeout = 5 * time.Second
+	// engineStopWaitPoll 轮询引擎退出状态的间隔。
+	engineStopWaitPoll = 20 * time.Millisecond
 )
 
 // errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
@@ -117,6 +123,12 @@ type DownloadManager struct {
 	// 画廊引擎运行时管理：正在运行的画廊引擎（暂停/取消/抢占时立即中断）
 	activeGalleries map[string]*galleryDownloader // 任务ID -> 正在运行的画廊引擎
 
+	// 每任务互斥：同一任务 ID 同一时刻只允许一个 worker 处理。
+	// 暂停→快速恢复（或抢占→重试）时旧 worker 可能尚未完全退出（线程/槽位未释放），
+	// 若新 worker 已取出队列会并发处理同一任务，导致线程/槽位重复占用（"线程不足"）。
+	taskRunMu   sync.Mutex
+	taskRunning map[string]bool // 正在被 worker 处理的任务 ID 集合
+
 	// 需求4：下载队列空闲检测（队列从非空→空后延迟触发自动增量维护查重）
 	idleMu    sync.Mutex
 	inFlight  int         // 已出队但尚未结束的任务数（含等待槽位/运行中/收尾）
@@ -137,6 +149,7 @@ func NewDownloadManager(db *gorm.DB, ehService *EHService) *DownloadManager {
 		archivePool:    newArchiveThreadPool(defaultMaxArchiveThreads),
 		activeArchives: make(map[string]*archiveDownloader),
 		activeGalleries: make(map[string]*galleryDownloader),
+		taskRunning:    make(map[string]bool),
 	}
 }
 
@@ -244,6 +257,24 @@ func (m *DownloadManager) runTask(taskID string) {
 		log.Printf("%s [worker] 任务 %s 当前状态为 %s（非 queued），跳过执行", dlWarnTag, taskID, task.Status)
 		return
 	}
+
+	// 每任务互斥：同一任务 ID 同一时刻只允许一个 worker 处理。
+	// 暂停→快速恢复（或抢占→重试）时旧 worker 可能尚未完全退出（线程/槽位未释放），
+	// 若此时新 worker 已取出队列，会并发处理同一任务导致 "线程不足"；此处让后者重新入队等待。
+	m.taskRunMu.Lock()
+	if m.taskRunning[taskID] {
+		m.taskRunMu.Unlock()
+		log.Printf("%s [worker] 任务 %s 已有 worker 在处理，稍后重新入队", dlWarnTag, taskID)
+		m.Enqueue(taskID)
+		return
+	}
+	m.taskRunning[taskID] = true
+	m.taskRunMu.Unlock()
+	defer func() {
+		m.taskRunMu.Lock()
+		delete(m.taskRunning, taskID)
+		m.taskRunMu.Unlock()
+	}()
 
 	log.Printf("%s [worker] 开始处理任务 id=%s gid=%s title=%q mode=%s",
 		dlLogTag, task.ID, task.GID, task.Title, task.Mode)
@@ -584,6 +615,10 @@ func (m *DownloadManager) PauseTask(taskID string) (*models.DownloadTask, error)
 	m.stopArchiveDownload(taskID)
 	// 同时中断运行中的画廊下载（图片请求取消，.part 保留供恢复续传）
 	m.stopGalleryDownload(taskID)
+	// 等待旧引擎完全退出（释放全局线程配额与调度槽位），确保快速恢复时
+	// 新 worker 不会因旧引擎尚未释放线程而排队等待（"线程不足"）。
+	m.waitArchiveStopped(taskID)
+	m.waitGalleryStopped(taskID)
 	log.Printf("%s 暂停任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -642,6 +677,10 @@ func (m *DownloadManager) CancelTask(taskID string) (*models.DownloadTask, error
 	m.stopArchiveDownload(taskID)
 	// 同时中断运行中的画廊下载（图片请求取消）
 	m.stopGalleryDownload(taskID)
+	// 等待旧引擎完全退出（释放全局线程配额与调度槽位），避免后续重试/恢复
+	// 因旧引擎尚未释放线程而排队等待（"线程不足"）。
+	m.waitArchiveStopped(taskID)
+	m.waitGalleryStopped(taskID)
 	log.Printf("%s 取消任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -1049,6 +1088,47 @@ func (m *DownloadManager) stopGalleryDownload(taskID string) {
 		g.stopDownload()
 	}
 	m.archivePool.wakeAll()
+}
+
+// waitArchiveStopped 等待归档引擎完全退出（轮询 activeArchives，带超时）。
+// 保证返回时旧引擎已释放全局线程配额与调度槽位，避免「暂停→快速恢复」时
+// 新 worker 因旧引擎尚未释放线程配额而排队等待（active=10/10 线程不足）。
+// 引擎的注销顺序保证：线程配额（releaseSlot/releaseAll）先于 unregisterArchive 释放，
+// 故等待注销完成即等价于等待线程配额与调度槽位释放。
+func (m *DownloadManager) waitArchiveStopped(taskID string) {
+	m.waitEngineExited(taskID, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.activeArchives[taskID]
+		return !ok
+	}, "归档")
+}
+
+// waitGalleryStopped 等待画廊引擎完全退出（轮询 activeGalleries，带超时）。
+func (m *DownloadManager) waitGalleryStopped(taskID string) {
+	m.waitEngineExited(taskID, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.activeGalleries[taskID]
+		return !ok
+	}, "画廊")
+}
+
+// waitEngineExited 轮询判断引擎是否已注销（exited 返回 true 表示已退出），
+// 直到退出或超过 engineStopWaitTimeout。暂停/取消/抢占后引擎应被 stopDownload
+// 的中断机制快速退出；超时作为兜底，避免调用方无限阻塞。
+func (m *DownloadManager) waitEngineExited(taskID string, exited func() bool, kind string) {
+	deadline := time.Now().Add(engineStopWaitTimeout)
+	for {
+		if exited() {
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Printf("%s [worker] 等待%s引擎 %s 退出超时（%v），不再阻塞", dlWarnTag, kind, taskID, engineStopWaitTimeout)
+			return
+		}
+		time.Sleep(engineStopWaitPoll)
+	}
 }
 
 // notifyArchiveThreadsChange 归档线程数设置变化时，动态调整所有运行中的归档任务的分块 worker 数

@@ -60,6 +60,10 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 <img width="2447" height="1288" alt="image" src="https://github.com/user-attachments/assets/235923d4-89d8-4f77-a793-44311c28fa64" />
 
+## 快速筛选下载
+
+<img width="2452" height="1275" alt="image" src="https://github.com/user-attachments/assets/d98244ff-b37d-459f-8e6a-14d549af2586" />
+
 
 ## 客制化抽卡
 

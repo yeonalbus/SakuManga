@@ -1195,6 +1195,17 @@ func (g *archiveDownloader) failOrLock(err error) {
 		} else if reason == archiveLockSessionExpired {
 			extra = "归档 Session 已过期或失效；点击「解锁」将从当前 IP 重新解锁"
 		}
+		// 自动 GP 解锁：设置开启且未达重试上限时，取消旧 Session 并重新入队（由 runTask 收尾统一重新入队），
+		// 跳过本次 error_lock 写入；达到上限或设置关闭则按原逻辑进入 error_lock 等待手动解锁。
+		if g.setting.AutoUnlockArchiveOnLock {
+			g.mu.Lock()
+			unlocked := g.m.autoUnlockArchiveTask(g.task)
+			g.mu.Unlock()
+			if unlocked {
+				log.Printf("%s [archive-engine] 任务 %s 已自动解锁重试（autoUnlockArchiveOnLock=true），跳过 error_lock", dlLogTag, g.task.ID)
+				return
+			}
+		}
 		g.mu.Lock()
 		g.task.Status = models.DownloadErrorLock
 		g.task.Error = err.Error() + "；" + extra

@@ -200,6 +200,22 @@
       </label>
     </div>
 
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">遇到锁自动消耗 GP 解锁</div>
+        <div class="item-subtext">
+          归档下载遇配额/IP 封锁（error_lock）时，自动取消旧 Session 并重新解锁重试（每任务最多 3 次）；关闭则进入 error_lock 等待手动解锁
+        </div>
+        <div v-if="downloadSettings.autoUnlockArchiveOnLock" class="warning-text">
+          ⚠️ 注意，这可能会导致消耗大量 GP
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="downloadSettings.autoUnlockArchiveOnLock" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <!-- ── 下载任务 ── -->
     <div class="section-title">📋 下载任务</div>
 
@@ -443,6 +459,14 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--app-text-3);
   line-height: 1.4;
+}
+
+/* 归档自动解锁警告提示 */
+.warning-text {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #ff7568;
+  font-weight: 500;
 }
 
 .row-value {

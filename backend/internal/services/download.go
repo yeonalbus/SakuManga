@@ -29,6 +29,9 @@ const (
 	dlWarnTag = "[DOWNLOAD-WARN]"
 	dlErrTag  = "[DOWNLOAD-ERROR]"
 	dlArcTag  = "[ARCHIVER]"
+	// maxArchiveAutoUnlock 归档任务「遇到锁自动消耗 GP 解锁」的单任务重试上限。
+	// 达到上限后不再自动解锁（任务保持 error_lock 等待手动解锁），避免无限消耗 GP。
+	maxArchiveAutoUnlock = 3
 )
 
 // errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
@@ -608,6 +611,7 @@ func (m *DownloadManager) RetryTask(taskID string) (*models.DownloadTask, error)
 	}
 	task.Status = models.DownloadQueued
 	task.Error = ""
+	task.AutoUnlockCount = 0 // 手动重试后重置自动解锁计数，重新获得自动解锁机会
 	task.UpdatedAt = time.Now()
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
@@ -655,6 +659,7 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 
 	task.Status = models.DownloadQueued
 	task.Error = ""
+	task.AutoUnlockCount = 0 // 手动解锁后重置自动解锁计数，重新获得自动解锁机会
 	task.UpdatedAt = time.Now()
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
@@ -663,6 +668,35 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 	// 解锁的高优先级任务入队时抢占正在运行的低优先级任务（计划书 5.5.2）
 	m.preemptLowerPriority(task.Priority)
 	return &task, nil
+}
+
+// autoUnlockArchiveTask 自动 GP 解锁（需求：归档任务遇锁且设置开启时，自动解锁重试）。
+// 每任务上限 maxArchiveAutoUnlock 次，达到上限后不再自动解锁（任务保持 error_lock 等待手动处理）。
+// 仅修改任务状态为 queued 并落库，由 runTask 收尾的统一重新入队逻辑（post 检查）负责入队，
+// 避免本方法主动 Enqueue 造成与 post 检查的重复入队。
+// 返回 true 表示已自动解锁（本次失败不再写 error_lock）。
+func (m *DownloadManager) autoUnlockArchiveTask(task *models.DownloadTask) bool {
+	if task == nil || task.Mode != models.DownloadModeArchive {
+		return false
+	}
+	if task.AutoUnlockCount >= maxArchiveAutoUnlock {
+		log.Printf("%s [auto-unlock] 任务 %s 已达自动解锁上限（%d 次），进入 error_lock 等待手动解锁",
+			dlWarnTag, task.ID, maxArchiveAutoUnlock)
+		return false
+	}
+	task.AutoUnlockCount++
+	// 先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁，对齐手动解锁流程
+	m.cancelArchiveSessionForTask(task)
+	task.Status = models.DownloadQueued
+	task.Error = ""
+	task.UpdatedAt = time.Now()
+	if err := m.db.Save(task).Error; err != nil {
+		log.Printf("%s [auto-unlock] 任务 %s 自动解锁状态保存失败: %v", dlErrTag, task.ID, err)
+		return false
+	}
+	log.Printf("%s [auto-unlock] 任务 %s（gid=%s）自动消耗 GP 解锁，取消旧 Session 后重新入队（第 %d/%d 次）",
+		dlLogTag, task.ID, task.GID, task.AutoUnlockCount, maxArchiveAutoUnlock)
+	return true
 }
 
 // cancelArchiveSessionForTask 取消任务对应的 E 站服务端归档 Session（invalidate_sessions=1）。

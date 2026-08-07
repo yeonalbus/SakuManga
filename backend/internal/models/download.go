@@ -61,7 +61,8 @@ type DownloadTask struct {
 	Speed       float64            `json:"speed"`                            // 实时速度（字节/秒）
 	ArchivePath string             `json:"archivePath,omitempty"`            // 压缩包路径
 	ExtractPath string             `json:"extractPath,omitempty"`            // 解压后文件夹路径
-	Error       string             `json:"error,omitempty"`                  // 最近错误信息
+	Error             string `json:"error,omitempty"`       // 最近错误信息
+	AutoUnlockCount   int    `json:"autoUnlockCount"`       // 自动 GP 解锁已重试次数（归档遇锁自动解锁，上限 3 次；手动解锁/重试后清零）
 	// 更新关联：本任务是「离线更新」下载时记录被更新漫画的 ID，完成后用于清理旧版
 	UpdateForComicID string    `json:"updateForComicId,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`
@@ -91,6 +92,7 @@ type DownloadSetting struct {
 	MaxArchiveConcurrency         int  `gorm:"default:1" json:"maxArchiveConcurrency"` // 最大归档并发数（1-10，且 ≤ ArchiveThreads；默认 1=单归档全线程，需多归档并行时调高）
 	DeleteZipAfterArchiveDownload bool `json:"deleteZipAfterArchiveDownload"` // 归档下载完成后删除原压缩包
 	AutoReduceThreadsOnEOF        bool `gorm:"default:true" json:"autoReduceThreadsOnEOF"` // 归档下载遇 EOF（连接中断）自动降低线程数规避：开启后自动降线程重试，关闭则直接报错提示手动调低
+	AutoUnlockArchiveOnLock       bool `json:"autoUnlockArchiveOnLock"`       // 归档任务遇锁(error_lock)时自动消耗 GP 解锁重试（默认关闭，开启可能消耗大量 GP）
 
 	// ── 下载任务 ──
 	AutoResumeTasks bool `json:"autoResumeTasks"` // 自动恢复下载任务

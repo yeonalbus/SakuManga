@@ -784,6 +784,7 @@ func defaultDownloadSetting() models.DownloadSetting {
 		ControlArchiveConcurrency:     true,
 		MaxArchiveConcurrency:         1,
 		DeleteZipAfterArchiveDownload: true,
+		AutoReduceThreadsOnEOF:        true,
 		AutoResumeTasks:               true,
 	}
 }

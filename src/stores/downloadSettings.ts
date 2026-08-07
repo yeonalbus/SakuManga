@@ -47,6 +47,7 @@ export interface DownloadSettings {
   controlArchiveConcurrency: boolean // 控制归档下载并发数
   maxArchiveConcurrency: number // 最大归档并发数（1-10，且 ≤ archiveThreads；默认 1）
   deleteZipAfterArchiveDownload: boolean // 归档下载完成后删除原压缩包
+  autoReduceThreadsOnEOF: boolean // 归档下载遇 EOF（连接中断）自动降低线程数规避
 
   // ── 下载任务 ──
   autoResumeTasks: boolean // 自动恢复下载任务
@@ -77,6 +78,7 @@ const defaultSettings: DownloadSettings = {
   controlArchiveConcurrency: true,
   maxArchiveConcurrency: 1,
   deleteZipAfterArchiveDownload: true,
+  autoReduceThreadsOnEOF: true,
 
   autoResumeTasks: true,
 
@@ -100,6 +102,7 @@ const SETTING_KEYS: (keyof DownloadSettings)[] = [
   'controlArchiveConcurrency',
   'maxArchiveConcurrency',
   'deleteZipAfterArchiveDownload',
+  'autoReduceThreadsOnEOF',
   'autoResumeTasks',
   'autoUpdateGallery',
   'autoUpdateScheme',

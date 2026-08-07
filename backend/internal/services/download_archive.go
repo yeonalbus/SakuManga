@@ -1009,12 +1009,61 @@ func (g *archiveDownloader) downloadArchiveFile(downloadURL string) error {
 	return g.runChunkDownload(downloadURL, total, threads)
 }
 
-// runChunkDownload 执行分块并发下载（含断点续传与 zip 校验）
+// runChunkDownload 执行分块并发下载（含断点续传与 zip 校验）。
+// 遇 EOF（连接被服务器提前中断）时，依据下载设置「自动降低线程数规避 EOF」开关：
+//   - 开启：自动减半线程数后利用 .part 断点续传重试（保持块大小一致，避免续传点错位），直至降到 1 线程；
+//   - 关闭：直接报错并提示用户手动调低归档下载线程数。
 func (g *archiveDownloader) runChunkDownload(downloadURL string, total int64, threads int) error {
-	d := newArchiveChunkDownloader(g, downloadURL, total)
-	g.setChunk(d)
-	defer g.setChunk(nil)
-	return d.run(threads)
+	autoReduce := g.m.GetSettings().AutoReduceThreadsOnEOF
+	cur := threads
+	if cur < 1 {
+		cur = 1
+	}
+
+	var firstChunk, firstCount int64
+	for attempt := 0; ; attempt++ {
+		d := newArchiveChunkDownloader(g, downloadURL, total)
+		if attempt == 0 {
+			firstChunk = d.chunk
+			firstCount = d.count
+		} else {
+			// 降级重试：复用首次的块大小与块数，保证 .part 断点续传起点一致（existing/chunk 不漂移）
+			d.chunk = firstChunk
+			d.count = firstCount
+			d.doneBits = make([]uint64, (firstCount+63)/64)
+		}
+
+		g.setChunk(d)
+		err := d.run(cur)
+		g.setChunk(nil)
+
+		if err == nil {
+			return nil
+		}
+		// 暂停/取消等主动停止 → 原样返回（.part 已截断到连续前缀，可后续续传）
+		if errors.Is(err, errTaskStopped) || g.stopped() {
+			return err
+		}
+		// 非 EOF 错误 → 不降级，直接返回
+		if !errors.Is(err, errArchiveEOF) {
+			return err
+		}
+
+		// EOF 连接中断：按开关决定自动降级或直接报错
+		if !autoReduce {
+			return fmt.Errorf("归档下载遇到 EOF（连接被中断）：请尝试在设置中调低归档下载线程数（当前 %d）", cur)
+		}
+		if cur <= 1 {
+			return fmt.Errorf("归档下载遇到 EOF（连接被中断）：已自动降至 1 线程仍失败，请稍后重试或切换 H@H 源")
+		}
+		next := cur / 2
+		if next < 1 {
+			next = 1
+		}
+		log.Printf("%s [archive-engine] 任务 %s 归档下载 EOF，自动降低线程数 %d -> %d 后断点续传重试",
+			dlWarnTag, g.task.ID, cur, next)
+		cur = next
+	}
 }
 
 // stopDownload 立即中断当前下载（暂停/取消时由 DownloadManager 调用）：

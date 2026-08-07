@@ -90,6 +90,7 @@ type DownloadSetting struct {
 	ControlArchiveConcurrency     bool `json:"controlArchiveConcurrency"`      // 控制归档下载并发：开启后归档任务需先获取全局线程配额（不足则排队等待）
 	MaxArchiveConcurrency         int  `gorm:"default:1" json:"maxArchiveConcurrency"` // 最大归档并发数（1-10，且 ≤ ArchiveThreads；默认 1=单归档全线程，需多归档并行时调高）
 	DeleteZipAfterArchiveDownload bool `json:"deleteZipAfterArchiveDownload"` // 归档下载完成后删除原压缩包
+	AutoReduceThreadsOnEOF        bool `gorm:"default:true" json:"autoReduceThreadsOnEOF"` // 归档下载遇 EOF（连接中断）自动降低线程数规避：开启后自动降线程重试，关闭则直接报错提示手动调低
 
 	// ── 下载任务 ──
 	AutoResumeTasks bool `json:"autoResumeTasks"` // 自动恢复下载任务

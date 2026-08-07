@@ -187,6 +187,19 @@
       </label>
     </div>
 
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">EOF 自动降低线程数</div>
+        <div class="item-subtext">
+          归档下载连接被中断（EOF）时自动降低线程数后断点续传重试；关闭则直接失败并提示手动调低归档下载线程数
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="downloadSettings.autoReduceThreadsOnEOF" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <!-- ── 下载任务 ── -->
     <div class="section-title">📋 下载任务</div>
 

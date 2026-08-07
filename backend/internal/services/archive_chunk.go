@@ -55,6 +55,16 @@ type archiveChunkDownloader struct {
 // minChunkSize 单块最小字节数（避免块过碎带来过多请求开销）
 const minChunkSize = int64(1024 * 1024) // 1 MiB
 
+// errArchiveEOF 归档分块下载连接被服务器提前中断（EOF）的哨兵错误。
+// downloadChunk 将 EOF / ErrUnexpectedEOF 包装为该哨兵，供上层 runChunkDownload 识别后
+// 依据「自动降低线程数规避 EOF」开关决定自动降级重试或直接报错提示手动调低线程数。
+var errArchiveEOF = errors.New("归档下载连接被中断(EOF)")
+
+// isEOFNetworkError 判断底层网络错误是否为连接被提前关闭（EOF / unexpected EOF）。
+func isEOFNetworkError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // newArchiveChunkDownloader 构造分块下载器
 func newArchiveChunkDownloader(g *archiveDownloader, downloadURL string, total int64) *archiveChunkDownloader {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -272,6 +282,9 @@ func (d *archiveChunkDownloader) downloadChunk(idx int64) error {
 		if d.ctx.Err() != nil || d.g.stopped() {
 			return errTaskStopped
 		}
+		if isEOFNetworkError(err) {
+			return fmt.Errorf("下载分块 %d 失败(EOF 连接中断): %w", idx, errArchiveEOF)
+		}
 		return fmt.Errorf("下载分块 %d 失败: %v", idx, err)
 	}
 	defer resp.Body.Close()
@@ -318,6 +331,9 @@ func (d *archiveChunkDownloader) downloadChunk(idx int64) error {
 		if rerr != nil {
 			if d.ctx.Err() != nil || d.g.stopped() {
 				return errTaskStopped
+			}
+			if isEOFNetworkError(rerr) {
+				return fmt.Errorf("下载分块 %d 读取中断(EOF): %w", idx, errArchiveEOF)
 			}
 			return rerr
 		}

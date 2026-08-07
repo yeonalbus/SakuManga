@@ -53,9 +53,6 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	updateScanHandler := handlers.NewUpdateScanHandler(db)
 	services.StartUpdateScanScheduler(db, ehService, downloadManager)
 
-	// 装载 admin 账号并启动榜单定时调度器（后台维护任务固定用 admin）
-	toplistService.StartScheduler(services.LoadAdminAccount(db))
-
 	toplistHandler := handlers.NewToplistHandler(db, toplistService)
 	favHandler := handlers.NewFavoritesHandler(db, favService)
 

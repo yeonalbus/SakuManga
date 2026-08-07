@@ -26,7 +26,7 @@ const openFullDetail = () => {
 </script>
 
 <template>
-  <aside class="detail-panel">
+  <aside v-show="open" class="detail-panel">
     <header class="detail-panel-header">
       <button
         class="detail-panel-title"
@@ -68,14 +68,20 @@ const openFullDetail = () => {
 }
 
 @media (min-width: 1025px) {
+  /* 默认：单列（详情面板收起，列表占满整行） */
   :global(html:not([data-layout='mobile']) .online-split) {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     align-items: start;
   }
 
-  :global(html:not([data-layout='mobile']) .online-split .detail-panel) {
+  /* 面板展开：左列表 + 右详情面板 */
+  :global(html:not([data-layout='mobile']) .online-split.panel-open) {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  }
+
+  :global(html:not([data-layout='mobile']) .online-split.panel-open .detail-panel) {
     position: sticky;
     top: 0;
     /* 56px 全局 TopBar + main-content 上下 24px 留白 */

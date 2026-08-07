@@ -125,7 +125,7 @@ onUnmounted(() => {
 
 <template>
   <div class="online-home-view">
-    <div class="online-split">
+    <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
         <GridContainer
           :items="filteredComics"

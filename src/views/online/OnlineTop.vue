@@ -103,7 +103,7 @@ onMounted(() => {
   <div class="leaderboard-page">
     <h2 class="page-title">🏆 官方排行榜 · {{ currentLabel }}</h2>
 
-    <div class="online-split">
+    <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
         <div v-if="isLoading" class="loading-state">加载排行榜中...</div>
 

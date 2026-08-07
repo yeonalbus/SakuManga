@@ -52,7 +52,7 @@ onMounted(() => {
 
 <template>
   <div class="page-wrapper">
-    <div class="online-split">
+    <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
         <!-- 仅在首次无数据且加载中时显示全局居中 Loading -->
         <div v-if="isLoading && hotComics.length === 0" class="loading-state">

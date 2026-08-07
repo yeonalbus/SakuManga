@@ -288,7 +288,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <div class="online-split">
+    <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
         <GridContainer
           v-if="favComicList.length > 0"

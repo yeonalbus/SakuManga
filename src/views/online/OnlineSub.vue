@@ -52,7 +52,7 @@ onMounted(() => {
 
 <template>
   <div class="page-wrapper">
-    <div class="online-split">
+    <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
         <GridContainer
           :items="subStore.comics"

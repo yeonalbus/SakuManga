@@ -102,10 +102,14 @@ type DownloadManager struct {
 	runningTotal   int         // 当前运行任务总数
 	runningArchive int         // 当前运行的归档任务数（仅统计/日志）
 	runningByPri   map[int]int // 各优先级正在运行的任务数
+	runningTasks   map[string]int // 任务ID -> 优先级（正在运行，供抢占式调度遍历）
 
 	// 归档引擎运行时管理：全局线程配额池 + 正在运行的归档引擎（动态调整/立即中断）
 	archivePool    *archiveThreadPool
 	activeArchives map[string]*archiveDownloader // 任务ID -> 正在运行的归档引擎
+
+	// 画廊引擎运行时管理：正在运行的画廊引擎（暂停/取消/抢占时立即中断）
+	activeGalleries map[string]*galleryDownloader // 任务ID -> 正在运行的画廊引擎
 }
 
 // NewDownloadManager 构造下载任务管理器
@@ -117,8 +121,10 @@ func NewDownloadManager(db *gorm.DB, ehService *EHService) *DownloadManager {
 		workers:        16, // worker 池仅作并发上限，实际并发由调度门控（downloadAllGalleriesSamePriority / 归档线程配额）控制
 		quit:           make(chan struct{}),
 		runningByPri:   make(map[int]int),
+		runningTasks:   make(map[string]int),
 		archivePool:    newArchiveThreadPool(defaultMaxArchiveThreads),
 		activeArchives: make(map[string]*archiveDownloader),
+		activeGalleries: make(map[string]*galleryDownloader),
 	}
 }
 
@@ -192,6 +198,15 @@ func (m *DownloadManager) runTask(taskID string) {
 		return
 	}
 
+	// 抢占让位：markRunning 与引擎启动之间可能被高优先级任务抢占（DB 状态已被置回 queued），
+	// 此时让位退出，由抢占流程负责重新入队，避免低优先级任务在抢占后仍启动引擎。
+	var chk models.DownloadTask
+	if err := m.db.First(&chk, "id = ?", taskID).Error; err == nil && chk.Status != models.DownloadDownloading {
+		log.Printf("%s [sched] 任务 %s 在引擎启动前被抢占（状态=%s），让位", dlWarnTag, taskID, chk.Status)
+		return
+	}
+	task = chk
+
 	m.dispatchEngine(&task)
 
 	// 离线更新任务收尾：下载成功后按设置清理旧版
@@ -199,6 +214,32 @@ func (m *DownloadManager) runTask(taskID string) {
 
 	// 无 H@H 自动降级：归档更新任务失败（非配额锁定）时按设置改用画廊引擎重试
 	m.fallbackUpdateToGallery(&task)
+
+	// 需求2：任何下载任务完成后，主动清除更新列表中同 GID 的更新标记。
+	// 覆盖：手动下载标记需更新的漫画本体（gid 匹配）+ 下载检测到的新版本时父画廊的标记（new_gid 匹配）。
+	if task.Status == models.DownloadCompleted && task.GID != "" {
+		if _, err := ClearOfflineUpdateByGID(m.db, task.GID); err != nil {
+			log.Printf("%s [update] 下载完成 gid=%s 清除更新标记失败: %v", dlErrTag, task.GID, err)
+		}
+	}
+
+	// 需求3(1)：下载完成后主动对账数据库（GID 去重 / ParentGID 回写 / PageCount 校正 / Aged 复位）。
+	// 依赖 ScanAndSaveDirectory 已入库的本地记录与其落地目录/压缩包内 metadata，做轻量比对。
+	if task.Status == models.DownloadCompleted && task.GID != "" {
+		if _, err := ReconcileOfflineAfterDownload(m.db, &task); err != nil {
+			log.Printf("%s [reconcile] 下载完成 gid=%s 数据对账失败: %v", dlErrTag, task.GID, err)
+		}
+	}
+
+	// 抢占恢复：任务被高优先级任务抢占后 DB 状态被置回 queued（进度保留，可断点续传），
+	// 自动重新入队以再次调度。降级路径（fallbackArchiveToGallery 会改 Mode + 自行入队）排除在外。
+	var post models.DownloadTask
+	if err := m.db.First(&post, "id = ?", taskID).Error; err == nil &&
+		post.Mode == task.Mode && post.Status == models.DownloadQueued {
+		log.Printf("%s [sched] 任务 %s 被抢占后重新入队（优先级=%d 进度=%d/%d）",
+			dlLogTag, taskID, post.Priority, post.DoneFiles, post.TotalFiles)
+		m.Enqueue(taskID)
+	}
 }
 
 // finalizeUpdate 离线更新任务完成后处理旧版漫画（按 AutoUpdateDeleteOriginal 设置）
@@ -385,6 +426,8 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		dlLogTag, task.ID, task.GID, task.Title, task.Mode, task.ArchiveType, task.Group, task.ArchivePath, task.ExtractPath)
 
 	m.Enqueue(task.ID)
+	// 新任务入队：优先级高于正在运行任务时抢占（计划书 5.5.2）
+	m.preemptLowerPriority(task.Priority)
 	return task, nil
 }
 
@@ -453,6 +496,8 @@ func (m *DownloadManager) PauseTask(taskID string) (*models.DownloadTask, error)
 	}
 	// 立即中断运行中的归档下载（分块 Range 请求取消，.part 保留供恢复续传）
 	m.stopArchiveDownload(taskID)
+	// 同时中断运行中的画廊下载（图片请求取消，.part 保留供恢复续传）
+	m.stopGalleryDownload(taskID)
 	log.Printf("%s 暂停任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -473,6 +518,8 @@ func (m *DownloadManager) ResumeTask(taskID string) (*models.DownloadTask, error
 		return nil, err
 	}
 	m.Enqueue(taskID)
+	// 恢复的高优先级任务入队时抢占正在运行的低优先级任务
+	m.preemptLowerPriority(task.Priority)
 	log.Printf("%s 恢复任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -507,7 +554,43 @@ func (m *DownloadManager) CancelTask(taskID string) (*models.DownloadTask, error
 	}
 	// 立即中断运行中的归档下载（分块 Range 请求取消）
 	m.stopArchiveDownload(taskID)
+	// 同时中断运行中的画廊下载（图片请求取消）
+	m.stopGalleryDownload(taskID)
 	log.Printf("%s 取消任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
+	return &task, nil
+}
+
+// SetTaskPriority 修改任务优先级并触发抢占调度（计划书 5.5 / 5.6）。
+// 提升优先级时抢占正在运行的低优先级任务为其让路；
+// queued 任务重新入队按新优先级竞争槽位（downloading 任务由 worker 退出时自动重新入队，paused 保持暂停）。
+func (m *DownloadManager) SetTaskPriority(taskID string, priority int) (*models.DownloadTask, error) {
+	var task models.DownloadTask
+	if err := m.db.First(&task, "id = ?", taskID).Error; err != nil {
+		return nil, errors.New("任务不存在")
+	}
+	if task.Status == models.DownloadCompleted || task.Status == models.DownloadCancelled {
+		return nil, fmt.Errorf("当前状态 %s 不允许修改优先级", task.Status)
+	}
+	if priority == task.Priority {
+		return &task, nil
+	}
+	old := task.Priority
+	task.Priority = priority
+	task.UpdatedAt = time.Now()
+	if err := m.db.Save(&task).Error; err != nil {
+		return nil, err
+	}
+	log.Printf("%s 修改任务 %s（gid=%s）优先级 %d → %d", dlLogTag, taskID, task.GID, old, priority)
+
+	// 优先级提升 → 抢占正在运行的低优先级任务，为本任务让路
+	if priority > old {
+		m.preemptLowerPriority(priority)
+	}
+
+	// queued 任务重新入队以按新优先级竞争槽位
+	if task.Status == models.DownloadQueued {
+		m.Enqueue(taskID)
+	}
 	return &task, nil
 }
 
@@ -534,6 +617,8 @@ func (m *DownloadManager) RetryTask(taskID string) (*models.DownloadTask, error)
 		m.cancelArchiveSessionForTask(&task)
 	}
 	m.Enqueue(taskID)
+	// 重试的高优先级任务入队时抢占正在运行的低优先级任务
+	m.preemptLowerPriority(task.Priority)
 	log.Printf("%s 重试任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
 }
@@ -575,6 +660,8 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 		return nil, err
 	}
 	m.Enqueue(taskID)
+	// 解锁的高优先级任务入队时抢占正在运行的低优先级任务（计划书 5.5.2）
+	m.preemptLowerPriority(task.Priority)
 	return &task, nil
 }
 
@@ -695,6 +782,7 @@ func defaultDownloadSetting() models.DownloadSetting {
 		DownloadAllGalleriesSamePriority: true,
 		ArchiveThreads:                10,
 		ControlArchiveConcurrency:     true,
+		MaxArchiveConcurrency:         1,
 		DeleteZipAfterArchiveDownload: true,
 		AutoResumeTasks:               true,
 	}
@@ -744,10 +832,21 @@ func (m *DownloadManager) GetSettings() *models.DownloadSetting {
 		if err := m.db.Save(&setting).Error; err != nil {
 			log.Printf("%s 迁移默认下载配置失败: %v", dlErrTag, err)
 		} else {
-			log.Printf("%s 已迁移旧下载设置：默认下载配置=%s", dlLogTag, setting.DefaultDownloadScheme)
+				log.Printf("%s 已迁移旧下载设置：默认下载配置=%s", dlLogTag, setting.DefaultDownloadScheme)
+			}
 		}
-	}
-	return &setting
+	
+		// 旧数据迁移：maxArchiveConcurrency 为新增字段（默认 1），旧记录为 0 时补齐默认值
+		if setting.MaxArchiveConcurrency == 0 {
+			setting.MaxArchiveConcurrency = 1
+			setting.UpdatedAt = time.Now()
+			if err := m.db.Save(&setting).Error; err != nil {
+				log.Printf("%s 迁移 maxArchiveConcurrency 默认值失败: %v", dlErrTag, err)
+			} else {
+				log.Printf("%s 已迁移下载设置：maxArchiveConcurrency=1", dlLogTag)
+			}
+		}
+		return &setting
 }
 
 // SaveSettings 保存下载设置
@@ -763,8 +862,10 @@ func (m *DownloadManager) SaveSettings(s *models.DownloadSetting) (*models.Downl
 		dlLogTag, s.ArchivePath, s.ExtractPath, s.ConcurrentImageDownloads, s.SpeedLimitImages, s.SpeedLimitInterval,
 		s.DeleteZipAfterArchiveDownload, s.AutoResumeTasks, s.AutoUpdateGallery, s.ArchiveThreads, s.ControlArchiveConcurrency)
 
-	// 归档线程数/并发控制开关变化 → 动态调整所有运行中的归档任务（对应 JHentai _onIsolateCountChange）
-	if s.ArchiveThreads != old.ArchiveThreads || s.ControlArchiveConcurrency != old.ControlArchiveConcurrency {
+	// 归档线程数 / 并发控制开关 / 最大归档并发数变化 → 动态调整所有运行中的归档任务并唤醒额度池
+	// 重新分配（对应 JHentai _onIsolateCountChange + _tryWakeWaitingTasks，计划书 5.6）
+	if s.ArchiveThreads != old.ArchiveThreads || s.ControlArchiveConcurrency != old.ControlArchiveConcurrency ||
+		s.MaxArchiveConcurrency != old.MaxArchiveConcurrency {
 		m.notifyArchiveThreadsChange(s.ArchiveThreads)
 	}
 	return s, nil
@@ -801,6 +902,37 @@ func (m *DownloadManager) stopArchiveDownload(taskID string) {
 	m.archivePool.wakeAll()
 }
 
+// ─────────────────────────────────────────────────────────────
+// 画廊引擎运行时管理：注册 / 注销 / 立即中断
+// ─────────────────────────────────────────────────────────────
+
+// registerGallery 注册正在运行的画廊引擎（供暂停/取消/抢占中断）
+func (m *DownloadManager) registerGallery(g *galleryDownloader) {
+	m.mu.Lock()
+	m.activeGalleries[g.task.ID] = g
+	m.mu.Unlock()
+}
+
+// unregisterGallery 注销画廊引擎
+func (m *DownloadManager) unregisterGallery(taskID string) {
+	m.mu.Lock()
+	delete(m.activeGalleries, taskID)
+	m.mu.Unlock()
+}
+
+// stopGalleryDownload 立即中断指定画廊任务的下载（暂停/取消/抢占时调用）：
+// 置位本地停止标记 + 取消共享 context，进行中的图片请求即刻中止（.part 保留供恢复续传）。
+// 同时唤醒线程配额池中排队等待的任务，使它们检查停止标记（否则被暂停的任务会一直阻塞在 acquirePartial）。
+func (m *DownloadManager) stopGalleryDownload(taskID string) {
+	m.mu.Lock()
+	g := m.activeGalleries[taskID]
+	m.mu.Unlock()
+	if g != nil {
+		g.stopDownload()
+	}
+	m.archivePool.wakeAll()
+}
+
 // notifyArchiveThreadsChange 归档线程数设置变化时，动态调整所有运行中的归档任务的分块 worker 数
 func (m *DownloadManager) notifyArchiveThreadsChange(newThreads int) {
 	m.mu.Lock()
@@ -812,6 +944,8 @@ func (m *DownloadManager) notifyArchiveThreadsChange(newThreads int) {
 	for _, g := range list {
 		g.onArchiveThreadsChange(newThreads)
 	}
+	// 唤醒排队任务重新竞争：线程数/并发上限变化后重算额度（计划书 5.6）
+	m.archivePool.wakeAll()
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -196,6 +196,28 @@ func (h *DownloadHandler) UnlockDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
+// SetDownloadPriority 修改任务优先级 POST /api/v1/downloads/:id/priority
+// 提升优先级会触发抢占式调度：正在运行的低优先级任务被置回 queued（进度保留），
+// 高优先级任务优先竞争全局线程额度（计划书 5.5）。
+func (h *DownloadHandler) SetDownloadPriority(c *gin.Context) {
+	if !requireDownloadPermission(c) {
+		return
+	}
+	var req struct {
+		Priority int `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
+		return
+	}
+	task, err := h.manager.SetTaskPriority(c.Param("id"), req.Priority)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, task)
+}
+
 // RestoreDownloads 恢复历史任务 POST /api/v1/downloads/restore
 func (h *DownloadHandler) RestoreDownloads(c *gin.Context) {
 	count, err := h.manager.RestoreTasks()

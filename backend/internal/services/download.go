@@ -32,6 +32,9 @@ const (
 	// maxArchiveAutoUnlock 归档任务「遇到锁自动消耗 GP 解锁」的单任务重试上限。
 	// 达到上限后不再自动解锁（任务保持 error_lock 等待手动解锁），避免无限消耗 GP。
 	maxArchiveAutoUnlock = 3
+	// queueIdleTriggerDelay 下载队列变空后，延迟触发自动增量维护查重的时间（需求4）。
+	// 队列保持空且无新任务超过该时长、且书库存在未反映变更时才触发；新任务入队即顺延。
+	queueIdleTriggerDelay = 1 * time.Minute
 )
 
 // errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
@@ -113,6 +116,12 @@ type DownloadManager struct {
 
 	// 画廊引擎运行时管理：正在运行的画廊引擎（暂停/取消/抢占时立即中断）
 	activeGalleries map[string]*galleryDownloader // 任务ID -> 正在运行的画廊引擎
+
+	// 需求4：下载队列空闲检测（队列从非空→空后延迟触发自动增量维护查重）
+	idleMu    sync.Mutex
+	inFlight  int         // 已出队但尚未结束的任务数（含等待槽位/运行中/收尾）
+	idleArmed bool        // 是否已设置空闲检查定时器
+	idleTimer *time.Timer // 空闲检查定时器（queueIdleTriggerDelay 后触发）
 }
 
 // NewDownloadManager 构造下载任务管理器
@@ -160,8 +169,66 @@ func (m *DownloadManager) worker(id int) {
 			log.Printf("%s worker#%d 退出", dlLogTag, id)
 			return
 		case taskID := <-m.queue:
+			// 需求4：记录在途任务（出队后包括等待槽位/运行/收尾全程），
+			// 队列真正空闲（无在途任务、无积压）时才允许触发自动增量维护查重。
+			m.idleMu.Lock()
+			m.inFlight++
+			m.idleMu.Unlock()
 			m.runTask(taskID)
+			m.taskFinished()
 		}
+	}
+}
+
+// taskFinished 单个任务执行结束后回调（worker 调用）：
+// 减少在途任务计数；队列从非空变为空时启动「1min 空闲检查」定时器，
+// 到期仍无新任务则自动触发增量维护查重（需求4）。
+func (m *DownloadManager) taskFinished() {
+	m.idleMu.Lock()
+	defer m.idleMu.Unlock()
+	if m.inFlight > 0 {
+		m.inFlight--
+	}
+	// 在途任务为 0 且队列无积压 → 队列已空；未设置定时器则启动 1min 延迟检查
+	if m.inFlight == 0 && len(m.queue) == 0 && !m.idleArmed {
+		m.idleArmed = true
+		m.idleTimer = time.AfterFunc(queueIdleTriggerDelay, m.onQueueIdleTimeout)
+		log.Printf("%s [idle] 下载队列已空，启动 1 分钟空闲检查（到期无新任务则自动增量维护查重）", dlLogTag)
+	}
+}
+
+// cancelQueueIdleCheck 取消空闲检查定时器（新任务入队时调用，队列重新非空即顺延）。
+func (m *DownloadManager) cancelQueueIdleCheck() {
+	m.idleMu.Lock()
+	defer m.idleMu.Unlock()
+	if m.idleArmed {
+		if m.idleTimer != nil {
+			m.idleTimer.Stop()
+		}
+		m.idleArmed = false
+	}
+}
+
+// onQueueIdleTimeout 队列空闲检查到期回调：
+// 重新确认队列仍为空（期间可能入队了新任务），且书库存在未反映变更、无运行中离线任务时，
+// 自动触发增量维护查重（单槽位互斥 + 变更时间戳去重，详见 AutoRunMaintainDedup）。
+func (m *DownloadManager) onQueueIdleTimeout() {
+	m.idleMu.Lock()
+	if !m.idleArmed {
+		m.idleMu.Unlock()
+		return // 定时器已被取消/重置
+	}
+	m.idleArmed = false
+	// 到期后重新确认队列仍为空（可能期间入队了新任务）
+	idle := m.inFlight == 0 && len(m.queue) == 0
+	m.idleMu.Unlock()
+
+	if !idle {
+		log.Printf("%s [idle] 空闲检查到期但期间有新下载任务，不触发自动维护查重", dlWarnTag)
+		return
+	}
+	if !AutoRunMaintainDedup(m.db, m.ehService) {
+		log.Printf("%s [idle] 自动增量维护查重未启动（无未反映变更或已有离线任务在运行）", dlLogTag)
 	}
 }
 
@@ -234,6 +301,12 @@ func (m *DownloadManager) runTask(taskID string) {
 		}
 	}
 
+	// 需求4：任何下载完成后记录书库变更时间戳（新增/替换漫画均改变本地书库），
+	// 供「队列空闲>1min」自动触发增量维护查重时做变更去重判断。
+	if task.Status == models.DownloadCompleted {
+		MarkLibraryChanged()
+	}
+
 	// 抢占恢复：任务被高优先级任务抢占后 DB 状态被置回 queued（进度保留，可断点续传），
 	// 自动重新入队以再次调度。降级路径（fallbackArchiveToGallery 会改 Mode + 自行入队）排除在外。
 	var post models.DownloadTask
@@ -272,6 +345,10 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 		}
 		if err := m.db.Delete(&old).Error; err != nil {
 			log.Printf("%s [update] 任务 %s 删除旧版记录失败: %v", dlErrTag, task.ID, err)
+		} else {
+			// 需求4：旧版已删除 → 记录书库变更 + 使维护查重结果过期（被删项移除）
+			MarkLibraryChanged()
+			InvalidateMaintainDedupResult([]string{old.ID})
 		}
 		return
 	}
@@ -284,6 +361,10 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 	if err := m.db.Save(&old).Error; err != nil {
 		log.Printf("%s [update] 任务 %s 更新漫画标记失败: %v", dlErrTag, task.ID, err)
 	}
+	// 需求4：保留旧版 → 记录书库变更 + 定向写入「旧版被新版取代，建议删除」到维护查重缓存，
+	// 使维护界面在更新完成瞬间即可看到该旧版建议删除（新旧替换瞬时反馈），无需等待重扫。
+	MarkLibraryChanged()
+	MarkMaintainDedupReplacement(m.db, &old, task.GID)
 	log.Printf("%s [update] 任务 %s 更新完成（保留旧版，仅清除更新标记）", dlLogTag, task.ID)
 }
 
@@ -476,6 +557,8 @@ func (m *DownloadManager) Enqueue(taskID string) {
 	select {
 	case m.queue <- taskID:
 		log.Printf("%s 任务 %s 已入队", dlLogTag, taskID)
+		// 需求4：新任务入队 → 队列重新非空，取消空闲检查定时器（顺延自动增量查重）
+		m.cancelQueueIdleCheck()
 	default:
 		log.Printf("%s 任务 %s 入队失败（队列已满），任务保持 queued 等待后续处理", dlWarnTag, taskID)
 	}

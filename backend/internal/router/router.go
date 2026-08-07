@@ -257,6 +257,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/maintain", offlineHandler.GetMaintainDedup)
 			admin.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
 			admin.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)
+			admin.GET("/offline/maintain/unsynced", offlineHandler.GetMaintainUnsynced)
 			admin.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 		}
 	}

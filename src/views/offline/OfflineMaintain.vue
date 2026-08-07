@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
@@ -31,6 +31,13 @@ interface DedupResultDTO {
   items: DedupItemDTO[]
   finishedAt?: number // 结果生成时间戳(ms)
   stale?: boolean // 结果是否已过期（删除操作后置 true，提示重新扫描）
+}
+
+// 需求4：书库变更与查重结果的同步状态（进入维护界面时判断是否自动增量查重）
+interface UnsyncedStatusDTO {
+  lastLibraryChange: number // 书库最近一次变更时间戳(ms)
+  resultFinishedAt: number // 最近一次查重结果生成时间戳(ms)
+  hasUnsynced: boolean // 是否存在尚未反映到查重结果的变更
 }
 
 const items = ref<DedupItemDTO[]>([])
@@ -274,10 +281,30 @@ const formatDate = (iso?: string) => {
 
 const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
 
+// 需求4：检测书库是否存在未反映到查重结果的变更（新下载 / 更新完成 / 删除记录后），
+// 是则自动触发一次增量查重并展示最新结果；无变更则直接展示已有结果（如有）。
+// 保留手动「重新扫描」与「强制全量在线核对」按钮（见模板）。
+const autoMaintainIfNeeded = async () => {
+  if (isScanning.value) return // 已有任务在跑（含后台定时器触发的），不重复启动
+  try {
+    const st = await http<UnsyncedStatusDTO>('/offline/maintain/unsynced')
+    if (st.hasUnsynced) {
+      toast.info('检测到书库有新变更（下载/更新/删除），自动启动增量查重...')
+      await runMaintain(false)
+    } else if (!items.value.length) {
+      // 无未反映变更但本地尚未展示结果：尝试拉取最近一次结果（后端重启后缓存仍保留时）
+      await loadResult()
+    }
+  } catch {
+    // 状态接口异常（如后端未启动），忽略
+  }
+}
+
 // bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
-// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；已有结果则直接展示；否则保持空态，
-// 由用户点击「重新扫描 / 强制全量核对」按钮时才开始新任务。
-onMounted(async () => {
+// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；已有结果则直接展示；否则保持空态。
+// 需求4：首次挂载与每次重新进入（keep-alive onActivated）都重新同步状态，
+// 并检测书库未反映变更自动触发增量查重；手动「重新扫描 / 强制全量核对」按钮始终保留。
+const refreshOnEnter = async () => {
   try {
     const s = await http<OfflineTaskState>('/offline/maintain/progress')
     taskState.value = s
@@ -287,9 +314,19 @@ onMounted(async () => {
     } else if (s.status === 'success') {
       await loadResult()
     }
+    await autoMaintainIfNeeded()
   } catch {
     // 进度接口异常（如后端未启动），忽略，页面保持空态
   }
+}
+
+let activatedOnce = false
+onMounted(refreshOnEnter)
+onActivated(() => {
+  if (activatedOnce) {
+    refreshOnEnter()
+  }
+  activatedOnce = true
 })
 onUnmounted(stopPolling)
 </script>

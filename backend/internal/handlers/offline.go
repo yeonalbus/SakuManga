@@ -198,6 +198,12 @@ func (h *OfflineHandler) GetMaintainResult(c *gin.Context) {
 	c.JSON(http.StatusOK, services.GetMaintainDedupResult())
 }
 
+// GetMaintainUnsynced 书库变更同步状态读取 GET /api/v1/offline/maintain/unsynced
+// 需求4：前端进入维护界面时据此判断是否自动触发增量查重（下载/更新/删除后结果未反映变更）。
+func (h *OfflineHandler) GetMaintainUnsynced(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetMaintainUnsyncedStatus())
+}
+
 // removeDedupReq 删除重复项请求体
 type removeDedupReq struct {
 	ComicID    string   `json:"comicId"`

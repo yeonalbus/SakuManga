@@ -1133,6 +1133,8 @@ func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	if err := db.Delete(&comic).Error; err != nil {
 		return fmt.Errorf("删除漫画记录失败: %v", err)
 	}
+	// 需求4：删除记录视为书库变更，记录时间戳供「队列空闲>1min」自动增量维护查重判断。
+	MarkLibraryChanged()
 	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
 	return nil
 }

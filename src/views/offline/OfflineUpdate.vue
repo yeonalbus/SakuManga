@@ -23,6 +23,8 @@ interface OfflineComicDTO {
   newToken?: string
   updateNote?: string
   sourceMode?: string
+  removedStatus?: boolean // 需求 3(2)：画廊已被 E 站删除/版权移除
+  removedAt?: number
 }
 
 interface UpdateListResponse {
@@ -194,6 +196,34 @@ const onCoverError = (id: string) => {
 
 const isDownloading = computed(() => downloadingId.value !== '')
 
+// 需求 3(2)：移出更新列表（清除更新标记，保留本地记录与磁盘文件）
+const dismissUpdate = async (comic: OfflineComicDTO) => {
+  try {
+    await http<{ dismissed: boolean }>(`/offline/updates/${comic.id}/dismiss`, {
+      method: 'POST',
+    })
+    toast.success(`《${comic.title}》已移出更新列表`)
+    await fetchUpdates()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '移出更新列表失败')
+  }
+}
+
+// 需求 3(2)：删除本地记录（保留磁盘文件；被删画廊无法下载新版，仅清理记录）
+const deleteRecord = async (comic: OfflineComicDTO) => {
+  const ok = window.confirm(`确定删除《${comic.title}》的本地记录吗？磁盘文件将保留。`)
+  if (!ok) return
+  try {
+    await http(`/comics/${comic.id}?deleteFile=false`, { method: 'DELETE' })
+    toast.success(`《${comic.title}》已从离线列表删除`)
+    await fetchUpdates()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '删除本地记录失败')
+  }
+}
+
 onMounted(fetchUpdates)
 onUnmounted(stopPolling)
 </script>
@@ -287,6 +317,7 @@ onUnmounted(stopPolling)
             <span class="mode-chip">{{
               comic.sourceMode === 'gallery' ? '📁 画廊' : '🗜️ 归档'
             }}</span>
+            <span v-if="comic.removedStatus" class="removed-chip">🚫 已被删除/移除</span>
             <span class="compare-hint">⇄ 对比</span>
           </div>
 
@@ -297,7 +328,11 @@ onUnmounted(stopPolling)
             <span class="meta-text">🕒 {{ formatDate(comic.updatedAt) }}</span>
           </div>
 
-          <div class="update-note">
+          <div v-if="comic.removedStatus" class="removed-note">
+            <span class="note-icon">🚫</span>
+            <span>该画廊已从 E 站删除/版权移除，无法下载新版；可从下方移出列表或删除本地记录。</span>
+          </div>
+          <div v-else class="update-note">
             <span class="note-icon">⚠️</span>
             <span>{{ comic.updateNote || '检测到新版本' }}</span>
           </div>
@@ -309,20 +344,27 @@ onUnmounted(stopPolling)
         </div>
 
         <div class="card-actions" @click.stop>
-          <label class="mode-label" for="mode">下载方案</label>
-          <select
-            :id="`mode-${comic.id}`"
-            v-model="modeFor[comic.id]"
-            class="mode-select"
-            :disabled="isDownloading"
-          >
-            <option value="">按设置（默认）</option>
-            <option value="archive">🗜️ 归档（H@H）</option>
-            <option value="gallery">📁 画廊（逐图）</option>
-          </select>
-          <button class="download-btn" :disabled="isDownloading" @click="startDownload(comic)">
-            {{ downloadingId === comic.id ? '⏳ 加入中...' : '⬇️ 下载新版' }}
-          </button>
+          <template v-if="comic.removedStatus">
+            <span class="removed-hint">已被删除的画廊无法下载新版</span>
+            <button class="ghost-btn" @click="dismissUpdate(comic)">🗑️ 移出列表</button>
+            <button class="delete-btn" @click="deleteRecord(comic)">⛔ 删除记录</button>
+          </template>
+          <template v-else>
+            <label class="mode-label" for="mode">下载方案</label>
+            <select
+              :id="`mode-${comic.id}`"
+              v-model="modeFor[comic.id]"
+              class="mode-select"
+              :disabled="isDownloading"
+            >
+              <option value="">按设置（默认）</option>
+              <option value="archive">🗜️ 归档（H@H）</option>
+              <option value="gallery">📁 画廊（逐图）</option>
+            </select>
+            <button class="download-btn" :disabled="isDownloading" @click="startDownload(comic)">
+              {{ downloadingId === comic.id ? '⏳ 加入中...' : '⬇️ 下载新版' }}
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -701,6 +743,64 @@ onUnmounted(stopPolling)
 .download-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.removed-chip {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #ff7588;
+  border: 1px solid rgba(255, 117, 136, 0.5);
+  background: rgba(255, 117, 136, 0.12);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.removed-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #ff7588;
+  background-color: #2a1418;
+  border: 1px solid #5a2a33;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.removed-hint {
+  font-size: 0.72rem;
+  color: #ff7588;
+}
+
+.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.ghost-btn:hover {
+  border-color: #ff7588;
+  color: #ff7588;
+}
+
+.delete-btn {
+  background-color: #b3384a;
+  border: none;
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.delete-btn:hover {
+  opacity: 0.85;
 }
 
 @media (max-width: 720px) {

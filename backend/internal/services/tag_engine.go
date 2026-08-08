@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -458,6 +459,50 @@ func (e *TagEngine) TranslateTags(rawTags []string) []*TagItem {
 	return result
 }
 
+// matchLevelFor 计算 q 对 (key, name) 的匹配层级（key 已统一为小写空格形式）：
+//
+//	4 = key 完全等于 q
+//	3 = key 以 q 开头（前缀）/ 中文名前缀
+//	2 = 多词 key 中某个完整单词 == q（如 "penis" → "huge penis"）★ / 中文名子串命中
+//	1 = 多词 key 中某个完整单词以 q 开头（跨词前缀，如 "peni" → "huge penis"）
+//	0 = 纯字符子串（如 "la" → "glasses" 的 g-la-sses）
+//	-1 = 不匹配
+func matchLevelFor(key, name, q string, enableCN bool) int {
+	if key == q {
+		return 4
+	}
+	if strings.HasPrefix(key, q) {
+		return 3
+	}
+	if q != "" {
+		// 完整单词命中：多词 key 中某个完整单词 == q
+		for _, w := range strings.Fields(key) {
+			if w == q {
+				return 2
+			}
+		}
+		// 跨词前缀：某个完整单词以 q 开头
+		for _, w := range strings.Fields(key) {
+			if strings.HasPrefix(w, q) {
+				return 1
+			}
+		}
+	}
+	if strings.Contains(key, q) {
+		return 0
+	}
+	// 中文名：前缀视为 3；子串命中视为完整词命中（中文无空格分词，整串即词）→ 2
+	if enableCN && name != "" {
+		if strings.HasPrefix(name, q) {
+			return 3
+		}
+		if strings.Contains(name, q) {
+			return 2
+		}
+	}
+	return -1
+}
+
 func (e *TagEngine) Suggest(query string, limit int) []*TagItem {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -467,7 +512,7 @@ func (e *TagEngine) Suggest(query string, limit int) []*TagItem {
 		return []*TagItem{}
 	}
 
-	// 显式命名空间：q 含冒号（如 female:sto）时要求 namespace 前缀一致，再按 key 匹配，
+	// 显式命名空间：q 含冒号（如 female:sto）时要求 namespace 一致，再按 key 匹配，
 	// 避免裸词 q 被「namespace:key 子串匹配」误命中（如 "la" 命中所有 female/language 标签，
 	// 导致 female:stockings 之类高热度乱联想霸榜）。
 	var ns string
@@ -477,53 +522,53 @@ func (e *TagEngine) Suggest(query string, limit int) []*TagItem {
 		keyQ = q[idx+1:]
 	}
 
-	// score：1=前缀命中（最相关） 0=子串命中
 	type scored struct {
 		tag   *TagItem
-		score int
+		level int
+		heat  float64
 	}
 	matched := make([]scored, 0, 32)
 
 	for _, tag := range e.tagList {
+		// 用户显式输入命名空间时，namespace 必须一致（裸词查询不做 namespace 子串匹配）
+		if ns != "" && !strings.EqualFold(tag.Namespace, ns) {
+			continue
+		}
 		lowerKey := strings.ToLower(tag.Key)
 		lowerName := strings.ToLower(tag.Name)
 
-		var score int
-		switch {
-		case ns != "":
-			// 用户显式输入命名空间：namespace 必须一致
-			if !strings.EqualFold(tag.Namespace, ns) {
-				continue
-			}
-			if strings.HasPrefix(lowerKey, keyQ) || (e.EnableCN && strings.HasPrefix(lowerName, keyQ)) {
-				score = 1
-			} else if strings.Contains(lowerKey, keyQ) || (e.EnableCN && strings.Contains(lowerName, keyQ)) {
-				score = 0
-			} else {
-				continue
-			}
-		default:
-			// 裸词查询：只匹配 key / 中文名，不做 namespace 子串匹配
-			if strings.HasPrefix(lowerKey, q) || (e.EnableCN && strings.HasPrefix(lowerName, q)) {
-				score = 1
-			} else if strings.Contains(lowerKey, q) || (e.EnableCN && strings.Contains(lowerName, q)) {
-				score = 0
-			} else {
+		var level int
+		if keyQ == "" {
+			// 显式命名空间后为空（如 "female:"）：列出该命名空间全部标签，按热度排
+			level = 3
+		} else {
+			level = matchLevelFor(lowerKey, lowerName, keyQ, e.EnableCN)
+			if level < 0 {
 				continue
 			}
 		}
-		matched = append(matched, scored{tag: tag, score: score})
+		matched = append(matched, scored{
+			tag:   tag,
+			level: level,
+			heat:  math.Log10(float64(tag.Count) + 1),
+		})
 	}
 
-	// 排序：前缀命中优先 → 热度高优先 → key 短优先
+	// 热度协同排序：热度（log10 Count）主导 + 匹配层级次级（权重 6:1）。
+	// 例：huge penis(36080, 完整词 level2) ≈ 2+6×4.557=29.34 >
+	//     penis enlargement(21051, 前缀 level3) ≈ 3+6×4.323=28.94，完整词命中+高热度胜出；
+	// 同时 3a 不回归：la 时 lactation(前缀,700) ≈ 3+6×2.846=20.08 >
+	//     glasses(子串,900) ≈ 0+6×2.955=17.73。
+	// 关闭热度排序（EnableSort=false）时仅按匹配层级排。
 	sort.Slice(matched, func(i, j int) bool {
-		if matched[i].score != matched[j].score {
-			return matched[i].score > matched[j].score
-		}
 		if e.EnableSort {
-			if matched[i].tag.Count != matched[j].tag.Count {
-				return matched[i].tag.Count > matched[j].tag.Count
+			ti := float64(matched[i].level) + 6*matched[i].heat
+			tj := float64(matched[j].level) + 6*matched[j].heat
+			if ti != tj {
+				return ti > tj
 			}
+		} else if matched[i].level != matched[j].level {
+			return matched[i].level > matched[j].level
 		}
 		return len(matched[i].tag.Key) < len(matched[j].tag.Key)
 	})

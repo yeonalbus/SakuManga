@@ -35,10 +35,11 @@ func SyncTagCount(c *gin.Context) {
 // QueryTagSuggestions 搜索补全联想 API
 func QueryTagSuggestions(c *gin.Context) {
 	q := c.Query("q")
-	limitStr := c.DefaultQuery("limit", "10")
+	limitStr := c.DefaultQuery("limit", "20")
 	limit, _ := strconv.Atoi(limitStr)
-	if limit <= 0 {
-		limit = 10
+	// 联想词增多（配合前端可滚动下拉）：默认 20、上限 50，防异常大 limit
+	if limit <= 0 || limit > 50 {
+		limit = 20
 	}
 
 	results := services.GlobalTagEngine.Suggest(q, limit)

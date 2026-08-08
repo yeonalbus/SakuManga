@@ -80,3 +80,43 @@ func TestSuggestPrefixPriorityNoNamespaceNoise(t *testing.T) {
 		t.Fatalf("female:sto 应命中 female:stockings，实际=%v", res)
 	}
 }
+
+// 需求1-热度协同：输入 "penis" 应通过「完整单词命中」找到 male:huge penis，
+// 且在热度协同排序下 huge penis(36080, 完整词命中) 排在 penis enlargement(21051, 前缀) 之前。
+func TestSuggestHeatCoopFullWordMatch(t *testing.T) {
+	e := &TagEngine{
+		tags:       make(map[string]*TagItem),
+		EnableCN:   true,
+		EnableSort: true,
+		tagList: []*TagItem{
+			{Namespace: "male", Key: "huge penis", Name: "巨根", Count: 36080},
+			{Namespace: "male", Key: "penis enlargement", Name: "阴茎增大", Count: 21051},
+			{Namespace: "female", Key: "penis ring", Name: "阴茎环", Count: 15000},
+		},
+	}
+
+	// 1) 裸词 "penis"：huge penis（完整单词命中）应出现且排在 penis enlargement（前缀）之前，
+	//    与需求1给出的预期一致（huge penis 36080 第一、penis enlargement 21051 第二）。
+	res := e.Suggest("penis", 8)
+	if len(res) < 2 {
+		t.Fatalf("penis 应至少有 2 个结果，实际=%v", res)
+	}
+	if res[0].Namespace != "male" || res[0].Key != "huge penis" {
+		t.Fatalf("penis 首个结果应为 male:huge penis（完整词命中+高热度），实际=%v", res[0])
+	}
+	if res[1].Key != "penis enlargement" {
+		t.Fatalf("penis 第二个结果应为 penis enlargement，实际=%v", res[1])
+	}
+
+	// 2) 跨词前缀 "peni"：应命中 male:huge penis（完整单词 "penis" 以 "peni" 开头）
+	res = e.Suggest("peni", 8)
+	foundHuge := false
+	for _, it := range res {
+		if it.Namespace == "male" && it.Key == "huge penis" {
+			foundHuge = true
+		}
+	}
+	if !foundHuge {
+		t.Fatalf("跨词前缀 peni 应命中 male:huge penis，实际=%v", res)
+	}
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 // 🟢 1. 按领域引入：漫画数据源来自 comicStore，书架信息来自 bookshelfStore
 import { offlineComics, deleteOfflineComics } from '@/stores/comicStore'
@@ -76,8 +76,9 @@ const handlePageChange = (page: number) => {
   scrollMainToTop('smooth')
 }
 
-// 任务五：进入页面时恢复页码；滚动位置在渲染后恢复
-onMounted(async () => {
+// 任务五/S11：恢复上次离开的列表状态（页码 + 滚动位置）。
+// onMounted 与 onActivated 共用：keep-alive 缓存下「同标签返回」只触发 onActivated。
+const restoreListState = async () => {
   const saved = takeListState('/offline/bookshelf')
   if (saved?.page && saved.page > 1) {
     currentPage.value = saved.page
@@ -89,6 +90,17 @@ onMounted(async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
+}
+
+onMounted(restoreListState)
+
+// S11：keep-alive 缓存下重新激活书架页时同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) {
+    restoreListState()
+  }
+  activatedOnce = true
 })
 
 // 任务五：离开列表页时保存「页码 + 滚动位置」

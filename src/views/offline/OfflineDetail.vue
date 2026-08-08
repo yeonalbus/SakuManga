@@ -11,6 +11,7 @@ import type { OfflineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
+import { isDetailNewTab } from '@/utils/detailNav'
 
 // 后端 GetOfflineComicDetail 返回的离线漫画 DTO
 // tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
@@ -156,6 +157,11 @@ const handleAddToReadingList = () => {
 }
 
 const handleBack = () => {
+  // S11：由本应用新标签打开（S10 统一入口）→ 关闭标签返回列表
+  if (isDetailNewTab((route.query.id as string) || '')) {
+    window.close()
+    return
+  }
   if (window.history.length > 1) {
     router.back()
   } else {

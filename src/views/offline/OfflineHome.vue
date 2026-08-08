@@ -20,8 +20,10 @@ import { scrollMainToTop, rememberListState, takeListState, getMainContent } fro
 const { toast, modal } = useUI()
 const userStore = useUserStore()
 
-// 任务五：进入页面时恢复上次离开的列表状态（页码）；滚动位置在数据就绪后恢复
-onMounted(async () => {
+// 任务五/S11：恢复上次离开的列表状态（页码 + 滚动位置），并刷新离线数据。
+// onMounted 与 onActivated 共用：keep-alive 缓存下「同标签返回」只触发 onActivated，
+// 若不在此恢复，页码/滚动会停留在离开前的旧状态。
+const restoreListState = async () => {
   const saved = takeListState('/offline/home')
   if (saved?.page && saved.page > 1) {
     currentPage.value = saved.page
@@ -35,14 +37,16 @@ onMounted(async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
-})
+}
 
-// 需求2：App.vue 用 keep-alive 缓存路由，重新进入书库页（相同 fullPath）不会触发 onMounted，
-// 导致「下载新版本后删除旧版本」等后端变更不反映到前端。改为每次重新激活书库页时刷新离线数据源。
+onMounted(restoreListState)
+
+// 需求2 + S11：App.vue 用 keep-alive 缓存路由，重新进入书库页（相同 fullPath）不会触发 onMounted，
+// 导致「下载新版本后删除旧版本」等后端变更不反映到前端。每次重新激活书库页时刷新离线数据源并恢复列表状态。
 let activatedOnce = false
 onActivated(() => {
   if (activatedOnce) {
-    fetchOfflineComics()
+    restoreListState()
   }
   activatedOnce = true
 })

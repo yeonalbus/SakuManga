@@ -11,6 +11,7 @@ import { resolveDefaultDownloadScheme } from '@/api/download'
 import { markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
+import { isDetailNewTab } from '@/utils/detailNav'
 
 const route = useRoute()
 const router = useRouter()
@@ -242,6 +243,11 @@ const handleAddToReadingList = () => {
 }
 
 const handleBack = () => {
+  // S11：由本应用新标签打开（S10 统一入口）→ 关闭标签返回列表
+  if (isDetailNewTab((route.query.id as string) || '')) {
+    window.close()
+    return
+  }
   if (window.history.length > 1) {
     router.back()
   } else {

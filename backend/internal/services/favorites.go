@@ -293,7 +293,9 @@ func (s *FavoritesService) RemoveFavorite(db *gorm.DB, userID uint, account *mod
 // AttachFavoriteStates 挂载 SQLite 中的本地收藏状态 (仅补充，绝不误杀原状态)
 func AttachFavoriteStates(db *gorm.DB, userID uint, comics []OnlineComicDTO) []OnlineComicDTO {
 	if len(comics) == 0 {
-		return comics
+		// 无结果时返回非 nil 空切片，避免 JSON 序列化为 null
+		// （前端 filteredComics 会对 comics 直接 .filter，null 会导致渲染崩溃）
+		return make([]OnlineComicDTO, 0)
 	}
 
 	gids := make([]string, 0, len(comics))
@@ -329,7 +331,8 @@ func AttachFavoriteStates(db *gorm.DB, userID uint, comics []OnlineComicDTO) []O
 // 注意：本地漫画库为全局共享，无需按用户隔离；只补 true，绝不误改 false。
 func AttachDownloadStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO {
 	if len(comics) == 0 {
-		return comics
+		// 无结果时返回非 nil 空切片，避免 JSON 序列化为 null 破坏前端渲染
+		return make([]OnlineComicDTO, 0)
 	}
 
 	gids := make([]string, 0, len(comics))

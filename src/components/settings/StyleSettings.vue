@@ -35,28 +35,6 @@
       </div>
     </div>
 
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">每行画廊数</div>
-        <div class="item-subtext">卡片 / 名片分别设置，范围 1-5；不设置则按视口自适应</div>
-      </div>
-
-      <div class="columns-config">
-        <label class="columns-row">
-          <span class="columns-label">🎴 卡片</span>
-          <select v-model.number="cardColumns" class="setting-select">
-            <option v-for="n in 5" :key="`card-${n}`" :value="n">{{ n }} 个</option>
-          </select>
-        </label>
-        <label class="columns-row">
-          <span class="columns-label">🪪 名片</span>
-          <select v-model.number="compactColumns" class="setting-select">
-            <option v-for="n in 5" :key="`compact-${n}`" :value="n">{{ n }} 个</option>
-          </select>
-        </label>
-      </div>
-    </div>
-
     <!-- 自动适配详情面板列数（仅宽屏桌面在线列表生效） -->
     <div class="setting-item">
       <div class="item-info">
@@ -129,7 +107,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useUI } from '@/composables/useUI'
-import { viewMode, toggleViewMode, cardColumns, compactColumns } from '@/stores/viewMode'
+import { viewMode, toggleViewMode } from '@/stores/viewMode'
 import {
   styleSettings,
   resetStyleSettings,
@@ -245,7 +223,7 @@ const handleReset = () => {
   gap: 2px;
 }
 
-/* 每行画廊数：卡片 / 名片两个独立行 */
+/* 面板列数：卡片 / 名片 · 收起/展开 四个独立行 */
 .columns-config {
   display: flex;
   flex-direction: column;

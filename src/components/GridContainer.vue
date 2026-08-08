@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import {
-  viewMode,
-  cardColumns,
-  compactColumns,
-  DEFAULT_CARD_COLUMNS,
-  DEFAULT_COMPACT_COLUMNS,
-} from '@/stores/viewMode'
+import { viewMode } from '@/stores/viewMode'
 import { styleSettings } from '@/stores/styleSettings'
 import type { ComicItem } from '@/types/comic'
 import ItemCard from './ItemCard.vue'
@@ -62,27 +56,21 @@ onUnmounted(() => {
   layoutObserver = null
 })
 
-/** 列数注入优先级：
-    1. 面板自动适配（宽屏在线列表 + 开启自动适配 + 传入 panelOpen）→ 按面板开/关注入列数
-    2. 用户自定义「每行画廊数」→ 覆盖各断点列数
-    3. 均未生效 → 交由视口媒体查询渐进降级 */
+/** 列数注入：
+    仅当「面板自动适配」生效（宽屏在线列表 + 开启自动适配 + 传入 panelOpen）时，
+    按面板开/关状态注入 --card-cols / --compact-cols；
+    否则不注入任何变量，交由视口媒体查询渐进降级（各断点默认列数）。 */
 const gridStyle = computed<Record<string, string>>(() => {
-  const style: Record<string, string> = {}
   const panelAdapt =
     styleSettings.autoPanelColumns && isWideScreen.value && props.panelOpen !== undefined
-  if (panelAdapt) {
-    style['--card-cols'] = String(
-      props.panelOpen ? styleSettings.cardPanelOpenCols : styleSettings.cardPanelClosedCols,
-    )
-    style['--compact-cols'] = String(
-      props.panelOpen ? styleSettings.compactPanelOpenCols : styleSettings.compactPanelClosedCols,
-    )
-    return style
-  }
-  if (cardColumns.value !== DEFAULT_CARD_COLUMNS) style['--card-cols'] = String(cardColumns.value)
-  if (compactColumns.value !== DEFAULT_COMPACT_COLUMNS) {
-    style['--compact-cols'] = String(compactColumns.value)
-  }
+  if (!panelAdapt) return {}
+  const style: Record<string, string> = {}
+  style['--card-cols'] = String(
+    props.panelOpen ? styleSettings.cardPanelOpenCols : styleSettings.cardPanelClosedCols,
+  )
+  style['--compact-cols'] = String(
+    props.panelOpen ? styleSettings.compactPanelOpenCols : styleSettings.compactPanelClosedCols,
+  )
   return style
 })
 </script>
@@ -131,12 +119,12 @@ const gridStyle = computed<Record<string, string>>(() => {
   gap: 16px;
 }
 
-/* 卡片模式 (card)：桌面 4 列网格（--card-cols 由用户「每行画廊数」自定义注入） */
+/* 卡片模式 (card)：桌面 4 列网格（--card-cols 由「面板自动适配」注入） */
 .card-grid.card {
   grid-template-columns: repeat(var(--card-cols, 4), 1fr);
 }
 
-/* 名片模式 (compact)：桌面 2 列网格（--compact-cols 由用户「每行画廊数」自定义注入） */
+/* 名片模式 (compact)：桌面 2 列网格（--compact-cols 由「面板自动适配」注入） */
 .card-grid.compact {
   grid-template-columns: repeat(var(--compact-cols, 2), 1fr);
   gap: 12px;
@@ -150,11 +138,11 @@ const gridStyle = computed<Record<string, string>>(() => {
   padding: 8px 0;
 }
 
-/* 📱 响应式列数（未自定义每行画廊数时生效）：
+/* 📱 响应式列数（未开启面板自动适配 / 非宽屏在线列表时生效）：
    - iPad 竖屏(≤1024px)：card 3 列
    - 手机/小平板(≤768px)：card 2 列
    - 手机竖屏(≤480px)：compact 单列，卡片更易点按
-   一旦用户通过「每行画廊数」注入 --card-cols / --compact-cols，
+   若开启「面板自动适配」注入 --card-cols / --compact-cols，
    各断点统一使用该值，忽略视口渐进。 */
 @media (max-width: 1024px) {
   .card-grid.card {

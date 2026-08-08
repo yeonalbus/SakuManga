@@ -142,6 +142,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/comics/random", onlineHandler.GetRandomComics)
 		api.GET("/comics/online/popular", onlineHandler.GetOnlinePopular)
 		api.GET("/comics/online/detail", onlineHandler.GetOnlineComicDetail)
+		api.GET("/comics/online/resolve-token", onlineHandler.ResolveOnlineToken)
 		api.GET("/comics/online/previews", onlineHandler.GetOnlineComicPreviews)
 		api.GET("/comics/online/pages", onlineHandler.GetOnlineComicPages)
 		api.GET("/comics/online/page", onlineHandler.GetOnlinePageByIndex)

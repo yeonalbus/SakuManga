@@ -305,6 +305,7 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 		Source           string `json:"source" binding:"required"`
 		ComicTitle       string `json:"comicTitle"`
 		CoverURL         string `json:"coverUrl"`
+		Token            string `json:"token"`
 		LastChapterTitle string `json:"lastChapterTitle"`
 		LastPageIndex    int    `json:"lastPageIndex"`
 		TotalPageCount   int    `json:"totalPageCount"`
@@ -321,18 +322,27 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 	var rec models.HistoryRecord
 	if err := h.db.Where("user_id = ? AND comic_id = ? AND source = ?", user.ID, req.ComicID, req.Source).First(&rec).Error; err != nil {
 		rec = models.HistoryRecord{
-			UserID:    user.ID,
-			ComicID:   req.ComicID,
-			Source:    models.ComicSource(req.Source),
+			UserID:     user.ID,
+			ComicID:    req.ComicID,
+			Source:     models.ComicSource(req.Source),
 			ComicTitle: req.ComicTitle,
-			CoverURL:  req.CoverURL,
+			CoverURL:   req.CoverURL,
+			Token:      req.Token,
 		}
 	}
 	rec.ComicTitle = req.ComicTitle
 	rec.CoverURL = req.CoverURL
 	rec.LastChapterTitle = req.LastChapterTitle
-	rec.LastPageIndex = req.LastPageIndex
-	rec.TotalPageCount = req.TotalPageCount
+	if req.Token != "" {
+		rec.Token = req.Token
+	}
+	// 进度保护：仅当入参进度 > 0 时才覆盖已有进度，避免卡片点击(lastPageIndex=0)清零上次阅读位置。
+	if req.LastPageIndex > 0 {
+		rec.LastPageIndex = req.LastPageIndex
+	}
+	if req.TotalPageCount > 0 {
+		rec.TotalPageCount = req.TotalPageCount
+	}
 	rec.LastReadAt = time.Now()
 	if err := h.db.Save(&rec).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存历史失败"})

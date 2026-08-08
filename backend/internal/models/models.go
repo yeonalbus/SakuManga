@@ -121,6 +121,7 @@ type HistoryRecord struct {
 	Source           ComicSource `json:"source"`
 	ComicTitle       string      `json:"comicTitle"`
 	CoverURL         string      `json:"coverUrl"`
+	Token            string      `json:"token,omitempty"`   // 在线画廊 token（历史打开在线详情必需）
 	LastChapterTitle string      `json:"lastChapterTitle,omitempty"`
 	LastPageIndex    int         `json:"lastPageIndex"`    // 上次看到第几页
 	TotalPageCount   int         `json:"totalPageCount"`   // 总页数

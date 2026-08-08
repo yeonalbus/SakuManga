@@ -253,6 +253,68 @@ func parseFavColorStyle(style string) int {
 	return -1
 }
 
+// ResolveGalleryToken 按 gid 请求 /g/{gid}/ 页面并解析 token（用于历史旧记录 token 兜底）。
+// E 站对缺少 token 的链接会返回 "Key missing" 页面并给出带正确 token 的 /g/{gid}/{token}/ 链接。
+func (s *EHService) ResolveGalleryToken(account *models.AccountSetting, gid string, setting *models.EHSetting) (string, error) {
+	client, err := s.BuildClient(account)
+	if err != nil {
+		return "", err
+	}
+	baseURL := GetBaseURL(account, setting)
+	pageURL := fmt.Sprintf("%s/g/%s/", baseURL, gid)
+	req, _ := http.NewRequest("GET", pageURL, nil)
+	req.Header.Set("User-Agent", ehReaderUserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("获取画廊 token 失败")
+	}
+	if resp.StatusCode != 200 {
+		body := readBodyLimited(resp)
+		resp.Body.Close()
+		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+			return "", gErr
+		}
+		return "", fmt.Errorf("获取画廊 token 失败（E 站返回 %d）", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return "", fmt.Errorf("解析画廊页面失败")
+	}
+
+	// 1) 首选：页面内任意 /g/{gid}/{token}/ 链接（missing-key 跳转页也会给出）
+	var token string
+	doc.Find("a[href*='/g/']").EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		href, _ := a.Attr("href")
+		g, t := extractGIDTokenFromHref(href)
+		if g == gid && t != "" {
+			token = t
+			return false
+		}
+		return true
+	})
+	if token != "" {
+		return token, nil
+	}
+
+	// 2) 兜底：meta refresh 跳转 URL 中内嵌的 /g/{gid}/{token}/
+	doc.Find("meta[http-equiv='refresh']").Each(func(_ int, m *goquery.Selection) {
+		if content, ok := m.Attr("content"); ok && token == "" {
+			if idx := strings.Index(content, "/g/"); idx >= 0 {
+				g, t := extractGIDTokenFromHref(content[idx:])
+				if g == gid && t != "" {
+					token = t
+				}
+			}
+		}
+	})
+	if token == "" {
+		return "", fmt.Errorf("未能从画廊页面解析出 token（gid=%s）", gid)
+	}
+	return token, nil
+}
+
 // extractGIDTokenFromHref 从 /g/{gid}/{token}/ 形式的 href 中提取 gid 与 token
 //（兼容绝对 URL 与尾部查询参数，如 https://exhentai.org/g/4051934/1649c84977/?p=0）
 func extractGIDTokenFromHref(href string) (gid, token string) {

@@ -375,6 +375,37 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// ResolveOnlineToken 按 gid 解析在线画廊 token GET /comics/online/resolve-token?id=<gid>
+// 用途：历史旧记录未持久化 token 时兜底。优先查本地已存 token（收藏表），否则抓 /g/<gid>/ 页面解析。
+func (h *OnlineComicHandler) ResolveOnlineToken(c *gin.Context) {
+	account := middleware.CurrentAccount(c)
+	if account == nil || account.IPBMemberID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先绑定并保存 E 站账户凭证"})
+		return
+	}
+	gid := strings.TrimSpace(c.Query("id"))
+	if gid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 id (GID) 参数"})
+		return
+	}
+
+	// 1. 本地兜底：收藏表可能已持久化该 gid 的 token
+	var fav models.FavoriteState
+	if err := h.db.Where("user_id = ? AND g_id = ?", account.ID, gid).First(&fav).Error; err == nil && fav.Token != "" {
+		c.JSON(http.StatusOK, gin.H{"gid": gid, "token": fav.Token})
+		return
+	}
+
+	// 2. 在线解析：抓取 /g/<gid>/ 页面从 missing-key 链接提取 token
+	ehSetting := getEHSetting(h.db, account.ID)
+	token, err := h.ehService.ResolveGalleryToken(account, gid, ehSetting)
+	if err != nil {
+		writeEHServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"gid": gid, "token": token})
+}
+
 // GetOnlinePopular 获取线上热门画廊列表
 func (h *OnlineComicHandler) GetOnlinePopular(c *gin.Context) {
 	account := middleware.CurrentAccount(c)

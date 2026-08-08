@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v1.2.0 · 最近更新：2026-08
+> 版本：v1.3.0 · 最近更新：2026-08
 
 ## 一、目录总览
 
@@ -13,7 +13,8 @@ SakuHentai/
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── plans/                          # 功能开发方案文档（Round1~5）
+├── plans/                          # 功能开发方案文档（Round1~9）
+├── VerNotes/                       # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程
 ├── 计划书/                          # 项目规划文档（已弃用）
 ├── 学习笔记/                        # 学习笔记（已弃用）
 ├── .roo/                           # Roo 自定义配置
@@ -116,6 +117,9 @@ src/
 │   ├── errorReporter.ts            # 前端错误上报（受高级设置「开启日志」门控）
 │   ├── device.ts                   # 设备/触控检测
 │   ├── tagFilter.ts                # 负向排除引擎（excludeTags/excludeKeywords 匹配）
+│   ├── detailNav.ts                # 详情新标签导航（记录来源状态，返回时恢复位置/页码）
+│   ├── pageHideFlush.ts            # 页面隐藏时冲刷进度/持久化（防丢失）
+│   ├── readingProgress.ts          # 阅读进度恢复决策（本地/后端取较新，偏好开关）
 │   └── mockData.ts                 # 生成 mock 数据（SVG/离线示例等，仅开发用）
 │
 └── views/                          # 页面级组件
@@ -146,7 +150,7 @@ src/
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
 
-### 设置面板 `components/settings/` 细分（v1.2.0 八分组）
+### 设置面板 `components/settings/` 细分（v1.3.0 八分组）
 
 | 分组         | 文件                         | 职责                                             | 管理员可见 |
 | ------------ | ---------------------------- | ------------------------------------------------ | :--------: |
@@ -277,7 +281,7 @@ backend/
         └── tag_scheduler.go        # Tag 维护定时调度
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go` 等。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go` 等。
 
 ---
 
@@ -312,6 +316,9 @@ backend/
 | 改设置中心（8 分组）                              | `src/views/SettingsView.vue` + `components/settings/*`                                                                     |
 | 改标签翻译/展示                                   | `stores/tagStore.ts`、`components/TagChip.vue`                                                                             |
 | 改用户数据初始化/迁移                             | `stores/libraryInit.ts`                                                                                                    |
+| 改详情新标签导航/返回位置恢复                     | `src/utils/detailNav.ts`、`views/online/OnlineDetail.vue`、`views/offline/OfflineDetail.vue`                              |
+| 改本地优先加载 / 默认收藏夹                      | `views/online/OnlineDetail.vue`、`stores/preferenceSettings.ts`、`components/settings/PreferenceSettings.vue`             |
+| 改阅读进度恢复策略                                | `utils/readingProgress.ts`、`utils/pageHideFlush.ts`、`stores/preferenceSettings.ts`                                       |
 
 ### 后端业务
 
@@ -339,6 +346,8 @@ backend/
 | 改数据模型                 | `backend/internal/models/*.go`                                                                        |
 | 改数据库初始化/迁移        | `backend/internal/database/db.go`                                                                     |
 | 改本地元数据解析           | `backend/internal/services/metadata.go`、`extract.go`                                                 |
+| 改维护在线回填 GID/失效画廊标记 | `backend/internal/services/offline.go`（backfill/RemovedStatus）、`offline_backfill_test.go`                             |
+| 改 toplist 解析对齐 E 站   | `backend/internal/services/toplist.go`、`toplist_test.go`                                                                |
 
 ### 构建 / 校验
 
@@ -365,10 +374,11 @@ backend/
 
 ---
 
-## 六、发布注意（v1.2.0）
+## 六、发布注意（v1.3.0）
 
-- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘），脚本标题自动读取 `package.json` 版本号。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
-- **版本号**：仅需修改 `package.json` 的 `version` 字段（如 `1.2.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题会自动跟随，无需再手动同步多处。
+- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `1.3.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前历史遗留为 `0.0.0`，发布时一并对齐）。
+- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
+- **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
 - `manga.db`、`data/` 为**运行时数据**，已加入 `.gitignore`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。

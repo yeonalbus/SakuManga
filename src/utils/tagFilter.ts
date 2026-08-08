@@ -180,32 +180,55 @@ export const tokenizeFSearchInput = (raw: string): string[] => {
 export interface SuggestQueryExtract {
   /** 实际发给 /tags/suggest 的查询词（可能为空：输入为空 / 刚选完完整 tag） */
   query: string
-  /** 最后一个 token 之前的所有 token（用单空格拼接），联想点击时作为前缀保留 */
+  /** 未完成短语之前的所有已完成 tag（用单空格拼接），联想点击时作为前缀保留 */
   prefix: string
-  /** 最后一个 token 是否带负号前缀 `-` */
+  /** 未完成短语首 token 是否带负号前缀 `-` */
   negative: boolean
 }
 
 /**
- * 从搜索框输入中提取「最后一个 token」作为联想查询词：
- * - 引号内内容视为整体（group:"da hootch$" 为一个 token，不影响前面的 token）；
- * - 若最后一个 token 仍处于引号内（含未闭合引号），取最后一个引号后的内容
+ * 判断 token 是否为「已完成 tag」：
+ * 含命名空间 `:` 且以 `$` 锚定或以闭合引号收尾（如 female:stockings$、group:"da hootch$"）。
+ * 裸词（无冒号）与未闭合的残缺 tag（如 huge penis、group:"da hoo）都不算已完成。
+ */
+export const isCompletedTag = (token: string): boolean => {
+  return token.includes(':') && (token.endsWith('$') || token.endsWith('"'))
+}
+
+/**
+ * 从搜索框输入中提取「最后一个已完成 tag 之后的所有 token」作为联想查询词（未完成短语）：
+ * - 已完成 tag 之后继续输入的裸词/残缺串整体视为待补全短语，点击联想时整体替换
+ *   （修复：输入 "huge penis" 只取最后 token 会导致点击后变成 "huge male:"huge penis$""）；
+ * - 引号内内容视为整体（group:"da hootch$" 为一个已完成 tag，不影响后续 token）；
+ * - 若短语仍处于引号内（含未闭合引号），取最后一个引号后的内容
  *   （如 group:"da h  → da h），保证多词 tag 中间继续输入也能联想；
  * - 去掉末尾锚点 `$` 便于后端子串匹配（用户手写标准语法时）；
  * - 识别负号前缀 `-`（查询词去掉负号，点击回填时需保留）。
- * 例：`group:"da hootch$" large` → { query:'large', prefix:'group:"da hootch$"', negative:false }
+ * 例：
+ *   `group:"da hootch$" large`     → { query:'large', prefix:'group:"da hootch$"', negative:false }
+ *   `huge penis`                   → { query:'huge penis', prefix:'', negative:false }
+ *   `female:blowjob$ femal`        → { query:'femal', prefix:'female:blowjob$', negative:false }
+ *   `group:"da hootch`             → { query:'da hootch', prefix:'', negative:false }
  */
 export const extractSuggestQuery = (raw: string): SuggestQueryExtract => {
   const tokens = tokenizeFSearchInput(raw)
   if (tokens.length === 0) return { query: '', prefix: '', negative: false }
-  const prefix = tokens.slice(0, -1).join(' ')
-  const last = tokens[tokens.length - 1]
-  const negative = last.startsWith('-')
-  let q = negative ? last.replace(/^-\s*/, '') : last
+  // 找最后一个已完成 tag 之后的位置：未完成短语 = 该位置起的所有 token
+  let start = 0
+  for (let i = 0; i < tokens.length; i++) {
+    if (isCompletedTag(tokens[i])) start = i + 1
+  }
+  const prefix = tokens.slice(0, start).join(' ')
+  const phrase = tokens.slice(start)
+  if (phrase.length === 0) return { query: '', prefix, negative: false }
+  const negative = phrase[0].startsWith('-')
+  let q = negative ? phrase[0].replace(/^-\s*/, '') : phrase[0]
   // 仍在引号内（或含未闭合引号）：取最后一个引号后的内容
   const quoteIdx = q.lastIndexOf('"')
   if (quoteIdx !== -1) q = q.slice(quoteIdx + 1)
-  // 去掉末尾锚点 $ 便于后端子串匹配
-  q = q.replace(/\$$/, '').trim()
+  // 未完成短语可能跨多个裸词（如 huge penis）：合并，并去掉末尾锚点便于子串匹配
+  q = `${q}${phrase.length > 1 ? ' ' + phrase.slice(1).join(' ') : ''}`
+    .replace(/\$$/, '')
+    .trim()
   return { query: q, prefix, negative }
 }

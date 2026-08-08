@@ -18,9 +18,12 @@ const props = withDefaults(
   defineProps<{
     tag: TagData | string
     showTranslation?: boolean
+    /** 禁用点击快捷搜索（供搜索联想下拉使用）：不拦截冒泡，把点击交给父级把 tag 插入输入框 */
+    disableQuickSearch?: boolean
   }>(),
   {
     showTranslation: true,
+    disableQuickSearch: false,
   },
 )
 
@@ -108,7 +111,16 @@ const getBgColor = (ns: string) => {
   }
 }
 
-// 🎯 点击 Tag 快捷搜索：根据所在域更新 Store 并回归列表页
+// 🎯 点击 Tag 快捷搜索：根据所在域更新 Store 并回归列表页。
+// 搜索联想下拉里（disableQuickSearch=true）需禁用：
+// 原实现 @click.stop 会在点击联想项（即 TagChip）时拦截冒泡并触发快捷搜索（在线新开标签/离线跳转），
+// 既阻止了 tag 被插入输入框，又导致"点击联想自动跳转搜索页"，无法连续输入多 tag。
+const onClick = (e: Event) => {
+  if (props.disableQuickSearch) return // 不 stopPropagation，冒泡交给父级（联想项）插入输入框
+  e.stopPropagation()
+  handleClick()
+}
+
 const handleClick = () => {
   const { namespace, key } = tagData.value
   const isOffline = modeStore.isOffline
@@ -133,7 +145,7 @@ const handleClick = () => {
   <span
     class="tag-chip"
     :style="{ backgroundColor: getBgColor(tagData.namespace) }"
-    @click.stop="handleClick"
+    @click="onClick"
   >
     <span v-if="tagData.namespace && tagData.namespace !== 'other'" class="tag-namespace">
       {{ tagData.namespace }}:

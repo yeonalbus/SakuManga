@@ -51,7 +51,8 @@ watch(
   { immediate: true },
 )
 
-// 🎯 2. 仅清空当前域 Store 关键词（不导航；S9/D7：删空/清空均不回归首页）
+// 🎯 2. 仅清空当前域 Store 关键词（不导航）。懒更新（S9/D7）下删空/✕ 不再调用它，
+// 只有用户显式点「搜索」（triggerSearch 空查询分支）才清空当前搜索并回归首页。
 const clearStoreKeyword = () => {
   if (modeStore.isOffline) {
     offlineSearchConfig.value.keyword = ''
@@ -65,14 +66,12 @@ watch(keyword, (newVal) => {
   const { query } = extractSuggestQuery(newVal)
   const wholeEmpty = !newVal.trim()
 
-  // 输入整体为空：取消未发请求、废弃在途响应（S4），清空 Store 关键词（不回归首页，S9）
+  // 输入整体为空：懒更新（S9/D7）——仅取消未发请求、废弃在途响应、清空联想，
+  // 不写 Store、不导航；URL 保留 kw、列表不重置，由用户显式点「搜索」才清空当前搜索。
   if (wholeEmpty) {
     if (suggestTimer) clearTimeout(suggestTimer)
     suggestSeq++
     suggestedTags.value = []
-    if (activeStoreKeyword.value !== '') {
-      clearStoreKeyword()
-    }
     return
   }
 
@@ -86,13 +85,26 @@ watch(keyword, (newVal) => {
 
   if (suggestTimer) clearTimeout(suggestTimer)
   const seq = ++suggestSeq
+  // 🧹 发新请求前先清空旧联想，避免旧结果在新结果到达前残留/闪烁（修复3a）
+  suggestedTags.value = []
   suggestTimer = window.setTimeout(async () => {
     try {
-      // 只发「最后一个 token」，避免整串（如 group:"da hootch$" large）在字典里无子串匹配
+      // 只发「未完成短语」，避免整串（如 group:"da hootch$" large）在字典里无子串匹配
       const data = await http<TagItem[]>('/tags/suggest', { params: { q: query, limit: 8 } })
-      // 仅当序号最新且最后一个 token 未再变化时写入（S4）
+      // 仅当序号最新且未完成短语未再变化时写入（S4）
       if (seq === suggestSeq && extractSuggestQuery(keyword.value).query === query) {
-        suggestedTags.value = data
+        // 🧹 相关性过滤（修复3a）：仅保留与查询词相关的结果——
+        // 带冒号（用户显式输入命名空间）按 ns:key 匹配；裸词按 key/中文名匹配，
+        // 避免旧后端 matchNS 子串匹配把命名空间命中（如 "la"→female:stockings）混入
+        const ql = query.toLowerCase()
+        const hasColon = ql.includes(':')
+        suggestedTags.value = (Array.isArray(data) ? data : []).filter((t) => {
+          if (!t || typeof t !== 'object') return false
+          const key = (t.key || '').toLowerCase()
+          const name = (t.name || '').toLowerCase()
+          const nsKey = `${t.namespace || ''}:${key}`.toLowerCase()
+          return hasColon ? nsKey.includes(ql) : key.includes(ql) || name.includes(ql)
+        })
       }
     } catch (e) {
       console.error('获取标签联想失败:', e)
@@ -207,10 +219,10 @@ const triggerSearch = (queryText?: string) => {
   }
 }
 
-// 清空按钮：仅清空输入与 Store 关键词，不导航（S9/D7；回归首页由「点击搜索」触发）
+// 清空按钮：懒更新（S9/D7）——仅清空输入框，不写 Store、不导航；
+// URL 保留 kw、列表不重置，由用户显式点「搜索」才清空当前搜索并回归首页
 const handleClearInput = () => {
   keyword.value = ''
-  if (activeStoreKeyword.value !== '') clearStoreKeyword()
 }
 
 // 联想点击：仅替换「最后一个 token」，保留前面已选的 tag，并保持输入焦点便于连续输入多 tag
@@ -375,7 +387,9 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
             class="vertical-tag-item"
             @click="handleTagSuggestClick(tag)"
           >
-            <TagChip :tag="tag" />
+            <!-- disableQuickSearch：联想下拉里点击芯片不触发 TagChip 快捷搜索（在线新开标签/离线跳转），
+                而是冒泡给父级 handleTagSuggestClick 把 tag 插入输入框，支持连续输入多 tag（修复3b） -->
+            <TagChip :tag="tag" :disable-quick-search="true" />
             <span v-if="tag.count" class="tag-count-badge"
               >🔥 {{ tag.count.toLocaleString() }}</span
             >

@@ -50,7 +50,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">扫描时刻</div>
-        <div class="item-subtext">东八区小时（0-23），默认 6 点</div>
+        <div class="item-subtext">系统本地小时（0-23），默认 6 点</div>
       </div>
       <input
         class="num-input"
@@ -140,7 +140,7 @@ const percent = computed(() => {
   return Math.min(100, Math.round((progress.value.done / progress.value.total) * 100))
 })
 
-// 下次预计执行时间：东八区下一个「扫描日 + 扫描时刻」
+// 下次预计执行时间：系统本地时区下一个「扫描日 + 扫描时刻」
 const nextRunLabel = computed(() => {
   if (!setting.value.enableWeeklyScan) return '未启用'
   const now = new Date()

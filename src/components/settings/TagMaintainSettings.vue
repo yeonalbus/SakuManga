@@ -111,7 +111,7 @@
       <div class="item-info">
         <div class="item-title">每日 Tag 刷新</div>
         <div class="item-subtext">
-          每天东八区 {{ setting.refreshHour }}:00 联网核对 E 站画廊，有变动则更新 OnlineTags
+          每天系统本地 {{ setting.refreshHour }}:00 联网核对 E 站画廊，有变动则更新 OnlineTags
         </div>
       </div>
       <label class="toggle-switch">
@@ -123,7 +123,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">每日刷新时刻</div>
-        <div class="item-subtext">东八区小时（0-23），默认 6 点</div>
+        <div class="item-subtext">系统本地小时（0-23），默认 6 点</div>
       </div>
       <input
         class="num-input"
@@ -140,7 +140,7 @@
       <div class="item-info">
         <div class="item-title">每周反向写回 ComicInfo</div>
         <div class="item-subtext">
-          每周{{ weekdayLabel }} {{ setting.writebackHour }}:00（东八区）将数据库 tag 写回
+          每周{{ weekdayLabel }} {{ setting.writebackHour }}:00（系统本地）将数据库 tag 写回
           ComicInfo.xml（zip/cbz 自动重打包）
         </div>
       </div>
@@ -163,7 +163,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">写回时刻</div>
-        <div class="item-subtext">东八区小时（0-23），默认 6 点</div>
+        <div class="item-subtext">系统本地小时（0-23），默认 6 点</div>
       </div>
       <input
         class="num-input"

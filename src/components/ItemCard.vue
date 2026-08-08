@@ -12,6 +12,7 @@ import {
   subscribeActiveDownloads,
 } from '@/stores/downloadTasksStore'
 import { useUI } from '@/composables/useUI'
+import { openComicDetailInNewTab } from '@/utils/detailNav'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
 // 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
@@ -134,18 +135,15 @@ const handlePointerUp = () => {
 // --------------------------------------------------
 // 4. 点击卡片主体：选择模式切换选中，否则跳转详情页
 // --------------------------------------------------
-// 🆕 中键 / Ctrl / Meta + 点击 → 新浏览器标签打开详情（web 原生优势）
+// 🆕 中键 / Ctrl / Meta + 点击 → 新浏览器标签打开详情（web 原生优势；S10 统一入口）
 const openInNewTab = () => {
   if (!props.comic?.id) return
   addHistory(props.comic)
-  let url = ''
-  if (props.comic.source === 'online') {
-    const token = onlineComic.value?.token || ''
-    url = router.resolve({ path: '/online/detail', query: { id: props.comic.id, token } }).href
-  } else {
-    url = router.resolve(`/offline/detail?id=${props.comic.id}`).href
-  }
-  window.open(url, '_blank')
+  openComicDetailInNewTab({
+    id: props.comic.id,
+    token: props.comic.source === 'online' ? onlineComic.value?.token || '' : undefined,
+    source: props.comic.source === 'online' ? 'online' : 'offline',
+  })
 }
 
 const handleCardClick = (event?: MouseEvent) => {
@@ -186,7 +184,8 @@ const handleCardClick = (event?: MouseEvent) => {
       query: { id: props.comic.id, token },
     })
   } else {
-    router.push(`/offline/detail?id=${props.comic.id}`)
+    // S10：离线卡片点击 → 新标签打开详情（返回语义见 S11）
+    openComicDetailInNewTab({ id: props.comic.id, source: 'offline' })
   }
 }
 

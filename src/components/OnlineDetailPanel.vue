@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
+import { openComicDetailInNewTab } from '@/utils/detailNav'
 
 const props = defineProps<{
   open: boolean
@@ -12,16 +12,10 @@ defineEmits<{
   (e: 'close'): void
 }>()
 
-const router = useRouter()
-
-/** 左上角标题作为触发键：点击在新浏览器标签打开完整详情（等价中键 / Ctrl / Meta + 点击） */
+/** 左上角标题作为触发键：点击在新浏览器标签打开完整详情（等价中键 / Ctrl / Meta + 点击；S10 统一入口） */
 const openFullDetail = () => {
   if (!props.open || !props.gid) return
-  const href = router.resolve({
-    path: '/online/detail',
-    query: { id: props.gid, token: props.token },
-  }).href
-  window.open(href, '_blank')
+  openComicDetailInNewTab({ id: props.gid, token: props.token, source: 'online' })
 }
 </script>
 

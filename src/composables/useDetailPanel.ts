@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import {
   getDetailPanelState,
@@ -7,6 +7,7 @@ import {
   closeDetailPanel,
   migrateDetailPanel,
 } from '@/stores/detailPanelStore'
+import { openComicDetailInNewTab } from '@/utils/detailNav'
 
 /**
  * 在线列表页「左右分栏详情面板」Composable
@@ -27,7 +28,6 @@ const WIDE_QUERY = '(min-width: 1025px)'
 
 export function useDetailPanel() {
   const route = useRoute()
-  const router = useRouter()
   const { toast } = useUI()
 
   const isWide = ref(false)
@@ -92,14 +92,12 @@ export function useDetailPanel() {
         isPanelOpen.value = true
         openDetailPanel(route.fullPath, comic.id, comic.token)
       } else {
-        const href = router.resolve({
-          path: '/online/detail',
-          query: { id: comic.id, token: comic.token },
-        }).href
-        window.open(href, '_blank')
+        // S10：宽屏且面板已关闭 → 新标签打开完整详情（统一入口，写新标签标记）
+        openComicDetailInNewTab({ id: comic.id, token: comic.token, source: 'online' })
       }
     } else {
-      router.push({ path: '/online/detail', query: { id: comic.id, token: comic.token || '' } })
+      // S10：在线窄屏 → 新标签打开完整详情（与宽屏面板关闭行为一致）
+      openComicDetailInNewTab({ id: comic.id, token: comic.token || '', source: 'online' })
     }
   }
 

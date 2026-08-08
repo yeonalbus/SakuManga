@@ -5,6 +5,7 @@ import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import OfflineDetailPanel, { type DetailTag } from '@/components/OfflineDetailPanel.vue'
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
+import { openComicDetailInNewTab } from '@/utils/detailNav'
 
 // Round4 任务一：双列对比视图
 //   type=update   → 左=本地原版（GET /comics/:id），右=线上最新版（newGID/newToken 复用 OnlineDetail embedded）
@@ -147,8 +148,8 @@ const goBack = () => {
 
 const openFullDetail = (comic: { id: string } | null) => {
   if (!comic?.id) return
-  const href = router.resolve({ path: '/offline/detail', query: { id: comic.id } }).href
-  window.open(href, '_blank')
+  // S10：统一入口打开离线详情新标签（写新标签标记，返回时关闭标签）
+  openComicDetailInNewTab({ id: comic.id, source: 'offline' })
 }
 
 // 更新类型：下载新版（复用 /offline/updates/download）

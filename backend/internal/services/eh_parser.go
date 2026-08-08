@@ -99,6 +99,40 @@ func parseRatingFromStyle(style string) float64 {
 	return 0.0
 }
 
+// toplistRatingPosRegex 匹配排行榜评分雪碧图 background-position 的 X/Y 偏移
+// （形如 "background-position:0px -21px"）
+var toplistRatingPosRegex = regexp.MustCompile(`background-position:\s*(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px`)
+
+// parseToplistRatingFromStyle 解析 E 站排行榜评分雪碧图（横向布局）。
+//
+// E 站 .ir 评分雪碧：background-position:Xpx Ypx
+//   X（整星横向位置）：0px→5.0, -16px→4.0, -32px→3.0, -48px→2.0, -64px→1.0
+//     即每向左移 16px 降 1 星（base = 5.0 + x/16.0）
+//   Y（行偏移）：-1px=满星行, -21px=半星行（-0.5）
+// 实测样本：0px -1px→5.0, 0px -21px→4.5, -32px -21px→2.5, -48px -1px→2.0
+func parseToplistRatingFromStyle(style string) float64 {
+	m := toplistRatingPosRegex.FindStringSubmatch(style)
+	if len(m) < 3 {
+		return 0.0
+	}
+	x, _ := strconv.ParseFloat(m[1], 64)
+	y, _ := strconv.ParseFloat(m[2], 64)
+
+	base := 5.0 + x/16.0
+	half := 0.0
+	if y <= -20 {
+		half = 0.5
+	}
+	r := base - half
+	if r < 0 {
+		return 0.0
+	}
+	if r > 5 {
+		return 5.0
+	}
+	return r
+}
+
 func parseTotalPagesByCount(doc *goquery.Document) int {
 	var targetText string
 	doc.Find("p, div, span").EachWithBreak(func(i int, s *goquery.Selection) bool {

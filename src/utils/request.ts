@@ -2,8 +2,24 @@
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 import { networkSettings } from '@/stores/networkSettings'
 
+/** 统一 HTTP 错误：携带状态码，供调用方区分「会话失效(401)」与普通/网络错误 */
+export class HttpError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+  }
+}
+
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>
+  /**
+   * 置位时 401 不触发全局登出（不清 token、不 dispatch app:unauthorized），仅抛错。
+   * 用于登录等本就预期返回 401 的接口（如密码错误），避免「登录失败」被当作「会话失效」处理。
+   */
+  skipAuthRedirect?: boolean
 }
 
 /**
@@ -70,8 +86,9 @@ export async function http<T = unknown>(
     unauthorizedHandled = false
     return response.json()
   }
-  // 会话失效：清除本地 token 并通知应用层跳转登录页（去重，见 unauthorizedHandled 注释）
-  if (response.status === 401) {
+  // 会话失效：清除本地 token 并通知应用层跳转登录页（去重，见 unauthorizedHandled 注释）。
+  // skipAuthRedirect 置位时（如 /auth/login 密码错误）跳过全局登出语义，仅抛错由调用方处理。
+  if (response.status === 401 && !options.skipAuthRedirect) {
     localStorage.removeItem(TOKEN_KEY)
     if (!unauthorizedHandled) {
       unauthorizedHandled = true
@@ -79,5 +96,5 @@ export async function http<T = unknown>(
     }
   }
   const errData = await response.json().catch(() => ({}))
-  throw new Error(errData.error || `HTTP 错误 ${response.status}`)
+  throw new HttpError(response.status, errData.error || `HTTP 错误 ${response.status}`)
 }

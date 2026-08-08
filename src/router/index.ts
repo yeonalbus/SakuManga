@@ -5,6 +5,21 @@ import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMem
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { useUserStore } from '@/stores/userStore'
 
+/**
+ * 依据「启动时默认菜单」偏好解析落地页。
+ * 供 `/` 根路径重定向、登录守卫、登录页无 redirect 参数时的 fallback 三处共用，
+ * 保证所有入口行为一致（否则已登录访问 /login 会被硬编码送回 /online/home，与默认启动偏好不一致）。
+ */
+export function resolveDefaultLandingPath(): string {
+  const startupMap: Record<string, string> = {
+    hot: '/online/hot',
+    home: '/online/home',
+    sub: '/online/sub',
+    fav: '/online/favorites',
+  }
+  return startupMap[preferenceSettings.defaultStartupMenu] ?? '/online/home'
+}
+
 //显式声明 : RouteRecordRaw[]
 const routes: RouteRecordRaw[] = [
   {
@@ -14,16 +29,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: () => {
-      // 依据「启动时默认菜单」偏好选择落地页（见偏好设置）
-      const startupMap: Record<string, string> = {
-        hot: '/online/hot',
-        home: '/online/home',
-        sub: '/online/sub',
-        fav: '/online/favorites',
-      }
-      return startupMap[preferenceSettings.defaultStartupMenu] ?? '/online/home'
-    },
+    redirect: resolveDefaultLandingPath,
   },
   {
     path: '/online/home',
@@ -164,7 +170,8 @@ router.beforeEach((to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (token && isLoginPage) {
-    return { path: '/online/home' }
+    // 已登录访问登录页：送回「启动时默认菜单」对应的落地页（与 / 根路径一致）
+    return { path: resolveDefaultLandingPath() }
   }
   return true
 })

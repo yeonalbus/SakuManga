@@ -43,6 +43,7 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { loadUserLibrary } from '@/stores/libraryInit'
+import { resolveDefaultLandingPath } from '@/router'
 
 const router = useRouter()
 const route = useRoute()
@@ -64,8 +65,9 @@ async function handleLogin() {
     await userStore.login(username.value.trim(), password.value)
     // 登录成功后加载当前用户的库数据（书架/历史/阅读清单/评分 + 旧数据迁移）
     loadUserLibrary()
+    // 无 redirect 参数时按「启动时默认菜单」偏好落地（与 / 根路径、登录守卫一致）
     const redirect =
-      typeof route.query.redirect === 'string' ? route.query.redirect : '/online/home'
+      typeof route.query.redirect === 'string' ? route.query.redirect : resolveDefaultLandingPath()
     await router.replace(redirect)
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : '登录失败，请检查用户名和密码'

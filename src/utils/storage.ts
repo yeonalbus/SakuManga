@@ -25,8 +25,10 @@ const isQuotaError = (e: unknown): boolean =>
 /** 阅读进度存储 key 前缀（每个账号一个 Map） */
 const PROGRESS_KEY_PREFIX = 'saku_comic_progress:'
 
-/** 每个账号阅读进度最多保留的条目数（超出删除最旧，进度可重新积累） */
-const MAX_PROGRESS_ENTRIES = 300
+/** 每个账号阅读进度最多保留的条目数（超出删除最旧，进度可重新积累）。
+ *  唯一权威定义：阅读进度写入（readingProgress.ts）与配额回收（本文件）共用，
+ *  避免两侧阈值不一致导致 301~500 条区间漏过第一层回收。 */
+export const MAX_PROGRESS_ENTRIES = 300
 
 /**
  * 裁剪全部阅读进度 Map：每个账号只保留最近 MAX 条；解析失败直接删除该 key。

@@ -9,6 +9,8 @@
 import { reactive, watch } from 'vue'
 import { loadStorage, saveStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
+import { API_BASE, TOKEN_KEY } from '@/config/api'
+import { onPageHide } from '@/utils/pageHideFlush'
 
 /** 速度限制时间间隔单位 */
 export type SpeedLimitInterval = '1s' | '2s' | '5s'
@@ -153,11 +155,15 @@ let syncing = false
 /** 保存后端防抖计时器：避免滑块等高频修改触发大量 POST */
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 是否存在尚未同步到后端的本地改动（页面隐藏时据此 keepalive 兜底 flush，避免防抖窗口内关闭丢失） */
+let pendingSave = false
+
 watch(
   downloadSettings,
   (val) => {
     saveStorage(STORAGE_KEY, val)
     if (!syncing) {
+      pendingSave = true
       scheduleSaveDownloadSettings()
     }
   },
@@ -192,12 +198,17 @@ export async function fetchDownloadSettings(): Promise<void> {
 function scheduleSaveDownloadSettings(): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
+    saveTimer = null
     http<unknown>('/downloads/settings', {
       method: 'POST',
       body: JSON.stringify(downloadSettings),
-    }).catch((err) => {
-      console.warn('[downloadSettings] 保存后端设置失败:', err)
     })
+      .then(() => {
+        pendingSave = false
+      })
+      .catch((err) => {
+        console.warn('[downloadSettings] 保存后端设置失败:', err)
+      })
   }, 300)
 }
 
@@ -238,3 +249,30 @@ export function isUsingDefaultDownloadPaths(): boolean {
 
 // 应用启动即拉取一次后端设置，保证任意页面读取到最新值
 fetchDownloadSettings()
+
+// 页面隐藏（关闭/刷新/切后台）时兜底 flush：若防抖窗口内存在未落盘的改动，
+// 立即用 keepalive fetch 同步到后端（带鉴权头），避免「改完立即关闭页面」导致改动丢失。
+// 回调幂等：pendingSave 置位才上报，pagehide 与 beforeunload 双触发只上报一次。
+onPageHide(() => {
+  if (!pendingSave) return
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  pendingSave = false
+  const token = localStorage.getItem(TOKEN_KEY)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  try {
+    void fetch(`${API_BASE}/downloads/settings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(downloadSettings),
+      keepalive: true,
+    }).catch(() => {
+      /* 页面卸载中失败可忽略（尽力而为） */
+    })
+  } catch {
+    /* 兜底失败静默（页面即将卸载） */
+  }
+})

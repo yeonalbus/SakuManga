@@ -2,7 +2,7 @@
 // 登录会话管理：token 存 localStorage，登录 / 登出 / 恢复会话
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { http } from '@/utils/request'
+import { http, HttpError } from '@/utils/request'
 import { safeSetItem } from '@/utils/storage'
 import { TOKEN_KEY } from '@/config/api'
 import type { UserInfo, LoginResult } from '@/types/user'
@@ -28,10 +28,12 @@ export const useUserStore = defineStore('user', () => {
   }
 
   // 登录成功后写入 token 与用户信息
+  // skipAuthRedirect：密码错误等 401 不应触发全局「会话失效」登出语义，仅由登录页展示错误
   async function login(username: string, password: string): Promise<UserInfo> {
     const data = await http<LoginResult>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
+      skipAuthRedirect: true,
     })
     setToken(data.token)
     user.value = data.user
@@ -39,16 +41,20 @@ export const useUserStore = defineStore('user', () => {
   }
 
   // 恢复会话：本地有 token 时向服务端校验并加载用户信息
-  // 返回是否恢复成功（token 失效 / 网络失败返回 false，不抛异常）
+  // 返回是否恢复成功（token 失效 / 网络失败返回 false，不抛异常）。
+  // 仅 401（会话确实失效，http() 已同时 dispatch app:unauthorized 全局清理）才清空本地 token；
+  // 网络错误/超时保留 token，避免瞬时网络波动导致用户被误登出。
   async function fetchMe(): Promise<boolean> {
     if (!token.value) return false
     try {
       const data = await http<{ user: UserInfo }>('/auth/me')
       user.value = data.user
       return true
-    } catch {
-      setToken('')
-      user.value = null
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 401) {
+        setToken('')
+        user.value = null
+      }
       return false
     }
   }

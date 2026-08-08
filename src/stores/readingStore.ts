@@ -5,6 +5,8 @@
 import { ref } from 'vue'
 import type { ComicItem } from '@/types/comic'
 import { http } from '@/utils/request'
+import { API_BASE, TOKEN_KEY } from '@/config/api'
+import { onPageHide } from '@/utils/pageHideFlush'
 
 /** 在线阅读清单 */
 export const onlineReadingList = ref<ComicItem[]>([])
@@ -98,3 +100,30 @@ export const getNextComicInQueue = (
 
   return list[currentIndex + 1]
 }
+
+// 页面隐藏（关闭/刷新/切后台）时兜底 flush：若防抖窗口内存在未同步的阅读清单，
+// 立即用 keepalive fetch 将最新整表 PUT 到后端（幂等整体覆盖），避免「改完立即关闭」丢失改动。
+// 回调幂等：有挂起计时器的 source 才上报；与在途写入链的极小时序竞态可忽略（后端按整表覆盖）。
+onPageHide(() => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  ;(['online', 'offline'] as const).forEach((source) => {
+    if (!syncTimers[source]) return
+    clearTimeout(syncTimers[source] as ReturnType<typeof setTimeout>)
+    syncTimers[source] = null
+    const list = source === 'online' ? onlineReadingList.value : offlineReadingList.value
+    try {
+      void fetch(`${API_BASE}/reading-list`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ source, items: list }),
+        keepalive: true,
+      }).catch(() => {
+        /* 页面卸载中失败可忽略（尽力而为） */
+      })
+    } catch {
+      /* 兜底失败静默（页面即将卸载） */
+    }
+  })
+})

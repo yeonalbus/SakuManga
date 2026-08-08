@@ -5,7 +5,7 @@
  * - 进度 key 按账号隔离：`saku_comic_progress:<uid>`（未登录回退 anonymous）
  * - `resolveResumePage`：历史入口总是恢复；非历史入口遵循偏好开关；无记录返回 null（= 第 1 页）
  */
-import { safeSetItem } from '@/utils/storage'
+import { safeSetItem, MAX_PROGRESS_ENTRIES } from '@/utils/storage'
 import { useUserStore } from '@/stores/userStore'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { getHistoryProgress } from '@/stores/historyStore'
@@ -23,10 +23,9 @@ export const getProgressMap = (uid: string): Record<string, number> => {
   }
 }
 
-/** 进度 Map 上限条数（超出删除最旧，保证最近读的优先保留） */
-export const MAX_PROGRESS_ENTRIES = 500
-
-/** 保存指定账号的作品阅读进度（在线/离线分开存储，避免 id 冲突） */
+/** 保存指定账号的作品阅读进度（在线/离线分开存储，避免 id 冲突）。
+ *  容量上限 MAX_PROGRESS_ENTRIES 统一引用 storage.ts 的权威定义（300），
+ *  与配额回收阈值保持一致，避免「写入保 500 / 回收裁 300」的漏网区间。 */
 export const saveProgress = (uid: string, src: ComicSource, id: string, page: number): void => {
   if (!id) return
   const map = getProgressMap(uid)

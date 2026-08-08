@@ -1,0 +1,1 @@
+import{f as e,j as t,l as n,t as r}from"./_plugin-vue_export-helper-Cvkktjkp.js";var i={};function a(r,i){return t(),e(`div`,null,[...i[0]||=[n(`h1`,null,`挖藕，页面找不到惹`,-1)]])}var o=r(i,[[`render`,a]]);export{o as default};

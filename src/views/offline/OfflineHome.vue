@@ -129,6 +129,14 @@ const handleDeleteSelected = async () => {
 
 const route = useRoute()
 
+// 需求2：URL 驱动搜索——新标签打开 /offline/home?kw=xxx 时写入离线搜索配置，
+// filteredComics 是响应式 computed，写入后自动生效（须在下方 watch 注册前执行，
+// 避免初始设置触发多余动作）。在线端对应逻辑见 OnlineHome.vue 的 kwFromUrl。
+const kwFromUrl = route.query.kw
+if (typeof kwFromUrl === 'string' && kwFromUrl.trim()) {
+  offlineSearchConfig.value.keyword = kwFromUrl.trim()
+}
+
 // 需求2：本地 tag 搜索——同时匹配翻译名(tags)与原始 tag 串(tagRaws)，二者在 store 中均已归一为 string[]
 const comicTagStrings = (comic: ComicItem): string[] => {
   const out: string[] = []

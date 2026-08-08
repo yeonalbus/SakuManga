@@ -4,7 +4,6 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   onlineSearchConfig,
   offlineSearchConfig,
-  applySearchOptionsInherit,
 } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import { useModeStore } from '@/stores/modeStore'
@@ -90,7 +89,7 @@ watch(keyword, (newVal) => {
   suggestTimer = window.setTimeout(async () => {
     try {
       // 只发「未完成短语」，避免整串（如 group:"da hootch$" large）在字典里无子串匹配
-      const data = await http<TagItem[]>('/tags/suggest', { params: { q: query, limit: 8 } })
+      const data = await http<TagItem[]>('/tags/suggest', { params: { q: query, limit: 20 } })
       // 仅当序号最新且未完成短语未再变化时写入（S4）
       if (seq === suggestSeq && extractSuggestQuery(keyword.value).query === query) {
         // 🧹 相关性过滤（修复3a）：仅保留与查询词相关的结果——
@@ -153,7 +152,7 @@ const safeSuggestedTags = computed<TagItem[]>(() => {
       count: typeof t.count === 'number' && Number.isFinite(t.count) ? t.count : 0,
     }))
     .filter((t) => t.key !== '')
-    .slice(0, 8)
+    .slice(0, 20)
 })
 
 // 🔗 E-Hentai 直链 / 裸 gid/token 解析
@@ -197,9 +196,9 @@ const triggerSearch = (queryText?: string) => {
     return
   }
 
-  // 🎯 依据「搜索选项继承」偏好，提交新搜索前重置不应继承的筛选条件
-  applySearchOptionsInherit(currentScope.value)
-
+  // 🎯 需求2：搜索改在「新浏览器标签」中打开（在线 / 离线一致）——
+  // 不在原标签重置筛选、写 Store 或导航，保留输入内容与列表/滚动/详情面板状态；
+  // 新标签页由 OnlineHome / OfflineHome 从 URL kw 初始化并自动搜索。
   keyword.value = finalQuery
 
   if (!searchHistory.value.includes(finalQuery)) {
@@ -208,15 +207,9 @@ const triggerSearch = (queryText?: string) => {
   }
 
   isFocused.value = false
-  const isOffline = modeStore.isOffline
-
-  if (isOffline) {
-    offlineSearchConfig.value.keyword = finalQuery
-    if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
-  } else {
-    onlineSearchConfig.value.keyword = finalQuery
-    if (!route.path.startsWith('/online/home')) router.push('/online/home')
-  }
+  const targetPath = modeStore.isOffline ? '/offline/home' : '/online/home'
+  const url = router.resolve({ path: targetPath, query: { kw: finalQuery } }).href
+  window.open(url, '_blank')
 }
 
 // 清空按钮：懒更新（S9/D7）——仅清空输入框，不写 Store、不导航；
@@ -583,6 +576,26 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 需求1：联想词增多（limit 20）时保持下拉框尺寸不变，列表内部滚动（自定义滚动条） */
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+/* 需求1：联想列表自定义细滚动条（暗色主题） */
+.vertical-tag-list::-webkit-scrollbar {
+  width: 6px;
+}
+.vertical-tag-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.vertical-tag-list::-webkit-scrollbar-thumb {
+  background-color: var(--app-border-3, rgba(255, 255, 255, 0.18));
+  border-radius: 3px;
+}
+.vertical-tag-list::-webkit-scrollbar-thumb:hover {
+  background-color: #007acc;
 }
 
 .vertical-tag-item {

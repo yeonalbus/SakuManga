@@ -31,15 +31,38 @@ page.setDefaultTimeout(30000)
 let pass = true
 
 // ---------- 可选：拦截 /api/tags/suggest，返回确定性数据 ----------
+// ⚠️ 用 context.route 而非 page.route：需求2 搜索新标签（window.open）是独立 Page，
+//    需让联想拦截在新标签中也生效（page.route 只作用于绑定页）。
 if (MOCK) {
-  await page.route('**/tags/suggest**', async (route) => {
+  await context.route('**/tags/suggest**', async (route) => {
     const u = new URL(route.request().url())
     const q = (u.searchParams.get('q') || '').toLowerCase()
+    const mk = (ns, key, name, count) => ({ namespace: ns, key, name, count })
     let items = []
     if (q.includes('penis') || q.includes('huge')) {
+      // 需求1：热度协同排序（huge penis 36080 第一、penis enlargement 21051 第二）
+      // + limit 20 验证：返回 20 条（> 旧上限 8），供联想框滚动条回归断言
       items = [
-        { namespace: 'male', key: 'huge penis', name: 'huge penis', count: 12345 },
-        { namespace: 'male', key: 'big penis', name: 'big penis', count: 8888 },
+        mk('male', 'huge penis', 'huge penis', 36080),
+        mk('male', 'penis enlargement', 'penis enlargement', 21051),
+        mk('male', 'big penis', 'big penis', 8888),
+        mk('male', 'penis ring', 'penis ring', 7777),
+        mk('male', 'penis pump', 'penis pump', 6666),
+        mk('male', 'small penis', 'small penis', 5555),
+        mk('female', 'penis in vagina', 'penis in vagina', 4444),
+        mk('female', 'penis on penis', 'penis on penis', 3333),
+        mk('male', 'penis gag', 'penis gag', 2222),
+        mk('male', 'penis torture', 'penis torture', 1111),
+        mk('male', 'penis job', 'penis job', 999),
+        mk('male', 'penis slip', 'penis slip', 888),
+        mk('male', 'penis tickling', 'penis tickling', 777),
+        mk('male', 'penis worship', 'penis worship', 666),
+        mk('male', 'penis growth', 'penis growth', 555),
+        mk('male', 'penis inflation', 'penis inflation', 444),
+        mk('male', 'penis shrinking', 'penis shrinking', 333),
+        mk('male', 'penis clamp', 'penis clamp', 222),
+        mk('male', 'penis butt', 'penis butt', 111),
+        mk('male', 'penis nail', 'penis nail', 88),
       ]
     } else if (q.includes('la')) {
       // 模拟旧后端「命名空间子串匹配」噪音：stockings(key/name 不含 la) 与
@@ -55,7 +78,7 @@ if (MOCK) {
     }
     await route.fulfill({ json: items })
   })
-  log('INFO', `已启用 /api/tags/suggest 路由拦截（MOCK=1）`)
+  log('INFO', `已启用 /api/tags/suggest 路由拦截（MOCK=1，context 级）`)
 }
 
 const inputSel = '.search-input'
@@ -191,6 +214,130 @@ async function testD() {
   }
 }
 
+// ==================== 测试E：需求1 热度协同排序 + limit 20 + 联想框滚动条 ====================
+async function testE() {
+  await gotoOnlineHome()
+  let items = []
+  try {
+    items = await typeAndGetSuggestions('penis')
+  } catch {
+    log('INFO', `[E] 输入 "penis" 后未出现联想项，跳过排序/滚动断言`)
+    return
+  }
+  log('INFO', `[E] 输入 "penis" 联想项数=${items.length}，首项=${esc(items[0])}`)
+  if (items.length === 0) {
+    log('FAIL', `[E] 输入 "penis" 无联想项`)
+    pass = false
+    return
+  }
+
+  // 断言1：热度协同——huge penis(36080) 应排在 penis enlargement(21051) 之前
+  const idxHuge = items.findIndex((s) => s.includes('huge penis'))
+  const idxEnlarge = items.findIndex((s) => s.includes('penis enlargement'))
+  const okOrder = MOCK
+    ? idxHuge === 0
+    : idxHuge !== -1 && idxEnlarge !== -1 && idxHuge < idxEnlarge
+  log(
+    okOrder ? 'PASS' : 'FAIL',
+    `[E] 热度协同排序：huge penis(idx=${idxHuge}) 应在 penis enlargement(idx=${idxEnlarge}) 之前`,
+  )
+  if (!okOrder) pass = false
+
+  // 断言2：limit 提高到 20 → 展示条数应超过旧上限 8
+  const okCount = items.length > 8
+  log(okCount ? 'PASS' : 'FAIL', `[E] 联想条数=${items.length}（应 >8，验证 limit 20）`)
+  if (!okCount) pass = false
+
+  // 断言3：联想框尺寸不变但内部可滚动（scrollHeight>clientHeight 且 overflow-y 滚动）
+  let scrollable = false
+  try {
+    scrollable = await page.evaluate(() => {
+      const el = document.querySelector('.vertical-tag-list')
+      if (!el) return false
+      const cs = getComputedStyle(el)
+      return (
+        el.scrollHeight > el.clientHeight &&
+        (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
+      )
+    })
+  } catch {
+    scrollable = false
+  }
+  log(
+    scrollable ? 'PASS' : 'FAIL',
+    `[E] 联想框内部可滚动（scrollHeight>clientHeight 且 overflowY 滚动）`,
+  )
+  if (!scrollable) pass = false
+}
+
+// ==================== 测试F：需求2 搜索在新标签打开（在线-点击 / 离线-回车） ====================
+async function runNewTabCase(label, path, kw, useEnter) {
+  await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.waitForSelector(inputSel, { timeout: 30000 })
+  await sleep(800)
+  await page.click(inputSel)
+  await page.fill(inputSel, kw)
+  await sleep(400)
+  const beforeUrl = page.url()
+  const pagesBefore = page.context().pages().length
+
+  const popupPromise = page.context().waitForEvent('page', { timeout: 10000 }).catch(() => null)
+  if (useEnter) {
+    await page.keyboard.press('Enter')
+  } else {
+    await page.click(searchBtnSel)
+  }
+  const newPage = await popupPromise
+  if (newPage) {
+    await newPage.waitForURL((u) => u.href !== 'about:blank', { timeout: 10000 }).catch(() => {})
+  }
+  await sleep(1500)
+
+  const pages = page.context().pages()
+  const afterUrl = page.url()
+  const v1 = await inputValue().catch(() => '')
+
+  // 断言1：确实新开了标签页
+  const opened = !!newPage && pages.length > pagesBefore
+  log(opened ? 'PASS' : 'FAIL', `[F-${label}] 新开标签：标签数 ${pagesBefore}→${pages.length}`)
+
+  // 断言2：新标签 URL 携带 kw（path 一致）
+  let okUrl = false
+  if (newPage) {
+    try {
+      const u = new URL(newPage.url())
+      okUrl = u.pathname === path && u.searchParams.get('kw') === kw
+    } catch {
+      okUrl = false
+    }
+  }
+  log(
+    okUrl ? 'PASS' : 'FAIL',
+    `[F-${label}] 新标签 URL=${newPage ? newPage.url() : '(无)'}（期望 path=${path} kw=${kw}）`,
+  )
+
+  // 断言3：原标签保留输入、URL 未跳转（不带 kw）
+  const keptInput = v1 === kw
+  const noNav = afterUrl === beforeUrl
+  log(
+    keptInput && noNav ? 'PASS' : 'FAIL',
+    `[F-${label}] 原标签保留输入=${esc(v1)} 且未导航（URL=${afterUrl}）`,
+  )
+
+  if (!opened || !okUrl || !keptInput || !noNav) pass = false
+
+  // 清理新开标签，避免污染后续用例
+  for (const p of page.context().pages()) {
+    if (p !== page) await p.close().catch(() => {})
+  }
+  await sleep(300)
+}
+
+async function testF() {
+  await runNewTabCase('online-点击', '/online/home', 'solo', false)
+  await runNewTabCase('offline-回车', '/offline/home', '巨根', true)
+}
+
 // ==================== 主流程 ====================
 try {
   await login()
@@ -200,6 +347,8 @@ try {
   await testB()
   await testC()
   await testD()
+  await testE()
+  await testF()
 
   log(pass ? 'RESULT PASS' : 'RESULT FAIL', pass ? '全部断言通过' : '存在失败断言')
 } catch (e) {

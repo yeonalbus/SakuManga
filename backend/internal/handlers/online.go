@@ -356,6 +356,22 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		detail = services.AttachDetailFavoriteState(h.db, account.ID, detail)
 	}
 
+	// 3. 本地优先（S1）：开启本地优先且按 GID 查到本地 OfflineComic 时附加 local 信息
+	//    元数据与评论仍在线抓取；前端据此将预览/阅读页图改走本地接口 /comics/:id/page/:index
+	preferLocal := c.Query("preferLocal") == "1" || c.Query("preferLocal") == "true"
+	if preferLocal && detail != nil {
+		var local models.OfflineComic
+		if err := h.db.Where("g_id = ?", gid).First(&local).Error; err == nil {
+			detail.Local = &services.GalleryLocalInfo{
+				ComicID:     local.ID,
+				PageCount:   local.PageCount,
+				CoverURL:    local.CoverURL,
+				LocalPath:   local.LocalPath,
+				HasComments: len(detail.Comments) > 0,
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, detail)
 }
 

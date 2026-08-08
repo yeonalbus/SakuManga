@@ -58,6 +58,18 @@
       </select>
     </div>
 
+    <!-- S1 本地优先加载 -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">本地优先加载</div>
+        <div class="item-subtext">在线画廊已有本地副本时，详情页预览/阅读优先使用本地文件（评论仍在线拉取）</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="preferenceSettings.preferLocalGallery" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <div class="reset-row">
       <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>

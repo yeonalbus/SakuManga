@@ -12,6 +12,7 @@ import { markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
 import { isDetailNewTab } from '@/utils/detailNav'
+import { API_BASE } from '@/config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -83,6 +84,14 @@ interface OnlineDetailDTO {
   maxPreviewPage?: number
   previewPages?: PreviewPageDTO[]
   comments?: { id: number; user: string; date: string; content: string }[]
+  // S1 本地优先：后端附加的本地副本信息（存在同 GID 本地画廊时返回）
+  local?: {
+    comicId: string
+    pageCount: number
+    coverUrl: string
+    localPath: string
+    hasComments: boolean
+  }
 }
 
 // 详情页扩展数据模型
@@ -119,6 +128,21 @@ const comic = ref<GalleryDetail>(createEmptyComic(effectiveGid.value, effectiveT
 // 详情加载失败信息（如画廊已删除/不可用/版权下架），非空时展示错误态
 const detailError = ref('')
 
+// S1 本地优先：后端附加的本地副本信息（有本地副本且开启本地优先时非空）
+interface LocalVersionInfo {
+  comicId: string
+  pageCount: number
+  coverUrl: string
+  localPath: string
+  hasComments: boolean
+}
+const localVersion = ref<LocalVersionInfo | null>(null)
+const useOnlineOverride = ref(false) // 手动切回在线版本（不改设置项，仅本次查看）
+const isLocalMode = computed(() => !!localVersion.value && !useOnlineOverride.value)
+// 在线预览切片缓存（手动切回在线版本时恢复）
+const onlinePreviewPages = ref<PreviewPageItem[]>([])
+const onlineMaxPreviewPage = ref(1)
+
 // 1. 获取画廊真实详情 (仅抓取 p=0 基础元数据与初始预览图)
 const fetchDetail = async () => {
   const gid = effectiveGid.value
@@ -133,8 +157,13 @@ const fetchDetail = async () => {
   isLoading.value = true
   detailError.value = ''
   try {
+    // S1：开启本地优先时附带 preferLocal=1，后端在本地库存在同 GID 画廊时附加 local 信息
     const data = await http<OnlineDetailDTO>('/comics/online/detail', {
-      params: { id: gid, token },
+      params: {
+        id: gid,
+        token,
+        ...(preferenceSettings.preferLocalGallery ? { preferLocal: 1 } : {}),
+      },
     })
 
     // 1. fetchDetail 内部的映射：
@@ -163,12 +192,68 @@ const fetchDetail = async () => {
     currentPreviewPage.value = 1
 
     addHistory(comic.value)
+
+    // S1 本地优先：记录本地副本信息与在线预览缓存，供徽章/切回在线版本使用
+    onlinePreviewPages.value = [...formattedInitialPreviews]
+    onlineMaxPreviewPage.value = data.maxPreviewPage || 1
+    localVersion.value = data.local || null
+    useOnlineOverride.value = false
+
+    // 本地模式：预览/阅读页图改走本地接口；加载失败则降级为在线预览
+    if (isLocalMode.value) {
+      const ok = await loadLocalPreviewPages()
+      if (!ok) localVersion.value = null
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : '获取画廊详情失败'
     detailError.value = msg
     toast.error(msg)
   } finally {
     isLoading.value = false
+  }
+}
+
+// S1 本地优先：加载本地页图列表并重建预览切片（0-based index 对应 /comics/:id/page/:index）
+const LOCAL_PREVIEW_BATCH = 40
+const loadLocalPreviewPages = async (): Promise<boolean> => {
+  const lv = localVersion.value
+  if (!lv) return false
+  try {
+    const res = await http<{ total: number; pages?: string[] }>(`/comics/${lv.comicId}/pages`)
+    const total = res.total || lv.pageCount || 0
+    if (total <= 0) return false
+    comic.value.pageCount = total
+    const count = Math.min(total, LOCAL_PREVIEW_BATCH)
+    comic.value.previewPages = Array.from({ length: count }, (_, i) => ({
+      pageIndex: i + 1,
+      url: `${API_BASE}/comics/${lv.comicId}/page/${i}`,
+      isSprite: false,
+      width: 100,
+      height: 130,
+    }))
+    maxPreviewPage.value = Math.ceil(total / LOCAL_PREVIEW_BATCH)
+    currentPreviewPage.value = 1
+    return true
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '加载本地版本失败，已使用在线预览')
+    return false
+  }
+}
+
+// S1 手动切回在线版本（不改动设置项，仅本次查看使用在线预览）
+const switchToOnline = () => {
+  useOnlineOverride.value = true
+  comic.value.previewPages = [...onlinePreviewPages.value]
+  maxPreviewPage.value = onlineMaxPreviewPage.value
+  currentPreviewPage.value = 1
+}
+
+// S1 从在线版本切回本地版本
+const switchToLocal = async () => {
+  useOnlineOverride.value = false
+  if (localVersion.value) {
+    const ok = await loadLocalPreviewPages()
+    if (!ok) localVersion.value = null
   }
 }
 
@@ -180,6 +265,25 @@ const handleLoadMorePreviews = async () => {
   const nextPage = currentPreviewPage.value + 1
 
   try {
+    // S1 本地模式：直接追加本地页图（无需网络请求）
+    if (isLocalMode.value && localVersion.value) {
+      const lv = localVersion.value
+      const total = comic.value.pageCount || 0
+      const start = comic.value.previewPages.length
+      const end = Math.min(start + LOCAL_PREVIEW_BATCH, total)
+      for (let i = start; i < end; i++) {
+        comic.value.previewPages.push({
+          pageIndex: i + 1,
+          url: `${API_BASE}/comics/${lv.comicId}/page/${i}`,
+          isSprite: false,
+          width: 100,
+          height: 130,
+        })
+      }
+      currentPreviewPage.value = nextPage
+      return
+    }
+
     const newPreviews = await http<PreviewPageDTO[]>('/comics/online/previews', {
       params: {
         id: comic.value.id,
@@ -270,6 +374,18 @@ const favColors: Record<number, string> = {
 
 // 5. 点击预览切片直接跳页阅读
 const handleStartReading = (targetPage: number = 1) => {
+  // S1 本地优先：有本地副本且未手动切回在线 → 走本地阅读（/reader source=offline）
+  if (isLocalMode.value && localVersion.value) {
+    router.push({
+      path: '/reader',
+      query: {
+        id: localVersion.value.comicId,
+        source: 'offline',
+        page: targetPage,
+      },
+    })
+    return
+  }
   router.push({
     path: '/reader',
     query: {
@@ -487,6 +603,8 @@ watch(
     currentPreviewPage.value = 0
     maxPreviewPage.value = 1
     showDownloadPanel.value = false
+    localVersion.value = null
+    useOnlineOverride.value = false
     fetchDetail()
   },
 )
@@ -547,6 +665,17 @@ watch(
             ⬇️ 下载
           </button>
         </div>
+      </div>
+
+      <!-- S1 本地优先：本地版本徽章 + 手动切回在线/本地 -->
+      <div v-if="localVersion" class="local-badge-row" :class="{ 'is-online': useOnlineOverride }">
+        <span class="local-badge" :class="{ online: useOnlineOverride }">
+          {{ useOnlineOverride ? '🌐 在线版本' : '📚 本地版本' }}
+        </span>
+        <button v-if="!useOnlineOverride" class="switch-version-btn" @click="switchToOnline">
+          切回在线版本
+        </button>
+        <button v-else class="switch-version-btn" @click="switchToLocal">使用本地版本</button>
       </div>
 
       <!-- 标题与英文/译名标题 -->
@@ -823,6 +952,54 @@ watch(
 </template>
 
 <style scoped>
+/* S1 本地优先：本地版本徽章行 */
+.local-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+}
+
+.local-badge-row.is-online {
+  border-color: rgba(90, 160, 255, 0.4);
+}
+
+.local-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text-strong);
+  padding: 3px 10px;
+  border-radius: 6px;
+  background-color: rgba(88, 196, 132, 0.15);
+  border: 1px solid rgba(88, 196, 132, 0.5);
+}
+
+.local-badge.online {
+  background-color: rgba(90, 160, 255, 0.15);
+  border-color: rgba(90, 160, 255, 0.5);
+}
+
+.switch-version-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.switch-version-btn:hover {
+  border-color: #ff7588;
+  color: var(--app-text-strong);
+}
+
 .detail-page {
   padding: 20px;
   max-width: 1100px;

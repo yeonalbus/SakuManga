@@ -84,6 +84,18 @@ type GalleryDetailResult struct {
 	IsFavorite       bool              `json:"isFavorite"`
 	FavIndex         *int              `json:"favIndex"`
 	MaxPreviewPage   int               `json:"maxPreviewPage"`
+	Local            *GalleryLocalInfo `json:"local,omitempty"` // S1 本地优先：本地库存在同 GID 画廊时附加
+}
+
+// GalleryLocalInfo 详情页「本地优先」（S1）附加信息
+// 开启本地优先且按 GID 查到本地 OfflineComic 时返回；元数据与评论仍在线抓取，
+// 前端据此将预览/阅读页图改走本地接口 /comics/:id/page/:index。
+type GalleryLocalInfo struct {
+	ComicID     string `json:"comicId"`     // 本地 OfflineComic.ID
+	PageCount   int    `json:"pageCount"`   // 本地页数
+	CoverURL    string `json:"coverUrl"`    // 本地封面路由 /api/v1/comics/:id/cover
+	LocalPath   string `json:"localPath"`   // 本地存储绝对路径
+	HasComments bool   `json:"hasComments"` // 在线详情是否解析出社区评论
 }
 
 type PreviewPageDTO struct {

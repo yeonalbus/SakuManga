@@ -559,10 +559,13 @@ const setFavorite = async (idx: number) => {
   }
 }
 
-// 点击选择收藏夹 (0 ~ 9)
+// 长按选择收藏夹 (0 ~ 9)：已收藏=切换，未收藏=加入（Round10-任务2）
 const handleSelectFavorite = async () => {
+  const isFav = comic.value.isFavorite
   const chosenIndex = await modal.prompt(
-    '请选择收藏夹 (输入 0 ~ 9)：',
+    isFav
+      ? `请选择要切换到的收藏夹（当前 Fav ${comic.value.favIndex ?? 0}，输入 0 ~ 9）：`
+      : '请选择要加入的收藏夹（输入 0 ~ 9）：',
     String(comic.value.favIndex ?? 0),
     '设置在线收藏',
   )
@@ -622,9 +625,10 @@ const clearPressTimer = () => {
 const handlePressStart = () => {
   clearPressTimer()
   isLongPress = false
+  // Round10-任务2：长按不再取消收藏，改为弹输入框选择收藏夹（已收藏=切换，未收藏=加入）
   pressTimer = window.setTimeout(() => {
     isLongPress = true
-    handleRemoveFavorite()
+    handleSelectFavorite()
   }, 700)
 }
 
@@ -632,12 +636,12 @@ const handlePressEnd = () => {
   clearPressTimer()
 }
 
-// Round8-任务1：点击「❤️」按默认收藏夹配置分流
-// - 未配置 → 弹输入框手动选择（保持原逻辑）
-// - 已配置且未收藏 → 直接收入默认收藏夹
-// - 已配置且已收藏、当前非默认 → 切换为默认收藏夹
-// - 已配置且已收藏、当前即默认 → 取消收藏（弹 web 确认框）
-// 长按取消收藏（handlePressStart）不受影响，始终取消。
+// Round10-任务2：点击「❤️」按默认收藏夹配置分流（长按=弹输入框选择收藏夹）
+// - 未配置默认收藏夹 → 单击取消收藏（弹 web 确认框；未收藏时无操作）
+// - 已配置默认收藏夹(Fav0) → 传递链：Fav1 --单击--> Fav0 --单击--> 取消收藏
+//   · 未收藏 → 直接收入默认收藏夹
+//   · 已收藏且非默认 → 切换为默认收藏夹
+//   · 已收藏且即默认 → 取消收藏（弹 web 确认框）
 const handleFavClick = async () => {
   if (isLongPress) {
     isLongPress = false
@@ -645,9 +649,13 @@ const handleFavClick = async () => {
   }
   const defaultFolder = preferenceSettings.defaultFavFolder
   if (defaultFolder === null) {
-    handleSelectFavorite()
+    // 情况一：未配置默认收藏夹 → 单击 = 取消收藏（未收藏时无操作）
+    if (comic.value.isFavorite) {
+      handleRemoveFavorite()
+    }
     return
   }
+  // 情况二：已配置默认收藏夹 → 默认分流
   if (comic.value.isFavorite) {
     if (comic.value.favIndex === defaultFolder) {
       handleRemoveFavorite()
@@ -710,7 +718,7 @@ watch(
             :class="{ active: isInReadingList }"
             @click="handleAddToReadingList"
           >
-            {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+            {{ isInReadingList ? '✓ 在清单' : '📑 清单' }}
           </button>
 
           <button
@@ -728,10 +736,10 @@ watch(
             @contextmenu.prevent
             @click="handleFavClick"
           >
-            ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
+            ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
           </button>
 
-          <button class="read-btn" @click="handleStartReading()">📖 立即阅读</button>
+          <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
 
           <button
             v-if="canDownload"
@@ -779,7 +787,7 @@ watch(
           :class="{ active: isInReadingList }"
           @click="handleAddToReadingList"
         >
-          {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+          {{ isInReadingList ? '✓ 在清单' : '📑 清单' }}
         </button>
 
         <button
@@ -797,10 +805,10 @@ watch(
           @contextmenu.prevent
           @click="handleFavClick"
         >
-          ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
+          ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
         </button>
 
-        <button class="read-btn" @click="handleStartReading()">📖 立即阅读</button>
+        <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
 
         <button
           v-if="canDownload"
@@ -1121,16 +1129,16 @@ watch(
 }
 .detail-page.embedded .right-actions {
   flex: 1 1 100%;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
 }
 .detail-page.embedded .action-btn,
 .detail-page.embedded .add-reading-btn {
-  padding: 8px 12px;
+  padding: 8px 10px;
   font-size: 0.82rem;
 }
 .detail-page.embedded .read-btn {
-  padding: 8px 14px;
+  padding: 8px 12px;
   font-size: 0.84rem;
 }
 .detail-page.embedded .comic-main-title {
@@ -1269,6 +1277,18 @@ watch(
   flex-wrap: nowrap;
   margin-bottom: 16px;
   padding-bottom: 2px;
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: var(--app-border-3) transparent;
+}
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar::-webkit-scrollbar) {
+  height: 6px;
+}
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar::-webkit-scrollbar-track) {
+  background: transparent;
+}
+:global(html[data-layout='mobile'] .detail-page .detail-actions-bar::-webkit-scrollbar-thumb) {
+  background: var(--app-border-3);
+  border-radius: 3px;
 }
 
 :global(html[data-layout='mobile'] .detail-page .detail-actions-bar .add-reading-btn),
@@ -1291,17 +1311,27 @@ watch(
   border-color: var(--app-border-3);
 }
 
-/* Round8-任务3：功能按钮横向滚动（内嵌面板与全页详情统一，隐藏滚动条） */
+/* Round10-任务1：功能按钮横向滚动兜底（内嵌面板与全页详情统一）
+   - flex-start 保证左端按钮完整可见、溢出向右侧滚动可回看
+   - 细滚动条仅在真正溢出时出现、可鼠标拖动；常态无溢出则不显示 */
 .right-actions {
   display: flex;
   gap: 10px;
   flex-wrap: nowrap;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: none; /* Firefox */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: var(--app-border-3) transparent;
 }
 .right-actions::-webkit-scrollbar {
-  display: none; /* Chromium / WebKit */
+  height: 6px;
+}
+.right-actions::-webkit-scrollbar-track {
+  background: transparent;
+}
+.right-actions::-webkit-scrollbar-thumb {
+  background: var(--app-border-3);
+  border-radius: 3px;
 }
 .right-actions .action-btn,
 .right-actions .add-reading-btn,

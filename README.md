@@ -59,17 +59,25 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ## 在线界面
 
-<img width="2440" height="1285" alt="image" src="https://github.com/user-attachments/assets/6ad55636-2335-4aac-8e4c-56e6ca637af2" />
+<img width="2445" height="1273" alt="image" src="https://github.com/user-attachments/assets/cecca7a8-0e23-4927-832e-84939721cbe8" />
 
-## 离线界面
+## 客制化本地管理
 
-<img width="2447" height="1288" alt="image" src="https://github.com/user-attachments/assets/235923d4-89d8-4f77-a793-44311c28fa64" />
+<img width="2439" height="1286" alt="image" src="https://github.com/user-attachments/assets/e82458a1-ab7d-4494-8453-1277b533fc82" />
+
+## 智能联网查询更新
+
+<img width="2445" height="1283" alt="image" src="https://github.com/user-attachments/assets/8f1c48f9-5c29-4dcb-a375-4d024eb4bd5c" />
 
 ## 快速筛选下载
 
-<img width="2452" height="1275" alt="image" src="https://github.com/user-attachments/assets/d98244ff-b37d-459f-8e6a-14d549af2586" />
+<img width="2446" height="1289" alt="image" src="https://github.com/user-attachments/assets/947772e6-1b45-433b-a875-13bafd64ade7" />
 
-## 客制化抽卡
+## 连续阅读清单
+
+<img width="2451" height="1282" alt="image" src="https://github.com/user-attachments/assets/3a8dcb39-0d3c-4223-9ece-3ffae1057b25" />
+
+## 自定义抽卡范围
 
 <img width="2423" height="1285" alt="image" src="https://github.com/user-attachments/assets/07e0d7f9-4c31-4eba-b3c1-8fb805deef3d" />
 

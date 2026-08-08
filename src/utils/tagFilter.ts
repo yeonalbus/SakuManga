@@ -150,3 +150,62 @@ export const formatFSearchTag = (
   if (!hasNs) return key
   return key.includes(' ') ? `${namespace}:"${key}$"` : `${namespace}:${key}$`
 }
+
+/**
+ * 按 E-Hentai f_search 语法切分输入为 token 数组（引号感知）：
+ * - 双引号内的内容视为一个整体（多词 tag，如 group:"da hootch$"）；
+ * - 引号外的空白视为 token 分隔，空 token 不入数组。
+ * 例：`group:"da hootch$" large` → ['group:"da hootch$"', 'large']
+ */
+export const tokenizeFSearchInput = (raw: string): string[] => {
+  const tokens: string[] = []
+  let cur = ''
+  let inQuote = false
+  for (const ch of raw) {
+    if (ch === '"') {
+      inQuote = !inQuote
+      cur += ch
+    } else if (/\s/.test(ch) && !inQuote) {
+      if (cur) tokens.push(cur)
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  if (cur) tokens.push(cur)
+  return tokens
+}
+
+/** 联想查询提取结果 */
+export interface SuggestQueryExtract {
+  /** 实际发给 /tags/suggest 的查询词（可能为空：输入为空 / 刚选完完整 tag） */
+  query: string
+  /** 最后一个 token 之前的所有 token（用单空格拼接），联想点击时作为前缀保留 */
+  prefix: string
+  /** 最后一个 token 是否带负号前缀 `-` */
+  negative: boolean
+}
+
+/**
+ * 从搜索框输入中提取「最后一个 token」作为联想查询词：
+ * - 引号内内容视为整体（group:"da hootch$" 为一个 token，不影响前面的 token）；
+ * - 若最后一个 token 仍处于引号内（含未闭合引号），取最后一个引号后的内容
+ *   （如 group:"da h  → da h），保证多词 tag 中间继续输入也能联想；
+ * - 去掉末尾锚点 `$` 便于后端子串匹配（用户手写标准语法时）；
+ * - 识别负号前缀 `-`（查询词去掉负号，点击回填时需保留）。
+ * 例：`group:"da hootch$" large` → { query:'large', prefix:'group:"da hootch$"', negative:false }
+ */
+export const extractSuggestQuery = (raw: string): SuggestQueryExtract => {
+  const tokens = tokenizeFSearchInput(raw)
+  if (tokens.length === 0) return { query: '', prefix: '', negative: false }
+  const prefix = tokens.slice(0, -1).join(' ')
+  const last = tokens[tokens.length - 1]
+  const negative = last.startsWith('-')
+  let q = negative ? last.replace(/^-\s*/, '') : last
+  // 仍在引号内（或含未闭合引号）：取最后一个引号后的内容
+  const quoteIdx = q.lastIndexOf('"')
+  if (quoteIdx !== -1) q = q.slice(quoteIdx + 1)
+  // 去掉末尾锚点 $ 便于后端子串匹配
+  q = q.replace(/\$$/, '').trim()
+  return { query: q, prefix, negative }
+}

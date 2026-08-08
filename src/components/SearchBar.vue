@@ -15,7 +15,8 @@ import type { FilterParams } from '@/types/comic'
 import { http } from '@/utils/request'
 import { safeSetItem } from '@/utils/storage'
 // 🎯 f_search 标准语法格式化：联想点击时按模式输出（在线标准语法 / 离线裸格式）
-import { formatFSearchTag } from '@/utils/tagFilter'
+// 🎯 多 tag 联想：extractSuggestQuery 提取输入串的「最后一个 token」作为联想词
+import { formatFSearchTag, extractSuggestQuery } from '@/utils/tagFilter'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,11 +25,16 @@ const { toast } = useUI()
 
 const keyword = ref('')
 const isFocused = ref(false)
+// 搜索框 DOM 引用：联想点击后保持焦点，便于连续输入多个 tag
+const searchInputRef = ref<HTMLInputElement | null>(null)
 
 const suggestedTags = ref<TagItem[]>([])
 let suggestTimer: number | null = null
 // 请求序号守卫（S4）：每次输入递增，丢弃过期响应，避免旧请求后到覆盖新输入结果
 let suggestSeq = 0
+// 联想点击抑制标记：点击联想项后 Vue 重渲染会把下拉 DOM 分离，其冒泡的 click 会被
+// handleOutsideClick 误判为「点击外部」而关闭联想。此处用短生命周期标记抑制该误判。
+let suppressOutsideClose = false
 
 // 🎯 1. 监听当前域 Store 的 keyword 变化，同步反显到搜索框输入框内（如点击 TagChip 时）
 const activeStoreKeyword = computed(() => {
@@ -54,18 +60,27 @@ const clearStoreKeyword = () => {
   }
 }
 
-// 🎯 3. 监听输入框内容：删空仅清空筛选（不导航）；有字则请求热度联想
+// 🎯 3. 监听输入框内容：删空仅清空筛选（不导航）；有字则以「最后一个 token」请求联想（多 tag 支持）
 watch(keyword, (newVal) => {
-  const q = newVal.trim()
-  if (!q) {
-    // 删空：取消未发请求、废弃在途响应（S4）
+  const { query } = extractSuggestQuery(newVal)
+  const wholeEmpty = !newVal.trim()
+
+  // 输入整体为空：取消未发请求、废弃在途响应（S4），清空 Store 关键词（不回归首页，S9）
+  if (wholeEmpty) {
     if (suggestTimer) clearTimeout(suggestTimer)
     suggestSeq++
     suggestedTags.value = []
-    // 删空时若 Store 里还有关键字，仅置空（列表去筛选），不回归首页（S9）
     if (activeStoreKeyword.value !== '') {
       clearStoreKeyword()
     }
+    return
+  }
+
+  // 有输入但最后一个 token 无有效联想词（如刚选完一个完整 tag）：仅清空联想列表
+  if (!query) {
+    if (suggestTimer) clearTimeout(suggestTimer)
+    suggestSeq++
+    suggestedTags.value = []
     return
   }
 
@@ -73,9 +88,10 @@ watch(keyword, (newVal) => {
   const seq = ++suggestSeq
   suggestTimer = window.setTimeout(async () => {
     try {
-      const data = await http<TagItem[]>('/tags/suggest', { params: { q, limit: 8 } })
-      // 仅当序号最新且关键词未再变化时写入（S4）
-      if (seq === suggestSeq && keyword.value.trim() === q) {
+      // 只发「最后一个 token」，避免整串（如 group:"da hootch$" large）在字典里无子串匹配
+      const data = await http<TagItem[]>('/tags/suggest', { params: { q: query, limit: 8 } })
+      // 仅当序号最新且最后一个 token 未再变化时写入（S4）
+      if (seq === suggestSeq && extractSuggestQuery(keyword.value).query === query) {
         suggestedTags.value = data
       }
     } catch (e) {
@@ -149,8 +165,15 @@ const triggerSearch = (queryText?: string) => {
   const finalQuery = (queryText !== undefined ? queryText : keyword.value).trim()
 
   if (!finalQuery) {
-    // 空查询：仅清空筛选，不导航（S9）
+    // 空查询：清空筛选后回归当前模式首页（仅「用户点击搜索」这一显式动作触发；
+    // 清空搜索栏本身不跳转，回归首页由这里负责）
     if (activeStoreKeyword.value !== '') clearStoreKeyword()
+    const isOffline = modeStore.isOffline
+    if (isOffline) {
+      if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
+    } else {
+      if (!route.path.startsWith('/online/home')) router.push('/online/home')
+    }
     return
   }
 
@@ -184,10 +207,26 @@ const triggerSearch = (queryText?: string) => {
   }
 }
 
-// 清空按钮：仅清空输入与 Store 关键词，不导航（S9/D7）
+// 清空按钮：仅清空输入与 Store 关键词，不导航（S9/D7；回归首页由「点击搜索」触发）
 const handleClearInput = () => {
   keyword.value = ''
   if (activeStoreKeyword.value !== '') clearStoreKeyword()
+}
+
+// 联想点击：仅替换「最后一个 token」，保留前面已选的 tag，并保持输入焦点便于连续输入多 tag
+const handleTagSuggestClick = (tag: TagItem) => {
+  const { prefix, negative } = extractSuggestQuery(keyword.value)
+  const inserted = formatFSearchTag(tag.namespace, tag.key, modeStore.isOffline)
+  keyword.value = prefix
+    ? `${prefix} ${negative ? '-' : ''}${inserted}`
+    : `${negative ? '-' : ''}${inserted}`
+  // 抑制紧随其后的冒泡 click 被 handleOutsideClick 误判为「点击外部」而关闭联想
+  suppressOutsideClose = true
+  isFocused.value = true
+  searchInputRef.value?.focus()
+  setTimeout(() => {
+    suppressOutsideClose = false
+  }, 0)
 }
 
 const removeHistoryItem = (item: string, e: Event) => {
@@ -205,6 +244,8 @@ const clearAllHistory = (e: Event) => {
 
 const searchBarRef = ref<HTMLElement | null>(null)
 const handleOutsideClick = (e: MouseEvent) => {
+  // 联想点击后（含被分离的下拉 DOM）冒泡到此的 click 一律跳过，避免误关联想
+  if (suppressOutsideClose) return
   if (searchBarRef.value && !searchBarRef.value.contains(e.target as Node)) {
     isFocused.value = false
   }
@@ -275,6 +316,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
     <div class="input-wrapper" :class="{ focused: isFocused }">
       <span class="search-icon">🔍</span>
       <input
+        ref="searchInputRef"
         v-model="keyword"
         type="text"
         class="search-input"
@@ -331,7 +373,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
             v-for="tag in safeSuggestedTags"
             :key="`${tag.namespace}:${tag.key}`"
             class="vertical-tag-item"
-            @click="keyword = formatFSearchTag(tag.namespace, tag.key, modeStore.isOffline)"
+            @click="handleTagSuggestClick(tag)"
           >
             <TagChip :tag="tag" />
             <span v-if="tag.count" class="tag-count-badge"

@@ -507,7 +507,7 @@ const comicSourceBadge = computed(() => {
           <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />
         </div>
         <div class="card-bottom-meta">
-          <span class="rating">⭐ {{ comic.rating || '5.0' }}</span>
+          <span class="rating">⭐ {{ comic.rating ? comic.rating.toFixed(1) : '—' }}</span>
           <span class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
             {{ comic.source === 'online' ? '在线' : comicSourceBadge || '本地' }}
           </span>

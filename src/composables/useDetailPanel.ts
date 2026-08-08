@@ -1,6 +1,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getDetailPanelState, openDetailPanel, closeDetailPanel } from '@/stores/detailPanelStore'
+import { useUI } from '@/composables/useUI'
+import {
+  getDetailPanelState,
+  openDetailPanel,
+  closeDetailPanel,
+  migrateDetailPanel,
+} from '@/stores/detailPanelStore'
 
 /**
  * 在线列表页「左右分栏详情面板」Composable
@@ -14,13 +20,15 @@ import { getDetailPanelState, openDetailPanel, closeDetailPanel } from '@/stores
  * - 面板已关闭时点击卡片：不再打开面板，而是用 window.open 新标签打开完整详情页
  *   （与面板标题「画廊详情 ↗」行为完全一致）。
  *
- * 面板开启状态按 route.path 存入 detailPanelStore，供组件因查询变化重建时恢复。
+ * 面板开启状态按 route.fullPath 存入 detailPanelStore（含 query），供组件因查询变化重建时恢复；
+ * 旧 route.path key 读取时自动迁移（S3）。
  */
 const WIDE_QUERY = '(min-width: 1025px)'
 
 export function useDetailPanel() {
   const route = useRoute()
   const router = useRouter()
+  const { toast } = useUI()
 
   const isWide = ref(false)
   const isPanelOpen = ref(false)
@@ -47,8 +55,9 @@ export function useDetailPanel() {
     })
     syncWide()
 
-    // 恢复当前路径上次打开的面板（组件因查询变化重建时生效）
-    const saved = getDetailPanelState(route.path)
+    // 恢复当前路径上次打开的面板（按 fullPath，含 query；兼容旧 route.path key）
+    const saved =
+      getDetailPanelState(route.fullPath) ?? migrateDetailPanel(route.fullPath, route.path)
     if (saved?.open && saved.gid) {
       panelGid.value = saved.gid
       panelToken.value = saved.token
@@ -81,7 +90,7 @@ export function useDetailPanel() {
       panelToken.value = comic.token
       if (isPanelOpen.value) {
         isPanelOpen.value = true
-        openDetailPanel(route.path, comic.id, comic.token)
+        openDetailPanel(route.fullPath, comic.id, comic.token)
       } else {
         const href = router.resolve({
           path: '/online/detail',
@@ -99,7 +108,7 @@ export function useDetailPanel() {
    */
   const closePanel = () => {
     isPanelOpen.value = false
-    closeDetailPanel(route.path)
+    closeDetailPanel(route.fullPath)
   }
 
   /**
@@ -112,7 +121,10 @@ export function useDetailPanel() {
       closePanel()
     } else if (panelGid.value) {
       isPanelOpen.value = true
-      openDetailPanel(route.path, panelGid.value, panelToken.value)
+      openDetailPanel(route.fullPath, panelGid.value, panelToken.value)
+    } else {
+      // 未选中任何卡片时给出反馈，而非静默 no-op（S3）
+      toast.info('请先点选一张卡片')
     }
   }
 

@@ -34,6 +34,23 @@ export function closeDetailPanel(path: string) {
   if (state) state.open = false
 }
 
+/**
+ * 兼容迁移：将旧 key（route.path）状态迁移到新 key（route.fullPath），
+ * 返回 fullPath 对应的状态（可能为 undefined）。fullPath 与 legacyPath 相同时为 no-op。
+ */
+export function migrateDetailPanel(
+  fullPath: string,
+  legacyPath: string,
+): DetailPanelState | undefined {
+  if (fullPath === legacyPath) return panelByPath[fullPath]
+  const legacy = panelByPath[legacyPath]
+  if (legacy && !panelByPath[fullPath]) {
+    panelByPath[fullPath] = legacy
+  }
+  delete panelByPath[legacyPath]
+  return panelByPath[fullPath]
+}
+
 /** 清除某路径的面板状态 */
 export function clearDetailPanel(path: string) {
   delete panelByPath[path]

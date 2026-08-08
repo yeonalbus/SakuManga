@@ -24,6 +24,8 @@ const isFocused = ref(false)
 
 const suggestedTags = ref<TagItem[]>([])
 let suggestTimer: number | null = null
+// 请求序号守卫（S4）：每次输入递增，丢弃过期响应，避免旧请求后到覆盖新输入结果
+let suggestSeq = 0
 
 // 🎯 1. 监听当前域 Store 的 keyword 变化，同步反显到搜索框输入框内（如点击 TagChip 时）
 const activeStoreKeyword = computed(() => {
@@ -40,34 +42,39 @@ watch(
   { immediate: true },
 )
 
-// 🎯 2. 重置并回归首页函数
-const resetToHome = () => {
-  const isOffline = modeStore.isOffline
-  if (isOffline) {
+// 🎯 2. 仅清空当前域 Store 关键词（不导航；S9/D7：删空/清空均不回归首页）
+const clearStoreKeyword = () => {
+  if (modeStore.isOffline) {
     offlineSearchConfig.value.keyword = ''
-    if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
   } else {
     onlineSearchConfig.value.keyword = ''
-    if (!route.path.startsWith('/online/home')) router.push('/online/home')
   }
 }
 
-// 🎯 3. 监听输入框内容：变空则重置回归首页；有字则请求热度联想
+// 🎯 3. 监听输入框内容：删空仅清空筛选（不导航）；有字则请求热度联想
 watch(keyword, (newVal) => {
   const q = newVal.trim()
   if (!q) {
+    // 删空：取消未发请求、废弃在途响应（S4）
+    if (suggestTimer) clearTimeout(suggestTimer)
+    suggestSeq++
     suggestedTags.value = []
-    // 当删空文字且 Store 里还有关键字时，自动回归首页
+    // 删空时若 Store 里还有关键字，仅置空（列表去筛选），不回归首页（S9）
     if (activeStoreKeyword.value !== '') {
-      resetToHome()
+      clearStoreKeyword()
     }
     return
   }
 
   if (suggestTimer) clearTimeout(suggestTimer)
+  const seq = ++suggestSeq
   suggestTimer = window.setTimeout(async () => {
     try {
-      suggestedTags.value = await http<TagItem[]>('/tags/suggest', { params: { q, limit: 8 } })
+      const data = await http<TagItem[]>('/tags/suggest', { params: { q, limit: 8 } })
+      // 仅当序号最新且关键词未再变化时写入（S4）
+      if (seq === suggestSeq && keyword.value.trim() === q) {
+        suggestedTags.value = data
+      }
     } catch (e) {
       console.error('获取标签联想失败:', e)
     }
@@ -138,7 +145,8 @@ const triggerSearch = (queryText?: string) => {
   const finalQuery = (queryText !== undefined ? queryText : keyword.value).trim()
 
   if (!finalQuery) {
-    resetToHome()
+    // 空查询：仅清空筛选，不导航（S9）
+    if (activeStoreKeyword.value !== '') clearStoreKeyword()
     return
   }
 
@@ -172,10 +180,10 @@ const triggerSearch = (queryText?: string) => {
   }
 }
 
-// 清空按钮点击事件
+// 清空按钮：仅清空输入与 Store 关键词，不导航（S9/D7）
 const handleClearInput = () => {
   keyword.value = ''
-  resetToHome()
+  if (activeStoreKeyword.value !== '') clearStoreKeyword()
 }
 
 const removeHistoryItem = (item: string, e: Event) => {
@@ -320,7 +328,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
             :key="`${tag.namespace}:${tag.key}`"
             class="vertical-tag-item"
             @click="
-              triggerSearch(tag.namespace !== 'other' ? `${tag.namespace}:${tag.key}` : tag.key)
+              keyword = tag.namespace !== 'other' ? `${tag.namespace}:${tag.key}` : tag.key
             "
           >
             <TagChip :tag="tag" />

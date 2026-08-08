@@ -244,6 +244,32 @@ body {
     sans-serif;
 }
 
+/* 全局主题化滚动条（明暗主题适配）：统一宽度/圆角，用主题边框色作滑块，避免暗色下白色默认滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--app-border-3);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box; /* 让滑块两侧留出 2px 内边距，视觉更轻盈 */
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--app-surface-3-hover);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+* {
+  /* Firefox：细滚动条 + 主题色滑块 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-border-3) transparent;
+}
+
 .app-container {
   display: flex;
   height: 100vh;

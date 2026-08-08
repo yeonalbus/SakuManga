@@ -26,6 +26,26 @@ xcopy "dist\*" "backend\webui\dist\" /e /i /y >nul
 echo.
 echo [3/4] 构建后端可执行文件 (go build)...
 pushd backend
+
+rem ---- 生成 exe 图标资源 (rsrc)：从 app.ico 生成 rsrc_windows_amd64.syso ----
+echo    生成 exe 图标资源 (rsrc)...
+where rsrc >nul 2>nul
+if errorlevel 1 (
+    echo    [提示] 未找到 rsrc，尝试自动安装...
+    go install github.com/akavel/rsrc@latest
+    if errorlevel 1 (
+        echo    [警告] rsrc 安装失败，将沿用已提交的 rsrc_windows_amd64.syso
+    )
+)
+if exist "app.ico" (
+    rsrc -ico app.ico -o rsrc_windows_amd64.syso -arch amd64
+    if errorlevel 1 (
+        echo    [警告] 图标资源生成失败，将沿用已提交的 rsrc_windows_amd64.syso
+    )
+) else (
+    echo    [提示] 未找到 app.ico，沿用已提交的 rsrc_windows_amd64.syso
+)
+
 go build -trimpath -ldflags "-s -w" -o "..\SakuHentai.exe" .
 if errorlevel 1 (
     popd

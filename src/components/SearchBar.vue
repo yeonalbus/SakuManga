@@ -14,6 +14,8 @@ import type { TagItem } from '@/stores/tagStore'
 import type { FilterParams } from '@/types/comic'
 import { http } from '@/utils/request'
 import { safeSetItem } from '@/utils/storage'
+// 🎯 f_search 标准语法格式化：联想点击时按模式输出（在线标准语法 / 离线裸格式）
+import { formatFSearchTag } from '@/utils/tagFilter'
 
 const router = useRouter()
 const route = useRoute()
@@ -329,9 +331,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
             v-for="tag in safeSuggestedTags"
             :key="`${tag.namespace}:${tag.key}`"
             class="vertical-tag-item"
-            @click="
-              keyword = tag.namespace !== 'other' ? `${tag.namespace}:${tag.key}` : tag.key
-            "
+            @click="keyword = formatFSearchTag(tag.namespace, tag.key, modeStore.isOffline)"
           >
             <TagChip :tag="tag" />
             <span v-if="tag.count" class="tag-count-badge"

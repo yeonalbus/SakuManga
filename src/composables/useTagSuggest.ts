@@ -20,8 +20,14 @@ export interface TagSuggestion extends TagItem {
  * @param source 输入源 getter（如 () => inputKeyword.value），内部 watch 其变化并防抖
  * @param limit 联想结果上限
  * @param debounce 防抖毫秒数
+ * @param formatInsert 可选的 insertText 格式化器（如按模式输出 E-Hentai f_search 标准语法）；缺省时保持裸 `namespace:key`
  */
-export function useTagSuggest(source: () => string, limit = 8, debounce = 150) {
+export function useTagSuggest(
+  source: () => string,
+  limit = 8,
+  debounce = 150,
+  formatInsert?: (namespace: string, key: string) => string,
+) {
   const suggestions = ref<TagSuggestion[]>([])
   const loading = ref(false)
   let timer: number | null = null
@@ -38,6 +44,7 @@ export function useTagSuggest(source: () => string, limit = 8, debounce = 150) {
         const key = typeof t.key === 'string' ? t.key : ''
         const hasNs = namespace !== 'other' && namespace !== ''
         const displayKey = hasNs ? `${namespace}:${key}` : key
+        const insertKey = formatInsert ? formatInsert(namespace, key) : displayKey
         return {
           namespace,
           key,
@@ -46,7 +53,7 @@ export function useTagSuggest(source: () => string, limit = 8, debounce = 150) {
           count: typeof t.count === 'number' && Number.isFinite(t.count) ? t.count : 0,
           isNegative,
           displayKey,
-          insertText: `${isNegative ? '- ' : ''}${displayKey}`,
+          insertText: `${isNegative ? '- ' : ''}${insertKey}`,
         }
       })
       .filter((t) => t.key !== '')

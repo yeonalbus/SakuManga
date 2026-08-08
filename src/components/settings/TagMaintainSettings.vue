@@ -23,6 +23,26 @@
       </div>
     </div>
 
+    <!-- 在线搜索 Tag 语法自动修正（全局，默认开启） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">🔍 在线搜索 Tag 语法自动修正</div>
+        <div class="item-subtext">
+          将 <code>group:da hootch</code> 之类的自由输入自动修正为 E 站标准语法
+          <code>group:"da hootch$"</code>，避免多词 tag 被拆成独立词条导致搜索无结果。
+          关闭后仅 tag 联想 / 点击时生成标准语法，手动输入需按 E 站规范书写。
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input
+          type="checkbox"
+          v-model="setting.enableFSearchAutoCorrect"
+          @change="saveSetting"
+        />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <!-- 标签数据（翻译/排序）下载管理 -->
     <div class="setting-item column-layout">
       <div class="main-row">
@@ -214,6 +234,7 @@ interface TagMaintainSetting {
   refreshHour: number
   writebackWeekday: number
   writebackHour: number
+  enableFSearchAutoCorrect: boolean
   lastDailyRunAt?: number
   lastWeeklyRunAt?: number
 }
@@ -240,6 +261,7 @@ const setting = ref<TagMaintainSetting>({
   refreshHour: 6,
   writebackWeekday: 0,
   writebackHour: 6,
+  enableFSearchAutoCorrect: true,
 })
 const progress = ref<TagMaintainProgress | null>(null)
 const busy = ref(false)

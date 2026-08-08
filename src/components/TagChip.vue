@@ -5,6 +5,8 @@ import { useTagStore } from '@/stores/tagStore'
 import { useModeStore } from '@/stores/modeStore'
 // 🎯 引入全局 SearchConfig Store 状态
 import { offlineSearchConfig } from '@/stores/searchStore'
+// 🎯 f_search 标准语法格式化：在线按 E-Hentai 规范（namespace:"key$"），离线保持裸格式
+import { formatFSearchTag } from '@/utils/tagFilter'
 
 export interface TagData {
   namespace: string
@@ -109,9 +111,9 @@ const getBgColor = (ns: string) => {
 // 🎯 点击 Tag 快捷搜索：根据所在域更新 Store 并回归列表页
 const handleClick = () => {
   const { namespace, key } = tagData.value
-  const queryTag = namespace && namespace !== 'other' ? `${namespace}:${key}` : key
-
   const isOffline = modeStore.isOffline
+  // 在线输出 E-Hentai f_search 标准语法（多词加引号与 $ 锚定），离线保持裸 namespace:key
+  const queryTag = formatFSearchTag(namespace, key, isOffline)
 
   if (isOffline) {
     offlineSearchConfig.value.keyword = queryTag

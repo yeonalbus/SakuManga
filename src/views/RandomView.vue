@@ -6,7 +6,7 @@ import TagChip from '@/components/TagChip.vue'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import { fetchRandomComicsApi } from '@/api/comic'
 // Round3-任务6：负向排除（抽卡结果前端兜底过滤）
-import { isNegativeItem, matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
+import { isNegativeItem, matchExcludes, parseKeywordQueue, formatFSearchTag } from '@/utils/tagFilter'
 import type {
   ComicItem,
   OnlineComic,
@@ -75,8 +75,12 @@ const keywordInput = ref('')
 const kwInputFocused = ref(false)
 
 // ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
+// 插入格式按抽卡范围区分：仅离线（scopeType === 'offline'）用裸格式，含在线用 E-Hentai f_search 标准语法
 const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
   () => keywordInput.value,
+  8,
+  150,
+  (namespace, key) => formatFSearchTag(namespace, key, scopeType.value === 'offline'),
 )
 
 // 选中联想项：负向项以「- namespace:key」压入队列

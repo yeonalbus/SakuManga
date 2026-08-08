@@ -131,3 +131,22 @@ export const parseKeywordQueue = (items: string[] | undefined): ParsedKeywordQue
 export const isNegativeItem = (raw: string): boolean => {
   return /^-\s*\S/.test((raw || '').trim())
 }
+
+/**
+ * 把单个 tag 格式化为目标形态：
+ * - 离线（本地 includes 子串匹配，非 E-Hentai 语法）：保持裸 `namespace:key`，`other` 裸词仅 key；
+ * - 在线（E-Hentai f_search 标准语法）：多词 key → `namespace:"key$"`，单词 key → `namespace:key$`；
+ *   无命名空间（other）的裸词不加 `$`（是全文搜索词而非 tag）。
+ */
+export const formatFSearchTag = (
+  namespace: string,
+  key: string,
+  isOffline: boolean,
+): string => {
+  const hasNs = !!namespace && namespace !== 'other'
+  if (isOffline) {
+    return hasNs ? `${namespace}:${key}` : key
+  }
+  if (!hasNs) return key
+  return key.includes(' ') ? `${namespace}:"${key}$"` : `${namespace}:${key}$`
+}

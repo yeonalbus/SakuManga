@@ -10,12 +10,12 @@ import (
 // ─────────────────────────────────────────────────────────────
 // Tag 维护定时调度器
 //
-// 调度规则（东八区 Asia/Shanghai）：
+// 调度规则（系统本地时区）：
 //   - 每日 RefreshHour 点（默认 6:00）：联网刷新全部含 gid 漫画的 OnlineTags
 //   - 每周 WritebackWeekday（0=周日）的 WritebackHour 点（默认 6:00）：反向写回 ComicInfo
 //
 // 实现复用 ToplistService.StartScheduler 的 time.Sleep(time.Until(next)) 模式，
-// 不引入 cron 依赖；Windows 下通过 time.LoadLocation 或 FixedZone 保证东八区。
+// 不引入 cron 依赖；基准时区使用 time.Local（系统本地时区），与计算机时间保持一致。
 // ─────────────────────────────────────────────────────────────
 
 // tagMaintainTrigger 下一次触发信息
@@ -40,12 +40,12 @@ func StartTagMaintainScheduler(db *gorm.DB, svc *TagMaintainService) {
 			setting := LoadTagMaintainSetting(db)
 
 			if next.Kind == "daily" && setting.EnableDailyRefresh {
-				log.Printf("%s [tagm] 触发每日 Tag 刷新（东八区 %02d:00）", dlLogTag, setting.RefreshHour)
+				log.Printf("%s [tagm] 触发每日 Tag 刷新（本地 %02d:00）", dlLogTag, setting.RefreshHour)
 				if _, err := svc.RefreshAllTags(); err != nil {
 					log.Printf("%s [tagm] 每日 Tag 刷新失败: %v", dlErrTag, err)
 				}
 			} else if setting.EnableWeeklyWriteback {
-				log.Printf("%s [tagm] 触发每周反向写回 ComicInfo（东八区 周%d %02d:00）",
+				log.Printf("%s [tagm] 触发每周反向写回 ComicInfo（本地 周%d %02d:00）",
 					dlLogTag, setting.WritebackWeekday, setting.WritebackHour)
 				if _, err := svc.WritebackComicInfo(); err != nil {
 					log.Printf("%s [tagm] 每周反向写回失败: %v", dlErrTag, err)

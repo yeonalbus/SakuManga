@@ -12,16 +12,16 @@ import (
 // ─────────────────────────────────────────────────────────────
 // 每周自动更新扫描调度器（Round4 任务四）
 //
-// 调度规则（东八区 Asia/Shanghai）：
+// 调度规则（系统本地时区）：
 //   - 每周 ScanWeekday（0=周日）的 ScanHour 点（默认 6:00）：
 //     执行一轮完整更新扫描（常规更新检测 + 老化判定），见 RunUpdateScanWithProgress。
 //
 // 实现复用 TagMaintain 的 time.Sleep(time.Until(next)) 模式，不引入 cron 依赖；
-// Windows 下通过 FixedZone 保证东八区。
+// 基准时区使用 time.Local（系统本地时区），与计算机时间保持一致。
 // ─────────────────────────────────────────────────────────────
 
-// updateScanLoc 周扫描东八区时区（与 TagMaintain 保持一致）
-var updateScanLoc = time.FixedZone("Asia/Shanghai", 8*60*60)
+// updateScanLoc 周扫描系统本地时区（与 TagMaintain 保持一致）
+var updateScanLoc = time.Local
 
 // LoadUpdateScanSetting 读取单例设置（不存在则创建默认值）
 func LoadUpdateScanSetting(db *gorm.DB) *models.UpdateScanSetting {
@@ -50,7 +50,7 @@ func SaveUpdateScanSetting(db *gorm.DB, setting *models.UpdateScanSetting) (*mod
 	return setting, nil
 }
 
-// nextUpdateScanTrigger 计算下一次周扫描触发时刻（东八区 ScanWeekday 的 ScanHour）
+// nextUpdateScanTrigger 计算下一次周扫描触发时刻（本地 ScanWeekday 的 ScanHour）
 func nextUpdateScanTrigger(db *gorm.DB) time.Time {
 	setting := LoadUpdateScanSetting(db)
 	now := time.Now().In(updateScanLoc)
@@ -78,7 +78,7 @@ func StartUpdateScanScheduler(db *gorm.DB, ehService *EHService, manager *Downlo
 				continue
 			}
 
-			log.Printf("%s [update] 触发每周自动更新扫描（东八区 周%d %02d:00）",
+			log.Printf("%s [update] 触发每周自动更新扫描（本地 周%d %02d:00）",
 				dlLogTag, setting.ScanWeekday, setting.ScanHour)
 			runWeeklyUpdateScan(db, ehService, manager)
 		}

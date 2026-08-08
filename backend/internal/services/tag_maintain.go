@@ -31,15 +31,8 @@ import (
 // 写回规则：   ComicInfo.Tags = OnlineTags − OfflineRemoveTags
 // ─────────────────────────────────────────────────────────────
 
-// 东八区时区（Windows 可能缺少 tzdata，回退 FixedZone）
-var tagMaintainLoc = loadTagMaintainLocation()
-
-func loadTagMaintainLocation() *time.Location {
-	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
-		return loc
-	}
-	return time.FixedZone("CST", 8*3600)
-}
+// 系统本地时区（Round9-时区统一：调度基准与计算机时间一致，随系统时区/DST 自动变化）
+var tagMaintainLoc = time.Local
 
 // TagMaintainProgress 刷新/写回任务进度（供界面轮询）
 type TagMaintainProgress struct {

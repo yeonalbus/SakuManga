@@ -85,9 +85,9 @@ type TagMaintainSetting struct {
 	ID                  uint      `gorm:"primaryKey;default:1" json:"id"`
 	EnableDailyRefresh  bool      `gorm:"default:true" json:"enableDailyRefresh"`   // 开启每日 Tag 刷新
 	EnableWeeklyWriteback bool    `gorm:"default:true" json:"enableWeeklyWriteback"` // 开启每周反向写回
-	RefreshHour         int       `gorm:"default:6" json:"refreshHour"`             // 每日刷新小时（东八区，默认 6）
+	RefreshHour         int       `gorm:"default:6" json:"refreshHour"`             // 每日刷新小时（系统本地时区，默认 6）
 	WritebackWeekday    int       `gorm:"default:0" json:"writebackWeekday"`        // 写回日（0=周日）
-	WritebackHour       int       `gorm:"default:6" json:"writebackHour"`           // 写回小时（东八区，默认 6）
+	WritebackHour       int       `gorm:"default:6" json:"writebackHour"`           // 写回小时（系统本地时区，默认 6）
 	LastDailyRunAt      int64     `json:"lastDailyRunAt,omitempty"`                 // 上次每日刷新执行时间(ms)
 	LastWeeklyRunAt     int64     `json:"lastWeeklyRunAt,omitempty"`                // 上次每周写回执行时间(ms)
 	UpdatedAt           time.Time `json:"updatedAt"`
@@ -99,7 +99,7 @@ type UpdateScanSetting struct {
 	ID               uint      `gorm:"primaryKey;default:1" json:"id"`
 	EnableWeeklyScan bool      `gorm:"default:false" json:"enableWeeklyScan"` // 开启每周自动更新扫描
 	ScanWeekday      int       `gorm:"default:0" json:"scanWeekday"`          // 扫描日（0=周日）
-	ScanHour         int       `gorm:"default:6" json:"scanHour"`             // 扫描时刻（东八区，默认 6）
+	ScanHour         int       `gorm:"default:6" json:"scanHour"`             // 扫描时刻（系统本地时区，默认 6）
 	LastWeeklyScanAt int64     `json:"lastWeeklyScanAt,omitempty"`            // 上次自动扫描执行时间(ms)
 	UpdatedAt        time.Time `json:"updatedAt"`
 }

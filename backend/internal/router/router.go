@@ -43,7 +43,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
 
-	// Tag 维护服务：启动调度器（启动时执行旧数据迁移，其后按东八区每日/每周触发）
+	// Tag 维护服务：启动调度器（启动时执行旧数据迁移，其后按系统本地时区每日/每周触发）
 	tagMaintainService := services.NewTagMaintainService(db, ehService)
 	services.StartTagMaintainScheduler(db, tagMaintainService)
 	tagMaintainHandler := handlers.NewTagMaintainHandler(db, tagMaintainService)

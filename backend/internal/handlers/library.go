@@ -80,11 +80,19 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取书架失败"})
 		return
 	}
-	// 依据 comicIds 实时统计数量
-	for i := range shelves {
-		shelves[i].Count = len(parseComicIDs(shelves[i].ComicIDs))
+	// comicIds 以 JSON 数组字符串存库，响应统一转为数组返回，
+	// 避免前端拿到字符串后调用 .filter/.includes 抛错（comicIds.filter is not a function）
+	resp := make([]gin.H, 0, len(shelves))
+	for _, s := range shelves {
+		ids := parseComicIDs(s.ComicIDs)
+		resp = append(resp, gin.H{
+			"id":       s.ID,
+			"name":     s.Name,
+			"count":    len(ids),
+			"comicIds": ids,
+		})
 	}
-	c.JSON(http.StatusOK, gin.H{"bookshelves": shelves})
+	c.JSON(http.StatusOK, gin.H{"bookshelves": resp})
 }
 
 // CreateBookshelf 新建书架 POST /api/v1/bookshelves

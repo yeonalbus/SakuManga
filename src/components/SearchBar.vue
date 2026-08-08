@@ -13,6 +13,7 @@ import FilterDrawer from '@/components/FilterDrawer.vue'
 import type { TagItem } from '@/stores/tagStore'
 import type { FilterParams } from '@/types/comic'
 import { http } from '@/utils/request'
+import { safeSetItem } from '@/utils/storage'
 
 const router = useRouter()
 const route = useRoute()
@@ -98,7 +99,8 @@ const loadSearchHistory = () => {
 }
 
 const saveSearchHistory = () => {
-  localStorage.setItem('app_search_history', JSON.stringify(searchHistory.value.slice(0, 10)))
+  // 配额保护：localStorage 满时走 safeSetItem 自动回收，避免 setItem 抛 QuotaExceededError
+  safeSetItem('app_search_history', JSON.stringify(searchHistory.value.slice(0, 10)))
 }
 
 const filteredHistory = computed(() => {

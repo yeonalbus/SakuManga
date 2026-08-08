@@ -8,6 +8,7 @@ import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic, ComicItem } from '@/types/comic'
 import { fetchOfflineComics, offlineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
+import { safeSetItem } from '@/utils/storage'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 // Round3-任务1：阅读进度按账号写回后端 /history
 import { getHistoryProgress, syncHistory } from '@/stores/historyStore'
@@ -343,11 +344,24 @@ const getProgressMap = (): Record<string, number> => {
 }
 
 // 2. 保存当前作品的阅读进度（在线/离线分开存储，避免 id 冲突）
+//    配额保护：Map 上限 MAX_PROGRESS_ENTRIES 条，超出删除最旧；写入走 safeSetItem 自动回收配额，
+//    避免读大量本子后 localStorage 超限（QuotaExceededError）导致进度/搜索历史写入抛错。
+const MAX_PROGRESS_ENTRIES = 500
 const saveProgress = (src: 'online' | 'offline', id: string, page: number) => {
   if (!id) return
   const map = getProgressMap()
-  map[`${src}:${id}`] = page
-  localStorage.setItem(progressStorageKey(), JSON.stringify(map))
+  const key = `${src}:${id}`
+  // 先删旧 key 再写入，保证「最近读的」排到对象末尾，容量裁剪时优先保留
+  delete map[key]
+  map[key] = page
+  const keys = Object.keys(map)
+  if (keys.length > MAX_PROGRESS_ENTRIES) {
+    const extra = keys.length - MAX_PROGRESS_ENTRIES
+    for (let i = 0; i < extra; i++) {
+      delete map[keys[i]]
+    }
+  }
+  safeSetItem(progressStorageKey(), JSON.stringify(map))
 }
 
 // 3. 读取指定作品的历史进度（无记录则默认第 1 页）

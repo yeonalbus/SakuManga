@@ -151,8 +151,9 @@ export const deleteOfflineComics = async (ids: string[], deleteFile = false): Pr
     // 2. 离线阅读清单
     offlineReadingList.value = offlineReadingList.value.filter((c) => !removedIds.has(c.id))
     // 3. 本地书架引用（comicIds）
+    // 防御：历史/后端数据异常时 comicIds 可能是非数组（如 JSON 字符串），跳过避免 .filter 抛错
     for (const shelf of bookshelfStore.bookshelves.value) {
-      if (shelf.comicIds?.length) {
+      if (Array.isArray(shelf.comicIds) && shelf.comicIds.length) {
         shelf.comicIds = shelf.comicIds.filter((cid) => !removedIds.has(cid))
       }
     }

@@ -4,13 +4,13 @@
  */
 import { ref, watch } from 'vue'
 import type { CardViewMode } from '@/types/comic'
-import { loadStorage } from '@/utils/storage'
+import { loadStorage, safeSetItem } from '@/utils/storage'
 
 /** 当前视图模式，默认 'card'（卡片），可切换为 'compact'（名片） */
 export const viewMode = ref<CardViewMode>(loadStorage('app_view_mode', 'card'))
 
 watch(viewMode, (newVal) => {
-  localStorage.setItem('app_view_mode', JSON.stringify(newVal))
+  safeSetItem('app_view_mode', JSON.stringify(newVal))
 })
 
 /** 在 card / compact 之间切换 */
@@ -43,8 +43,8 @@ export const compactColumns = ref<number>(
 )
 
 watch(cardColumns, (n) => {
-  localStorage.setItem('app_card_columns', JSON.stringify(clampColumns(n)))
+  safeSetItem('app_card_columns', JSON.stringify(clampColumns(n)))
 })
 watch(compactColumns, (n) => {
-  localStorage.setItem('app_compact_columns', JSON.stringify(clampColumns(n)))
+  safeSetItem('app_compact_columns', JSON.stringify(clampColumns(n)))
 })

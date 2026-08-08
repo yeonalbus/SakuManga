@@ -3,6 +3,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { http } from '@/utils/request'
+import { safeSetItem } from '@/utils/storage'
 import { TOKEN_KEY } from '@/config/api'
 import type { UserInfo, LoginResult } from '@/types/user'
 
@@ -18,7 +19,9 @@ export const useUserStore = defineStore('user', () => {
   function setToken(value: string) {
     token.value = value
     if (value) {
-      localStorage.setItem(TOKEN_KEY, value)
+      // 配额保护：token 是关键数据，配额满时 aggressive 回收（清进度缓存）确保能持久化，
+      // 避免 localStorage 超限导致 token 写不进去、请求不带 Authorization 而误报「未登录」
+      safeSetItem(TOKEN_KEY, value, { aggressive: true })
     } else {
       localStorage.removeItem(TOKEN_KEY)
     }

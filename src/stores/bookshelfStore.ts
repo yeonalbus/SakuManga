@@ -21,6 +21,26 @@ interface BookshelfDTO {
 /** 书架列表（内存态，由后端驱动） */
 export const bookshelves = ref<Bookshelf[]>([])
 
+/**
+ * 把后端/旧缓存返回的 comicIds 统一转为数组。
+ * 后端历史版本可能返回 JSON 数组字符串（如 `["a","b"]`）而非数组，
+ * 直接透传给上层会导致 .filter/.includes 抛错（comicIds.filter is not a function）。
+ */
+const toComicIdArray = (raw: unknown): string[] => {
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string')
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === 'string')
+        : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 /** 从后端加载当前用户的书架 */
 export const loadBookshelves = async () => {
   try {
@@ -29,11 +49,16 @@ export const loadBookshelves = async () => {
       id: s.id,
       name: s.name,
       count: s.count || 0,
-      comicIds: s.comicIds || [],
+      comicIds: toComicIdArray(s.comicIds),
     }))
   } catch (e) {
     // 后端不可用时回退旧 localStorage 数据，保证离线调试可用
-    bookshelves.value = loadStorage('app_bookshelves', [])
+    bookshelves.value = loadStorage<Bookshelf[]>('app_bookshelves', []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      count: s.count || 0,
+      comicIds: toComicIdArray(s.comicIds),
+    }))
     console.error('加载书架失败:', e)
   }
 }
@@ -54,7 +79,8 @@ export const migrateLegacyBookshelves = async () => {
       if (!shelf?.name) continue
       const created = await createBookshelf(shelf.name)
       if (created) {
-        for (const cid of shelf.comicIds || []) {
+        // 旧缓存 comicIds 可能为 JSON 数组字符串，统一转数组后再迁移
+        for (const cid of toComicIdArray(shelf.comicIds)) {
           await addComicToShelf(created.id, cid)
         }
       }

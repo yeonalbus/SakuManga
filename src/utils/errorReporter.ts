@@ -4,6 +4,7 @@
 // 用于诊断「搜索栏输入特定内容时页面消失」等难以本地复现的前端崩溃。
 import { API_BASE } from '@/config/api'
 import { advancedSettings } from '@/stores/advancedSettings'
+import { safeSetItem } from '@/utils/storage'
 
 export interface AppErrorEntry {
   ts: string
@@ -56,11 +57,12 @@ export function reportError(
     info,
   }
 
-  // 1. 本地环形缓冲（隐私模式等场景下 localStorage 不可用时静默降级）
+  // 1. 本地环形缓冲（隐私模式等场景下 localStorage 不可用时静默降级；
+  //    配额满时 safeSetItem 自动回收低价值缓存，保证诊断日志仍能落盘）
   try {
     const ring = readRing()
     ring.push(entry)
-    localStorage.setItem(RING_KEY, JSON.stringify(ring.slice(-RING_MAX)))
+    safeSetItem(RING_KEY, JSON.stringify(ring.slice(-RING_MAX)))
   } catch {
     /* ignore */
   }

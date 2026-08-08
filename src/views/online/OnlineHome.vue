@@ -164,7 +164,7 @@ onUnmounted(() => {
 
         <!-- 右下角悬浮操作球 -->
         <FloatingToolbar
-          :show-detail="true"
+          :show-detail="isWide"
           @refresh="initSearch"
           @seek-change="(date) => onlineStore.seekToDate(date)"
           @detail-toggle="togglePanel"

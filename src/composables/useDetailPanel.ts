@@ -1,6 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { useUI } from '@/composables/useUI'
 import {
   getDetailPanelState,
   openDetailPanel,
@@ -28,7 +27,6 @@ const WIDE_QUERY = '(min-width: 1025px)'
 
 export function useDetailPanel() {
   const route = useRoute()
-  const { toast } = useUI()
 
   const isWide = ref(false)
   const isPanelOpen = ref(false)
@@ -77,26 +75,20 @@ export function useDetailPanel() {
   })
 
   /**
-   * 打开详情：
-   * - 窄屏 / 强制移动 → 全屏详情路由
-   * - 宽屏且面板已打开 → 切换面板内容
-   * - 宽屏且面板已关闭 → window.open 新标签打开完整详情（与「画廊详情 ↗」一致），
-   *   同时记录 gid/token，便于操作菜单「详情页面」重新唤起
+   * 打开详情（宽屏点击卡片一律打开/切换小详情面板）：
+   * - 宽屏 → 自动打开/切换右侧小详情面板；新标签仅保留给 Ctrl/中键点击与「画廊详情 ↗」
+   * - 窄屏 / 强制移动 → 新标签打开完整详情（面板不渲染，回退全屏详情）
    */
   const openDetail = (comic: { id: string; token?: string }) => {
     if (!comic?.id) return
-    if (isWide.value && comic.token) {
-      panelGid.value = comic.id
-      panelToken.value = comic.token
-      if (isPanelOpen.value) {
-        isPanelOpen.value = true
-        openDetailPanel(route.fullPath, comic.id, comic.token)
-      } else {
-        // S10：宽屏且面板已关闭 → 新标签打开完整详情（统一入口，写新标签标记）
-        openComicDetailInNewTab({ id: comic.id, token: comic.token, source: 'online' })
-      }
+    panelGid.value = comic.id
+    panelToken.value = comic.token || ''
+    if (isWide.value) {
+      // 宽屏：点击卡片自动打开/切换小详情面板（OnlineDetail 对空 token 有兜底）
+      isPanelOpen.value = true
+      openDetailPanel(route.fullPath, comic.id, comic.token || '')
     } else {
-      // S10：在线窄屏 → 新标签打开完整详情（与宽屏面板关闭行为一致）
+      // 窄屏 / 强制移动：面板不渲染，新标签打开完整详情
       openComicDetailInNewTab({ id: comic.id, token: comic.token || '', source: 'online' })
     }
   }
@@ -113,16 +105,17 @@ export function useDetailPanel() {
    * 切换面板显隐（操作菜单「详情页面」栏目）：
    * - 已打开 → 收起
    * - 已关闭且有上次内容 → 重新唤起
+   * - 已关闭且从未点选卡片 → 打开占位面板（提示先选卡片），而非 toast/静默
    */
   const togglePanel = () => {
     if (isPanelOpen.value) {
       closePanel()
-    } else if (panelGid.value) {
-      isPanelOpen.value = true
-      openDetailPanel(route.fullPath, panelGid.value, panelToken.value)
     } else {
-      // 未选中任何卡片时给出反馈，而非静默 no-op（S3）
-      toast.info('请先点选一张卡片')
+      isPanelOpen.value = true
+      // 已点选过卡片 → 唤起该内容；否则打开占位空态（不写 store，避免持久化空态）
+      if (panelGid.value) {
+        openDetailPanel(route.fullPath, panelGid.value, panelToken.value)
+      }
     }
   }
 

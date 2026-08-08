@@ -78,7 +78,7 @@ onMounted(() => {
 
         <!-- 右下角悬浮球：提供一键刷新与回到顶部 + 详情页面切换 -->
         <FloatingToolbar
-          :show-detail="true"
+          :show-detail="isWide"
           @refresh="fetchPopularComics"
           @detail-toggle="togglePanel"
         />

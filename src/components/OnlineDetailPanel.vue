@@ -40,7 +40,7 @@ const openFullDetail = () => {
     </div>
     <div v-else class="detail-panel-empty">
       <div class="empty-icon">🖼️</div>
-      <p>点击左侧画廊卡片<br />在此查看详情</p>
+      <p>请选择要查看详情页的本子</p>
     </div>
   </aside>
 </template>

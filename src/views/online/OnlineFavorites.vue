@@ -327,7 +327,7 @@ onMounted(() => {
         <FloatingToolbar
           :show-sort="true"
           :sort-mode="sortMode"
-          :show-detail="true"
+          :show-detail="isWide"
           @refresh="() => fetchFavInitial()"
           @seek-change="(date) => fetchFavInitial(date)"
           @toggle-sort="

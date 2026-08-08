@@ -136,7 +136,7 @@ onMounted(() => {
         <FloatingToolbar
           :show-toplist="true"
           :toplist-current="currentTl"
-          :show-detail="true"
+          :show-detail="isWide"
           @toplist-select="handleToplistSelect"
           @detail-toggle="togglePanel"
           @refresh="handleRefresh"

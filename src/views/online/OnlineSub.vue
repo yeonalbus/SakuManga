@@ -87,7 +87,7 @@ onMounted(() => {
 
         <!-- 右下角悬浮操作球：支持手动刷新与按日期跳转 (seek) + 详情页面切换 -->
         <FloatingToolbar
-          :show-detail="true"
+          :show-detail="isWide"
           @refresh="initSearch"
           @seek-change="(date) => subStore.seekToDate(date)"
           @detail-toggle="togglePanel"

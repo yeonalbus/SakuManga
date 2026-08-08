@@ -30,6 +30,7 @@ export interface PreferenceSettings {
   searchOptionsInherit: SearchOptionsInherit // 搜索选项继承
   preferLocalGallery: boolean // S1 本地优先加载：在线画廊有本地副本时详情页优先读本地
   resumeFromLastPage: boolean // 非历史入口「立即阅读」是否从上次阅读位置开始（默认关）
+  defaultFavFolder: number | null // 默认收藏夹：null=未配置（手动输入），0-9=直接收入对应收藏夹
 }
 
 const STORAGE_KEY = 'saku_preference_settings'
@@ -43,6 +44,7 @@ const defaultSettings: PreferenceSettings = {
   searchOptionsInherit: 'all',
   preferLocalGallery: true,
   resumeFromLastPage: false,
+  defaultFavFolder: null,
 }
 
 /** 响应式偏好设置（自动持久化） */

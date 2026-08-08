@@ -82,6 +82,18 @@
       </label>
     </div>
 
+    <!-- Round8-任务1：默认收藏夹（配置后点击「加入收藏」直接收入默认收藏夹，无需手动选择） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">默认收藏夹</div>
+        <div class="item-subtext">配置后点击「加入收藏」无需选择直接收入；再次点击已收藏该夹的画廊将弹出取消收藏确认</div>
+      </div>
+      <select v-model="preferenceSettings.defaultFavFolder" class="setting-select">
+        <option :value="null">未配置（手动选择）</option>
+        <option v-for="n in 10" :key="n - 1" :value="n - 1">Fav {{ n - 1 }}</option>
+      </select>
+    </div>
+
     <div class="reset-row">
       <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>

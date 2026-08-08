@@ -532,6 +532,33 @@ const handleStartDownload = async () => {
   }
 }
 
+// 收藏到指定收藏夹 (0 ~ 9)：POST 后同步本地状态与历史/清单联动（Round8-任务1 抽出的公共实现）
+const setFavorite = async (idx: number) => {
+  try {
+    await http('/comics/online/favorite', {
+      method: 'POST',
+      body: JSON.stringify({
+        gid: comic.value.id,
+        token: comic.value.token,
+        favCat: idx,
+        note: '',
+      }),
+    })
+
+    // 🟢 1. 更新当前详情页的局部响应式状态
+    comic.value.isFavorite = true
+    comic.value.favIndex = idx
+
+    // 🟢 刷新历史记录并通知 store 联动更新列表与清单里的项
+    addHistory(comic.value)
+    updateOnlineFavoriteState(comic.value.id, true, idx)
+
+    toast.success(`已成功存入 Favorite ${idx}`)
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '设置收藏失败')
+  }
+}
+
 // 点击选择收藏夹 (0 ~ 9)
 const handleSelectFavorite = async () => {
   const chosenIndex = await modal.prompt(
@@ -539,44 +566,24 @@ const handleSelectFavorite = async () => {
     String(comic.value.favIndex ?? 0),
     '设置在线收藏',
   )
-  if (chosenIndex !== null) {
-    const idx = parseInt(chosenIndex, 10)
-    if (!isNaN(idx) && idx >= 0 && idx <= 9) {
-      try {
-        await http('/comics/online/favorite', {
-          method: 'POST',
-          body: JSON.stringify({
-            gid: comic.value.id,
-            token: comic.value.token,
-            favCat: idx,
-            note: '',
-          }),
-        })
-
-        // 🟢 1. 更新当前详情页的局部响应式状态
-        comic.value.isFavorite = true
-        comic.value.favIndex = idx
-
-        // 🟢 刷新历史记录并通知 store 联动更新列表与清单里的项
-        addHistory(comic.value)
-        updateOnlineFavoriteState(comic.value.id, true, idx)
-
-        toast.success(`已成功存入 Favorite ${idx}`)
-      } catch (err: unknown) {
-        toast.error(err instanceof Error ? err.message : '设置收藏失败')
-      }
-    } else {
-      toast.error('请输入 0 到 9 之间的数字')
-    }
+  if (chosenIndex === null) return
+  const idx = parseInt(chosenIndex, 10)
+  if (isNaN(idx) || idx < 0 || idx > 9) {
+    toast.error('请输入 0 到 9 之间的数字')
+    return
   }
+  await setFavorite(idx)
 }
 
-// 取消收藏
+// 取消收藏（Round8-任务2：浏览器 confirm 改为项目统一 web 弹窗）
 const handleRemoveFavorite = async () => {
   if (!comic.value.isFavorite) return
 
-  const confirm = window.confirm(`确定要从收藏夹移除《${comic.value.title}》吗？`)
-  if (!confirm) return
+  const confirmed = await modal.confirm(
+    `确定要从收藏夹移除《${comic.value.title}》吗？`,
+    '取消收藏',
+  )
+  if (!confirmed) return
 
   try {
     await http('/comics/online/favorite', {
@@ -625,12 +632,31 @@ const handlePressEnd = () => {
   clearPressTimer()
 }
 
-const handleFavClick = () => {
+// Round8-任务1：点击「❤️」按默认收藏夹配置分流
+// - 未配置 → 弹输入框手动选择（保持原逻辑）
+// - 已配置且未收藏 → 直接收入默认收藏夹
+// - 已配置且已收藏、当前非默认 → 切换为默认收藏夹
+// - 已配置且已收藏、当前即默认 → 取消收藏（弹 web 确认框）
+// 长按取消收藏（handlePressStart）不受影响，始终取消。
+const handleFavClick = async () => {
   if (isLongPress) {
     isLongPress = false
     return
   }
-  handleSelectFavorite()
+  const defaultFolder = preferenceSettings.defaultFavFolder
+  if (defaultFolder === null) {
+    handleSelectFavorite()
+    return
+  }
+  if (comic.value.isFavorite) {
+    if (comic.value.favIndex === defaultFolder) {
+      handleRemoveFavorite()
+    } else {
+      await setFavorite(defaultFolder)
+    }
+  } else {
+    await setFavorite(defaultFolder)
+  }
 }
 
 onMounted(() => {
@@ -1095,7 +1121,6 @@ watch(
 }
 .detail-page.embedded .right-actions {
   flex: 1 1 100%;
-  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -1266,9 +1291,23 @@ watch(
   border-color: var(--app-border-3);
 }
 
+/* Round8-任务3：功能按钮横向滚动（内嵌面板与全页详情统一，隐藏滚动条） */
 .right-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
+}
+.right-actions::-webkit-scrollbar {
+  display: none; /* Chromium / WebKit */
+}
+.right-actions .action-btn,
+.right-actions .add-reading-btn,
+.right-actions .read-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .action-btn {

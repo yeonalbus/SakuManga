@@ -763,6 +763,13 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
 	pairID := map[string]string{}        // Round4 任务一：comic id → 成对对象 comic id（对比视图双列展示）
 
+	// ── 0. D5-B 在线回填 GID（S6）──
+	// 额外路径无 sidecar 元数据的文件夹 GID==''，规则 1/3 无法跨路径识别「新版/旧版」。
+	// 这里按标题在线搜索回填 GID/Token，成功后规则 1（同 GID）与规则 3（父画廊关系）
+	// 在本次运行中即可完成跨路径查重。需绑定 IPB 账号，回填失败/多结果写
+	// parent_checked_at 增量跳过（配合 S5 限流），避免每次维护重复搜索。
+	backfillGIDOnline(db, ehService, comics, forceFull, onProgress)
+
 	// ── 1. 同 GID 分组查重 ──
 	gidGroups := map[string][]models.OfflineComic{}
 	for _, c := range comics {
@@ -1109,6 +1116,159 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	}
 	log.Printf("%s [maintain] 维护查重完成：建议保留 %d 项，建议删除 %d 项", dlLogTag, keepCount, removeCount)
 	return result, nil
+}
+
+// backfillGIDOnline D5-B：对 GID=='' 的离线漫画按标题在线搜索，回填 GID/Token。
+//
+// 背景（S6）：额外路径下的文件夹若无 sidecar 元数据（metadata/ComicInfo.xml），
+// 入库时 GID/Token 为空，规则 1（同 GID 查重）与规则 3（父画廊关系）无法匹配，
+// 跨路径「新版/旧版」识别失效。这里在维护查重阶段按标题走在线搜索，命中唯一且
+// 高置信度的画廊后回写 g_id/token，随后由规则 1/3 在本次运行中完成跨路径识别。
+//
+// 约束：
+//   - 前置条件：绑定 IPB 账号（account.IPBMemberID 非空），未绑定则跳过；
+//   - 回填失败/无结果/多结果置信度不足 → 写 parent_checked_at 增量跳过（下次除非
+//     forceFull 否则不再搜索），配合 S5 限流退避 1.2s；
+//   - 单次维护最多回填 maxGIDBackfill 个，避免大量无 GID 文件夹拖慢任务。
+func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.OfflineComic, forceFull bool, onProgress OfflineProgressFn) {
+	if db == nil || ehService == nil {
+		return
+	}
+	account := LoadAdminAccount(db)
+	if account == nil || account.IPBMemberID == "" {
+		return // 未绑定 IPB 账号：跳过在线回填
+	}
+	ehSetting := loadEHSetting(db, LoadAdminUserID(db))
+
+	// 收集待回填目标：GID/Token 均空、且增量时跳过已尝试过（parent_checked_at>0）的
+	var targets []int
+	for i := range comics {
+		c := &comics[i]
+		if c.GID != "" || c.Token != "" || c.ParentCheckedAt != 0 {
+			continue
+		}
+		targets = append(targets, i)
+	}
+	const maxGIDBackfill = 50
+	if len(targets) > maxGIDBackfill {
+		targets = targets[:maxGIDBackfill]
+	}
+
+	for idx, pos := range targets {
+		c := &comics[pos]
+		if onProgress != nil {
+			onProgress(idx+1, len(targets), c.Title, "在线回填 GID（标题搜索）")
+		}
+		q := buildSearchTitle(c.Title)
+		if q == "" {
+			markBackfillSkipped(db, c)
+			continue
+		}
+		res, err := ehService.FetchGalleryList(account, SearchParams{Keyword: q}, ehSetting)
+		if err != nil || res == nil || len(res.Comics) == 0 {
+			log.Printf("%s [maintain] 漫画 %q 标题搜索失败/无结果（跳过回填，增量不再尝试）: %v",
+				dlWarnTag, c.Title, err)
+			markBackfillSkipped(db, c)
+			time.Sleep(1200 * time.Millisecond)
+			continue
+		}
+		match := pickConfidentMatch(c.Title, res.Comics)
+		if match == nil {
+			log.Printf("%s [maintain] 漫画 %q 标题搜索无高置信度命中（多结果/命名冲突），跳过回填（增量不再尝试）",
+				dlWarnTag, c.Title)
+			markBackfillSkipped(db, c)
+			time.Sleep(1200 * time.Millisecond)
+			continue
+		}
+		c.GID = match.ID
+		c.Token = match.Token
+		_ = db.Model(c).Updates(map[string]interface{}{"g_id": match.ID, "token": match.Token})
+		log.Printf("%s [maintain] 漫画 %q 在线回填 GID=%s（规则 1/3 将重新识别跨路径重复）",
+			dlLogTag, c.Title, match.ID)
+		time.Sleep(1200 * time.Millisecond)
+	}
+}
+
+// markBackfillSkipped 回填失败/无结果时写 parent_checked_at 增量跳过标记（S6）。
+func markBackfillSkipped(db *gorm.DB, c *models.OfflineComic) {
+	now := time.Now().UnixMilli()
+	_ = db.Model(c).Update("parent_checked_at", now)
+	c.ParentCheckedAt = now
+}
+
+// buildSearchTitle 从本地标题构造在线搜索关键词：
+// 去掉 [Artist] 等方括号标签前缀，去除多余空白；过短（<4 字符）放弃避免无意义搜索。
+func buildSearchTitle(title string) string {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return ""
+	}
+	// 去掉方括号包裹的标签前缀（如 "[milky] xxx" → "xxx"）
+	if strings.HasPrefix(t, "[") {
+		if idx := strings.Index(t, "] "); idx > 0 {
+			t = strings.TrimSpace(t[idx+2:])
+		} else if idx := strings.Index(t, "]"); idx > 0 {
+			t = strings.TrimSpace(t[idx+1:])
+		}
+	}
+	t = strings.Join(strings.Fields(t), " ")
+	if len([]rune(t)) < 4 {
+		return ""
+	}
+	return t
+}
+
+// normalizeTitle 标题归一化：小写、丢弃标点、折叠空白（保留 CJK/日文等非 ASCII）。
+func normalizeTitle(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r >= 0x80 {
+			b.WriteRune(r)
+		} else if r == ' ' {
+			b.WriteRune(' ')
+		}
+		// 其余标点符号丢弃
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// pickConfidentMatch 从搜索结果中挑选高置信度匹配项：
+//   - 归一化标题与目标完全相等或互为子串（长度足够）时命中；
+//   - 多个结果标题接近 → 同名不同画，置信度不足返回 nil（防误写 GID）。
+func pickConfidentMatch(title string, comics []OnlineComicDTO) *OnlineComicDTO {
+	target := normalizeTitle(title)
+	if target == "" {
+		return nil
+	}
+	var first *OnlineComicDTO
+	for i := range comics {
+		nt := normalizeTitle(comics[i].Title)
+		if nt == "" {
+			continue
+		}
+		if isTitleMatch(target, nt) {
+			if first == nil {
+				first = &comics[i]
+			} else {
+				return nil // 多个候选标题一致 → 同名不同画，置信度不足
+			}
+		}
+	}
+	return first
+}
+
+// isTitleMatch 标题匹配判定：完全相等，或长度足够（≥6）时互为子串。
+func isTitleMatch(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if len(a) >= 6 && len(b) >= 6 {
+		if strings.Contains(a, b) || strings.Contains(b, a) {
+			return true
+		}
+	}
+	return false
 }
 
 // findComicByID 在 comics 切片中按 id 查找漫画（返回最新值指针；成对对象解析用，Round4 任务一）。

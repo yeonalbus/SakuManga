@@ -447,8 +447,8 @@ func ParseDirMetadata(dirPath string) *ParsedMetadata {
 		name := strings.ToLower(entry.Name())
 		fullPath := filepath.Join(dirPath, entry.Name())
 
-		// A. 匹配 JSON 元数据 (metadata / ametadata / info.json 等)
-		if name == "metadata" || name == "ametadata" || name == "info.json" || strings.HasSuffix(name, ".json") {
+		// A. 匹配 JSON 元数据 (metadata / ametadata / info.json / .ehdata 等)
+		if name == "metadata" || name == "ametadata" || name == "info.json" || name == ".ehdata" || strings.HasSuffix(name, ".json") {
 			if data, err := os.ReadFile(fullPath); err == nil {
 				// 稳健解析：兼容 JHentai 画廊(gallery 包裹层)/归档(平铺)格式与 tags 字符串/数组混用
 				result.applyJSONMeta(parseEHJSONMetadata(data))
@@ -488,7 +488,7 @@ func ParseZipMetadata(zipPath string) *ParsedMetadata {
 		}
 		name := strings.ToLower(filepath.Base(f.Name))
 
-		if name == "metadata" || name == "ametadata" || name == "info.json" || name == "comicinfo.xml" {
+		if name == "metadata" || name == "ametadata" || name == "info.json" || name == ".ehdata" || name == "comicinfo.xml" {
 			rc, err := f.Open()
 			if err != nil {
 				continue

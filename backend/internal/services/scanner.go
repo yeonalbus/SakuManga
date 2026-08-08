@@ -302,10 +302,25 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	comicID := generateID(localPath)
 	coverURL := "/api/v1/comics/" + comicID + "/cover"
 
-	// 🎯 1.5 增量模式：该路径已在库中 → 直接跳过（不重复解析/入库）
+	// 🎯 1.5 增量模式：该路径已在库中 → 默认跳过；
+	//    但若已有记录缺 GID/Token（此前无 sidecar 元数据），重新解析本地元数据补提
+	//    （S6：用户补放 metadata/ComicInfo.xml 后再次增量扫描即可自动回填 GID，
+	//     使跨路径「同 GID / 父画廊关系」查重自动生效）。
 	if incremental {
 		var existing models.OfflineComic
 		if err := database.DB.Where("local_path = ?", localPath).First(&existing).Error; err == nil {
+			if existing.GID == "" && meta.GID != "" {
+				updates := map[string]interface{}{"g_id": meta.GID}
+				if meta.Token != "" {
+					updates["token"] = meta.Token
+				}
+				if meta.ParentGID != "" {
+					updates["parent_g_id"] = meta.ParentGID
+				}
+				if err := database.DB.Model(&existing).Updates(updates).Error; err == nil {
+					log.Printf("%s [scan] 增量补提元数据 gid=%s: %q", dlLogTag, meta.GID, localPath)
+				}
+			}
 			log.Printf("%s [scan] 增量模式跳过已存在路径: %q", dlLogTag, localPath)
 			return false
 		}

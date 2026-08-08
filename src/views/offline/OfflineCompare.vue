@@ -32,6 +32,7 @@ interface OfflineDetailDTO {
   category?: string
   pageCount?: number
   gid?: string
+  token?: string // 本地画廊绑定的在线 Token（S7 左侧 OnlineDetail local-panel 加载用）
   publishedAt?: string
   addedAt?: string
   fileModifiedAt?: string
@@ -63,6 +64,10 @@ const localTags = ref<DetailTag[]>([])
 const onlineGid = ref('')
 const onlineToken = ref('')
 const updateNote = ref('')
+
+// S7：左侧「本地原版」使用 OnlineDetail local-panel 渲染（在线结构 + 本地页图预览），需本地 gid/token
+const localGid = computed(() => localComic.value?.gid || '')
+const localToken = computed(() => localComic.value?.token || '')
 
 // maintain 类型：左=建议保留，右=建议删除
 const leftComic = ref<OfflineDetailDTO | null>(null)
@@ -240,16 +245,32 @@ onMounted(load)
     </div>
 
     <div v-else class="online-split compare-split">
-      <!-- 左侧：本地原版 / 建议保留 -->
+      <!-- 左侧：本地原版（update=OnlineDetail 纯本地版）/ 建议保留（maintain） -->
       <div class="split-main">
-        <OfflineDetailPanel
-          :comic="compareType === 'update' ? localComic : leftComic"
-          :tags="compareType === 'update' ? localTags : leftTags"
-          :badge="compareType === 'update' ? '本地原版' : '建议保留'"
-          badge-type="ok"
-          :reason="compareType === 'update' ? '' : leftReason"
-          @open-full="openFullDetail(compareType === 'update' ? localComic : leftComic)"
-        />
+        <template v-if="compareType === 'update'">
+          <aside class="compare-online-panel">
+            <header class="compare-panel-header">
+              <span class="compare-panel-title">📚 本地原版</span>
+            </header>
+            <div v-if="localGid" class="compare-online-body">
+              <OnlineDetail embedded local-panel :gid="localGid" :token="localToken" />
+            </div>
+            <div v-else class="compare-online-empty">
+              <div class="empty-icon">📭</div>
+              <p>该本地漫画未绑定在线画廊（缺少 GID），无法在线对比详情。</p>
+            </div>
+          </aside>
+        </template>
+        <template v-else>
+          <OfflineDetailPanel
+            :comic="leftComic"
+            :tags="leftTags"
+            badge="建议保留"
+            badge-type="ok"
+            :reason="leftReason"
+            @open-full="openFullDetail(leftComic)"
+          />
+        </template>
       </div>
 
       <!-- 右侧：线上最新版 / 建议删除 -->

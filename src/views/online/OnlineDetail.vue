@@ -27,8 +27,9 @@ const props = withDefaults(
     embedded?: boolean
     gid?: string
     token?: string
+    localPanel?: boolean // S7 对比左侧：纯本地版展示（强制本地模式、隐藏评论 tab 与版本切换）
   }>(),
-  { embedded: false, gid: '', token: '' },
+  { embedded: false, gid: '', token: '', localPanel: false },
 )
 
 // 有效 gid/token：内嵌面板优先使用 props，全屏路由则读 route.query
@@ -162,7 +163,7 @@ const fetchDetail = async () => {
       params: {
         id: gid,
         token,
-        ...(preferenceSettings.preferLocalGallery ? { preferLocal: 1 } : {}),
+        ...(props.localPanel || preferenceSettings.preferLocalGallery ? { preferLocal: 1 } : {}),
       },
     })
 
@@ -667,15 +668,25 @@ watch(
         </div>
       </div>
 
-      <!-- S1 本地优先：本地版本徽章 + 手动切回在线/本地 -->
-      <div v-if="localVersion" class="local-badge-row" :class="{ 'is-online': useOnlineOverride }">
-        <span class="local-badge" :class="{ online: useOnlineOverride }">
-          {{ useOnlineOverride ? '🌐 在线版本' : '📚 本地版本' }}
+      <!-- S1 本地优先：本地版本徽章 + 手动切回在线/本地；S7 对比左侧 localPanel 固定展示「本地原版」 -->
+      <div
+        v-if="localVersion"
+        class="local-badge-row"
+        :class="{ 'is-online': useOnlineOverride, 'is-static': localPanel }"
+      >
+        <span class="local-badge" :class="{ online: useOnlineOverride && !localPanel }">
+          {{ localPanel ? '📚 本地原版' : useOnlineOverride ? '🌐 在线版本' : '📚 本地版本' }}
         </span>
-        <button v-if="!useOnlineOverride" class="switch-version-btn" @click="switchToOnline">
+        <button
+          v-if="!localPanel && !useOnlineOverride"
+          class="switch-version-btn"
+          @click="switchToOnline"
+        >
           切回在线版本
         </button>
-        <button v-else class="switch-version-btn" @click="switchToLocal">使用本地版本</button>
+        <button v-else-if="!localPanel" class="switch-version-btn" @click="switchToLocal">
+          使用本地版本
+        </button>
       </div>
 
       <!-- 标题与英文/译名标题 -->
@@ -742,7 +753,7 @@ watch(
           🖼️ 预览切片 (已载 {{ comic.previewPages?.length || 0 }} / 共 {{ comic.pageCount || 0 }}P)
         </button>
         <button
-          v-if="preferenceSettings.showGalleryComments"
+          v-if="!localPanel && preferenceSettings.showGalleryComments"
           class="tab-item"
           :class="{ active: activeTab === 'comments' }"
           @click="activeTab = 'comments'"
@@ -852,7 +863,7 @@ watch(
 
       <!-- Tab 3: 社区评论 -->
       <div
-        v-if="preferenceSettings.showGalleryComments && activeTab === 'comments'"
+        v-if="!localPanel && preferenceSettings.showGalleryComments && activeTab === 'comments'"
         class="tab-content comments-tab"
       >
         <div v-if="comic.comments?.length" class="comments-list">

@@ -28,8 +28,15 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 	// 1. 搜索关键词
 	// ⚠️ 实时性说明：E 站首页时差（约 2h 缓存）的真正原因是缺少 sk 会话 Cookie，
 	// 而非缺少 f_search 参数。请确保账号已配置 sk（见 eh_auth.go BuildClient）。
-	if params.Keyword != "" {
-		q.Set("f_search", params.Keyword)
+	keyword := params.Keyword
+	// E-Hentai tag 语法自动修正（TagMaintain 设置可关，默认开启）：
+	// 将 group:da hootch 之类自由输入修正为 group:"da hootch$" 标准语法，
+	// 避免 E 站把多词 tag 拆成独立 token 导致无结果（见 fsearch_normalize.go）。
+	if keyword != "" && FSearchAutoCorrectEnabled() {
+		keyword = NormalizeFSearch(keyword)
+	}
+	if keyword != "" {
+		q.Set("f_search", keyword)
 	}
 
 	// 1.5 语言筛选：以 language:xxx token 并入 f_search（与禁用语言过滤互斥）

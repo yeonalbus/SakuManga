@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"SakuHentai/internal/models"
@@ -33,6 +34,21 @@ import (
 
 // 系统本地时区（Round9-时区统一：调度基准与计算机时间一致，随系统时区/DST 自动变化）
 var tagMaintainLoc = time.Local
+
+// ─── 在线搜索 f_search 自动修正开关（默认开启） ───
+// EHService 为无状态空结构体（不持 DB），因此用包级原子缓存承载该全局开关，
+// 由 Load/SaveTagMaintainSetting 在读写时同步，FetchGalleryList 内部仅读取。
+var fSearchAutoCorrect = func() atomic.Bool {
+	var b atomic.Bool
+	b.Store(true)
+	return b
+}()
+
+// SetFSearchAutoCorrect 更新 f_search 自动修正开关缓存
+func SetFSearchAutoCorrect(v bool) { fSearchAutoCorrect.Store(v) }
+
+// FSearchAutoCorrectEnabled 读取 f_search 自动修正开关（未初始化时默认开启）
+func FSearchAutoCorrectEnabled() bool { return fSearchAutoCorrect.Load() }
 
 // TagMaintainProgress 刷新/写回任务进度（供界面轮询）
 type TagMaintainProgress struct {
@@ -117,17 +133,20 @@ func LoadTagMaintainSetting(db *gorm.DB) *models.TagMaintainSetting {
 	var setting models.TagMaintainSetting
 	if err := db.First(&setting, 1).Error; err != nil {
 		setting = models.TagMaintainSetting{
-			ID:                   1,
-			EnableDailyRefresh:   true,
-			EnableWeeklyWriteback: true,
-			RefreshHour:          6,
-			WritebackWeekday:     0,
-			WritebackHour:        6,
+			ID:                      1,
+			EnableDailyRefresh:      true,
+			EnableWeeklyWriteback:   true,
+			RefreshHour:             6,
+			WritebackWeekday:        0,
+			WritebackHour:           6,
+			EnableFSearchAutoCorrect: true,
 		}
 		if err := db.Create(&setting).Error; err != nil {
 			log.Printf("%s 初始化 TagMaintainSetting 失败: %v", dlErrTag, err)
 		}
 	}
+	// 同步 f_search 自动修正开关到包级缓存
+	SetFSearchAutoCorrect(setting.EnableFSearchAutoCorrect)
 	return &setting
 }
 
@@ -138,6 +157,8 @@ func SaveTagMaintainSetting(db *gorm.DB, setting *models.TagMaintainSetting) (*m
 	if err := db.Save(setting).Error; err != nil {
 		return nil, err
 	}
+	// 同步 f_search 自动修正开关到包级缓存
+	SetFSearchAutoCorrect(setting.EnableFSearchAutoCorrect)
 	return setting, nil
 }
 

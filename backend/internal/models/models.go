@@ -82,15 +82,16 @@ type OfflineComic struct {
 
 // TagMaintainSetting Tag 维护设置（单例 ID=1）
 type TagMaintainSetting struct {
-	ID                  uint      `gorm:"primaryKey;default:1" json:"id"`
-	EnableDailyRefresh  bool      `gorm:"default:true" json:"enableDailyRefresh"`   // 开启每日 Tag 刷新
-	EnableWeeklyWriteback bool    `gorm:"default:true" json:"enableWeeklyWriteback"` // 开启每周反向写回
-	RefreshHour         int       `gorm:"default:6" json:"refreshHour"`             // 每日刷新小时（系统本地时区，默认 6）
-	WritebackWeekday    int       `gorm:"default:0" json:"writebackWeekday"`        // 写回日（0=周日）
-	WritebackHour       int       `gorm:"default:6" json:"writebackHour"`           // 写回小时（系统本地时区，默认 6）
-	LastDailyRunAt      int64     `json:"lastDailyRunAt,omitempty"`                 // 上次每日刷新执行时间(ms)
-	LastWeeklyRunAt     int64     `json:"lastWeeklyRunAt,omitempty"`                // 上次每周写回执行时间(ms)
-	UpdatedAt           time.Time `json:"updatedAt"`
+	ID                     uint      `gorm:"primaryKey;default:1" json:"id"`
+	EnableDailyRefresh     bool      `gorm:"default:true" json:"enableDailyRefresh"`     // 开启每日 Tag 刷新
+	EnableWeeklyWriteback  bool      `gorm:"default:true" json:"enableWeeklyWriteback"`  // 开启每周反向写回
+	RefreshHour            int       `gorm:"default:6" json:"refreshHour"`               // 每日刷新小时（系统本地时区，默认 6）
+	WritebackWeekday       int       `gorm:"default:0" json:"writebackWeekday"`          // 写回日（0=周日）
+	WritebackHour          int       `gorm:"default:6" json:"writebackHour"`             // 写回小时（系统本地时区，默认 6）
+	EnableFSearchAutoCorrect bool    `gorm:"default:true" json:"enableFSearchAutoCorrect"` // 开启在线搜索 f_search 自动修正为 E 站标准语法（namespace:"key$"）
+	LastDailyRunAt         int64     `json:"lastDailyRunAt,omitempty"`                   // 上次每日刷新执行时间(ms)
+	LastWeeklyRunAt        int64     `json:"lastWeeklyRunAt,omitempty"`                  // 上次每周写回执行时间(ms)
+	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
 // UpdateScanSetting 每周自动更新扫描设置（单例 ID=1，Round4 任务四）

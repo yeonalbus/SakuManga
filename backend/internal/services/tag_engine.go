@@ -467,31 +467,75 @@ func (e *TagEngine) Suggest(query string, limit int) []*TagItem {
 		return []*TagItem{}
 	}
 
-	var matched []*TagItem
-
-	for _, tag := range e.tagList {
-		matchEN := strings.Contains(strings.ToLower(tag.Key), q)
-		matchCN := e.EnableCN && strings.Contains(strings.ToLower(tag.Name), q)
-		matchNS := strings.Contains(strings.ToLower(tag.Namespace+":"+tag.Key), q)
-
-		if matchEN || matchCN || matchNS {
-			matched = append(matched, tag)
-		}
+	// 显式命名空间：q 含冒号（如 female:sto）时要求 namespace 前缀一致，再按 key 匹配，
+	// 避免裸词 q 被「namespace:key 子串匹配」误命中（如 "la" 命中所有 female/language 标签，
+	// 导致 female:stockings 之类高热度乱联想霸榜）。
+	var ns string
+	keyQ := q
+	if idx := strings.Index(q, ":"); idx != -1 {
+		ns = q[:idx]
+		keyQ = q[idx+1:]
 	}
 
-	sort.Slice(matched, func(i, j int) bool {
-		if e.EnableSort {
-			if matched[i].Count != matched[j].Count {
-				return matched[i].Count > matched[j].Count
+	// score：1=前缀命中（最相关） 0=子串命中
+	type scored struct {
+		tag   *TagItem
+		score int
+	}
+	matched := make([]scored, 0, 32)
+
+	for _, tag := range e.tagList {
+		lowerKey := strings.ToLower(tag.Key)
+		lowerName := strings.ToLower(tag.Name)
+
+		var score int
+		switch {
+		case ns != "":
+			// 用户显式输入命名空间：namespace 必须一致
+			if !strings.EqualFold(tag.Namespace, ns) {
+				continue
+			}
+			if strings.HasPrefix(lowerKey, keyQ) || (e.EnableCN && strings.HasPrefix(lowerName, keyQ)) {
+				score = 1
+			} else if strings.Contains(lowerKey, keyQ) || (e.EnableCN && strings.Contains(lowerName, keyQ)) {
+				score = 0
+			} else {
+				continue
+			}
+		default:
+			// 裸词查询：只匹配 key / 中文名，不做 namespace 子串匹配
+			if strings.HasPrefix(lowerKey, q) || (e.EnableCN && strings.HasPrefix(lowerName, q)) {
+				score = 1
+			} else if strings.Contains(lowerKey, q) || (e.EnableCN && strings.Contains(lowerName, q)) {
+				score = 0
+			} else {
+				continue
 			}
 		}
-		return len(matched[i].Key) < len(matched[j].Key)
+		matched = append(matched, scored{tag: tag, score: score})
+	}
+
+	// 排序：前缀命中优先 → 热度高优先 → key 短优先
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].score != matched[j].score {
+			return matched[i].score > matched[j].score
+		}
+		if e.EnableSort {
+			if matched[i].tag.Count != matched[j].tag.Count {
+				return matched[i].tag.Count > matched[j].tag.Count
+			}
+		}
+		return len(matched[i].tag.Key) < len(matched[j].tag.Key)
 	})
 
 	if len(matched) > limit {
-		return matched[:limit]
+		matched = matched[:limit]
 	}
-	return matched
+	out := make([]*TagItem, 0, len(matched))
+	for _, m := range matched {
+		out = append(out, m.tag)
+	}
+	return out
 }
 
 func (e *TagEngine) GetVersions() (string, string) {

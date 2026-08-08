@@ -27,11 +27,12 @@ func (h *TagMaintainHandler) GetSetting(c *gin.Context) {
 
 // saveTagSettingReq 保存设置的请求体（指针字段以区分“未传”与“传 false”）
 type saveTagSettingReq struct {
-	EnableDailyRefresh    *bool `json:"enableDailyRefresh"`
-	EnableWeeklyWriteback *bool `json:"enableWeeklyWriteback"`
-	RefreshHour           *int  `json:"refreshHour"`
-	WritebackWeekday      *int  `json:"writebackWeekday"`
-	WritebackHour         *int  `json:"writebackHour"`
+	EnableDailyRefresh      *bool `json:"enableDailyRefresh"`
+	EnableWeeklyWriteback   *bool `json:"enableWeeklyWriteback"`
+	EnableFSearchAutoCorrect *bool `json:"enableFSearchAutoCorrect"`
+	RefreshHour             *int  `json:"refreshHour"`
+	WritebackWeekday        *int  `json:"writebackWeekday"`
+	WritebackHour           *int  `json:"writebackHour"`
 }
 
 // SaveSetting 保存 Tag 维护设置 POST /api/v1/offline/tags/setting
@@ -48,6 +49,10 @@ func (h *TagMaintainHandler) SaveSetting(c *gin.Context) {
 	}
 	if req.EnableWeeklyWriteback != nil {
 		setting.EnableWeeklyWriteback = *req.EnableWeeklyWriteback
+	}
+	// 修复：请求体缺该字段导致「在线搜索 Tag 语法自动修正」开关无法关闭/开启
+	if req.EnableFSearchAutoCorrect != nil {
+		setting.EnableFSearchAutoCorrect = *req.EnableFSearchAutoCorrect
 	}
 	if req.RefreshHour != nil {
 		setting.RefreshHour = *req.RefreshHour

@@ -325,7 +325,14 @@ func (d *archiveChunkDownloader) finalize() error {
 	}
 
 	if !isValidZip(d.part) {
-		return fmt.Errorf("下载完成但 zip 校验失败（文件损坏，可重试）")
+		// 校验失败：关闭句柄并删除损坏的 .part 与伴生位图，返回哨兵错误供 run() 自动重下一次。
+		//（若不清理，重试会按位图判定“全部完成”再次校验同一损坏文件，形成死循环）
+		if f != nil {
+			_ = f.Close()
+		}
+		removeArchiveBitmap(d.part)
+		_ = os.Remove(d.part)
+		return fmt.Errorf("%w: 已清除缓存，将自动重新下载", errZipCorrupt)
 	}
 	if err := os.Rename(d.part, d.g.zipPath); err != nil {
 		return err

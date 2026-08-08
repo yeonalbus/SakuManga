@@ -258,8 +258,17 @@ func (g *archiveDownloader) run() {
 	log.Printf("%s [archive-engine] 任务 %s 已获取 H@H 下载链接: %s", dlLogTag, g.task.ID, truncateForLog(downloadURL, 200))
 
 	// 6. 下载 zip：探测 Range 支持与总大小后，按线程数分流（分块并发 / 单线程续传）
-	if err := g.downloadArchiveFile(downloadURL); err != nil {
-		g.failOrLock(err)
+	// zip 校验失败（文件损坏）：.part/.bits 已删除，自动从零重下一次；再次失败才任务报错。
+	dlErr := g.downloadArchiveFile(downloadURL)
+	if errors.Is(dlErr, errZipCorrupt) && !g.stopped() {
+		log.Printf("%s [archive-engine] 任务 %s zip 校验失败，已清除缓存，自动重新下载一次", dlWarnTag, g.task.ID)
+		dlErr = g.downloadArchiveFile(downloadURL)
+		if errors.Is(dlErr, errZipCorrupt) {
+			log.Printf("%s [archive-engine] 任务 %s 重新下载后仍校验失败，任务报错（可手动重试）", dlErrTag, g.task.ID)
+		}
+	}
+	if dlErr != nil {
+		g.failOrLock(dlErr)
 		return
 	}
 
@@ -501,6 +510,11 @@ func (g *archiveDownloader) findKeyForm(forms []archiverForm) *archiverForm {
 // errHathdlOnly 标记「仅支持 H@H Downloader」的画廊在尝试直链下载失败后的降级信号：
 // 已优先尝试 H@H 下载页直链（#continue > a / #db > p > a），全部失败时降级为画廊逐图下载。
 var errHathdlOnly = errors.New("该画廊仅支持 H@H Downloader 且直链解析失败，降级为画廊逐图下载")
+
+// errZipCorrupt 归档 zip 校验失败（下载数据损坏，非网络错误）。
+// 校验失败处会先删除损坏的 .part 与伴生位图 .bits，再由 run() 捕获后自动重下一次；
+// 再次失败才任务报错（用户手动重试时从零全新下载）。
+var errZipCorrupt = errors.New("下载完成但 zip 校验失败（文件损坏，已清除缓存）")
 
 // isHathdlOnly 判断页面是否属于「仅 H@H Downloader」画廊：
 // 存在 hathdl_xres 隐藏表单即判定（hathdl_xres 为 H@H Downloader 表单的特征字段；
@@ -919,7 +933,11 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 	closed = true
 
 	if !isValidZip(g.partPath) {
-		return fmt.Errorf("下载完成但 zip 校验失败（文件损坏，可重试）")
+		// 校验失败：删除损坏的 .part 与伴生位图，返回哨兵错误供 run() 自动重下一次
+		//（写句柄已在上方 Close；残留位图一并清理，避免重试按位图判定“全部完成”再次校验同一损坏文件）
+		removeArchiveBitmap(g.partPath)
+		_ = os.Remove(g.partPath)
+		return fmt.Errorf("%w: 已清除缓存，将自动重新下载", errZipCorrupt)
 	}
 	if err := os.Rename(g.partPath, g.zipPath); err != nil {
 		return err

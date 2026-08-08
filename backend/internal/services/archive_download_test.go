@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -1009,5 +1010,227 @@ func TestArchiveEngineAcquireSlot(t *testing.T) {
 	g3.releaseSlot()
 	if got := mgr.archivePool.currentActive(); got != 0 {
 		t.Fatalf("全部释放后 active 应为 0，实际 %d", got)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// zip 校验失败清理与自动重试（Round 6）
+// 覆盖：下载完成但 zip 损坏时删除 .part/.bits 并返回 errZipCorrupt 哨兵错误，
+//       清除缓存后重新下载从零开始（修复「按位图判定全部完成→反复校验同一损坏文件」死循环）。
+// ─────────────────────────────────────────────────────────────
+
+// TestDownloadZipSingleThreadCorruptCleansUp 单线程 downloadZip 路径：
+// 下载到损坏数据 → 校验失败 → 删除 .part 并返回 errZipCorrupt（哨兵错误），
+// 使 run() 能捕获后自动重下一次（重试时 .part 已清，从零全新下载）。
+func TestDownloadZipSingleThreadCorruptCleansUp(t *testing.T) {
+	corrupt := make([]byte, 3*1024*1024) // 3 MiB 随机数据（非 zip）
+	rng := rand.New(rand.NewSource(7))
+	if _, err := rng.Read(corrupt); err != nil {
+		t.Fatalf("生成损坏数据失败: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(corrupt)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(corrupt)
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	// 预写伴生位图残留：校验失败后应一并清理
+	//（单线程 downloadZip 顶部会移除 .bits；分块路径 finalize 的清理由
+	//  TestChunkFinalizeCorruptCleansUp 单独覆盖）
+	if err := writeArchiveBitmap(g.partPath, 1024, 2, []uint64{3}); err != nil {
+		t.Fatalf("预写位图失败: %v", err)
+	}
+
+	err := g.downloadZip(srv.URL + "/file.zip")
+	if !errors.Is(err, errZipCorrupt) {
+		t.Fatalf("downloadZip 应返回 errZipCorrupt，实际: %v", err)
+	}
+	if _, e := os.Stat(g.partPath); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .part 应被删除（重试从零重新下载）")
+	}
+	if _, e := os.Stat(archiveBitmapPath(g.partPath)); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .bits 应被删除")
+	}
+	if _, e := os.Stat(g.zipPath); !os.IsNotExist(e) {
+		t.Fatal("校验失败后不应生成 .zip 正式文件")
+	}
+}
+
+// TestChunkFinalizeCorruptCleansUp 分块路径 finalize 回归测试（死循环根因场景）：
+// 预写「完整损坏 .part + 全完成位图」，模拟「校验失败后残留缓存被重试再次命中」。
+// 修复前：位图判定“全部完成”→ 直接校验同一损坏文件 → 反复失败（死循环）。
+// 修复后：校验失败 → 删除 .part 与 .bits → 返回 errZipCorrupt（run() 捕获后自动重下一次）。
+func TestChunkFinalizeCorruptCleansUp(t *testing.T) {
+	size := 8 * 1024 * 1024 // 8 MiB
+	corrupt := make([]byte, size)
+	rng := rand.New(rand.NewSource(13))
+	if _, err := rng.Read(corrupt); err != nil {
+		t.Fatalf("生成损坏数据失败: %v", err)
+	}
+	srv := newRangeServer(corrupt, true)
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	setting := mgr.GetSettings()
+	setting.ArchiveThreads = 5
+	setting.ControlArchiveConcurrency = false
+	if _, err := mgr.SaveSettings(setting); err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	total, rangeOK, err := g.probeArchiveDownload(srv.URL + "/file.zip")
+	if err != nil {
+		t.Fatalf("探测失败: %v", err)
+	}
+	if !rangeOK || total != int64(len(corrupt)) {
+		t.Fatalf("探测 rangeOK=%v total=%d，期望 true/%d", rangeOK, total, len(corrupt))
+	}
+
+	// 以与生产一致的分块布局计算 chunk/count
+	d := newArchiveChunkDownloader(g, srv.URL+"/file.zip", total)
+	chunk, count := d.chunk, d.count
+	d.cancel()
+	if count < 2 {
+		t.Fatalf("测试数据块数不足（count=%d）", count)
+	}
+
+	// 预写完整损坏 .part + 全完成位图（模拟“校验失败后缓存残留”）
+	if err := os.WriteFile(g.partPath, corrupt, 0o644); err != nil {
+		t.Fatalf("预写损坏 .part 失败: %v", err)
+	}
+	fullBits := make([]uint64, (count+63)/64)
+	for i := int64(0); i < count; i++ {
+		fullBits[i/64] |= 1 << (uint(i) % 64)
+	}
+	if err := writeArchiveBitmap(g.partPath, chunk, count, fullBits); err != nil {
+		t.Fatalf("写位图失败: %v", err)
+	}
+
+	// 走完整入口：位图“全部完成”→ 直接校验 → 发现损坏 → 清理 + errZipCorrupt（不再死循环）
+	err = g.downloadArchiveFile(srv.URL + "/file.zip")
+	if !errors.Is(err, errZipCorrupt) {
+		t.Fatalf("应返回 errZipCorrupt，实际: %v", err)
+	}
+	if _, e := os.Stat(g.partPath); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .part 应被删除")
+	}
+	if _, e := os.Stat(archiveBitmapPath(g.partPath)); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .bits 应被删除")
+	}
+	if _, e := os.Stat(g.zipPath); !os.IsNotExist(e) {
+		t.Fatal("校验失败后不应生成 .zip 正式文件")
+	}
+}
+
+// TestZipCorruptRetryFreshDownload 验证 run() 自动重下一次的正确行为：
+// 第一次分块下载得到损坏数据 → 校验失败清理缓存（errZipCorrupt）；
+// 第二次（模拟自动重下）因缓存已清，从零重新下载有效数据并成功落盘。
+func TestZipCorruptRetryFreshDownload(t *testing.T) {
+	size := 8 * 1024 * 1024 // 8 MiB
+	valid := makeTestZip(t, size)
+	corrupt := make([]byte, len(valid)) // 与 valid 等长，避免末块越界
+	rng := rand.New(rand.NewSource(21))
+	if _, err := rng.Read(corrupt); err != nil {
+		t.Fatalf("生成损坏数据失败: %v", err)
+	}
+	total := int64(len(valid))
+
+	mgr := newTestDownloadManager(t)
+	setting := mgr.GetSettings()
+	setting.ArchiveThreads = 5
+	setting.ControlArchiveConcurrency = false
+	if _, err := mgr.SaveSettings(setting); err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+
+	// 推算生产一致的分块布局（决定“前 count 个块请求返回损坏数据”）
+	g0 := newTestArchiveDownloader(t, mgr, "http://layout-only", t.TempDir())
+	d0 := newArchiveChunkDownloader(g0, "http://layout-only/file.zip", total)
+	_, count := d0.chunk, d0.count
+	d0.cancel()
+
+	var mu sync.Mutex
+	chunkReqs := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			// 无 Range 的探测/回退请求：返回有效数据（不影响校验路径）
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", total))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(valid)
+			return
+		}
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if end <= 0 || end >= total {
+			end = total - 1
+		}
+		if start >= total {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		if rng == "bytes=0-1023" {
+			// Range 探测（生产固定 bytes=0-1023）：返回有效数据以启用分块。
+			// 注意不能按“字节数 <= 1024”判定：末块可能很小（zip 头开销使 total 非块整数倍），
+			// 会被误判为探测而打乱损坏/有效数据预算。
+			_, _ = w.Write(valid[start : end+1])
+			return
+		}
+		mu.Lock()
+		chunkReqs++
+		n := chunkReqs
+		mu.Unlock()
+		if int64(n) <= count {
+			// 第一次完整分块下载 → 全部块为损坏数据（触发校验失败）
+			_, _ = w.Write(corrupt[start : end+1])
+			return
+		}
+		_, _ = w.Write(valid[start : end+1])
+	}))
+	defer srv.Close()
+
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	// 第一次下载：全损坏 → errZipCorrupt 且缓存已清
+	err1 := g.downloadArchiveFile(srv.URL + "/file.zip")
+	if !errors.Is(err1, errZipCorrupt) {
+		t.Fatalf("第一次下载应返回 errZipCorrupt，实际: %v", err1)
+	}
+	if _, e := os.Stat(g.partPath); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .part 应被删除（自动重下从零开始）")
+	}
+	if _, e := os.Stat(archiveBitmapPath(g.partPath)); !os.IsNotExist(e) {
+		t.Fatal("校验失败后 .bits 应被删除")
+	}
+
+	// 第二次下载（模拟 run() 自动重下一次）：缓存已清 → 从零重新下载有效数据 → 成功
+	if err := g.downloadArchiveFile(srv.URL + "/file.zip"); err != nil {
+		t.Fatalf("清除缓存后重新下载应成功: %v", err)
+	}
+	got, err := os.ReadFile(g.zipPath)
+	if err != nil {
+		t.Fatalf("读取 zip 失败: %v", err)
+	}
+	if !bytes.Equal(got, valid) {
+		t.Fatalf("重下内容与源不一致：got=%d 字节，want=%d 字节", len(got), len(valid))
+	}
+
+	mu.Lock()
+	reqs := chunkReqs
+	mu.Unlock()
+	if reqs < int(count)*2 {
+		t.Fatalf("自动重下应重新下载全部块（期望至少 %d 个块请求，实际 %d）", count*2, reqs)
 	}
 }

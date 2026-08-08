@@ -1,1 +1,0 @@
-import{B as e,X as t}from"./_plugin-vue_export-helper-Cvkktjkp.js";import{a as n,i as r}from"./request-CmthyWrj.js";var i=t(r(`app_view_mode`,`card`));e(i,e=>{n(`app_view_mode`,JSON.stringify(e))});var a=()=>{i.value=i.value===`card`?`compact`:`card`};export{i as n,a as t};

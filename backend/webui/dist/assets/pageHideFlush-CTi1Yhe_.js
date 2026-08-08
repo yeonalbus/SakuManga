@@ -1,0 +1,1 @@
+function e(e){typeof window>`u`||(window.addEventListener(`pagehide`,e),window.addEventListener(`beforeunload`,e))}export{e as t};

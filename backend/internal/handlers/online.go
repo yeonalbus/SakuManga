@@ -356,6 +356,9 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 		detail = services.AttachDetailFavoriteState(h.db, account.ID, detail)
 	}
 
+	// 挂载本地「已下载」状态（离线库存在同 GID → 前端下载按钮拦截提示，避免重复下载）
+	detail = services.AttachDetailDownloadState(h.db, detail)
+
 	// 3. 本地优先（S1）：开启本地优先且按 GID 查到本地 OfflineComic 时附加 local 信息
 	//    元数据与评论仍在线抓取；前端据此将预览/阅读页图改走本地接口 /comics/:id/page/:index
 	preferLocal := c.Query("preferLocal") == "1" || c.Query("preferLocal") == "true"

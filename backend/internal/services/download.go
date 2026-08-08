@@ -45,6 +45,8 @@ const (
 
 // errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
 var errTaskAlreadyExists = errors.New("task already exists")
+// errAlreadyDownloaded：该 gid 已在本地离线库下载过（非更新任务），拒绝重复下载
+var errAlreadyDownloaded = errors.New("gallery already downloaded")
 
 // CreateDownloadParams 创建下载任务的入参（前端 POST /api/v1/downloads）
 type CreateDownloadParams struct {
@@ -514,6 +516,16 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		return nil, fmt.Errorf("%w（gid=%s 已有进行中任务 %s）", errTaskAlreadyExists, p.GID, existing.ID)
 	}
 
+	// 已下载去重：本地离线库已存在同 gid 记录时拒绝重复下载。
+	// 更新任务（UpdateForComicID != ""）允许同 gid 扩充 / 新版替换旧版，必须放行；
+	// 否则手动/自动「下载更新版」会被误判为「已下载」而中断。
+	if p.UpdateForComicID == "" {
+		var offline models.OfflineComic
+		if err := m.db.Select("id").Where("g_id = ?", p.GID).First(&offline).Error; err == nil {
+			return nil, fmt.Errorf("%w（gid=%s 已下载到本地）", errAlreadyDownloaded, p.GID)
+		}
+	}
+
 	setting := m.GetSettings()
 	task := &models.DownloadTask{
 		ID:               newTaskID(),
@@ -567,7 +579,8 @@ func (m *DownloadManager) CreateTasksBatch(p BatchCreateParams) *BatchCreateResu
 			UserID:      p.UserID,
 		})
 		if err != nil {
-			if errors.Is(err, errTaskAlreadyExists) {
+			if errors.Is(err, errTaskAlreadyExists) || errors.Is(err, errAlreadyDownloaded) {
+				// 进行中任务 / 已下载到本地：均计入 skipped，前端按「跳过已存在」提示
 				res.Skipped++
 			} else {
 				res.Failed++

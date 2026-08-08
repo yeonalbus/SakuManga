@@ -378,6 +378,21 @@ func AttachDetailFavoriteState(db *gorm.DB, userID uint, detail *GalleryDetailRe
 	return detail
 }
 
+// 🟢 新增：详情页挂载本地「已下载」状态（本地离线库存在同 GID 记录 → 拦截重复下载提示）
+func AttachDetailDownloadState(db *gorm.DB, detail *GalleryDetailResult) *GalleryDetailResult {
+	if detail == nil || detail.ID == "" {
+		return detail
+	}
+
+	var count int64
+	db.Model(&models.OfflineComic{}).Where("g_id = ?", detail.ID).Count(&count)
+	if count > 0 {
+		detail.IsDownloaded = true
+	}
+
+	return detail
+}
+
 // ChangeFavoriteSortOrder 独立触发 E 站排序状态切换，并保存返回的 Cookie
 func (s *FavoritesService) ChangeFavoriteSortOrder(db *gorm.DB, userID uint, account *models.AccountSetting, sortMode string, setting *models.EHSetting) error {
 	client, err := s.ehService.BuildClient(account)

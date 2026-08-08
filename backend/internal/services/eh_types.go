@@ -83,6 +83,7 @@ type GalleryDetailResult struct {
 	Comments         []CommentDTO      `json:"comments"`     // 社区评论列表
 	IsFavorite       bool              `json:"isFavorite"`
 	FavIndex         *int              `json:"favIndex"`
+	IsDownloaded     bool              `json:"isDownloaded"` // 本地离线库是否已存在同 GID（供下载去重提示）
 	MaxPreviewPage   int               `json:"maxPreviewPage"`
 	Local            *GalleryLocalInfo `json:"local,omitempty"` // S1 本地优先：本地库存在同 GID 画廊时附加
 }

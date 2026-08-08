@@ -70,6 +70,18 @@
       </label>
     </div>
 
+    <!-- Round7-任务3：非历史入口是否从上次阅读位置开始（默认关） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">从上次阅读位置开始</div>
+        <div class="item-subtext">从首页/榜单/书架等非历史入口打开时，自动跳转到上次阅读的页码（历史记录入口始终恢复）</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="preferenceSettings.resumeFromLastPage" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <div class="reset-row">
       <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>

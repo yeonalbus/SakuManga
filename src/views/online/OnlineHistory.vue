@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { onlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
@@ -7,6 +8,14 @@ import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round7-任务4：列表状态记忆（新标签返回本页恢复滚动）+ 列表状态提供者
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  clearListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 // 动态提取在线浏览过的漫画列表（本页均为 online 来源）
 const comics = computed<OnlineComic[]>(() =>
@@ -14,7 +23,35 @@ const comics = computed<OnlineComic[]>(() =>
 )
 
 // 左右分栏详情面板（宽屏桌面生效；窄屏回退全屏详情路由）
-const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel } = useDetailPanel()
+const { isWide, isPanelOpen, panelGid, panelToken, panelFromHistory, openDetail, closePanel } =
+  useDetailPanel()
+
+// Round7-任务4：返回本页时恢复滚动位置；注册提供者供打开详情前捕获状态
+onMounted(async () => {
+  const saved = takeListState('/online/history')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/online/history', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+})
+
+onUnmounted(() => {
+  clearListStateProvider('/online/history')
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/online/history', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
+})
 
 // 长按多选 → 批量下载
 const {
@@ -43,6 +80,7 @@ const handleClear = () => {
 
     <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">
+        <!-- Round7-任务6：历史入口卡片，「立即阅读」始终从上次位置开始 -->
         <GridContainer
           v-if="comics.length > 0"
           :items="comics"
@@ -51,9 +89,10 @@ const handleClear = () => {
           :selected-ids="selectedIds"
           :panel-mode="isWide"
           :panel-open="isPanelOpen"
+          :from-history="true"
           @longpress="handleLongPress"
           @select="handleSelect"
-          @open="openDetail"
+          @open="(c) => openDetail(c, { fromHistory: true })"
         />
         <div v-else class="empty-tip">暂无在线浏览记录</div>
 
@@ -72,6 +111,7 @@ const handleClear = () => {
         :open="isPanelOpen"
         :gid="panelGid"
         :token="panelToken"
+        :from-history="panelFromHistory"
         @close="closePanel"
       />
     </div>

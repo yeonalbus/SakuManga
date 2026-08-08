@@ -2,11 +2,16 @@
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
 
-const props = defineProps<{
-  open: boolean
-  gid: string
-  token: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    gid: string
+    token: string
+    /** Round7-任务6：来源是否为历史页（面板内「立即阅读」从上次位置开始） */
+    fromHistory?: boolean
+  }>(),
+  { fromHistory: false },
+)
 
 defineEmits<{
   (e: 'close'): void
@@ -36,7 +41,7 @@ const openFullDetail = () => {
     </header>
 
     <div v-if="open && gid" class="detail-panel-body">
-      <OnlineDetail embedded :gid="gid" :token="token" />
+      <OnlineDetail embedded :gid="gid" :token="token" :from-history="fromHistory" />
     </div>
     <div v-else class="detail-panel-empty">
       <div class="empty-icon">🖼️</div>

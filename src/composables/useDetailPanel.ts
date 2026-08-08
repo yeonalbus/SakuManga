@@ -32,6 +32,8 @@ export function useDetailPanel() {
   const isPanelOpen = ref(false)
   const panelGid = ref('')
   const panelToken = ref('')
+  // Round7-任务6：面板当前内容来源是否为历史页（影响「立即阅读」起始页）
+  const panelFromHistory = ref(false)
 
   let mql: MediaQueryList | null = null
   let layoutObserver: MutationObserver | null = null
@@ -79,17 +81,26 @@ export function useDetailPanel() {
    * - 宽屏 → 自动打开/切换右侧小详情面板；新标签仅保留给 Ctrl/中键点击与「画廊详情 ↗」
    * - 窄屏 / 强制移动 → 新标签打开完整详情（面板不渲染，回退全屏详情）
    */
-  const openDetail = (comic: { id: string; token?: string }) => {
+  const openDetail = (
+    comic: { id: string; token?: string },
+    opts: { fromHistory?: boolean } = {},
+  ) => {
     if (!comic?.id) return
     panelGid.value = comic.id
     panelToken.value = comic.token || ''
+    panelFromHistory.value = !!opts.fromHistory
     if (isWide.value) {
       // 宽屏：点击卡片自动打开/切换小详情面板（OnlineDetail 对空 token 有兜底）
       isPanelOpen.value = true
-      openDetailPanel(route.fullPath, comic.id, comic.token || '')
+      openDetailPanel(route.fullPath, comic.id, comic.token || '', opts.fromHistory)
     } else {
       // 窄屏 / 强制移动：面板不渲染，新标签打开完整详情
-      openComicDetailInNewTab({ id: comic.id, token: comic.token || '', source: 'online' })
+      openComicDetailInNewTab({
+        id: comic.id,
+        token: comic.token || '',
+        source: 'online',
+        resume: opts.fromHistory,
+      })
     }
   }
 
@@ -119,5 +130,14 @@ export function useDetailPanel() {
     }
   }
 
-  return { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel }
+  return {
+    isWide,
+    isPanelOpen,
+    panelGid,
+    panelToken,
+    panelFromHistory,
+    openDetail,
+    closePanel,
+    togglePanel,
+  }
 }

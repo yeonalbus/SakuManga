@@ -8,11 +8,17 @@ import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic, ComicItem } from '@/types/comic'
 import { fetchOfflineComics, offlineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
-import { safeSetItem } from '@/utils/storage'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 // Round3-任务1：阅读进度按账号写回后端 /history
 import { getHistoryProgress, syncHistory } from '@/stores/historyStore'
 import { useUserStore } from '@/stores/userStore'
+// Round7-任务1：本地进度存储统一委托公共工具（与详情页「立即阅读」恢复共用同一实现）
+import {
+  getProgressStorageKey,
+  getProgressMap as getSharedProgressMap,
+  saveProgress as saveSharedProgress,
+  getSavedPage as getSharedSavedPage,
+} from '@/utils/readingProgress'
 
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
 interface WakeLockManager {
@@ -327,48 +333,15 @@ const resetImgStates = () => {
 
 // --------------------------------------------------
 // 📖 阅读历史进度持久化 (localStorage)
+// 统一委托 src/utils/readingProgress.ts（与详情页「立即阅读」恢复逻辑共用同一实现）
 // --------------------------------------------------
-// Round3-任务1：进度 key 按账号隔离（不同账号缓存互不干扰；未登录回退 anonymous）
-const progressStorageKey = () => {
-  const uid = userStore.user?.id ?? 'anonymous'
-  return `saku_comic_progress:${uid}`
-}
-
-// 1. 获取全量进度 Map { [source:id]: pageNumber }
-const getProgressMap = (): Record<string, number> => {
-  try {
-    return JSON.parse(localStorage.getItem(progressStorageKey()) || '{}')
-  } catch {
-    return {}
-  }
-}
-
-// 2. 保存当前作品的阅读进度（在线/离线分开存储，避免 id 冲突）
-//    配额保护：Map 上限 MAX_PROGRESS_ENTRIES 条，超出删除最旧；写入走 safeSetItem 自动回收配额，
-//    避免读大量本子后 localStorage 超限（QuotaExceededError）导致进度/搜索历史写入抛错。
-const MAX_PROGRESS_ENTRIES = 500
-const saveProgress = (src: 'online' | 'offline', id: string, page: number) => {
-  if (!id) return
-  const map = getProgressMap()
-  const key = `${src}:${id}`
-  // 先删旧 key 再写入，保证「最近读的」排到对象末尾，容量裁剪时优先保留
-  delete map[key]
-  map[key] = page
-  const keys = Object.keys(map)
-  if (keys.length > MAX_PROGRESS_ENTRIES) {
-    const extra = keys.length - MAX_PROGRESS_ENTRIES
-    for (let i = 0; i < extra; i++) {
-      delete map[keys[i]]
-    }
-  }
-  safeSetItem(progressStorageKey(), JSON.stringify(map))
-}
-
-// 3. 读取指定作品的历史进度（无记录则默认第 1 页）
-const getSavedPage = (src: 'online' | 'offline', id: string): number => {
-  const map = getProgressMap()
-  return map[`${src}:${id}`] || 1
-}
+const currentUid = (): string => String(userStore.user?.id ?? 'anonymous')
+const progressStorageKey = (): string => getProgressStorageKey(currentUid())
+const getProgressMap = (): Record<string, number> => getSharedProgressMap(currentUid())
+const saveProgress = (src: 'online' | 'offline', id: string, page: number): void =>
+  saveSharedProgress(currentUid(), src, id, page)
+const getSavedPage = (src: 'online' | 'offline', id: string): number =>
+  getSharedSavedPage(currentUid(), src, id)
 
 // Round3-任务1：当前阅读作品元信息（供后端进度写回；离线优先取库内真实条目）
 const currentComicMeta = computed<ComicItem | null>(() => {
@@ -394,6 +367,8 @@ const scheduleSyncProgress = () => {
   if (progressSyncTimer) clearTimeout(progressSyncTimer)
   progressSyncTimer = setTimeout(() => {
     if (!currentComicMeta.value || totalPages.value <= 0) return
+    // Round7-任务1：第 1 页不写回后端进度，避免把历史进度清零（第 1 页无需恢复）
+    if (currentPage.value <= 1) return
     syncHistory(source.value, currentComicMeta.value, {
       lastPageIndex: currentPage.value,
       totalPageCount: totalPages.value,
@@ -919,7 +894,18 @@ onUnmounted(() => {
   if (autoTurnTimer) clearInterval(autoTurnTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (wakeLockSentinel) wakeLockSentinel.release()
-  if (progressSyncTimer) clearTimeout(progressSyncTimer)
+  // Round7-任务1：退出时立即 flush 未完成的后端进度同步（仅当前页 > 1 时，
+  // 避免第 1 页入口快速退出把后端已有进度清零）
+  if (progressSyncTimer) {
+    clearTimeout(progressSyncTimer)
+    progressSyncTimer = null
+    if (currentPage.value > 1 && currentComicMeta.value && totalPages.value > 0) {
+      syncHistory(source.value, currentComicMeta.value, {
+        lastPageIndex: currentPage.value,
+        totalPageCount: totalPages.value,
+      })
+    }
+  }
 })
 
 // --------------------------------------------------

@@ -21,6 +21,7 @@ export interface HistoryRecordDTO {
   source: 'online' | 'offline'
   comicTitle: string
   coverUrl: string
+  token?: string
   lastChapterTitle?: string
   lastPageIndex?: number
   totalPageCount?: number
@@ -34,7 +35,7 @@ const MAX_HISTORY = 50
 export const onlineHistoryList = ref<HistoryItem[]>([])
 export const offlineHistoryList = ref<HistoryItem[]>([])
 
-/** 后端记录 → 前端 HistoryItem（title 与 pageCount 归一化） */
+/** 后端记录 → 前端 HistoryItem（title 与 pageCount 归一化；在线记录透传 token） */
 const toHistoryItem = (r: HistoryRecordDTO): HistoryItem => ({
   comic: {
     id: r.comicId,
@@ -42,6 +43,7 @@ const toHistoryItem = (r: HistoryRecordDTO): HistoryItem => ({
     coverUrl: r.coverUrl,
     source: r.source,
     pageCount: r.totalPageCount || undefined,
+    ...(r.source === 'online' ? { token: r.token || '' } : {}),
   } as ComicItem,
   readAt: r.lastReadAt,
 })
@@ -73,17 +75,21 @@ export const syncHistory = async (
   opts: SyncHistoryOptions = {},
 ) => {
   try {
+    // 仅在显式提供进度时才提交 lastPageIndex/totalPageCount：
+    // 卡片点击（无进度入参）不再把后端已有进度清零，避免阅读位置丢失。
+    const body: Record<string, unknown> = {
+      comicId: comic.id,
+      source,
+      comicTitle: comic.title || '',
+      coverUrl: comic.coverUrl || '',
+      lastChapterTitle: '',
+      ...(source === 'online' ? { token: (comic as OnlineComic).token || '' } : {}),
+    }
+    if (opts.lastPageIndex !== undefined) body.lastPageIndex = opts.lastPageIndex
+    if (opts.totalPageCount !== undefined) body.totalPageCount = opts.totalPageCount
     await http('/history', {
       method: 'POST',
-      body: JSON.stringify({
-        comicId: comic.id,
-        source,
-        comicTitle: comic.title || '',
-        coverUrl: comic.coverUrl || '',
-        lastChapterTitle: '',
-        lastPageIndex: opts.lastPageIndex ?? 0,
-        totalPageCount: opts.totalPageCount ?? comic.pageCount ?? 0,
-      }),
+      body: JSON.stringify(body),
     })
   } catch (e) {
     console.error('同步历史失败:', e)
@@ -111,6 +117,24 @@ export const getHistoryProgress = async (
   } catch (e) {
     console.error('读取阅读进度失败:', e)
     return null
+  }
+}
+
+/**
+ * Round7-任务4：在线画廊 token 兜底解析。
+ * 历史记录可能丢失 token（旧数据 / 手动写入），打开在线详情需要 token；
+ * 后端先查收藏表，再按 gid 抓取画廊页解析。失败返回 ''（不抛异常）。
+ */
+export const resolveOnlineToken = async (gid: string): Promise<string> => {
+  if (!gid) return ''
+  try {
+    const data = await http<{ gid: string; token: string }>(
+      `/comics/online/resolve-token?id=${encodeURIComponent(gid)}`,
+    )
+    return data?.token || ''
+  } catch (e) {
+    console.error('解析在线 token 失败:', e)
+    return ''
   }
 }
 

@@ -11,7 +11,10 @@ import type { OfflineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
-import { isDetailNewTab } from '@/utils/detailNav'
+import { isDetailNewTab, consumeBackState } from '@/utils/detailNav'
+import { rememberListState } from '@/utils/scrollMemory'
+// Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
+import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
 
 // 后端 GetOfflineComicDetail 返回的离线漫画 DTO
 // tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
@@ -157,8 +160,21 @@ const handleAddToReadingList = () => {
 }
 
 const handleBack = () => {
-  // S11：由本应用新标签打开（S10 统一入口）→ 关闭标签返回列表
-  if (isDetailNewTab((route.query.id as string) || '')) {
+  const comicId = (route.query.id as string) || ''
+  // Round7-任务4：opener 存在（来源标签仍打开）→ 直接关闭本标签，来源列表保持原位
+  if (window.opener) {
+    window.close()
+    return
+  }
+  // Round7-任务4：opener 已关闭 → 回到来源列表并恢复位置（读取打开时记录的状态）
+  const backState = consumeBackState(comicId)
+  if (backState) {
+    rememberListState(backState.fromPath, { top: backState.top, page: backState.page })
+    router.replace(backState.fromPath)
+    return
+  }
+  // S11：由本应用新标签打开（sessionStorage 标记）→ 关闭标签返回列表
+  if (isDetailNewTab(comicId)) {
     window.close()
     return
   }
@@ -254,11 +270,19 @@ const isComicInShelf = (shelfId: string) => {
   return shelf?.comicIds?.includes(comic.value.id) ?? false
 }
 
-const handleStartReading = () => {
+const handleStartReading = async () => {
   if (!comic.value || !comic.value.id) return
   recordComicClick(comic.value.id)
   comic.value.readCount = (comic.value.readCount || 0) + 1
-  router.push(`/reader?id=${comic.value.id}&source=offline`)
+  // Round7-任务1/3：显式计算起始页并携带 ?page=N（历史入口总是恢复，否则按偏好开关）
+  const fromHistory = route.query.resume === '1'
+  const resumePage = await resolveResumePage('offline', comic.value.id, {
+    fromHistory,
+    resumePreference: isResumeFromLastPageEnabled(),
+  })
+  const query: Record<string, string> = { id: comic.value.id, source: 'offline' }
+  if (resumePage && resumePage > 1) query.page = String(resumePage)
+  router.push({ path: '/reader', query })
 }
 
 const deleting = ref(false)

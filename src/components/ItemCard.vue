@@ -30,6 +30,8 @@ const props = withDefaults(
     panelMode?: boolean
     /** Round3-任务3：隐藏副标题（排行榜等场景只保留单一标题，日文优先） */
     hideSubtitle?: boolean
+    /** Round7-任务6：历史入口卡片，详情页「立即阅读」从上次位置开始 */
+    fromHistory?: boolean
   }>(),
   {
     size: 'normal',
@@ -38,6 +40,7 @@ const props = withDefaults(
     selected: false,
     panelMode: false,
     hideSubtitle: false,
+    fromHistory: false,
   },
 )
 
@@ -143,6 +146,8 @@ const openInNewTab = () => {
     id: props.comic.id,
     token: props.comic.source === 'online' ? onlineComic.value?.token || '' : undefined,
     source: props.comic.source === 'online' ? 'online' : 'offline',
+    // Round7-任务6：历史入口卡片始终从上次位置开始
+    resume: props.fromHistory,
   })
 }
 
@@ -177,15 +182,19 @@ const handleCardClick = (event?: MouseEvent) => {
   addHistory(props.comic)
 
   if (props.comic.source === 'online') {
-    // 🟢 在线模式：传递 id (GID) 和 token
+    // 🟢 在线模式：传递 id (GID) 和 token（历史入口加 resume=1 标记，始终从上次位置开始）
     const token = onlineComic.value?.token || ''
     router.push({
       path: '/online/detail',
-      query: { id: props.comic.id, token },
+      query: {
+        id: props.comic.id,
+        token,
+        ...(props.fromHistory ? { resume: '1' } : {}),
+      },
     })
   } else {
     // S10：离线卡片点击 → 新标签打开详情（返回语义见 S11）
-    openComicDetailInNewTab({ id: props.comic.id, source: 'offline' })
+    openComicDetailInNewTab({ id: props.comic.id, source: 'offline', resume: props.fromHistory })
   }
 }
 

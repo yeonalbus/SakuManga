@@ -5,14 +5,17 @@ import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
-import { addHistory, updateOnlineFavoriteState } from '@/stores/historyStore'
+import { addHistory, updateOnlineFavoriteState, resolveOnlineToken } from '@/stores/historyStore'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { resolveDefaultDownloadScheme } from '@/api/download'
 import { markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
-import { isDetailNewTab } from '@/utils/detailNav'
+import { isDetailNewTab, consumeBackState } from '@/utils/detailNav'
 import { API_BASE } from '@/config/api'
+import { rememberListState } from '@/utils/scrollMemory'
+// Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
+import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,8 +31,10 @@ const props = withDefaults(
     gid?: string
     token?: string
     localPanel?: boolean // S7 对比左侧：纯本地版展示（强制本地模式、隐藏评论 tab 与版本切换）
+    /** Round7-任务6：来源是否为历史页（内嵌面板时由父级传入，「立即阅读」从上次位置开始） */
+    fromHistory?: boolean
   }>(),
-  { embedded: false, gid: '', token: '', localPanel: false },
+  { embedded: false, gid: '', token: '', localPanel: false, fromHistory: false },
 )
 
 // 有效 gid/token：内嵌面板优先使用 props，全屏路由则读 route.query
@@ -147,9 +152,19 @@ const onlineMaxPreviewPage = ref(1)
 // 1. 获取画廊真实详情 (仅抓取 p=0 基础元数据与初始预览图)
 const fetchDetail = async () => {
   const gid = effectiveGid.value
-  const token = effectiveToken.value
+  let token = effectiveToken.value
 
-  if (!gid || !token) {
+  if (!gid) {
+    toast.error('画廊 ID 或 Token 参数缺失！')
+    isLoading.value = false
+    return
+  }
+  // Round7-任务4：token 缺失（历史记录 / 手动链接丢失）时按 gid 兜底解析
+  if (!token) {
+    token = await resolveOnlineToken(gid)
+    if (token && comic.value) comic.value.token = token
+  }
+  if (!token) {
     toast.error('画廊 ID 或 Token 参数缺失！')
     isLoading.value = false
     return
@@ -348,8 +363,21 @@ const handleAddToReadingList = () => {
 }
 
 const handleBack = () => {
-  // S11：由本应用新标签打开（S10 统一入口）→ 关闭标签返回列表
-  if (isDetailNewTab((route.query.id as string) || '')) {
+  const gid = effectiveGid.value || ''
+  // Round7-任务4：opener 存在（来源标签仍打开）→ 直接关闭本标签，来源列表保持原位
+  if (window.opener) {
+    window.close()
+    return
+  }
+  // Round7-任务4：opener 已关闭 → 回到来源列表并恢复位置（读取打开时记录的状态）
+  const backState = consumeBackState(gid)
+  if (backState) {
+    rememberListState(backState.fromPath, { top: backState.top, page: backState.page })
+    router.replace(backState.fromPath)
+    return
+  }
+  // S11：由本应用新标签打开（sessionStorage 标记）→ 关闭标签返回列表
+  if (isDetailNewTab(gid)) {
     window.close()
     return
   }
@@ -373,8 +401,20 @@ const favColors: Record<number, string> = {
   9: '#f000a0',
 }
 
-// 5. 点击预览切片直接跳页阅读
-const handleStartReading = (targetPage: number = 1) => {
+// 5. 点击预览切片直接跳页阅读；「立即阅读」按钮不传参 → 显式计算起始页
+const handleStartReading = async (targetPage?: number) => {
+  let page = targetPage
+  // Round7-任务1/3：未显式指定页码（「立即阅读」按钮）→ 计算起始页
+  // （历史入口总是恢复，否则按偏好开关；无记录回到第 1 页）
+  if (page === undefined) {
+    // Round7-任务6：内嵌面板由父级标记来源为历史页；全屏路由看 ?resume=1
+    const fromHistory = props.fromHistory || route.query.resume === '1'
+    const resumePage = await resolveResumePage('online', comic.value.id, {
+      fromHistory,
+      resumePreference: isResumeFromLastPageEnabled(),
+    })
+    page = resumePage ?? 1
+  }
   // S1 本地优先：有本地副本且未手动切回在线 → 走本地阅读（/reader source=offline）
   if (isLocalMode.value && localVersion.value) {
     router.push({
@@ -382,7 +422,7 @@ const handleStartReading = (targetPage: number = 1) => {
       query: {
         id: localVersion.value.comicId,
         source: 'offline',
-        page: targetPage,
+        page,
       },
     })
     return
@@ -393,7 +433,7 @@ const handleStartReading = (targetPage: number = 1) => {
       id: comic.value.id,
       token: comic.value.token,
       source: 'online',
-      page: targetPage,
+      page,
     },
   })
 }
@@ -656,7 +696,7 @@ watch(
             ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
           </button>
 
-          <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
+          <button class="read-btn" @click="handleStartReading()">📖 立即阅读</button>
 
           <button
             v-if="canDownload"
@@ -725,7 +765,7 @@ watch(
           ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '加入收藏' }}
         </button>
 
-        <button class="read-btn" @click="handleStartReading(1)">📖 立即阅读</button>
+        <button class="read-btn" @click="handleStartReading()">📖 立即阅读</button>
 
         <button
           v-if="canDownload"

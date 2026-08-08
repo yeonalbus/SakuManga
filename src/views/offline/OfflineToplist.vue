@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onActivated, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import ItemCard from '@/components/ItemCard.vue'
 // 🟢 1. 从 comicStore 引入真实的全局离线漫画数据
 import { offlineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 import { detectDeviceClass } from '@/utils/device'
+// Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
@@ -37,6 +45,38 @@ const restItemsForView = computed(() =>
 const getComicReadCount = (item: OfflineComic) => {
   return item.readCount || 0
 }
+
+// Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无分页，page 恒为 1）
+const restoreListState = async () => {
+  const saved = takeListState('/offline/toplist')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/offline/toplist', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+}
+
+onMounted(restoreListState)
+
+// keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) restoreListState()
+  activatedOnce = true
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/offline/toplist', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
+})
 </script>
 
 <template>

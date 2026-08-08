@@ -15,6 +15,7 @@ import {
   scrollMainToTop,
   rememberListState,
   takeListState,
+  setListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
 
@@ -90,6 +91,11 @@ const restoreListState = async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
+  // Round7-任务4：注册列表状态提供者（打开详情新标签前捕获 { top, page }）
+  setListStateProvider('/offline/bookshelf', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: currentPage.value,
+  }))
 }
 
 onMounted(restoreListState)

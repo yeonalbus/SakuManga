@@ -14,6 +14,8 @@ export interface DetailPanelState {
   gid: string
   token: string
   open: boolean
+  /** Round7-任务6：来源是否为历史页（面板内「立即阅读」从上次位置开始） */
+  fromHistory?: boolean
 }
 
 const panelByPath = reactive<Record<string, DetailPanelState>>({})
@@ -23,9 +25,14 @@ export function getDetailPanelState(path: string): DetailPanelState | undefined 
   return panelByPath[path]
 }
 
-/** 打开某路径的面板（记录 gid/token） */
-export function openDetailPanel(path: string, gid: string, token: string) {
-  panelByPath[path] = { gid, token, open: true }
+/** 打开某路径的面板（记录 gid/token；可选标记来源为历史页） */
+export function openDetailPanel(path: string, gid: string, token: string, fromHistory?: boolean) {
+  panelByPath[path] = {
+    gid,
+    token,
+    open: true,
+    ...(fromHistory ? { fromHistory: true } : {}),
+  }
 }
 
 /** 关闭某路径的面板（保留 gid/token，方便再次打开时快速定位） */

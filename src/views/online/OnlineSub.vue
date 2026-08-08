@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, onMounted } from 'vue'
+import { watch, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
@@ -9,6 +9,14 @@ import { useSubStore } from '@/stores/subStore' // 🟢 对应订阅专用的 Pi
 import { subSearchConfig } from '@/stores/searchStore' // 🟢 对应订阅专用的搜索/分类配置
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
+import { onBeforeRouteLeave } from 'vue-router'
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const subStore = useSubStore()
 
@@ -45,8 +53,39 @@ watch(
   { deep: true },
 )
 
+// Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无限滚动，page 恒为 1）
+const restoreListState = async () => {
+  const saved = takeListState('/online/sub')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/online/sub', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+}
+
 onMounted(() => {
   initSearch()
+  restoreListState()
+})
+
+// keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) restoreListState()
+  activatedOnce = true
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/online/sub', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
 })
 </script>
 

@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { offlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
 // 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
+// Round7-任务4：注册列表状态提供者，供打开详情（新标签）前捕获 { top, page }
 import {
   scrollMainToTop,
   rememberListState,
   takeListState,
+  setListStateProvider,
+  clearListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
 
@@ -40,6 +43,15 @@ onMounted(async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
+  // Round7-任务4：注册列表状态提供者（打开详情新标签前捕获 { top, page }）
+  setListStateProvider('/offline/history', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: currentPage.value,
+  }))
+})
+
+onUnmounted(() => {
+  clearListStateProvider('/offline/history')
 })
 
 // 任务五：离开列表页时保存「页码 + 滚动位置」
@@ -70,7 +82,8 @@ const handleClear = () => {
       </button>
     </div>
 
-    <GridContainer v-if="comics.length > 0" :items="currentPageItems">
+    <!-- Round7-任务6：历史入口卡片，点击详情后「立即阅读」始终从上次位置开始 -->
+    <GridContainer v-if="comics.length > 0" :items="currentPageItems" :from-history="true">
       <!-- 通过 #footer 插槽挂载数字分页组件 -->
       <template #footer>
         <Pagination

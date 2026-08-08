@@ -94,3 +94,45 @@ export const restoreScroll = (path: string, retries = 5): void => {
 
   requestAnimationFrame(tryRestore)
 }
+
+// ─────────────────────────────────────────────────────────────
+// 列表状态提供者（Round7 返回优化：新标签返回来源列表恢复位置）
+// 列表页在数据就绪时注册「捕获当前状态」的回调；打开详情时 detailNav
+// 通过当前 pathname 找到对应提供者，立即捕获 { top, page } 存 sessionStorage，
+// 供新标签在 opener 已关闭时返回列表并恢复。
+// ─────────────────────────────────────────────────────────────
+
+type ListStateProvider = () => ListState | undefined
+
+const listStateProviders = new Map<string, ListStateProvider>()
+
+/** 注册当前路径的列表状态捕获回调（列表页 onMounted / 数据就绪时调用） */
+export const setListStateProvider = (path: string, provider: ListStateProvider): void => {
+  if (!path) return
+  listStateProviders.set(path, provider)
+}
+
+/** 注销指定路径的状态捕获回调（列表页 onUnmounted 时调用） */
+export const clearListStateProvider = (path: string): void => {
+  listStateProviders.delete(path)
+}
+
+/**
+ * 捕获当前路由路径对应列表页的最新状态 { top, page }。
+ * 供 detailNav 打开详情前记录返回来源；无注册提供者时回退为仅滚动位置。
+ */
+export const captureActiveListState = (): ListState | undefined => {
+  const path = window.location.pathname
+  const provider = listStateProviders.get(path)
+  if (provider) {
+    try {
+      const state = provider()
+      if (state) return state
+    } catch {
+      /* 提供者抛错时降级为滚动位置回退 */
+    }
+  }
+  const el = getMainContent()
+  const top = el ? el.scrollTop : window.scrollY ?? 0
+  return top > 0 ? { top } : undefined
+}

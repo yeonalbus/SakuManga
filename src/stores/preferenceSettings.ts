@@ -29,6 +29,7 @@ export interface PreferenceSettings {
   startInFullscreen: boolean // 以全屏模式启动
   searchOptionsInherit: SearchOptionsInherit // 搜索选项继承
   preferLocalGallery: boolean // S1 本地优先加载：在线画廊有本地副本时详情页优先读本地
+  resumeFromLastPage: boolean // 非历史入口「立即阅读」是否从上次阅读位置开始（默认关）
 }
 
 const STORAGE_KEY = 'saku_preference_settings'
@@ -41,6 +42,7 @@ const defaultSettings: PreferenceSettings = {
   startInFullscreen: false,
   searchOptionsInherit: 'all',
   preferLocalGallery: true,
+  resumeFromLastPage: false,
 }
 
 /** 响应式偏好设置（自动持久化） */

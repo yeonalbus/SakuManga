@@ -15,7 +15,13 @@ import type { ComicItem, OfflineComic } from '@/types/comic'
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
 // 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
-import { scrollMainToTop, rememberListState, takeListState, getMainContent } from '@/utils/scrollMemory'
+import {
+  scrollMainToTop,
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const { toast, modal } = useUI()
 const userStore = useUserStore()
@@ -37,6 +43,11 @@ const restoreListState = async () => {
       if (el && el.scrollHeight > 0) el.scrollTop = saved.top
     })
   }
+  // Round7-任务4：注册列表状态提供者（打开详情新标签前捕获 { top, page }）
+  setListStateProvider('/offline/home', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: currentPage.value,
+  }))
 }
 
 onMounted(restoreListState)

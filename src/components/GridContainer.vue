@@ -23,6 +23,8 @@ const props = defineProps<{
   panelMode?: boolean
   /** 小详情面板是否展开：宽屏在线列表 + 开启自动适配时，按面板开/关注入对应列数 */
   panelOpen?: boolean
+  /** Round7-任务6：历史入口卡片，详情页「立即阅读」从上次位置开始 */
+  fromHistory?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -102,6 +104,7 @@ const gridStyle = computed<Record<string, string>>(() => {
         :select-mode="selectMode"
         :selected="selectedIds?.includes(item.id) ?? false"
         :panel-mode="panelMode"
+        :from-history="fromHistory"
         @longpress="(c) => emit('longpress', c)"
         @select="(c) => emit('select', c)"
         @open="(c) => emit('open', c)"

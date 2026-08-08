@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { watch, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { watch, computed, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬浮球
@@ -12,6 +12,13 @@ import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 // Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
+// Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const onlineStore = useOnlineStore()
 
@@ -114,8 +121,39 @@ watch(
   { deep: true },
 )
 
+// Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无限滚动，page 恒为 1）
+const restoreListState = async () => {
+  const saved = takeListState('/online/home')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/online/home', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+}
+
 onMounted(() => {
   initSearch()
+  restoreListState()
+})
+
+// keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) restoreListState()
+  activatedOnce = true
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/online/home', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
 })
 
 onUnmounted(() => {

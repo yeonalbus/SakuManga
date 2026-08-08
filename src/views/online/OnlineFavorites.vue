@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
@@ -11,6 +11,14 @@ import { batchCreateDownloads } from '@/api/download'
 import { http } from '@/utils/request'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
+import { onBeforeRouteLeave } from 'vue-router'
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const { toast } = useUI()
 
@@ -252,8 +260,39 @@ const cleanCursor = (cursor?: string, isPrev = false): string => {
   return cursor
 }
 
+// Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无限滚动，page 恒为 1）
+const restoreListState = async () => {
+  const saved = takeListState('/online/favorites')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/online/favorites', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+}
+
 onMounted(() => {
   fetchFavInitial()
+  restoreListState()
+})
+
+// keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) restoreListState()
+  activatedOnce = true
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/online/favorites', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
 })
 </script>
 

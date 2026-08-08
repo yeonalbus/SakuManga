@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
@@ -9,6 +9,14 @@ import { useUI } from '@/composables/useUI'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 import { http } from '@/utils/request'
+// Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
+import { onBeforeRouteLeave } from 'vue-router'
+import {
+  rememberListState,
+  takeListState,
+  setListStateProvider,
+  getMainContent,
+} from '@/utils/scrollMemory'
 
 const { toast } = useUI()
 const hotComics = ref<OnlineComic[]>([])
@@ -45,8 +53,39 @@ const fetchPopularComics = async () => {
   }
 }
 
+// Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无分页，page 恒为 1）
+const restoreListState = async () => {
+  const saved = takeListState('/online/hot')
+  if (saved && saved.top > 0) {
+    await nextTick()
+    requestAnimationFrame(() => {
+      const el = getMainContent()
+      if (el && el.scrollHeight > 0) el.scrollTop = saved.top
+    })
+  }
+  setListStateProvider('/online/hot', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+}
+
 onMounted(() => {
   fetchPopularComics()
+  restoreListState()
+})
+
+// keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
+let activatedOnce = false
+onActivated(() => {
+  if (activatedOnce) restoreListState()
+  activatedOnce = true
+})
+
+onBeforeRouteLeave(() => {
+  rememberListState('/online/hot', {
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  })
 })
 </script>
 

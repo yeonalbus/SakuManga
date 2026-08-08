@@ -542,6 +542,35 @@ func ClearOfflineUpdateByComicID(db *gorm.DB, comicID string) (bool, error) {
 	return true, nil
 }
 
+// ClearRemovedStatus 批量清除画廊移除标记（S5/D4：失效画廊修复后重新参与查重）。
+//
+// 应用场景：画廊此前被判为「已被删除/移除」（removed/copyright）并持久化 RemovedStatus，
+// 后续 filterOfflineUpdateEnabled / 维护查重直接过滤该画廊（避免重复联网 404）。
+// 若源已恢复（重新上传 / 更换源），用户点击维护页「清除移除标记并全局重新匹配」，
+// 一键批量清零 removed_status / removed_at，并复位 parent_checked_at=0
+// （此前增量核对已跳过，需复位后由 forceFull 全量重新在线核对/回填 GID）。
+// 返回清除的条数。
+func ClearRemovedStatus(db *gorm.DB) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	res := db.Model(&models.OfflineComic{}).
+		Where("removed_status = ?", true).
+		Updates(map[string]interface{}{
+			"removed_status":    false,
+			"removed_at":        0,
+			"parent_checked_at": 0,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("%s [maintain] 清除 %d 个漫画的移除标记（S5/D4：失效画廊修复后重新参与查重）",
+			dlLogTag, res.RowsAffected)
+	}
+	return res.RowsAffected, nil
+}
+
 // ReconcileResult 下载完成后数据对账结果（需求 3(1)）
 type ReconcileResult struct {
 	DedupItems         []DedupItem `json:"dedupItems"`         // GID 去重建议（复用 DedupItem，供维护页提示）
@@ -865,8 +894,30 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				}
 				detail, err := ehService.FetchGalleryDetail(account, c.GID, c.Token, ehSetting)
 				if err != nil || detail == nil {
-					log.Printf("%s [maintain] 漫画 %q(gid=%s) 在线详情拉取失败（跳过在线发现）: %v",
-						dlWarnTag, c.Title, c.GID, err)
+					now := time.Now().UnixMilli()
+					// S5：区分「画廊被删」与「网络故障」——
+					//   removed/copyright → 持久化 RemovedStatus 并回写核对时间戳，
+					//   后续 filterOfflineUpdateEnabled 直接过滤，不再重复联网 404；
+					//   其余 HTTP/网络错误为临时故障，仅回写核对时间戳（增量跳过，
+					//   全量 forceFull 再核对），避免每次维护查重都重复重试。
+					var gu *ErrGalleryUnavailable
+					if err != nil && errors.As(err, &gu) && (gu.Kind == "removed" || gu.Kind == "copyright") {
+						c.RemovedStatus = true
+						c.RemovedAt = now
+						c.ParentCheckedAt = now
+						_ = db.Model(c).Updates(map[string]interface{}{
+							"removed_status":    true,
+							"removed_at":        now,
+							"parent_checked_at": now,
+						})
+						log.Printf("%s [maintain] 漫画 %q(gid=%s) 已被删除/移除（%s），标记 RemovedStatus 并排除后续扫描",
+							dlLogTag, c.Title, c.GID, gu.Kind)
+					} else {
+						c.ParentCheckedAt = now
+						_ = db.Model(c).Update("parent_checked_at", now)
+						log.Printf("%s [maintain] 漫画 %q(gid=%s) 在线详情拉取失败（跳过在线发现）: %v",
+							dlWarnTag, c.Title, c.GID, err)
+					}
 					time.Sleep(1200 * time.Millisecond)
 					continue
 				}

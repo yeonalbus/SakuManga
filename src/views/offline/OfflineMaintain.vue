@@ -139,6 +139,36 @@ const runFullMaintain = async () => {
   await runMaintain(true)
 }
 
+// S5/D4：清除全部「已被删除/移除」标记并复位核对时间戳，随后强制全量在线重新匹配
+// （失效画廊修复后重新参与查重/更新检测；此前增量核对已跳过，需全量重新在线核对）。
+const isClearingRemoved = ref(false)
+const clearRemovedAndRematch = async () => {
+  if (isScanning.value || isClearingRemoved.value) return
+  const confirmed = await modal.confirm(
+    '将清除全部「已被删除/移除」标记并复位其核对时间戳，随后强制全量在线重新匹配这些画廊（可能耗时数十分钟）。\n\n仅适用于画廊已重新上传 / 源已恢复的情况。确定继续吗？',
+    '🧹 清除移除标记并全局重新匹配',
+  )
+  if (!confirmed) return
+  isClearingRemoved.value = true
+  try {
+    const data = await http<{ ok: boolean; cleared?: number }>('/offline/maintain/clear-removed', {
+      method: 'POST',
+    })
+    const cleared = data.cleared ?? 0
+    if (cleared > 0) {
+      toast.success(`已清除 ${cleared} 个漫画的移除标记，开始全局重新匹配...`)
+      await runMaintain(true)
+    } else {
+      toast.info('当前没有标记为「已删除/移除」的漫画，无需清除')
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '清除移除标记失败')
+  } finally {
+    isClearingRemoved.value = false
+  }
+}
+
 const keepItems = computed(() => items.value.filter((i) => i.keep))
 const removeItems = computed(() => items.value.filter((i) => !i.keep))
 const isSelectAll = computed(
@@ -344,13 +374,25 @@ onUnmounted(stopPolling)
       <div class="header-actions">
         <button
           class="scan-btn ghost"
-          :disabled="isScanning"
+          :disabled="isScanning || isClearingRemoved"
+          title="清除全部「已被删除/移除」标记并复位核对时间戳，随后强制全量在线重新匹配（失效画廊修复后重新参与查重）"
+          @click="clearRemovedAndRematch"
+        >
+          {{ isClearingRemoved ? '⏳ 处理中...' : '🧹 清除移除标记并全局重新匹配' }}
+        </button>
+        <button
+          class="scan-btn ghost"
+          :disabled="isScanning || isClearingRemoved"
           title="忽略已核对标记，联网逐本重抓全部画廊详情页，可能耗时数十分钟"
           @click="runFullMaintain"
         >
           ⚡ 强制全量在线核对
         </button>
-        <button class="scan-btn" :disabled="isScanning" @click="runMaintain(false)">
+        <button
+          class="scan-btn"
+          :disabled="isScanning || isClearingRemoved"
+          @click="runMaintain(false)"
+        >
           {{ isScanning ? '扫描中...' : '🔍 重新扫描' }}
         </button>
       </div>

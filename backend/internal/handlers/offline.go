@@ -252,3 +252,19 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 	services.InvalidateMaintainDedupResult([]string{req.ComicID})
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1})
 }
+
+// ClearRemovedStatus 批量清除画廊移除标记 POST /api/v1/offline/maintain/clear-removed
+//
+// D4：失效画廊修复后（重新上传 / 更换源），一键清除全部 removed_status 标记并复位
+// parent_checked_at（此前增量核对已跳过），使这些画廊重新参与维护查重/更新检测。
+// 前端随后触发 forceFull 全量在线重新匹配。返回清除的条数。
+func (h *OfflineHandler) ClearRemovedStatus(c *gin.Context) {
+	cleared, err := services.ClearRemovedStatus(h.db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 结果缓存失效：标记 stale=true 提示重新扫描（清除标记不改变 items 本身）
+	services.InvalidateMaintainDedupResult(nil)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "cleared": cleared})
+}

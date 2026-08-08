@@ -4,7 +4,7 @@
 import { ref, computed } from 'vue'
 import { batchCreateDownloads, type DownloadTarget } from '@/api/download'
 import { useUI } from '@/composables/useUI'
-import { markGidActive } from '@/stores/downloadTasksStore'
+import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
 import { useUserStore } from '@/stores/userStore'
 
 const props = withDefaults(
@@ -39,16 +39,37 @@ const handleBatchDownload = async () => {
     toast.warning('请先选择要下载的作品')
     return
   }
+  // 预过滤去重：已下载到本地 / 已在下载队列中的条目不再提交后端
+  const downloadedCount = props.selected.filter((t) => t.isDownloaded).length
+  const downloadingCount = props.selected.filter(
+    (t) => !t.isDownloaded && isGidDownloading(t.gid),
+  ).length
+  const toSubmit = props.selected.filter((t) => !t.isDownloaded && !isGidDownloading(t.gid))
+
+  if (toSubmit.length === 0) {
+    const parts: string[] = []
+    if (downloadedCount > 0) parts.push(`已下载 ${downloadedCount} 部`)
+    if (downloadingCount > 0) parts.push(`下载中 ${downloadingCount} 部`)
+    toast.info(`所选作品无需下载：${parts.join('、')}`)
+    emit('close')
+    return
+  }
+
   isBatchDownloading.value = true
   try {
-    const res = await batchCreateDownloads(props.selected)
+    const res = await batchCreateDownloads(toSubmit)
     if (res.created > 0) {
-      props.selected.forEach((t) => markGidActive(t.gid))
+      toSubmit.forEach((t) => markGidActive(t.gid))
     }
+    // 汇总提示：新增 + 本轮预过滤跳过 + 后端兜底跳过
+    const skipParts: string[] = []
+    if (downloadedCount > 0) skipParts.push(`已下载 ${downloadedCount} 部`)
+    if (downloadingCount > 0) skipParts.push(`下载中 ${downloadingCount} 部`)
+    if (res.skipped > 0) skipParts.push(`任务已存在 ${res.skipped} 部`)
     if (res.failed > 0) {
       toast.error(`批量加入失败 ${res.failed} 部：${(res.errors || []).join('；')}`)
-    } else if (res.skipped > 0) {
-      toast.success(`成功加入 ${res.created} 部，跳过已存在的 ${res.skipped} 部`)
+    } else if (skipParts.length > 0) {
+      toast.success(`成功加入 ${res.created} 部，跳过：${skipParts.join('、')}`)
     } else {
       toast.success(`已加入 ${res.created} 部到下载队列`)
     }

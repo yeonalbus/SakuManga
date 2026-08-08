@@ -63,6 +63,8 @@ export function useBatchSelection(getItems: () => OnlineComic[]) {
         token: c.token,
         title: c.title,
         coverUrl: c.coverUrl,
+        // 附带已下载标记，供批量下载工具条做前端预过滤去重
+        isDownloaded: c.isDownloaded,
       })
     }
     return targets

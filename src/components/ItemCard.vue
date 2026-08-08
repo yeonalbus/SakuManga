@@ -215,7 +215,8 @@ const canQuickDownload = computed(
     props.comic.source === 'online' &&
     !!onlineComic.value?.token &&
     !props.selectMode &&
-    !isDownloading.value,
+    !isDownloading.value &&
+    !props.comic.isDownloaded, // 已下载到本地：不再展示快捷下载按钮
 )
 
 const handleQuickDownload = async () => {
@@ -224,6 +225,11 @@ const handleQuickDownload = async () => {
   // 双重防护：轮询状态尚未同步前拦截重复点击
   if (isDownloading.value) {
     toast.info('该画廊已在下载中，请勿重复下载')
+    return
+  }
+  // 已下载拦截：本地离线库已存在同 gid 时不再重复下载（按钮一般已隐藏，此处兜底）
+  if (props.comic.isDownloaded) {
+    toast.info('该画廊已存入本地，请勿重复下载')
     return
   }
   isQuickDownloading.value = true

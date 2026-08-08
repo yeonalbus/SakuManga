@@ -20,6 +20,8 @@ export interface DownloadTarget {
   token: string
   title?: string
   coverUrl?: string
+  /** 是否已下载到本地（批量下载前端预过滤去重用，不入队参与后端口径） */
+  isDownloaded?: boolean
 }
 
 /** 按「下载设置 → 默认下载配置」计算下载模式与归档类型 */

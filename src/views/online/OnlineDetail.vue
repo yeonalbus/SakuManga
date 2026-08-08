@@ -8,7 +8,7 @@ import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState, resolveOnlineToken } from '@/stores/historyStore'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { resolveDefaultDownloadScheme } from '@/api/download'
-import { markGidActive } from '@/stores/downloadTasksStore'
+import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
 import { isDetailNewTab, consumeBackState } from '@/utils/detailNav'
@@ -473,6 +473,15 @@ const selectedArchiveType = ref<'original' | 'resample'>('original')
 const archiveOptions = computed(() => gpInfo.value?.archive?.options || [])
 
 const handleOpenDownloadPanel = async () => {
+  // 去重拦截：已下载到本地 / 已在下载队列中的画廊禁止重复下载
+  if (comic.value.isDownloaded) {
+    toast.info('该画廊已存入本地，请勿重复下载')
+    return
+  }
+  if (isGidDownloading(comic.value.id)) {
+    toast.info('该画廊已加入下载队列，请勿重复下载')
+    return
+  }
   showDownloadPanel.value = true
   // 默认方案读取「下载设置 → 默认下载配置」（四选一）
   const { mode, archiveType } = resolveDefaultDownloadScheme()

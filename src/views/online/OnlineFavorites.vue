@@ -8,6 +8,7 @@ import type { OnlineComic } from '@/types/comic'
 import { useUI } from '@/composables/useUI'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { batchCreateDownloads } from '@/api/download'
+import { isGidDownloading } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useDetailPanel } from '@/composables/useDetailPanel'
@@ -44,20 +45,41 @@ const downloadAllFavorites = async () => {
   if (isDownloadingAll.value || favComicList.value.length === 0) return
   isDownloadingAll.value = true
   try {
-    const targets = favComicList.value
+    const allTargets = favComicList.value
       .filter((c) => !!c.token)
-      .map((c) => ({ gid: c.id, token: c.token!, title: c.title, coverUrl: c.coverUrl }))
+      .map((c) => ({
+        gid: c.id,
+        token: c.token!,
+        title: c.title,
+        coverUrl: c.coverUrl,
+        isDownloaded: c.isDownloaded,
+      }))
+    // 预过滤去重：已下载到本地 / 已在下载队列中的收藏不再重复提交
+    const downloadedCount = allTargets.filter((t) => t.isDownloaded).length
+    const downloadingCount = allTargets.filter(
+      (t) => !t.isDownloaded && isGidDownloading(t.gid),
+    ).length
+    const targets = allTargets.filter((t) => !t.isDownloaded && !isGidDownloading(t.gid))
     if (targets.length === 0) {
-      toast.warning('当前收藏夹中没有可下载的作品')
+      const parts: string[] = []
+      if (downloadedCount > 0) parts.push(`已下载 ${downloadedCount} 部`)
+      if (downloadingCount > 0) parts.push(`下载中 ${downloadingCount} 部`)
+      toast.info(`收藏均已存在本地或下载队列：${parts.join('、')}`)
       return
     }
     const res = await batchCreateDownloads(targets)
     if (res.failed > 0) {
       toast.error(`加入失败 ${res.failed} 部：${(res.errors || []).join('；')}`)
-    } else if (res.skipped > 0) {
-      toast.success(`成功加入 ${res.created} 部，跳过已存在的 ${res.skipped} 部`)
     } else {
-      toast.success(`已将 ${res.created} 部收藏加入下载队列`)
+      const skipParts: string[] = []
+      if (downloadedCount > 0) skipParts.push(`已下载 ${downloadedCount} 部`)
+      if (downloadingCount > 0) skipParts.push(`下载中 ${downloadingCount} 部`)
+      if (res.skipped > 0) skipParts.push(`任务已存在 ${res.skipped} 部`)
+      if (skipParts.length > 0) {
+        toast.success(`已将 ${res.created} 部收藏加入下载队列，跳过：${skipParts.join('、')}`)
+      } else {
+        toast.success(`已将 ${res.created} 部收藏加入下载队列`)
+      }
     }
   } catch (err) {
     toast.error(`一键全部下载失败：${(err as Error)?.message || '未知错误'}`)

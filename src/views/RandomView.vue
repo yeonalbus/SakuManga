@@ -263,7 +263,8 @@ const handleStartDraw = async () => {
   try {
     const res = await fetchRandomComicsApi(buildParams())
 
-    let items = res.comics.map(toComicItem)
+    // 防御：后端返回 comics:null 时按空数组处理，避免 null.map 抛错
+    let items = (res.comics || []).map(toComicItem)
 
     // ─── Round3-任务6：前端负向兜底过滤（负向 tag 精确 / 负向关键词子串）───
     const parsed = parseKeywordQueue(drawConfig.keywords)

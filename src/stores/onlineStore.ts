@@ -39,7 +39,9 @@ export const useOnlineStore = defineStore('onlineStore', () => {
 
     try {
       const res = await fetchOnlineComicsApi(params)
-      comics.value = res.comics
+      // 防御：后端在搜索无结果时可能返回 comics:null（Go nil slice 序列化为 null），
+      // 直接赋值会让后续 filteredComics 的 .filter 在 null 上崩溃，统一兜底为空数组。
+      comics.value = res.comics || []
       nextGid.value = res.next
       prevGid.value = res.prev
       hasMore.value = res.hasMore ?? !!res.next
@@ -67,7 +69,8 @@ export const useOnlineStore = defineStore('onlineStore', () => {
       })
 
       // 流式追加数据到列表尾部[cite: 1]
-      comics.value.push(...res.comics)
+      // 防御：后端返回 null 时按空数组处理，避免 push 展开 null 抛错
+      comics.value.push(...(res.comics || []))
       nextGid.value = res.next
       hasMore.value = res.hasMore ?? !!res.next
     } catch (err: unknown) {

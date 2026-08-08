@@ -7,6 +7,13 @@ interface RequestOptions extends RequestInit {
 }
 
 /**
+ * 401 会话失效是否已通知应用层（模块级标记）：
+ * 并发请求同时 401 时只 dispatch 一次 app:unauthorized，
+ * 避免 main.ts 监听被多次触发；成功响应后复位，保证下次失效可再次通知。
+ */
+let unauthorizedHandled = false
+
+/**
  * 基础 Fetch 封装
  */
 export async function http<T = unknown>(
@@ -58,15 +65,19 @@ export async function http<T = unknown>(
   })
 
   // 5. 统一异常处理
-  if (!response.ok) {
-    // 会话失效：清除本地 token 并通知应用层跳转登录页
-    if (response.status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
+  if (response.ok) {
+    // 成功响应：复位 401 通知标记，保证下一次会话失效仍能触发跳转
+    unauthorizedHandled = false
+    return response.json()
+  }
+  // 会话失效：清除本地 token 并通知应用层跳转登录页（去重，见 unauthorizedHandled 注释）
+  if (response.status === 401) {
+    localStorage.removeItem(TOKEN_KEY)
+    if (!unauthorizedHandled) {
+      unauthorizedHandled = true
       window.dispatchEvent(new Event('app:unauthorized'))
     }
-    const errData = await response.json().catch(() => ({}))
-    throw new Error(errData.error || `HTTP 错误 ${response.status}`)
   }
-
-  return response.json()
+  const errData = await response.json().catch(() => ({}))
+  throw new Error(errData.error || `HTTP 错误 ${response.status}`)
 }

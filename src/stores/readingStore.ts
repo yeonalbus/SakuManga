@@ -27,13 +27,30 @@ export const loadReadingList = async (source: 'online' | 'offline') => {
   }
 }
 
+/** 阅读清单后端同步（按 source）：防抖 200ms 合并连续操作 + 串行化保证 PUT 不乱序覆盖 */
+const SYNC_DEBOUNCE_MS = 200
+const syncTimers: Record<string, ReturnType<typeof setTimeout> | null> = {}
+/** 每 source 一条在途写入链，后一次写排队在前一次完成后，避免快速增删时后端收到乱序请求 */
+const syncChains: Record<string, Promise<unknown>> = {}
+
 /** 把指定来源的整个队列保存到后端（幂等整体覆盖） */
 const saveReadingList = (source: 'online' | 'offline') => {
-  const list = source === 'online' ? onlineReadingList.value : offlineReadingList.value
-  http('/reading-list', {
-    method: 'PUT',
-    body: JSON.stringify({ source, items: list }),
-  }).catch((e) => console.error('保存阅读清单失败:', e))
+  if (syncTimers[source]) clearTimeout(syncTimers[source])
+  syncTimers[source] = setTimeout(() => {
+    syncTimers[source] = null
+    const list = source === 'online' ? onlineReadingList.value : offlineReadingList.value
+    const body = JSON.stringify({ source, items: list })
+    const chain = (syncChains[source] ?? Promise.resolve())
+      .catch(() => {}) // 前一次写入失败不阻断后续写入
+      .then(() =>
+        http('/reading-list', {
+          method: 'PUT',
+          body,
+        }),
+      )
+      .catch((e) => console.error('保存阅读清单失败:', e))
+    syncChains[source] = chain
+  }, SYNC_DEBOUNCE_MS)
 }
 
 /** 统一添加/移除阅读清单：已存在则移除，否则加入 */

@@ -44,6 +44,16 @@ const cleanTagName = (raw: string): string => {
   return cleaned
 }
 
+/** 安全解析 tags 字符串（脏数据 / 非法 JSON 时回退空数组，避免单条数据拖垮整批拉取） */
+const safeParseTags = (raw: string): string[] => {
+  try {
+    const arr = JSON.parse(raw || '[]')
+    return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 /** 后端 /comics/offline 返回的原始行（tags 为 TagItem 对象数组） */
 interface OfflineComicRaw {
   id: string
@@ -76,7 +86,7 @@ export const fetchOfflineComics = async () => {
                 })
                 .filter(Boolean)
             : typeof item.tags === 'string'
-              ? JSON.parse((item.tags as string) || '[]')
+              ? safeParseTags(item.tags as string)
               : [],
         // 需求2：原始 tag 串（namespace:key，_ 归一为空格并小写），供 tag 搜索/语言过滤精确匹配
         tagRaws:

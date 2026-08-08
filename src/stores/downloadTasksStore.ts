@@ -37,16 +37,25 @@ function refreshOfflineComicsAfterTask(): void {
   })
 }
 
-/** 拉取一次活动任务列表（失败静默保留上次状态，避免抖动报错） */
+/** 拉取一次活动任务列表（失败静默保留上次状态，避免抖动报错）。
+ *  分页拉取全部活动任务（每页 500），避免大量任务时漏检导致角标/去重失效。 */
 export async function fetchActiveDownloads(): Promise<void> {
   // 无下载许可用户不轮询（中心制：无许可用户隐藏下载能力，避免无意义请求）
   const userStore = useUserStore()
   if (!userStore.isAdmin && !userStore.user?.allowDownload) return
   try {
-    const res = await http<{ tasks?: ActiveDownloadTask[] }>('/downloads', {
-      params: { status: 'active', page: 1, size: 200 },
-    })
-    const tasks = res.tasks || []
+    const tasks: ActiveDownloadTask[] = []
+    let page = 1
+    const PAGE_SIZE = 500
+    for (;;) {
+      const res = await http<{ tasks?: ActiveDownloadTask[] }>('/downloads', {
+        params: { status: 'active', page, size: PAGE_SIZE },
+      })
+      const batch = res.tasks || []
+      tasks.push(...batch)
+      if (batch.length < PAGE_SIZE) break
+      page += 1
+    }
     const current = new Set(tasks.map((t) => String(t.gid)).filter(Boolean))
     // 检测任务完成/取消：gid 从 active 集合消失（completed/cancelled 不在 active 内）→ 刷新离线书库缓存
     if (lastActiveGids.size > 0) {

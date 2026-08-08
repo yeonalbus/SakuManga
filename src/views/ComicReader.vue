@@ -10,14 +10,15 @@ import { fetchOfflineComics, offlineComics } from '@/stores/comicStore'
 import { http } from '@/utils/request'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 // Round3-任务1：阅读进度按账号写回后端 /history
-import { getHistoryProgress, syncHistory } from '@/stores/historyStore'
+import { syncHistory } from '@/stores/historyStore'
 import { useUserStore } from '@/stores/userStore'
 // Round7-任务1：本地进度存储统一委托公共工具（与详情页「立即阅读」恢复共用同一实现）
 import {
   getProgressStorageKey,
   getProgressMap as getSharedProgressMap,
   saveProgress as saveSharedProgress,
-  getSavedPage as getSharedSavedPage,
+  resolveResumePage,
+  isResumeFromLastPageEnabled,
 } from '@/utils/readingProgress'
 
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
@@ -179,13 +180,12 @@ const loadComicPages = async () => {
     if (Number.isInteger(targetPage) && targetPage >= 1 && targetPage <= totalPages.value) {
       startPage = targetPage
     } else {
-      // Round3-任务1：本地缓存先定位，随后以按账号隔离的后端进度校准（后端有记录则覆盖）
-      const last = getSavedPage(source.value, realId)
-      startPage = Math.min(Math.max(1, last), totalPages.value)
-      const serverPage = await getHistoryProgress(source.value, realId)
-      if (serverPage && serverPage >= 1 && serverPage <= totalPages.value) {
-        startPage = serverPage
-      }
+      // 统一恢复逻辑：本地缓存 + 后端进度取更远位置（与详情页「立即阅读」resolveResumePage 一致）
+      const last = await resolveResumePage(source.value, realId, {
+        fromHistory: route.query.resume === '1',
+        resumePreference: isResumeFromLastPageEnabled(),
+      })
+      if (last !== null) startPage = Math.min(Math.max(1, last), totalPages.value)
     }
     currentPage.value = startPage
     if (isWebtoon.value) scrollToPage(startPage)
@@ -340,8 +340,6 @@ const progressStorageKey = (): string => getProgressStorageKey(currentUid())
 const getProgressMap = (): Record<string, number> => getSharedProgressMap(currentUid())
 const saveProgress = (src: 'online' | 'offline', id: string, page: number): void =>
   saveSharedProgress(currentUid(), src, id, page)
-const getSavedPage = (src: 'online' | 'offline', id: string): number =>
-  getSharedSavedPage(currentUid(), src, id)
 
 // Round3-任务1：当前阅读作品元信息（供后端进度写回；离线优先取库内真实条目）
 const currentComicMeta = computed<ComicItem | null>(() => {
@@ -646,7 +644,7 @@ watch(
         toast.info('当前浏览器不支持屏幕常亮锁')
       }
     } else if (wakeLockSentinel) {
-      wakeLockSentinel.release()
+      wakeLockSentinel.release().catch(() => {})
       wakeLockSentinel = null
     }
   },
@@ -893,7 +891,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onCaptureClick, true)
   if (autoTurnTimer) clearInterval(autoTurnTimer)
   if (clockTimer) clearInterval(clockTimer)
-  if (wakeLockSentinel) wakeLockSentinel.release()
+  if (wakeLockSentinel) wakeLockSentinel.release().catch(() => {})
   // Round7-任务1：退出时立即 flush 未完成的后端进度同步（仅当前页 > 1 时，
   // 避免第 1 页入口快速退出把后端已有进度清零）
   if (progressSyncTimer) {

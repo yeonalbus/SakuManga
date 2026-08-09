@@ -50,6 +50,7 @@ backend/data/*.tmp
 
 # 单 exe 打包产物
 /SakuHentai.exe
+/SakuHentai-*.exe
 
 # 测试用漫画
 /MangaExamlpe

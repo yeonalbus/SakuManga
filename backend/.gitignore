@@ -5,3 +5,4 @@
 # 临时/诊断输出
 *.part
 *.bits
+ziprangecheck_out/

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -790,6 +791,8 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 	// 归档任务：先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁
 	if task.Mode == models.DownloadModeArchive {
 		m.cancelArchiveSessionForTask(&task)
+		// 会话重建：旧 .part/.bits 来自旧会话（可能已耗尽配额，数据不可信），清除强制从零重下
+		clearArchivePartialCache(&task)
 	}
 
 	task.Status = models.DownloadQueued
@@ -822,6 +825,8 @@ func (m *DownloadManager) autoUnlockArchiveTask(task *models.DownloadTask) bool 
 	task.AutoUnlockCount++
 	// 先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁，对齐手动解锁流程
 	m.cancelArchiveSessionForTask(task)
+	// 会话重建：旧 .part/.bits 来自耗尽配额的旧会话，数据不可信，清除强制从零重下
+	clearArchivePartialCache(task)
 	task.Status = models.DownloadQueued
 	task.Error = ""
 	task.UpdatedAt = time.Now()
@@ -859,6 +864,22 @@ func (m *DownloadManager) cancelArchiveSessionForTask(task *models.DownloadTask)
 		return
 	}
 	log.Printf("%s 已取消任务 %s（gid=%s）的服务端归档 Session，将从当前 IP 重新解锁", dlLogTag, task.ID, task.GID)
+}
+
+// clearArchivePartialCache 清除归档任务的 .part/.bits 缓存文件。
+// 会话重建（invalidate_sessions=1）后旧数据来自已耗尽配额的旧会话，不可信，
+// 必须强制从零重下，避免位图复用坏块导致 zip 校验反复失败（实测：会话重建后位图
+// 复用旧会话的坏块，即使换了新直链仍 zip 校验失败）。
+func clearArchivePartialCache(task *models.DownloadTask) {
+	if task == nil || task.Mode != models.DownloadModeArchive || task.ArchivePath == "" {
+		return
+	}
+	dirName := fmt.Sprintf("archive - %s - %s", task.GID, cleanFolderName(task.Title))
+	part := filepath.Join(task.ArchivePath, dirName+".zip.part")
+	removeArchiveBitmap(part)
+	if err := os.Remove(part); err != nil && !os.IsNotExist(err) {
+		log.Printf("%s 清理任务 %s 归档缓存失败: %v", dlWarnTag, task.ID, err)
+	}
 }
 
 // ListTasks 查询任务列表（支持状态/模式过滤 + 分页）

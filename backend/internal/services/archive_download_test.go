@@ -1234,3 +1234,226 @@ func TestZipCorruptRetryFreshDownload(t *testing.T) {
 		t.Fatalf("自动重下应重新下载全部块（期望至少 %d 个块请求，实际 %d）", count*2, reqs)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// 归档「校验失败无法重下」修复回归测试
+// 覆盖：分块 EOF 字节校验（downloadChunk）、会话重建缓存清理
+//       （clearArchivePartialCache）、重建会话重试（retryResolveArchiveDownloadURL）。
+// ─────────────────────────────────────────────────────────────
+
+// TestChunkDownloadIncompleteEOFRejected 验证 close-delimited（无 Content-Length）响应
+// 提前截断时，downloadChunk 按实际读取字节数校验块完整性并报错（修复：EOF 不再盲目标记完成）。
+// 回归场景：H@H 对已耗尽配额的画廊会话返回被截断的数据，若静默标记完成会组合出损坏 zip
+// 却报「下载完成」，且位图复用坏块导致重下仍失败。
+func TestChunkDownloadIncompleteEOFRejected(t *testing.T) {
+	const total = int64(1024 * 1024) // 1 MiB
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, rw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, "hijack failed", http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+		// close-delimited 206：无 Content-Length/Transfer-Encoding，写部分数据后关连接
+		// → 客户端读到连接正常关闭（io.EOF），但实际字节数 < 期望块长 → 判定截断
+		fmt.Fprintf(rw, "HTTP/1.1 206 Partial Content\r\n")
+		fmt.Fprintf(rw, "Content-Range: bytes 0-1023/%d\r\n", total)
+		fmt.Fprintf(rw, "Connection: close\r\n")
+		fmt.Fprintf(rw, "\r\n")
+		if _, werr := rw.Write(make([]byte, 100)); werr != nil {
+			return
+		}
+		_ = rw.Flush()
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+	f, err := os.OpenFile(g.partPath, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("打开 .part 失败: %v", err)
+	}
+	defer f.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &archiveChunkDownloader{
+		g:        g,
+		url:      srv.URL + "/file.zip",
+		total:    total,
+		chunk:    total,
+		count:    1,
+		part:     g.partPath,
+		client:   &http.Client{},
+		ctx:      ctx,
+		cancel:   cancel,
+		doneBits: make([]uint64, 1),
+		f:        f,
+	}
+
+	err = d.downloadChunk(0)
+	if err == nil {
+		t.Fatal("截断的 close-delimited 响应应被判定为块不完整并报错")
+	}
+	if !strings.Contains(err.Error(), "不完整") {
+		t.Fatalf("错误信息应含「不完整」关键字，实际: %v", err)
+	}
+	if d.doneBits[0] != 0 {
+		t.Fatal("不完整的块不应被标记为完成（避免位图复用坏块）")
+	}
+}
+
+// TestClearArchivePartialCache 验证会话重建（invalidate_sessions=1）后清除旧 .part/.bits。
+// 回归场景：实测发现会话重建拿到新直链后，位图续传复用旧会话的坏块仍校验失败——
+// 必须清除不可信旧缓存强制从零重下；非归档任务与 ArchivePath 为空时不应清理（防御性）。
+func TestClearArchivePartialCache(t *testing.T) {
+	dir := t.TempDir()
+	task := &models.DownloadTask{
+		ID:          "cache-task",
+		Mode:        models.DownloadModeArchive,
+		GID:         "4099258",
+		Title:       "Retry 本子",
+		ArchivePath: dir,
+	}
+	part := filepath.Join(dir, fmt.Sprintf("archive - %s - %s.zip.part", task.GID, cleanFolderName(task.Title)))
+	if err := os.WriteFile(part, []byte("old bad partial"), 0o644); err != nil {
+		t.Fatalf("写 .part 失败: %v", err)
+	}
+	if err := os.WriteFile(archiveBitmapPath(part), []byte("ABIT"), 0o644); err != nil {
+		t.Fatalf("写 .bits 失败: %v", err)
+	}
+
+	clearArchivePartialCache(task)
+
+	if _, err := os.Stat(part); !os.IsNotExist(err) {
+		t.Fatal(".part 应被清除（会话重建后旧数据不可信）")
+	}
+	if _, err := os.Stat(archiveBitmapPath(part)); !os.IsNotExist(err) {
+		t.Fatal(".bits 应被清除（避免位图复用坏块）")
+	}
+
+	// 防御性分支：非归档任务不清理
+	if err := os.WriteFile(part, []byte("data"), 0o644); err != nil {
+		t.Fatalf("重建 .part 失败: %v", err)
+	}
+	clearArchivePartialCache(&models.DownloadTask{ID: "g", Mode: models.DownloadModeGallery, ArchivePath: dir})
+	if _, err := os.Stat(part); err != nil {
+		t.Fatal("非归档任务不应清理 .part")
+	}
+	// 防御性分支：ArchivePath 为空不清理
+	clearArchivePartialCache(&models.DownloadTask{ID: "a", Mode: models.DownloadModeArchive})
+	if _, err := os.Stat(part); err != nil {
+		t.Fatal("ArchivePath 为空的任务不应清理 .part")
+	}
+}
+
+// TestRetryResolveCancelsOldSessionAndClearsCache 验证 zip 校验失败后的重试：
+// 先取消旧 H@H 归档会话（POST invalidate_sessions=1 重建会话以重置画廊下载字节配额），
+// 清除旧缓存，再重新走 archiver.php 流程解析全新直链。
+// 回归场景：直接复用原直链会命中已耗尽配额的旧会话（404 "clocked too many downloaded
+// bytes on this gallery"），导致 90% 重下仍失败。
+func TestRetryResolveCancelsOldSessionAndClearsCache(t *testing.T) {
+	// requestDownloadLink 内部用 buildTransport()（读全局代理）：config.json 配置了代理
+	// 会把请求打到代理而非测试服务器 → 临时禁用并在结束时恢复。
+	proxyLock.Lock()
+	oldProxy := currentProxy
+	currentProxy = ""
+	proxyLock.Unlock()
+	defer func() {
+		proxyLock.Lock()
+		currentProxy = oldProxy
+		proxyLock.Unlock()
+	}()
+
+	var mu sync.Mutex
+	cancelCalls, keyPosts := 0, 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			b, _ := io.ReadAll(r.Body)
+			body := string(b)
+			if strings.Contains(body, "invalidate_sessions=1") {
+				mu.Lock()
+				cancelCalls++
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("<html>archiver</html>"))
+				return
+			}
+			if strings.Contains(body, "archiver_key") {
+				mu.Lock()
+				keyPosts++
+				mu.Unlock()
+				// 相对路径：requestDownloadLink 会基于 archiverBase 自动补全为完整直链
+				w.Header().Set("Location", "/download/archive.zip")
+				w.WriteHeader(http.StatusFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default: // GET archiver.php 归档页
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html><body>
+<form action="/archiver.php" method="post">
+<input type="hidden" name="dltype" value="org">
+<input type="hidden" name="archiver_key" value="key123">
+<input type="submit" value="Download">
+</form>
+</body></html>`))
+		}
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	dir := t.TempDir()
+	g := newTestArchiveDownloader(t, mgr, srv.URL, dir)
+	g.client = srv.Client() // 信任测试服务器自签证书
+	g.task.Mode = models.DownloadModeArchive
+	g.task.GID = "4099258"
+	g.task.Token = "tok123"
+	g.task.ArchiveType = models.ArchiveTypeOriginal
+	g.task.Title = "Retry 本子"
+	g.task.ArchivePath = dir
+
+	// 残留旧会话缓存（模拟锁定路径未走 finalize 清理）
+	part := filepath.Join(dir, fmt.Sprintf("archive - %s - %s.zip.part", g.task.GID, cleanFolderName(g.task.Title)))
+	if err := os.WriteFile(part, []byte("old bad partial"), 0o644); err != nil {
+		t.Fatalf("写 .part 失败: %v", err)
+	}
+	if err := os.WriteFile(archiveBitmapPath(part), []byte("ABIT"), 0o644); err != nil {
+		t.Fatalf("写 .bits 失败: %v", err)
+	}
+
+	// 重建会话：先取消旧 Session（invalidate_sessions=1）→ 清缓存 → 重新解析新直链
+	dlURL, _, err := g.retryResolveArchiveDownloadURL()
+	if err != nil {
+		t.Fatalf("retryResolveArchiveDownloadURL 失败: %v", err)
+	}
+	if !strings.HasSuffix(dlURL, "/download/archive.zip") {
+		t.Fatalf("应返回新解析的直链，实际: %s", dlURL)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if cancelCalls == 0 {
+		t.Fatal("重建会话应先取消旧 Session（invalidate_sessions=1）")
+	}
+	if keyPosts == 0 {
+		t.Fatal("重建会话后应重新走 archiver.php 流程解析新直链")
+	}
+	if _, err := os.Stat(part); !os.IsNotExist(err) {
+		t.Fatal("重建会话后应清除旧 .part 缓存")
+	}
+	if _, err := os.Stat(archiveBitmapPath(part)); !os.IsNotExist(err) {
+		t.Fatal("重建会话后应清除旧 .bits 位图")
+	}
+}

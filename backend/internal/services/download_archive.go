@@ -258,11 +258,36 @@ func (g *archiveDownloader) run() {
 	log.Printf("%s [archive-engine] 任务 %s 已获取 H@H 下载链接: %s", dlLogTag, g.task.ID, truncateForLog(downloadURL, 200))
 
 	// 6. 下载 zip：探测 Range 支持与总大小后，按线程数分流（分块并发 / 单线程续传）
-	// zip 校验失败（文件损坏）：.part/.bits 已删除，自动从零重下一次；再次失败才任务报错。
+	// zip 校验失败（文件损坏）：.part/.bits 已删除。重试前先重建 H@H 归档会话
+	//（invalidate_sessions=1 取消旧 Session + 重新解析全新直链）——直接复用同一 downloadURL
+	// 会命中已耗尽下载字节配额的旧会话（404 "clocked too many downloaded bytes"），必然再次失败。
 	dlErr := g.downloadArchiveFile(downloadURL)
 	if errors.Is(dlErr, errZipCorrupt) && !g.stopped() {
-		log.Printf("%s [archive-engine] 任务 %s zip 校验失败，已清除缓存，自动重新下载一次", dlWarnTag, g.task.ID)
-		dlErr = g.downloadArchiveFile(downloadURL)
+		log.Printf("%s [archive-engine] 任务 %s zip 校验失败，已清除缓存，重建归档会话后重新下载一次", dlWarnTag, g.task.ID)
+		newURL, arcInfo, resolveErr := g.retryResolveArchiveDownloadURL()
+		if resolveErr != nil {
+			// 与首次解析一致：仅 H@H 画廊降级为逐图下载；其余按失败处理
+			if errors.Is(resolveErr, errHathdlOnly) {
+				if g.task.UpdateForComicID != "" && !g.m.GetSettings().AutoUpdateFallbackToGallery {
+					g.fail(resolveErr.Error())
+					return
+				}
+				if g.stopped() {
+					log.Printf("%s [archive-engine] 任务 %s 已被取消/暂停，跳过降级", dlWarnTag, g.task.ID)
+					return
+				}
+				g.m.fallbackArchiveToGallery(g.task, resolveErr.Error())
+				return
+			}
+			g.failOrLock(resolveErr)
+			return
+		}
+		if arcInfo != nil && arcInfo.SizeBytes > 0 {
+			g.task.TotalBytes = arcInfo.SizeBytes
+			g.persist()
+		}
+		log.Printf("%s [archive-engine] 任务 %s 已重建归档会话获取新下载链接: %s", dlLogTag, g.task.ID, truncateForLog(newURL, 200))
+		dlErr = g.downloadArchiveFile(newURL)
 		if errors.Is(dlErr, errZipCorrupt) {
 			log.Printf("%s [archive-engine] 任务 %s 重新下载后仍校验失败，任务报错（可手动重试）", dlErrTag, g.task.ID)
 		}
@@ -385,6 +410,25 @@ func (g *archiveDownloader) resolveArchiveDownloadURL() (string, *models.Archive
 		return "", nil, err
 	}
 	return dlURL, g.lastArchiveInfo, nil
+}
+
+// retryResolveArchiveDownloadURL zip 校验失败后的重试：先取消旧 H@H 归档会话
+//（POST invalidate_sessions=1，重建会话以重置画廊下载字节配额），再重新走 archiver.php
+// 流程获取全新直链。直接复用原直链会命中已耗尽配额的旧会话（404 "clocked too many
+// downloaded bytes on this gallery"），导致无法通过重下修复（实测：90% 重下仍失败）。
+func (g *archiveDownloader) retryResolveArchiveDownloadURL() (string, *models.ArchiveInfo, error) {
+	log.Printf("%s [archive-engine] 任务 %s 重建归档会话：先取消旧 Session（invalidate_sessions=1）", dlArcTag, g.task.ID)
+	if err := cancelArchiveSession(g.client, g.referer, g.task.GID, g.task.Token); err != nil {
+		log.Printf("%s [archive-engine] 任务 %s 取消旧归档 Session 失败（继续尝试重新解锁）: %v", dlWarnTag, g.task.ID, err)
+	}
+	// 缓存清理：若残留旧 .part/.bits（锁定路径未走 finalize 清理），旧数据来自配额耗尽
+	// 会话不可信，强制从零重下，避免位图复用坏块再次校验失败。
+	clearArchivePartialCache(g.task)
+	url, info, err := g.resolveArchiveDownloadURL()
+	if err != nil {
+		return "", nil, err
+	}
+	return url, info, nil
 }
 
 // fetchArchiverForms GET archiver.php 并解析全部表单
@@ -917,6 +961,11 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 			}
 		}
 		if rerr == io.EOF {
+			// 校验下载完整性：Content-Length 已知时，实际写入字节数必须一致；
+			// 否则说明连接被提前截断（配额惩罚/网络中断），返回错误触发重试而非静默损坏。
+			if resp.ContentLength >= 0 && written != resp.ContentLength {
+				return fmt.Errorf("zip 下载不完整: 期望 %d 字节，实际 %d 字节（连接被截断）", resp.ContentLength, written)
+			}
 			break
 		}
 		if rerr != nil {

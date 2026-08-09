@@ -472,6 +472,12 @@ func (d *archiveChunkDownloader) downloadChunk(idx int64) error {
 			}
 		}
 		if rerr == io.EOF {
+			// 校验块完整性：H@H 对 close-delimited 响应连接正常关闭时 Go 返回 io.EOF，
+			// 此时实际读取字节数若小于期望块长度，说明服务器提前截断（配额惩罚/连接中断），
+			// 块数据不完整——直接报错使该块重新下载，避免组合出损坏 zip 却标记“下载完成”。
+			if got, want := off-start, end-start; got != want {
+				return fmt.Errorf("下载分块 %d 不完整: 期望 %d 字节，实际 %d 字节（连接被截断）", idx, want, got)
+			}
 			break
 		}
 		if rerr != nil {

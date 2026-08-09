@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v1.3.1 · 最近更新：2026-08
+> 版本：v1.3.2 · 最近更新：2026-08
 
 ## 一、目录总览
 
@@ -150,7 +150,7 @@ src/
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
 
-### 设置面板 `components/settings/` 细分（v1.3.1 八分组）
+### 设置面板 `components/settings/` 细分（v1.3.2 八分组）
 
 | 分组         | 文件                         | 职责                                             | 管理员可见 |
 | ------------ | ---------------------------- | ------------------------------------------------ | :--------: |
@@ -190,9 +190,9 @@ backend/
 │
 ├── cmd_debug/                      # 调试用命令行工具（独立 main，不影响主程序）
 │   └── main.go                     # cmd_debug 目录调试入口
-│   # 另有 archivedebug / archivercheck / dbcheck / dmscheck / metadump /
-│   #      readerdebug / relationscheck / reproissue / schemadump / statusdebug /
-│   #      updatelogic 等 11 个按场景拆分的调试小工具
+│   # 另有 archivedebug / archivercheck / archivespeed / dbcheck / dmscheck /
+│   #      metadump / readerdebug / relationscheck / reproissue / schemadump /
+│   #      statusdebug / updatelogic / ziprangecheck 等 13 个按场景拆分的调试小工具
 │
 ├── data/                           # 标签词典/计数缓存（运行时下载生成，跟随 exe 位置，勿入库）
 │   ├── db.raw.json + .etag         # 标签词典原始数据 + 校验
@@ -376,9 +376,9 @@ backend/
 
 ---
 
-## 六、发布注意（v1.3.1）
+## 六、发布注意（v1.3.2）
 
-- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `1.3.1`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `1.3.1`）。
+- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `1.3.2`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `1.3.2`）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
 - **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。

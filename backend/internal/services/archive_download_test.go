@@ -1457,3 +1457,216 @@ func TestRetryResolveCancelsOldSessionAndClearsCache(t *testing.T) {
 		t.Fatal("重建会话后应清除旧 .bits 位图")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// 1 字节末块回归测试
+// 用户反馈：下载分块 N 不完整: 期望 1 字节，实际 0 字节。
+// 根因：当 total % chunkSize == 1 时（如 total = threads*k + 1），末块 Range 退化为
+// bytes=N-N 单字节请求，H@H 对单字节 Range 返回 206 空 body（close-delimited），
+// 触发 downloadChunk 的 EOF 字节校验误判为「块不完整」导致任务直接失败。
+// 修复：newArchiveChunkDownloader 将 chunkSize 减 1，把最后 1 字节并入前一块。
+// ─────────────────────────────────────────────────────────────
+
+// TestArchiveChunkLayoutNoOneByteChunk 回归测试：分块布局不得产生 1 字节块。
+func TestArchiveChunkLayoutNoOneByteChunk(t *testing.T) {
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, "https://example.com/", t.TempDir())
+
+	// 覆盖多种 total，重点命中 total % chunkSize == 1 的边界（默认归档线程数 10）
+	totals := []int64{
+		2, 3,                         // 极小文件（zip 最小也远大于此，仅作下界）
+		int64(1024*1024) + 1,          // total = minChunkSize + 1
+		10*int64(1024*1024) + 1,       // total = threads*minChunkSize + 1（k=1MiB 边界）
+		10*1048577 + 1,                // total = threads*k + 1，k = minChunkSize+1
+		10*(5*int64(1024*1024)) + 1,   // total = threads*5MiB + 1
+		8*int64(1024*1024) + 1,        // 8MiB + 1
+		100 * int64(1024 * 1024),      // 100MiB 常规
+		200*int64(1024*1024) + 1,      // 200MiB + 1
+	}
+	for _, total := range totals {
+		d := newArchiveChunkDownloader(g, "https://example.com/file.zip", total)
+		if d.count < 1 {
+			d.cancel()
+			t.Fatalf("total=%d count<1", total)
+		}
+		for i := int64(0); i < d.count; i++ {
+			lo := i * d.chunk
+			hi := d.chunkEnd(i)
+			if hi-lo < 2 {
+				t.Errorf("total=%d count=%d chunk=%d 块 %d 大小=%d 字节 < 2（单字节 Range 会退化）",
+					total, d.count, d.chunk, i, hi-lo)
+			}
+		}
+		// 末块是退化高发点，单独明确断言
+		last := d.chunkEnd(d.count-1) - (d.count-1)*d.chunk
+		if last < 2 {
+			t.Errorf("total=%d 末块=%d 字节 < 2（应并入前一块避免单字节 Range）", total, last)
+		}
+		d.cancel()
+	}
+}
+
+// TestChunkDownloadSingleByteEmptyBodyRejected 验证 H@H 对单字节 Range (bytes=N-N) 返回
+// 206 空 body（close-delimited）时，downloadChunk 会识别为块不完整并报「期望 1 字节，
+// 实际 0 字节」，佐证分块布局必须避免 1 字节块（见 newArchiveChunkDownloader 修复）。
+func TestChunkDownloadSingleByteEmptyBodyRejected(t *testing.T) {
+	const total = int64(6)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// 模拟 H@H：单字节 Range（start==end）返回 206 空 body（close-delimited）
+		if start == end {
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, rw, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			fmt.Fprintf(rw, "HTTP/1.1 206 Partial Content\r\n")
+			fmt.Fprintf(rw, "Content-Range: bytes %d-%d/%d\r\n", start, end, total)
+			fmt.Fprintf(rw, "Connection: close\r\n")
+			fmt.Fprintf(rw, "\r\n")
+			_ = rw.Flush()
+			_ = conn.Close()
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(make([]byte, end-start+1))
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+	f, err := os.OpenFile(g.partPath, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("打开 .part 失败: %v", err)
+	}
+	defer f.Close()
+
+	// 手动构造修复前可能出现的布局：total=6, chunk=5 → 块 1 恰为 1 字节（[5,6)）
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &archiveChunkDownloader{
+		g:        g,
+		url:      srv.URL + "/file.zip",
+		total:    total,
+		chunk:    5,
+		count:    2,
+		part:     g.partPath,
+		client:   &http.Client{},
+		ctx:      ctx,
+		cancel:   cancel,
+		doneBits: make([]uint64, 1),
+		f:        f,
+	}
+
+	err = d.downloadChunk(1)
+	if err == nil {
+		t.Fatal("H@H 对单字节 Range 返回空 body 应被判定为块不完整并报错")
+	}
+	if !strings.Contains(err.Error(), "不完整") || !strings.Contains(err.Error(), "期望 1 字节") {
+		t.Fatalf("错误信息应含「不完整: 期望 1 字节」，实际: %v", err)
+	}
+	if d.doneBits[0] != 0 {
+		t.Fatal("不完整的块不应被标记为完成")
+	}
+}
+
+// TestArchiveChunkDownloadNoSingleByteRange 端到端回归：模拟 H@H 服务器对单字节 Range
+// (bytes=N-N) 返回 206 空 body。精确构造 total = 3*chunkSize + 1 的合法 zip
+//（修复前末块恰 1 字节 → 触发 H@H 空 body → 「期望 1 字节，实际 0 字节」失败），
+// 修复后布局把末块并入前一块（无单字节 Range），下载应完整成功且不产生单字节请求。
+func TestArchiveChunkDownloadNoSingleByteRange(t *testing.T) {
+	// 任意合法 zip：修复后分块布局保证每块至少 2 字节（无 bytes=N-N 单字节 Range），
+	// 因此即使服务器对单字节 Range 返回空 body，也不会触发（H@H 空 body 行为已被
+	// TestChunkDownloadSingleByteEmptyBodyRejected 单独覆盖），下载应完整成功。
+	data := makeTestZip(t, 8*1024*1024)
+	total := int64(len(data))
+
+	var mu sync.Mutex
+	singleByte := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", total))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if start == end {
+			mu.Lock()
+			singleByte++
+			mu.Unlock()
+			// H@H 行为：单字节 Range 返回 206 空 body（close-delimited）
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, rw, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			fmt.Fprintf(rw, "HTTP/1.1 206 Partial Content\r\n")
+			fmt.Fprintf(rw, "Content-Range: bytes %d-%d/%d\r\n", start, end, total)
+			fmt.Fprintf(rw, "Connection: close\r\n")
+			fmt.Fprintf(rw, "\r\n")
+			_ = rw.Flush()
+			_ = conn.Close()
+			return
+		}
+		if end < 0 || end >= total {
+			end = total - 1
+		}
+		if start >= total {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[start : end+1])
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+	if err := g.runChunkDownload(srv.URL+"/file.zip", total, 5); err != nil {
+		t.Fatalf("分块下载失败: %v", err)
+	}
+
+	got, err := os.ReadFile(g.zipPath)
+	if err != nil {
+		t.Fatalf("读取 zip 失败: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("下载结果与源不一致: got=%d 字节, want=%d 字节", len(got), len(data))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if singleByte != 0 {
+		t.Fatalf("修复后分块布局不应产生单字节 Range（bytes=N-N）请求，实际 %d 次", singleByte)
+	}
+}

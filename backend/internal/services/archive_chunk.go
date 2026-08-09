@@ -175,6 +175,17 @@ func newArchiveChunkDownloader(g *archiveDownloader, downloadURL string, total i
 	if total > 0 && total/int64(threads) > chunkSize {
 		chunkSize = total / int64(threads)
 	}
+	// 避免末块退化为 1 字节：当 total % chunkSize == 1 时（如 total = threads*k + 1），
+	// 末块 Range 会退化为 bytes=N-N 单字节请求，H@H 服务器对单字节 Range 会返回 206 空 body
+	//（close-delimited），触发 downloadChunk 的 EOF 字节校验误判为「块不完整」
+	//（期望 1 字节，实际 0 字节）导致下载任务直接失败。
+	// 将 chunkSize 减 1，把最后 1 字节并入前一块，保证每块至少 2 字节。
+	if total > 0 && total%chunkSize == 1 {
+		chunkSize--
+		if chunkSize < 1 {
+			chunkSize = 1
+		}
+	}
 	count := (total + chunkSize - 1) / chunkSize
 	if count < 1 {
 		count = 1

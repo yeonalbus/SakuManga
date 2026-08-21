@@ -87,6 +87,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 漫画数据与封面（封面/页图为公开路由，见上方 public 分组）
 		api.GET("/comics/offline", handlers.GetOfflineComics)
 		api.GET("/comics/:id", handlers.GetComicDetail)
+		// Round11：离线漫画标题/备注编辑（title 空串=恢复原标题）
+		api.PUT("/comics/:id", handlers.UpdateOfflineComic)
 		// 删除本地画廊为系统级写操作（仅管理员），见下方 admin 分组
 		// 阅读次数上报（排行榜持久化，问题9）
 		api.POST("/comics/:id/click", handlers.RecordComicClick)

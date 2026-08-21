@@ -360,6 +360,23 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		addedAt = existingAdded.AddedAt
 	}
 
+	// Round11：OriginalTitle 首次入库 = 当前标题；已有记录由下方 existingFull 保留
+	originalTitle := title
+	remarkPreserve := ""
+
+	// Round11：OriginalTitle / Remark 保留策略。
+	// OriginalTitle 仅首次入库时记录（供「修改标题 → 恢复原标题」）；
+	// 已存在记录（重新扫描/更新）不覆盖 OriginalTitle 与用户备注。
+	var existingFull models.OfflineComic
+	if err := database.DB.Where("local_path = ?", localPath).First(&existingFull).Error; err == nil {
+		if existingFull.OriginalTitle != "" {
+			originalTitle = existingFull.OriginalTitle
+		}
+		if existingFull.Remark != "" {
+			remarkPreserve = existingFull.Remark
+		}
+	}
+
 	// 发布时间：metadata publishTime / ComicInfo 日期（问题1 排序）
 	publishedAt := parsePublishTime(meta.PublishTime)
 
@@ -367,6 +384,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		ID:             comicID,
 		Title:          title,
 		TitleJpn:       titleJpn,
+		OriginalTitle:  originalTitle,
+		Remark:         remarkPreserve,
 		CoverURL:       coverURL,
 		Source:         models.SourceOffline,
 		Category:       category,             // 写入解析出的分类

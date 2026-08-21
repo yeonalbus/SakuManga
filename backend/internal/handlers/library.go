@@ -397,9 +397,18 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 			Token:      req.Token,
 		}
 	}
-	rec.ComicTitle = req.ComicTitle
-	rec.CoverURL = req.CoverURL
-	rec.LastChapterTitle = req.LastChapterTitle
+	// Round11-Bug3：标题/封面空值不覆盖已有记录。
+	// 阅读器进度写回（syncHistory）可能只带 comicId 而不带标题/封面
+	// （在线模式 fallback 为空串），无条件覆盖会把正常历史污染成 gid 乱码/无封面。
+	if req.ComicTitle != "" {
+		rec.ComicTitle = req.ComicTitle
+	}
+	if req.CoverURL != "" {
+		rec.CoverURL = req.CoverURL
+	}
+	if req.LastChapterTitle != "" {
+		rec.LastChapterTitle = req.LastChapterTitle
+	}
 	if req.Token != "" {
 		rec.Token = req.Token
 	}

@@ -186,6 +186,9 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 		itemText := s.Text()
 		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
 			pageCount, _ = strconv.Atoi(matches[1])
+			if pageCount > 100000 {
+				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
+			}
 		}
 
 		updatedAt := ""
@@ -321,6 +324,32 @@ func (s *EHService) FetchPopularList(account *models.AccountSetting, ehSetting *
 			rating = parseRatingFromStyle(style)
 		}
 
+		// Round11-D1：热门列表补全页数与标签（与首页解析一致）
+		var tags []string
+		s.Find("div.gt, div.gtl, div.gtw, div.gtd, div[title*=':']").Each(func(_ int, tagNode *goquery.Selection) {
+			tagStr := ""
+			if t, ok := tagNode.Attr("title"); ok && strings.Contains(t, ":") {
+				tagStr = t
+			} else if id, ok := tagNode.Attr("id"); ok && strings.HasPrefix(id, "ta_") {
+				tagStr = strings.TrimPrefix(id, "ta_")
+				tagStr = strings.ReplaceAll(tagStr, "_", " ")
+			} else {
+				tagStr = strings.TrimSpace(tagNode.Text())
+			}
+			if tagStr != "" {
+				tags = append(tags, strings.ToLower(tagStr))
+			}
+		})
+
+		pageCount := 0
+		itemText := s.Text()
+		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
+			pageCount, _ = strconv.Atoi(matches[1])
+			if pageCount > 100000 {
+				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
+			}
+		}
+
 		comics = append(comics, OnlineComicDTO{
 			ID:           gid,
 			Token:        token,
@@ -329,6 +358,8 @@ func (s *EHService) FetchPopularList(account *models.AccountSetting, ehSetting *
 			Source:       "online",
 			Category:     category,
 			Rating:       rating,
+			Tags:         tags,
+			PageCount:    pageCount,
 			IsDownloaded: false,
 		})
 	})

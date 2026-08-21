@@ -13,7 +13,10 @@ import (
 var (
 	urlRegex         = regexp.MustCompile(`url\(['"]?(.*?)['"]?\)`)
 	resultCountRegex = regexp.MustCompile(`(?i)(?:Found\s+(?:about\s+)?|of\s+)([\d,]+)\s+results`)
-	pageCountRegex   = regexp.MustCompile(`(\d+)\s*(?:pages|P|页)`)
+	// Round11-Bug2：页数正则收紧 —— (?:pages?|P\b|页) 带单词边界，
+	// 排除标题/标签中「数字 + 大写P开头单词」（如 "223 Piece"、"(959539 Piece)"）被误匹配；
+	// (?i:pages?) 兼容 E 站 "pages"/"page"/"Pages" 大小写变体；P\b 仅匹配独立大写 P（如 "39P"）。
+	pageCountRegex   = regexp.MustCompile(`(\d+)\s*(?:(?i:pages?)|P\b|页)`)
 	dateRegex        = regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}`)
 )
 
@@ -80,23 +83,16 @@ func extractCoverURL(s *goquery.Selection) string {
 	return rawURL
 }
 
+// parseRatingFromStyle 解析 E 站列表卡片评分雪碧图 background-position（Round11-Bug1）。
+//
+// E 站 .ir 评分雪碧与排行榜同构（X 横向整星 + Y 行偏移半星），统一委托
+// parseToplistRatingFromStyle 处理：
+//   - 满星行（Y=-1px）：0px→5.0, -16px→4.0, -32px→3.0, -48px→2.0, -64px→1.0
+//   - 半星行（Y=-21px，E 站列表大量使用）：0px→4.5, -16px→3.5, -32px→2.5, -48px→1.5, -64px→0.5
+// 旧实现只按 X 偏移判整星，导致 0px -21px（4.5 星）解析为 0（卡片显示 ⭐ —）、
+// -16px -21px（3.5 星）误判为 4.0。修复后评分精度与 E 站一致。
 func parseRatingFromStyle(style string) float64 {
-	if strings.Contains(style, "0px 0px") || strings.Contains(style, "0px -1") {
-		return 5.0
-	}
-	if strings.Contains(style, "-16px") {
-		return 4.0
-	}
-	if strings.Contains(style, "-32px") {
-		return 3.0
-	}
-	if strings.Contains(style, "-48px") {
-		return 2.0
-	}
-	if strings.Contains(style, "-64px") {
-		return 1.0
-	}
-	return 0.0
+	return parseToplistRatingFromStyle(style)
 }
 
 // toplistRatingPosRegex 匹配排行榜评分雪碧图 background-position 的 X/Y 偏移

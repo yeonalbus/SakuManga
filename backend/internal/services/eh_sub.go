@@ -151,6 +151,9 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 		itemText := s.Text()
 		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
 			pageCount, _ = strconv.Atoi(matches[1])
+			if pageCount > 100000 {
+				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
+			}
 		}
 
 		updatedAt := ""

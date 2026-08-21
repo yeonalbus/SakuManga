@@ -221,6 +221,50 @@ func GetComicDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, comic)
 }
 
+// UpdateOfflineComic 修改离线漫画标题/本地备注 PUT /api/v1/comics/:id
+// Round11-Opt3：title 传空字符串 = 恢复原标题（OriginalTitle，首次入库标题）；
+// remark 为本地备注；两者均为指针，未传字段不修改。
+func UpdateOfflineComic(c *gin.Context) {
+	id := c.Param("id")
+	var comic models.OfflineComic
+	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该漫画记录"})
+		return
+	}
+
+	var req struct {
+		Title  *string `json:"title"`
+		Remark *string `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	if req.Title == nil && req.Remark == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "没有可更新的字段"})
+		return
+	}
+
+	if req.Title != nil {
+		if *req.Title == "" {
+			// 清空输入 → 恢复原标题（保留首次入库标题，便于反复尝试）
+			if comic.OriginalTitle != "" {
+				comic.Title = comic.OriginalTitle
+			}
+		} else {
+			comic.Title = *req.Title
+		}
+	}
+	if req.Remark != nil {
+		comic.Remark = *req.Remark
+	}
+	if err := database.DB.Save(&comic).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已更新", "data": gin.H{"title": comic.Title, "remark": comic.Remark, "originalTitle": comic.OriginalTitle}})
+}
+
 // GetComicPages 获取指定漫画的所有页数信息
 func GetComicPages(c *gin.Context) {
 	id := c.Param("id")

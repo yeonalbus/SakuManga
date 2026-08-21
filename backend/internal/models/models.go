@@ -72,6 +72,10 @@ type OfflineComic struct {
 	RemovedStatus bool  `gorm:"default:false" json:"removedStatus"`    // 画廊被删除/版权移除（removed/copyright）；网络故障不得标记
 	RemovedAt     int64 `json:"removedAt,omitempty"`                   // 标记时间戳(ms)
 
+	// ── Round11：标题恢复 + 本地备注 ──
+	OriginalTitle string `gorm:"type:text" json:"originalTitle,omitempty"` // 首次入库标题（手动改标题后可恢复，扫描更新不覆盖）
+	Remark        string `gorm:"type:text" json:"remark,omitempty"`        // 本地备注（用户客制化，扫描不覆盖）
+
 	// ── Tag 双轨维护字段（本地漫画 Tag 维护系统）──
 	OnlineTags        string `gorm:"type:text" json:"onlineTags,omitempty"`        // E站官方 tag JSON 数组（每日刷新覆盖）
 	OfflineAddTags    string `gorm:"type:text" json:"offlineAddTags,omitempty"`    // 本地新增 tag JSON 数组（用户客制化）

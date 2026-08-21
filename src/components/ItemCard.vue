@@ -367,6 +367,7 @@ const comicSourceBadge = computed(() => {
 <template>
   <div
     class="item-card"
+    :data-gid="comic.id"
     :class="[currentMode, size || 'normal', { 'select-mode': selectMode, selected }]"
     @click="handleCardClick"
     @pointerdown="handlePointerDown"

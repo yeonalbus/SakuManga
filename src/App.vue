@@ -377,6 +377,8 @@ body {
   background-color: var(--app-bg);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Round12：禁用浏览器原生 scroll anchoring，避免其自选锚点与面板滚动补偿叠加双重位移 */
+  overflow-anchor: none;
 }
 
 /* ─────────────────────────────────────────

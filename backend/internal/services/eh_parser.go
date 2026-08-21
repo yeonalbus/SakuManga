@@ -18,7 +18,42 @@ var (
 	// (?i:pages?) 兼容 E 站 "pages"/"page"/"Pages" 大小写变体；P\b 仅匹配独立大写 P（如 "39P"）。
 	pageCountRegex   = regexp.MustCompile(`(\d+)\s*(?:(?i:pages?)|P\b|页)`)
 	dateRegex        = regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}`)
+
+	// listPageFullRegex 匹配列表页中「独立页数文案」节点（整串锚定）。
+	// 与排行榜 toplistPageFullRegex 同思路：只认叶子节点整段文本，拒绝行级拼接。
+	// (?i) 使 pages?/p\b 兼容 "Pages"/"P"/"p" 变体；「页」匹配中文单位。
+	listPageFullRegex = regexp.MustCompile(`(?i)^\s*(\d+)\s*(?:pages?|p\b|页)\s*$`)
 )
+
+// extractListPageCount 从画廊行节点提取页数（Round11-Bug3 修复）。
+//
+// ⚠️ 旧实现直接对整行 s.Text() 跑 pageCountRegex：行文本是各子节点文本的拼接，
+// 会把上传者名字末尾的数字与紧随其后的 "N pages" 接成更大的数，
+// 实测 gid=4136008（上传者 "Nid135" + "29 pages" → "Nid13529 pages"）被误取为 13529。
+// 正确做法：只扫描行内「叶子级」小节点（自身不嵌套 div/a/p/span/table/ul），
+// 整段文本形如 "NN pages/page/P/页" 才采纳，取文档序第一个命中
+// （页数节点位于 .gl3e 容器，先于 .gl4e 的标题/标签，不会被标签文本抢跑）。
+func extractListPageCount(s *goquery.Selection) int {
+	var result int
+	s.Find("div, span, td").EachWithBreak(func(_ int, n *goquery.Selection) bool {
+		// 跳过聚合节点（如 .gl3e 容器，其 Text() 仍会拼接子节点文本）
+		if n.Find("div, a, p, span, table, ul").Length() > 0 {
+			return true
+		}
+		txt := strings.TrimSpace(n.Text())
+		if txt == "" {
+			return true
+		}
+		if m := listPageFullRegex.FindStringSubmatch(txt); len(m) > 1 {
+			if v, err := strconv.Atoi(m[1]); err == nil && v > 0 && v <= 100000 {
+				result = v
+				return false
+			}
+		}
+		return true
+	})
+	return result
+}
 
 // CalculateFCats 计算 E 站反向分类掩码
 func CalculateFCats(activeCategories []string) int {

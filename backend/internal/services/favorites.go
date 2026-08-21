@@ -125,14 +125,8 @@ func (s *FavoritesService) FetchFavoritesList(db *gorm.DB, userID uint, account 
 			}
 		})
 
-		pageCount := 0
-		itemText := sel.Text()
-		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
-			pageCount, _ = strconv.Atoi(matches[1])
-			if pageCount > 100000 {
-				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
-			}
-		}
+		// Round11-Bug3：页数改走叶子节点整串匹配（避免上传者数字与页数拼接误判）
+		pageCount := extractListPageCount(sel)
 
 		comics = append(comics, OnlineComicDTO{
 			ID:           gid,

@@ -182,14 +182,10 @@ func (s *EHService) FetchGalleryList(account *models.AccountSetting, params Sear
 			}
 		})
 
-		pageCount := 0
 		itemText := s.Text()
-		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
-			pageCount, _ = strconv.Atoi(matches[1])
-			if pageCount > 100000 {
-				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
-			}
-		}
+		// Round11-Bug3：页数改走叶子节点整串匹配 —— 整行文本会把上传者名字数字与页数拼接
+		// （如上传者 "Nid135" + "29 pages" → "Nid13529 pages" 误取 13529）
+		pageCount := extractListPageCount(s)
 
 		updatedAt := ""
 		if match := dateRegex.FindString(itemText); match != "" {
@@ -341,14 +337,8 @@ func (s *EHService) FetchPopularList(account *models.AccountSetting, ehSetting *
 			}
 		})
 
-		pageCount := 0
-		itemText := s.Text()
-		if matches := pageCountRegex.FindStringSubmatch(itemText); len(matches) > 1 {
-			pageCount, _ = strconv.Atoi(matches[1])
-			if pageCount > 100000 {
-				pageCount = 0 // 防御：异常大数值视为解析错误（Round11-Bug2）
-			}
-		}
+		// Round11-Bug3：页数改走叶子节点整串匹配（避免上传者数字与页数拼接误判）
+		pageCount := extractListPageCount(s)
 
 		comics = append(comics, OnlineComicDTO{
 			ID:           gid,

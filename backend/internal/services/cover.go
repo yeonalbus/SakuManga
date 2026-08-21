@@ -2,11 +2,21 @@ package services
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
+	_ "image/gif"
+	_ "image/png"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+
+	"SakuHentai/internal/models"
 )
 
 func IsImage(filename string) bool {
@@ -88,4 +98,162 @@ func GetCoverFromZip(zipPath string) ([]byte, string, error) {
 		}
 	}
 	return nil, "", errors.New("压缩包内未找到图片")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round14：离线封面缩略图缓存
+//
+// 根因：离线卡片封面每次请求都读取完整原图——ZIP/CBZ 每次 zip.OpenReader 打开
+// 整个压缩包（如 192MB）解压第一张原图；散图文件夹直接 c.File 输出完整原图
+// （可能数 MB）。离线首页 24 张/页并发请求 → 后端 IO/解码打满 → 界面卡顿。
+// 方案：首次生成 480px 宽 JPEG 缩略图写入 <dataDir>/cover_cache/<id>.jpg，
+// 后续直接输出缓存文件（带 Cache-Control/ETag，浏览器二次零请求）；
+// 源文件 modtime 变化时自动重建。
+// ─────────────────────────────────────────────────────────────
+
+// CoverThumbWidth 封面缩略图目标宽度（Round14-D3=A：固定 480px）
+const CoverThumbWidth = 480
+
+// coverCacheDir 封面缓存目录（相对路径，main.go 已 chdir 到 exe 目录，与 manga.db 同级）
+const coverCacheDir = "cover_cache"
+
+// coverCacheMu 保护缓存目录创建
+var coverCacheMu sync.Mutex
+
+// coverCachePath 返回某 comic 的封面缓存路径
+func coverCachePath(comicID string) string {
+	return filepath.Join(coverCacheDir, comicID+".jpg")
+}
+
+// ensureCoverCacheDir 创建封面缓存目录（幂等）
+func ensureCoverCacheDir() error {
+	coverCacheMu.Lock()
+	defer coverCacheMu.Unlock()
+	return os.MkdirAll(coverCacheDir, 0o755)
+}
+
+// readCoverSource 读取封面源图（ZIP 或目录），返回字节 + 源修改时间（缓存失效依据）
+func readCoverSource(comic models.OfflineComic) ([]byte, time.Time, error) {
+	fi, err := os.Stat(comic.LocalPath)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if fi.IsDir() {
+		imgPath, err := GetCoverFromDir(comic.LocalPath)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		data, err := os.ReadFile(imgPath)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		imgFi, _ := os.Stat(imgPath)
+		if imgFi != nil {
+			return data, imgFi.ModTime(), nil
+		}
+		return data, fi.ModTime(), nil
+	}
+	if IsArchive(comic.LocalPath) {
+		data, _, err := GetCoverFromZip(comic.LocalPath)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		return data, fi.ModTime(), nil
+	}
+	return nil, time.Time{}, errors.New("不支持的格式")
+}
+
+// decodeAndResize 解码图片并等比缩放到宽 CoverThumbWidth，输出 JPEG。
+// 无法解码（如 AVIF）或无需缩放（原图更小）时返回 false，由调用方回退原图直传。
+func decodeAndResize(data []byte) ([]byte, bool) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, false
+	}
+	bounds := img.Bounds()
+	w := bounds.Dx()
+	if w <= 0 || w <= CoverThumbWidth {
+		return nil, false
+	}
+	h := bounds.Dy() * CoverThumbWidth / w
+	if h <= 0 {
+		return nil, false
+	}
+	resized := image.NewRGBA(image.Rect(0, 0, CoverThumbWidth, h))
+	// 盒式平均降采样（无需 x/image 依赖；列表缩略图画质足够）
+	box := (w + CoverThumbWidth - 1) / CoverThumbWidth
+	if box < 1 {
+		box = 1
+	}
+	for y := 0; y < h; y++ {
+		srcY := y * bounds.Dy() / h
+		for x := 0; x < CoverThumbWidth; x++ {
+			srcX := x * w / CoverThumbWidth
+			var r, g, b, a, n uint32
+			for dy := 0; dy < box; dy++ {
+				for dx := 0; dx < box; dx++ {
+					px := srcX + dx
+					py := srcY + dy
+					if px >= w {
+						px = w - 1
+					}
+					if py >= bounds.Dy() {
+						py = bounds.Dy() - 1
+					}
+					cr, cg, cb, ca := img.At(px, py).RGBA()
+					r += cr >> 8
+					g += cg >> 8
+					b += cb >> 8
+					a += ca >> 8
+					n++
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			resized.SetRGBA(x, y, color.RGBA{
+				R: uint8(r / n),
+				G: uint8(g / n),
+				B: uint8(b / n),
+				A: uint8(a / n),
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, resized, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, false
+	}
+	return buf.Bytes(), true
+}
+
+// GetCoverThumb 获取离线漫画封面缩略图（Round14）：
+//   - 缓存命中且源未变更 → 返回 (nil, cachePath, true)，调用方 c.File(cachePath)；
+//   - 未命中 → 读源图 → 缩放生成缓存 → 返回 (nil, cachePath, true)；
+//   - 无需缩放/解码失败 → 返回 (srcData, "", false)，调用方原图直传。
+func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, cached bool, err error) {
+	srcData, srcMod, err := readCoverSource(comic)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	cachePath = coverCachePath(comic.ID)
+
+	// 命中判断：缓存存在 && 源修改时间不晚于缓存
+	if fi, statErr := os.Stat(cachePath); statErr == nil {
+		if !srcMod.IsZero() && !fi.ModTime().Before(srcMod) {
+			return nil, cachePath, true, nil
+		}
+	}
+
+	thumb, ok := decodeAndResize(srcData)
+	if !ok {
+		return srcData, "", false, nil
+	}
+	if err := ensureCoverCacheDir(); err != nil {
+		return nil, "", false, err
+	}
+	if err := os.WriteFile(cachePath, thumb, 0o644); err != nil {
+		return nil, "", false, err
+	}
+	return nil, cachePath, true, nil
 }

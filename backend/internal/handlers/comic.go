@@ -171,6 +171,8 @@ func GetOfflineComicDetail(c *gin.Context) {
 }
 
 // GetComicCover 动态服务封面图
+// Round14：优先走缩略图缓存（ZIP/CBZ 不再反复解压整包、散图不再直传完整原图），
+// 带 Cache-Control/ETag，浏览器二次进入零请求 → 修复离线界面卡顿。
 func GetComicCover(c *gin.Context) {
 	id := c.Param("id")
 	var comic models.OfflineComic
@@ -179,35 +181,33 @@ func GetComicCover(c *gin.Context) {
 		return
 	}
 
-	fi, err := os.Stat(comic.LocalPath)
+	// Round14：缩略图缓存（ZIP/Dir 共用）
+	data, cachePath, cached, err := services.GetCoverThumb(comic)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "文件路径不存在"})
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 1. 如果是散图文件夹
-	if fi.IsDir() {
-		imgPath, err := services.GetCoverFromDir(comic.LocalPath)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
+	// ETag = 缓存文件 modtime（命中后浏览器可直接 304）
+	if cached {
+		fi, _ := os.Stat(cachePath)
+		if fi != nil {
+			etag := fmt.Sprintf(`"%d"`, fi.ModTime().Unix())
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Header("ETag", etag)
+			if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+				c.Status(http.StatusNotModified)
+				return
+			}
 		}
-		c.File(imgPath) // 直接流式输出本地文件
+		c.File(cachePath)
 		return
 	}
 
-	// 2. 如果是 ZIP/CBZ 压缩包
-	if services.IsArchive(comic.LocalPath) {
-		imgBytes, contentType, err := services.GetCoverFromZip(comic.LocalPath)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.Data(http.StatusOK, contentType, imgBytes)
-		return
-	}
-
-	c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的格式"})
+	// 未命中缓存（无需缩放/解码失败）：原图直传，仍带长缓存头
+	contentType := "image/jpeg"
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, contentType, data)
 }
 
 // GetComicDetail 获取单本漫画详情

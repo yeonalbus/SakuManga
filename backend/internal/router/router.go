@@ -166,6 +166,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.DELETE("/bookshelves/:id/comics", libraryHandler.RemoveComicFromBookshelf)
 		// Round10：书架内项目自定义排序 / 书架列表自定义排序
 		api.PUT("/bookshelves/:id/order", libraryHandler.ReorderBookshelfComics)
+	// Round13：书架置顶 / 批量加入
+	api.PUT("/bookshelves/:id/pin", libraryHandler.SetBookshelfPinned)
+	api.POST("/bookshelves/:id/comics/batch", libraryHandler.BatchAddComicsToBookshelf)
 		api.POST("/bookshelves/reorder", libraryHandler.ReorderBookshelves)
 
 		// 历史（按用户隔离 + 上限淘汰）

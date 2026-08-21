@@ -91,6 +91,7 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 			"name":     s.Name,
 			"count":    len(ids),
 			"comicIds": ids,
+			"pinned":   s.Pinned,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"bookshelves": resp})
@@ -221,6 +222,89 @@ func (h *LibraryHandler) AddComicToBookshelf(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已加入书架", "data": shelf})
+}
+
+// SetBookshelfPinned 置顶/取消置顶书架 PUT /api/v1/bookshelves/:id/pin
+// （Round13：侧栏常驻高频书架，最多 5 个置顶由前端控制，后端只存标记）
+func (h *LibraryHandler) SetBookshelfPinned(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		Pinned bool `json:"pinned"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	shelf.Pinned = req.Pinned
+	if err := h.db.Model(&shelf).Update("pinned", req.Pinned).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存置顶状态失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "置顶状态已更新", "data": shelf})
+}
+
+// BatchAddComicsToBookshelf 批量将漫画加入书架 POST /api/v1/bookshelves/:id/comics/batch
+// （Round13：离线多选快捷加入书架；已在书架中的自动跳过，返回 added/skipped）
+func (h *LibraryHandler) BatchAddComicsToBookshelf(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		ComicIDs []string `json:"comicIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	if len(req.ComicIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 comicIds"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	existing := parseComicIDs(shelf.ComicIDs)
+	inSet := make(map[string]bool, len(existing))
+	for _, id := range existing {
+		inSet[id] = true
+	}
+	added := 0
+	skipped := 0
+	for _, id := range req.ComicIDs {
+		if id == "" || inSet[id] {
+			skipped++
+			continue
+		}
+		existing = append(existing, id)
+		inSet[id] = true
+		added++
+	}
+	shelf.ComicIDs = joinComicIDs(existing)
+	shelf.Count = len(existing)
+	if err := h.db.Save(&shelf).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "批量加入完成", "added": added, "skipped": skipped, "data": shelf})
 }
 
 // RemoveComicFromBookshelf 将漫画移出书架 DELETE /api/v1/bookshelves/:id/comics?comicId=..

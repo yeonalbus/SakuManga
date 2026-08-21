@@ -71,6 +71,40 @@ export const toggleReadingList = (comic: ComicItem) => {
   saveReadingList(source)
 }
 
+
+/** 显式加入阅读清单（幂等：重复加入忽略；Round10-Opt2） */
+export const addToReadingList = (comic: ComicItem) => {
+  const source = comic.source === 'online' ? 'online' : 'offline'
+  const targetList = source === 'online' ? onlineReadingList : offlineReadingList
+  if (targetList.value.some((item) => item.id === comic.id)) return
+  // bug3：入队时强制写入 source，防止调用方传入的 comic 缺 source 字段，
+  // 从而在后续「立即阅读」时被误判为离线模式（在线 gid 走离线接口 404）。
+  targetList.value.push({ ...comic, source } as ComicItem)
+  saveReadingList(source)
+}
+
+/** 显式从清单移出单本（幂等；只影响清单本身，不触碰本地库/书架/历史；Round10-Opt2） */
+export const removeFromReadingList = (comic: ComicItem) => {
+  const source = comic.source === 'online' ? 'online' : 'offline'
+  const targetList = source === 'online' ? onlineReadingList : offlineReadingList
+  const before = targetList.value.length
+  targetList.value = targetList.value.filter((item) => item.id !== comic.id)
+  if (targetList.value.length !== before) saveReadingList(source)
+}
+
+/** 在清单中移动单本位置（dir=-1 上移 / 1 下移；Round10-Opt1a 自定义排序） */
+export const moveInReadingList = (comic: ComicItem, dir: -1 | 1) => {
+  const source = comic.source === 'online' ? 'online' : 'offline'
+  const targetList = source === 'online' ? onlineReadingList : offlineReadingList
+  const index = targetList.value.findIndex((item) => item.id === comic.id)
+  if (index < 0) return
+  const newIndex = index + dir
+  if (newIndex < 0 || newIndex >= targetList.value.length) return
+  const [item] = targetList.value.splice(index, 1)
+  targetList.value.splice(newIndex, 0, item)
+  saveReadingList(source)
+}
+
 /** 清空指定来源的阅读清单 */
 export const clearReadingList = (source: 'online' | 'offline') => {
   if (source === 'online') onlineReadingList.value = []

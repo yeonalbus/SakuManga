@@ -11,6 +11,8 @@ import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import { useUserStore } from '@/stores/userStore'
 import type { ComicItem, OfflineComic } from '@/types/comic'
+// Round10-Bug3：离线星级筛选统一按「生效评分」（个人评分优先）过滤
+import { getEffectiveRating } from '@/stores/ratingStore'
 // Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
@@ -201,7 +203,9 @@ const filteredComics = computed(() => {
     }
 
     // 关卡 4：评分与页数范围过滤
-    if (cfg.minRating !== undefined && (comic.rating || 0) < cfg.minRating) {
+    // Round10-Bug3：改用生效评分（离线优先个人评分 1-5 星，未评分回退社区评分），
+    // 否则星级筛选按社区评分（本地下载多为 0）永远筛不出个人评分的作品。
+    if (cfg.minRating !== undefined && getEffectiveRating(comic) < cfg.minRating) {
       return false
     }
 

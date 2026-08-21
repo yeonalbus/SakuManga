@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/bookshelfStore'
-import { offlineReadingList, toggleReadingList } from '@/stores/readingStore'
+import { offlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { getMyRating, setMyRating } from '@/stores/ratingStore'
 import { fetchOfflineComics, recordComicClick, deleteOfflineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
@@ -150,12 +150,14 @@ const isInReadingList = computed(() =>
   offlineReadingList.value.some((item) => item.id === comic.value.id),
 )
 
+// Round10-Opt2：拆分为显式「加入/移出」动作，只影响清单本身（不触碰本地库/书架/历史）
 const handleAddToReadingList = () => {
-  toggleReadingList(comic.value)
   if (isInReadingList.value) {
-    toast.success(`已将《${comic.value.title}》加入本地阅读清单 📑`)
+    removeFromReadingList(comic.value)
+    toast.info(`已将《${comic.value.title}》从本地清单移出`)
   } else {
-    toast.info(`已从本地阅读清单中移除《${comic.value.title}》`)
+    addToReadingList(comic.value)
+    toast.success(`已将《${comic.value.title}》加入本地阅读清单 📑`)
   }
 }
 

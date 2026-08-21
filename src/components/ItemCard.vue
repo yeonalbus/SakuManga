@@ -13,6 +13,8 @@ import {
 } from '@/stores/downloadTasksStore'
 import { useUI } from '@/composables/useUI'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
+// Round10-Bug2：卡片评分统一走「生效评分」（离线优先个人评分，回退社区评分）
+import { getEffectiveRating } from '@/stores/ratingStore'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
 // 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
@@ -334,6 +336,11 @@ onUnmounted(() => {
 })
 
 // --------------------------------------------------
+// Round10-Bug2：生效评分（离线优先个人评分 1-5 星，未评分回退社区评分）
+// --------------------------------------------------
+const displayRating = computed(() => getEffectiveRating(props.comic))
+
+// --------------------------------------------------
 // 5. 问题2：日语标题优先双行显示（titleJpn 为空时回退到原 title）
 // --------------------------------------------------
 const jpnTitle = computed(() => {
@@ -439,7 +446,7 @@ const comicSourceBadge = computed(() => {
               ★
             </span>
 
-            <span v-if="comic.rating" class="rating-text">⭐ {{ comic.rating }}</span>
+            <span v-if="displayRating" class="rating-text">⭐ {{ displayRating.toFixed(1) }}</span>
 
             <span v-if="comic.pageCount" class="pages-text">{{ comic.pageCount }} 页</span>
 
@@ -522,7 +529,7 @@ const comicSourceBadge = computed(() => {
           <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />
         </div>
         <div class="card-bottom-meta">
-          <span class="rating">⭐ {{ comic.rating ? comic.rating.toFixed(1) : '—' }}</span>
+          <span class="rating">⭐ {{ displayRating ? displayRating.toFixed(1) : '—' }}</span>
           <span class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
             {{ comic.source === 'online' ? '在线' : comicSourceBadge || '本地' }}
           </span>

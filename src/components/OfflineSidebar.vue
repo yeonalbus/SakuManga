@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { bookshelves, addBookshelf, removeBookshelf } from '@/stores/bookshelfStore'
+import { bookshelves, addBookshelf, removeBookshelf, renameBookshelf, moveBookshelf } from '@/stores/bookshelfStore'
 import { useUserStore } from '@/stores/userStore'
 
 const router = useRouter()
@@ -25,6 +25,15 @@ const createNewBookshelf = async () => {
   if (name && name.trim()) {
     addBookshelf(name.trim())
     toast.success(`书架「${name}」创建成功！`)
+  }
+}
+
+// 重命名书架（Round10）
+const renameShelf = async (shelf: { id: string; name: string }) => {
+  const name = await modal.prompt('请输入书架新名称', shelf.name, '重命名书架')
+  if (name && name.trim() && name.trim() !== shelf.name) {
+    await renameBookshelf(shelf.id, name.trim())
+    toast.success(`书架已重命名为「${name.trim()}」`)
   }
 }
 
@@ -71,6 +80,27 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 
           <div class="shelf-right-info">
             <span class="shelf-count">{{ shelf.count || 0 }}</span>
+
+            <!-- Round10：书架顺序自定义排序（hover 显示 ↑/↓） -->
+            <span
+              class="move-btn"
+              title="书架上移"
+              @click.stop.prevent="moveBookshelf(shelf.id, -1)"
+            >
+              ↑
+            </span>
+            <span
+              class="move-btn"
+              title="书架下移"
+              @click.stop.prevent="moveBookshelf(shelf.id, 1)"
+            >
+              ↓
+            </span>
+
+            <!-- Round10：书架改名 -->
+            <span class="rename-btn" title="重命名书架" @click.stop.prevent="renameShelf(shelf)">
+              ✎
+            </span>
 
             <span
               class="delete-btn"
@@ -182,7 +212,9 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
   color: var(--app-text-2);
 }
 
-.delete-btn {
+.delete-btn,
+.rename-btn,
+.move-btn {
   font-size: 0.75rem;
   color: var(--app-text-2);
   padding: 0 4px;
@@ -193,13 +225,25 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
     color 0.2s;
 }
 
-.sub-nav-item:hover .delete-btn {
+.sub-nav-item:hover .delete-btn,
+.sub-nav-item:hover .rename-btn,
+.sub-nav-item:hover .move-btn {
   opacity: 1;
 }
 
 .delete-btn:hover {
   color: #ef4444 !important;
   background-color: rgba(239, 68, 68, 0.2);
+}
+
+.rename-btn:hover {
+  color: #3d5afe !important;
+  background-color: rgba(61, 90, 254, 0.15);
+}
+
+.move-btn:hover {
+  color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.15);
 }
 
 .add-shelf-btn {

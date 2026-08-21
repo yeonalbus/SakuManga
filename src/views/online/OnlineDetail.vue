@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import type { OnlineComic } from '@/types/comic'
 import TagChip from '@/components/TagChip.vue'
-import { onlineReadingList, toggleReadingList } from '@/stores/readingStore'
+import { onlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState, resolveOnlineToken } from '@/stores/historyStore'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { resolveDefaultDownloadScheme } from '@/api/download'
@@ -353,12 +353,14 @@ const isInReadingList = computed(() =>
   onlineReadingList.value.some((item) => item.id === comic.value.id),
 )
 
+// Round10-Opt2：拆分为显式「加入/移出」动作，只影响清单本身
 const handleAddToReadingList = () => {
-  toggleReadingList(comic.value)
   if (isInReadingList.value) {
-    toast.success(`已将《${comic.value.title}》加入在线阅读清单 📑`)
+    removeFromReadingList(comic.value)
+    toast.info(`已将《${comic.value.title}》从在线清单移出`)
   } else {
-    toast.info(`已从在线阅读清单中移除《${comic.value.title}》`)
+    addToReadingList(comic.value)
+    toast.success(`已将《${comic.value.title}》加入在线阅读清单 📑`)
   }
 }
 

@@ -168,6 +168,69 @@ export const removeComicFromShelf = async (shelfId: string, comicId: string) => 
   }
 }
 
+
+/** 按自定义顺序整体重排书架内项目（Round10，PUT /bookshelves/:id/order） */
+export const reorderShelfComics = async (shelfId: string, comicIds: string[]) => {
+  const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  if (shelf) {
+    shelf.comicIds = [...comicIds]
+    shelf.count = comicIds.length
+  }
+  try {
+    await http(`/bookshelves/${shelfId}/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ comicIds }),
+    })
+  } catch (e) {
+    console.error('保存书架排序失败:', e)
+  }
+}
+
+/** 重命名书架（Round10，PUT /bookshelves/:id） */
+export const renameBookshelf = async (id: string, name: string) => {
+  const trimmed = name.trim()
+  if (!trimmed) return
+  const shelf = bookshelves.value.find((b) => b.id === id)
+  if (shelf) shelf.name = trimmed
+  try {
+    await http(`/bookshelves/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: trimmed }),
+    })
+  } catch (e) {
+    console.error('重命名书架失败:', e)
+  }
+}
+
+/** 按自定义顺序批量重排书架列表（Round10，POST /bookshelves/reorder） */
+export const reorderBookshelves = async (ids: string[]) => {
+  const orderMap = new Map(ids.map((id, i) => [id, i]))
+  bookshelves.value = [...bookshelves.value].sort((a, b) => {
+    const ia = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER
+    const ib = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER
+    return ia - ib
+  })
+  try {
+    await http('/bookshelves/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    })
+  } catch (e) {
+    console.error('保存书架顺序失败:', e)
+  }
+}
+
+/** 上移/下移单个书架（Round10，侧栏 ↑/↓） */
+export const moveBookshelf = async (id: string, dir: -1 | 1) => {
+  const idx = bookshelves.value.findIndex((b) => b.id === id)
+  const newIdx = idx + dir
+  if (idx < 0 || newIdx < 0 || newIdx >= bookshelves.value.length) return
+  const arr = [...bookshelves.value]
+  const [item] = arr.splice(idx, 1)
+  arr.splice(newIdx, 0, item)
+  await reorderBookshelves(arr.map((b) => b.id))
+}
+
 /** 书架展示列表：数量优先使用后端实时 count，缺失时回退 comicIds 长度 */
 export const computedBookshelves = computed(() => {
   return bookshelves.value.map((shelf) => ({

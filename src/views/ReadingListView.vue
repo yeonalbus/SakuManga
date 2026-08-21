@@ -7,7 +7,8 @@ import {
   onlineReadingList,
   offlineReadingList,
   clearReadingList,
-  toggleReadingList,
+  removeFromReadingList,
+  moveInReadingList,
 } from '@/stores/readingStore'
 import type { ComicItem } from '@/types/comic'
 
@@ -39,9 +40,10 @@ const handleRead = (comic: ComicItem) => {
   router.push({ path: '/reader', query })
 }
 
-// 移出清单
+// 移出清单（Round10-Opt2：显式、幂等，只影响清单本身）
 const handleRemove = (comic: ComicItem) => {
-  toggleReadingList(comic)
+  removeFromReadingList(comic)
+  toast.info(`已将《${comic.title}》移出清单`)
 }
 
 // 清空当前清单
@@ -117,6 +119,23 @@ const handleQuickImport = async () => {
           </div>
 
           <div class="card-actions">
+            <!-- Round10-Opt1a：清单自定义排序（↑/↓） -->
+            <button
+              class="icon-btn move-btn"
+              title="上移"
+              :disabled="currentList[0]?.id === comic.id"
+              @click="moveInReadingList(comic, -1)"
+            >
+              ↑
+            </button>
+            <button
+              class="icon-btn move-btn"
+              title="下移"
+              :disabled="currentList[currentList.length - 1]?.id === comic.id"
+              @click="moveInReadingList(comic, 1)"
+            >
+              ↓
+            </button>
             <button class="icon-btn play-btn" title="立即阅读" @click="handleRead(comic)">▶</button>
             <button class="icon-btn remove-btn" title="移出清单" @click="handleRemove(comic)">
               ✕
@@ -334,6 +353,19 @@ const handleQuickImport = async () => {
 .remove-btn:hover {
   background-color: rgba(239, 68, 68, 0.2);
   color: #ef4444;
+}
+
+.move-btn {
+  background-color: transparent;
+  color: var(--app-text-muted);
+}
+.move-btn:hover:not(:disabled) {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+.move-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* 📱 移动形态（<1024px）：操作按钮常显（触摸屏无 hover），避免无法操作 */

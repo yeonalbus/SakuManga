@@ -288,6 +288,11 @@ body {
   flex-direction: column;
   padding: 20px 10px;
   flex-shrink: 0;
+  /* Round13：书架增多时侧栏整体可滚动，避免「工具/系统」被顶出视口不可达 */
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-border-3) transparent;
 }
 
 /* 让 Logo 标题和按钮在同一行并排显示 */
@@ -298,6 +303,11 @@ body {
   padding: 0 5px 20px 5px;
   border-bottom: 1px solid var(--app-border);
   margin-bottom: 15px;
+  /* Round13：侧栏滚动时 logo 常驻顶部 */
+  position: sticky;
+  top: 0;
+  background-color: var(--app-surface);
+  z-index: 1;
 }
 
 .logo {
@@ -335,6 +345,18 @@ body {
   background-color: var(--app-accent);
   color: #fff;
   font-weight: bold;
+}
+
+/* Round13：侧栏细滚动条 */
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--app-border-3);
+  border-radius: 3px;
 }
 
 /* 右侧主体包装层：垂直排列顶栏和内容 */

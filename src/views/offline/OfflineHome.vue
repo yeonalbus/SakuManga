@@ -9,6 +9,8 @@ import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
+import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
+import { addComicsToShelf } from '@/stores/bookshelfStore'
 import { useUserStore } from '@/stores/userStore'
 import type { ComicItem, OfflineComic } from '@/types/comic'
 // Round10-Bug3：离线星级筛选统一按「生效评分」（个人评分优先）过滤
@@ -95,6 +97,25 @@ const handleSelect = (comic: ComicItem) => toggleSelect(comic)
 const exitSelectMode = () => {
   selectMode.value = false
   selectedIds.value = []
+}
+
+// Round13：多选快捷加入书架
+const showShelfPicker = ref(false)
+const openShelfPicker = () => {
+  if (selectedIds.value.length === 0) return
+  showShelfPicker.value = true
+}
+const handleAddToShelf = async (shelfId: string) => {
+  const ids = [...selectedIds.value]
+  showShelfPicker.value = false
+  if (ids.length === 0) return
+  const { added, skipped } = await addComicsToShelf(shelfId, ids)
+  if (added > 0 || skipped > 0) {
+    toast.success(`已加入书架 ${added} 本${skipped > 0 ? `（跳过 ${skipped} 本已在书架）` : ''}`)
+  } else {
+    toast.warning('所选作品均已在该书架中')
+  }
+  exitSelectMode()
 }
 
 const toggleSelectAllPage = () => {
@@ -335,6 +356,13 @@ const seekToDate = (date: string) => {
       <span class="select-count">已选 {{ selectedIds.length }} 部</span>
       <button class="toolbar-btn" @click="toggleSelectAllPage">全选本页</button>
       <button
+        class="toolbar-btn"
+        :disabled="selectedIds.length === 0"
+        @click="openShelfPicker"
+      >
+        📥 加入书架
+      </button>
+      <button
         v-if="userStore.isAdmin"
         class="toolbar-btn danger"
         :disabled="selectedIds.length === 0"
@@ -388,6 +416,15 @@ const seekToDate = (date: string) => {
 
     <!-- Round4 任务八：悬浮球（刷新 + 日期跳页） -->
     <FloatingToolbar @refresh="fetchOfflineComics" @seek-change="seekToDate" />
+
+    <!-- Round13：多选快捷加入书架（检索浮层 add 模式） -->
+    <BookshelfPickerOverlay
+      :open="showShelfPicker"
+      mode="add"
+      :selected-count="selectedIds.length"
+      @close="showShelfPicker = false"
+      @add="handleAddToShelf"
+    />
   </div>
 </template>
 

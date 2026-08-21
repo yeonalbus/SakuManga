@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { bookshelves, addBookshelf, removeBookshelf, renameBookshelf, moveBookshelf } from '@/stores/bookshelfStore'
+import {
+  bookshelves,
+  pinnedBookshelves,
+  PIN_LIMIT,
+  addBookshelf,
+  removeBookshelf,
+  renameBookshelf,
+  moveBookshelf,
+  setBookshelfPinned,
+} from '@/stores/bookshelfStore'
+import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import { useUserStore } from '@/stores/userStore'
 
 const router = useRouter()
@@ -14,6 +24,14 @@ const { isAdmin } = useUserStore()
 
 // 控制书架菜单的展开/折叠状态
 const isBookshelfOpen = ref(true)
+
+// Round13：全部书架检索浮层
+const showAllShelfPicker = ref(false)
+const openShelfPicker = () => {
+  showAllShelfPicker.value = true
+}
+// 置顶书架数量上限提示（已置顶时侧栏每行显示 📌 取消置顶）
+const pinnedCount = computed(() => bookshelves.value.filter((b) => b.pinned).length)
 
 const toggleBookshelf = () => {
   isBookshelfOpen.value = !isBookshelfOpen.value
@@ -69,51 +87,59 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
       </div>
 
       <div v-show="isBookshelfOpen" class="foldable-body">
-        <router-link
-          v-for="shelf in bookshelves"
-          :key="shelf.id"
-          :to="`/offline/bookshelf?id=${shelf.id}`"
-          class="sub-nav-item"
-          :class="{ active: route.query.id === shelf.id }"
-        >
-          <span class="shelf-name">{{ shelf.name }}</span>
+        <!-- Round13：仅常驻展示置顶书架（最多 PIN_LIMIT 个），其余进「全部书架」浮层 -->
+        <div v-if="pinnedBookshelves.length === 0" class="pin-hint">
+          💡 在「全部书架」中点击 ⭐ 置顶常用书架（最多 {{ PIN_LIMIT }} 个）
+        </div>
 
-          <div class="shelf-right-info">
-            <span class="shelf-count">{{ shelf.count || 0 }}</span>
+        <template v-for="shelf in pinnedBookshelves" :key="shelf.id">
+          <router-link
+            :to="`/offline/bookshelf?id=${shelf.id}`"
+            class="sub-nav-item"
+            :class="{ active: route.query.id === shelf.id }"
+          >
+            <span class="shelf-name"><span class="pin-dot">📌</span> {{ shelf.name }}</span>
 
-            <!-- Round10：书架顺序自定义排序（hover 显示 ↑/↓） -->
-            <span
-              class="move-btn"
-              title="书架上移"
-              @click.stop.prevent="moveBookshelf(shelf.id, -1)"
-            >
-              ↑
-            </span>
-            <span
-              class="move-btn"
-              title="书架下移"
-              @click.stop.prevent="moveBookshelf(shelf.id, 1)"
-            >
-              ↓
-            </span>
+            <div class="shelf-right-info">
+              <span class="shelf-count">{{ shelf.count || 0 }}</span>
 
-            <!-- Round10：书架改名 -->
-            <span class="rename-btn" title="重命名书架" @click.stop.prevent="renameShelf(shelf)">
-              ✎
-            </span>
+              <!-- Round10：书架顺序自定义排序（hover 显示 ↑/↓，置顶书架顺序 = 全局顺序） -->
+              <span
+                class="move-btn"
+                title="书架上移"
+                @click.stop.prevent="moveBookshelf(shelf.id, -1)"
+              >
+                ↑
+              </span>
+              <span
+                class="move-btn"
+                title="书架下移"
+                @click.stop.prevent="moveBookshelf(shelf.id, 1)"
+              >
+                ↓
+              </span>
 
-            <span
-              class="delete-btn"
-              title="删除书架"
-              @click.stop.prevent="handleDeleteShelf(shelf.id, shelf.name)"
-            >
-              ✕
-            </span>
-          </div>
-        </router-link>
+              <!-- Round13：取消置顶 -->
+              <span
+                class="unpin-btn"
+                title="取消置顶"
+                @click.stop.prevent="setBookshelfPinned(shelf.id, false)"
+              >
+                📌
+              </span>
+            </div>
+          </router-link>
+        </template>
 
+        <!-- Round13：全部书架检索浮层入口 -->
+        <button class="all-shelf-btn" @click="openShelfPicker">
+          🔍 全部书架（{{ bookshelves.length }}）
+        </button>
         <button class="add-shelf-btn" @click="createNewBookshelf">➕ 新建书架</button>
       </div>
+
+      <!-- Round13：全部书架检索浮层 -->
+      <BookshelfPickerOverlay :open="showAllShelfPicker" mode="navigate" @close="showAllShelfPicker = false" />
     </div>
   </div>
 
@@ -244,6 +270,53 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 .move-btn:hover {
   color: #10b981 !important;
   background-color: rgba(16, 185, 129, 0.15);
+}
+
+.pin-hint {
+  font-size: 0.75rem;
+  color: var(--app-text-muted);
+  padding: 4px 8px;
+  line-height: 1.5;
+}
+
+.pin-dot {
+  font-size: 0.7rem;
+  margin-right: 2px;
+}
+
+.all-shelf-btn {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-3);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-align: left;
+  margin-top: 4px;
+  transition: all 0.2s;
+}
+.all-shelf-btn:hover {
+  border-color: #007acc;
+  color: #007acc;
+}
+
+.unpin-btn {
+  font-size: 0.75rem;
+  color: var(--app-text-2);
+  padding: 0 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition:
+    opacity 0.2s,
+    color 0.2s;
+}
+.sub-nav-item:hover .unpin-btn {
+  opacity: 1;
+}
+.unpin-btn:hover {
+  color: #e6b800 !important;
+  background-color: rgba(230, 184, 0, 0.15);
 }
 
 .add-shelf-btn {

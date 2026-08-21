@@ -10,7 +10,9 @@ import {
   reorderShelfComics,
   renameBookshelf,
   removeBookshelf,
+  addComicsToShelf,
 } from '@/stores/bookshelfStore'
+import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import type { Bookshelf, OfflineComic, ComicItem } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
@@ -169,6 +171,25 @@ const handleSelect = (comic: ComicItem) => toggleSelect(comic)
 const exitSelectMode = () => {
   selectMode.value = false
   selectedIds.value = []
+}
+
+// Round13：多选快捷加入书架
+const showShelfPicker = ref(false)
+const openShelfPicker = () => {
+  if (selectedIds.value.length === 0) return
+  showShelfPicker.value = true
+}
+const handleAddToShelf = async (shelfId: string) => {
+  const ids = [...selectedIds.value]
+  showShelfPicker.value = false
+  if (ids.length === 0) return
+  const { added, skipped } = await addComicsToShelf(shelfId, ids)
+  if (added > 0 || skipped > 0) {
+    toast.success(`已加入书架 ${added} 本${skipped > 0 ? `（跳过 ${skipped} 本已在书架）` : ''}`)
+  } else {
+    toast.warning('所选作品均已在该书架中')
+  }
+  exitSelectMode()
 }
 
 const toggleSelectAllPage = () => {
@@ -336,6 +357,13 @@ const handleDeleteCurrent = async () => {
       <span class="select-count">已选 {{ selectedIds.length }} 部</span>
       <button class="toolbar-btn" @click="toggleSelectAllPage">全选本页</button>
       <button
+        class="toolbar-btn"
+        :disabled="selectedIds.length === 0"
+        @click="openShelfPicker"
+      >
+        📥 加入书架
+      </button>
+      <button
         v-if="userStore.isAdmin"
         class="toolbar-btn danger"
         :disabled="selectedIds.length === 0"
@@ -365,6 +393,15 @@ const handleDeleteCurrent = async () => {
         />
       </template>
     </GridContainer>
+
+    <!-- Round13：多选快捷加入书架（检索浮层 add 模式） -->
+    <BookshelfPickerOverlay
+      :open="showShelfPicker"
+      mode="add"
+      :selected-count="selectedIds.length"
+      @close="showShelfPicker = false"
+      @add="handleAddToShelf"
+    />
   </div>
 </template>
 

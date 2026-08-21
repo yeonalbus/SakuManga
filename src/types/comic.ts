@@ -63,6 +63,7 @@ export interface Bookshelf {
   name: string
   count: number
   comicIds?: string[] // 该书架收录的漫画 ID 列表
+  pinned?: boolean // 侧栏置顶（Round13）
 }
 
 /** 联合类型：UI 层统一处理的单项对象 */

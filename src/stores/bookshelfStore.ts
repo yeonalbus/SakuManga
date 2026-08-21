@@ -14,6 +14,7 @@ interface BookshelfDTO {
   name: string
   count?: number
   comicIds?: string[]
+  pinned?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -50,6 +51,7 @@ export const loadBookshelves = async () => {
       name: s.name,
       count: s.count || 0,
       comicIds: toComicIdArray(s.comicIds),
+      pinned: !!s.pinned,
     }))
   } catch (e) {
     // 后端不可用时回退旧 localStorage 数据，保证离线调试可用
@@ -148,6 +150,56 @@ export const addComicToShelf = async (shelfId: string, comicId: string) => {
   } catch (e) {
     console.error('加入书架失败:', e)
   }
+}
+
+/** 置顶/取消置顶书架（Round13，侧栏常驻高频；后端存标记，前端控制上限） */
+export const setBookshelfPinned = async (id: string, pinned: boolean) => {
+  const shelf = bookshelves.value.find((b) => b.id === id)
+  if (shelf) shelf.pinned = pinned
+  try {
+    await http(`/bookshelves/${id}/pin`, {
+      method: 'PUT',
+      body: JSON.stringify({ pinned }),
+    })
+  } catch (e) {
+    console.error('更新书架置顶失败:', e)
+  }
+}
+
+/** 侧栏置顶书架列表（Round13）：pinned 的按全局 sort_order 顺序取前 5 个 */
+export const PIN_LIMIT = 5
+export const pinnedBookshelves = computed(() =>
+  bookshelves.value.filter((b) => b.pinned).slice(0, PIN_LIMIT),
+)
+
+/** 批量将漫画加入书架（Round13：离线多选快捷加入；去重，返回 {added, skipped}） */
+export const addComicsToShelf = async (shelfId: string, comicIds: string[]): Promise<{ added: number; skipped: number }> => {
+  const unique = Array.from(new Set(comicIds.filter(Boolean)))
+  const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  let added = 0
+  let skipped = 0
+  if (shelf && unique.length > 0) {
+    if (!shelf.comicIds) shelf.comicIds = []
+    for (const cid of unique) {
+      if (shelf.comicIds.includes(cid)) skipped++
+      else {
+        shelf.comicIds.push(cid)
+        added++
+      }
+    }
+    if (added > 0) shelf.count = (shelf.count || 0) + added
+  }
+  try {
+    const res = await http<{ added?: number; skipped?: number }>(`/bookshelves/${shelfId}/comics/batch`, {
+      method: 'POST',
+      body: JSON.stringify({ comicIds: unique }),
+    })
+    if (res?.added !== undefined) added = res.added
+    if (res?.skipped !== undefined) skipped = res.skipped
+  } catch (e) {
+    console.error('批量加入书架失败:', e)
+  }
+  return { added, skipped }
 }
 
 /** 将作品移出书架（本地乐观更新 + 后端同步） */

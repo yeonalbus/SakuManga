@@ -76,7 +76,8 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 	}
 
 	var shelves []models.Bookshelf
-	if err := h.db.Where("user_id = ?", user.ID).Order("name asc").Find(&shelves).Error; err != nil {
+	// Round10：书架列表按自定义排序 sort_order 输出（未重排的旧数据 sort_order=0，回退 name asc）
+	if err := h.db.Where("user_id = ?", user.ID).Order("sort_order asc, name asc").Find(&shelves).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取书架失败"})
 		return
 	}
@@ -111,12 +112,20 @@ func (h *LibraryHandler) CreateBookshelf(c *gin.Context) {
 		return
 	}
 
+	// Round10：新书架排在现有书架之后（sort_order = 当前最大值 + 1）
+	var maxOrder int
+	h.db.Model(&models.Bookshelf{}).
+		Where("user_id = ?", user.ID).
+		Select("COALESCE(MAX(sort_order), 0)").
+		Scan(&maxOrder)
+
 	shelf := models.Bookshelf{
-		ID:       "shelf-" + strconv.FormatInt(time.Now().UnixMilli(), 10),
-		UserID:   user.ID,
-		Name:     req.Name,
-		Count:    0,
-		ComicIDs: "[]",
+		ID:        "shelf-" + strconv.FormatInt(time.Now().UnixMilli(), 10),
+		UserID:    user.ID,
+		Name:      req.Name,
+		Count:     0,
+		ComicIDs:  "[]",
+		SortOrder: maxOrder + 1,
 	}
 	if err := h.db.Create(&shelf).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建书架失败"})
@@ -247,6 +256,64 @@ func (h *LibraryHandler) RemoveComicFromBookshelf(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已移出书架", "data": shelf})
+}
+
+// ReorderBookshelfComics 按自定义顺序整体重排书架内项目 PUT /api/v1/bookshelves/:id/order
+// （Round10：书架内项目自定义排序，comicIds 数组顺序即展示顺序）
+func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	var req struct {
+		ComicIDs []string `json:"comicIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	if req.ComicIDs == nil {
+		req.ComicIDs = []string{}
+	}
+	shelf.ComicIDs = joinComicIDs(req.ComicIDs)
+	shelf.Count = len(req.ComicIDs)
+	if err := h.db.Save(&shelf).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架排序失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "书架排序已更新", "data": shelf})
+}
+
+// ReorderBookshelves 批量重排书架列表顺序 POST /api/v1/bookshelves/reorder
+// （Round10：侧栏书架自定义排序，ids 数组下标即 sort_order）
+func (h *LibraryHandler) ReorderBookshelves(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	for i, id := range req.IDs {
+		h.db.Model(&models.Bookshelf{}).
+			Where("id = ? AND user_id = ?", id, user.ID).
+			Update("sort_order", i)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "书架顺序已更新"})
 }
 
 // ─────────────────────────────────────────────────────────────

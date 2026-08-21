@@ -107,11 +107,12 @@ type UpdateScanSetting struct {
 
 // Bookshelf 本地书架（按用户隔离）
 type Bookshelf struct {
-	ID       string `gorm:"primaryKey" json:"id"`
-	UserID   uint   `gorm:"index" json:"userId"`
-	Name     string `gorm:"not null" json:"name"`
-	Count    int    `gorm:"default:0" json:"count"`
-	ComicIDs string `gorm:"type:text" json:"comicIds"` // JSON 数组存储: ["id1", "id2"]
+	ID        string `gorm:"primaryKey" json:"id"`
+	UserID    uint   `gorm:"index" json:"userId"`
+	Name      string `gorm:"not null" json:"name"`
+	Count     int    `gorm:"default:0" json:"count"`
+	ComicIDs  string `gorm:"type:text" json:"comicIds"` // JSON 数组存储: ["id1", "id2"]（顺序即书架内项目自定义排序）
+	SortOrder int    `gorm:"default:0" json:"sortOrder"` // 书架列表自定义排序（Round10，AutoMigrate 自动加列）
 }
 
 // HistoryRecord 历史记录项（按用户隔离）

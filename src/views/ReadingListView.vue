@@ -9,8 +9,12 @@ import {
   clearReadingList,
   removeFromReadingList,
   moveInReadingList,
+  addToReadingList,
 } from '@/stores/readingStore'
 import type { ComicItem } from '@/types/comic'
+// Round11-Opt1：从书架快速导入（仅离线，增量式、按书架内顺序）
+import { bookshelves, loadBookshelves } from '@/stores/bookshelfStore'
+import { offlineComics, fetchOfflineComics } from '@/stores/comicStore'
 
 const router = useRouter()
 const { toast, modal } = useUI()
@@ -57,10 +61,55 @@ const handleClearAll = async () => {
   }
 }
 
-// 预留的快捷导入占位
-const handleQuickImport = async () => {
-  const tabName = activeTab.value === 'online' ? '收藏夹' : '本地书架'
-  toast.info(`调起【从${tabName}导入】面板... (待后端接入)`)
+// Round11-Opt1：从书架快速导入（仅离线 tab 显示入口）
+const showShelfImport = ref(false)
+const importingId = ref('')
+
+const openShelfImport = async () => {
+  // 确保离线漫画与书架数据已加载（直接进入本页时 offlineComics 可能尚未填充，
+  // 否则导入会因映射为空而显示「本地库无匹配」导入 0 本）
+  await Promise.all([fetchOfflineComics(), loadBookshelves()])
+  showShelfImport.value = true
+}
+
+/**
+ * 从指定书架增量导入到离线清单：
+ * - 初始顺序 = 书架 comicIds 数组顺序（Round10 已保证即书架展示顺序）；
+ * - 增量式：已在清单中的跳过，其余按顺序追加到清单末尾；
+ * - 仅影响清单本身，不触碰书架/本地库。
+ */
+const importFromShelf = async (shelf: { id: string; name: string; comicIds?: string[] }) => {
+  if (importingId.value) return
+  importingId.value = shelf.id
+  try {
+    const ids = shelf.comicIds || []
+    const byId = new Map(offlineComics.value.map((c) => [c.id, c]))
+    const existing = new Set(offlineReadingList.value.map((c) => c.id))
+    let added = 0
+    let skipped = 0
+    for (const cid of ids) {
+      const comic = byId.get(cid)
+      if (!comic) {
+        skipped++
+        continue
+      }
+      if (existing.has(cid)) {
+        skipped++
+        continue
+      }
+      addToReadingList(comic)
+      existing.add(cid)
+      added++
+    }
+    if (added > 0) {
+      toast.success(`已从书架「${shelf.name}」导入 ${added} 本到本地清单（跳过 ${skipped} 本）`)
+    } else {
+      toast.info(`书架「${shelf.name}」无新增可导入（已在清单或本地库无匹配）`)
+    }
+    showShelfImport.value = false
+  } finally {
+    importingId.value = ''
+  }
 }
 </script>
 
@@ -92,13 +141,44 @@ const handleQuickImport = async () => {
       </button>
     </div>
 
-    <!-- 二级动作栏 -->
+    <!-- 二级动作栏（Round11-Opt1：快速导入仅离线 tab 显示，在线取消） -->
     <div class="action-bar">
-      <button class="action-text-btn" @click="handleQuickImport">➕ 快捷导入</button>
+      <button v-if="activeTab === 'offline'" class="action-text-btn" @click="openShelfImport">
+        ➕ 从书架导入
+      </button>
       <button v-if="currentList.length > 0" class="action-text-btn danger" @click="handleClearAll">
         🗑️ 清空当前
       </button>
     </div>
+
+    <!-- Round11-Opt1：书架选择弹层（离线清单从书架增量导入） -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showShelfImport" class="shelf-import-mask" @click.self="showShelfImport = false">
+          <div class="shelf-import-panel">
+            <h3 class="import-title">📁 从书架导入</h3>
+            <p class="import-hint">按书架内顺序增量追加到本地清单（已在清单中的自动跳过）</p>
+            <div class="shelf-import-list">
+              <div v-if="bookshelves.length === 0" class="import-empty">
+                暂无书架，请先在「离线模式 → 书架」中创建
+              </div>
+              <button
+                v-for="shelf in bookshelves"
+                :key="shelf.id"
+                class="shelf-import-item"
+                :disabled="importingId === shelf.id"
+                @click="importFromShelf(shelf)"
+              >
+                <span class="shelf-name">📁 {{ shelf.name }}</span>
+                <span class="shelf-count">{{ shelf.count || 0 }} 本</span>
+                <span class="import-action">{{ importingId === shelf.id ? '导入中…' : '导入 →' }}</span>
+              </button>
+            </div>
+            <button class="import-close-btn" @click="showShelfImport = false">关闭</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 列表主体 -->
     <div class="list-body">
@@ -366,6 +446,122 @@ const handleQuickImport = async () => {
 .move-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* Round11-Opt1：书架导入弹层 */
+.shelf-import-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shelf-import-panel {
+  width: 90%;
+  max-width: 420px;
+  max-height: 75vh;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--app-text-strong);
+}
+
+.import-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-3);
+}
+
+.shelf-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.import-empty {
+  padding: 20px 8px;
+  text-align: center;
+  color: var(--app-text-3);
+  font-size: 13px;
+}
+
+.shelf-import-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.shelf-import-item:hover:not(:disabled) {
+  border-color: #3d5afe;
+  background: var(--app-surface-3-hover);
+}
+
+.shelf-import-item:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.shelf-import-item .shelf-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--app-text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-import-item .shelf-count {
+  font-size: 12px;
+  color: var(--app-text-3);
+  background: var(--app-surface-3);
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.shelf-import-item .import-action {
+  font-size: 12px;
+  color: #3d5afe;
+  white-space: nowrap;
+}
+
+.import-close-btn {
+  align-self: flex-end;
+  background: var(--app-border-2);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.import-close-btn:hover {
+  background: var(--app-surface-3-hover);
+  color: var(--app-text-strong);
 }
 
 /* 📱 移动形态（<1024px）：操作按钮常显（触摸屏无 hover），避免无法操作 */

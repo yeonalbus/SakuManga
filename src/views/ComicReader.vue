@@ -2,7 +2,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { getNextComicInQueue } from '@/stores/readingStore'
+import { getNextComicInQueue, onlineReadingList, offlineReadingList } from '@/stores/readingStore'
+// Round11-Bug3：阅读器进度写回时恢复标题/封面（在线模式从清单/历史取，避免把历史污染成 gid 乱码）
+import { onlineHistoryList, offlineHistoryList } from '@/stores/historyStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic, ComicItem } from '@/types/comic'
@@ -342,15 +344,26 @@ const saveProgress = (src: 'online' | 'offline', id: string, page: number): void
   saveSharedProgress(currentUid(), src, id, page)
 
 // Round3-任务1：当前阅读作品元信息（供后端进度写回；离线优先取库内真实条目）
+// Round11-Bug3：fallback 不得把 title 设为 comicId（会把后端历史标题污染成 gid 乱码、封面丢失）。
+// 从阅读清单 / 历史记录中恢复真实标题与封面；仍缺失时 title 留空串，由后端 AddHistory 空值不覆盖保护。
 const currentComicMeta = computed<ComicItem | null>(() => {
   if (!comicId.value) return null
   if (source.value === 'offline') {
     const found = offlineComics.value.find((c) => c.id === comicId.value)
     if (found) return found
+    const fromList = offlineReadingList.value.find((c) => c.id === comicId.value)
+    if (fromList) return fromList
+    const fromHistory = offlineHistoryList.value.find((h) => h.comic.id === comicId.value)?.comic
+    if (fromHistory) return fromHistory
+  } else {
+    const fromList = onlineReadingList.value.find((c) => c.id === comicId.value)
+    if (fromList) return fromList
+    const fromHistory = onlineHistoryList.value.find((h) => h.comic.id === comicId.value)?.comic
+    if (fromHistory) return fromHistory
   }
   return {
     id: comicId.value,
-    title: comicId.value,
+    title: '',
     coverUrl: '',
     source: source.value,
     tags: [],

@@ -4,6 +4,8 @@ import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { setTaskPriority, type DownloadTask } from '@/api/download'
 import { useUserStore } from '@/stores/userStore'
+// Round11-Opt2：下载队列全部完成后 toast + 刷新本地库缓存
+import { fetchOfflineComics } from '@/stores/comicStore'
 
 interface ListResponse {
   tasks: DownloadTask[]
@@ -156,10 +158,32 @@ const setStatusFilter = (s: string) => {
   fetchTasks()
 }
 
+// Round11-Opt2：检测「活动任务从有 → 无」（队列全部完成），toast + 刷新本地库缓存。
+// 全库维护查重已改为手动触发（离线更新页「开始检测」），此处仅做前端状态同步。
+let lastActiveCount = -1
+const checkQueueCompletion = async () => {
+  try {
+    const res = await http<ListResponse>('/downloads', {
+      params: { status: 'active', page: 1, size: 1 },
+    })
+    const count = res.total || 0
+    if (lastActiveCount > 0 && count === 0) {
+      toast.success('下载队列已全部完成，本地书库已同步刷新')
+      fetchOfflineComics()
+    }
+    lastActiveCount = count
+  } catch {
+    // 失败静默：保持上次状态，下次轮询再判定
+  }
+}
+
 onMounted(() => {
   if (!canDownload.value) return // 无下载权限：不发起轮询
   fetchTasks()
-  timer = window.setInterval(fetchTasks, 2000) // 2s 轮询
+  timer = window.setInterval(() => {
+    fetchTasks()
+    checkQueueCompletion()
+  }, 2000) // 2s 轮询
 })
 
 onUnmounted(() => {

@@ -10,6 +10,7 @@ import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
+import { API_BASE } from '@/config/api'
 import { useUserStore } from '@/stores/userStore'
 import { isDetailNewTab, consumeBackState } from '@/utils/detailNav'
 import { rememberListState } from '@/utils/scrollMemory'
@@ -41,6 +42,11 @@ interface OfflineDetailDTO {
   localPath: string
   fileSize?: number
   readCount?: number
+  // Round11-Opt3：原标题（恢复用）、本地备注、E 站在线关联（跳转在线画廊）
+  originalTitle?: string
+  remark?: string
+  gid?: string
+  token?: string
 }
 
 const route = useRoute()
@@ -48,7 +54,15 @@ const router = useRouter()
 const { toast, modal } = useUI()
 const userStore = useUserStore()
 
-const comic = ref<OfflineComic>({
+// Round11-Opt3：详情展示扩展字段（原标题/备注/E 站在线关联）
+interface OfflineDetailComic extends OfflineComic {
+  originalTitle?: string
+  remark?: string
+  gid?: string
+  token?: string
+}
+
+const comic = ref<OfflineDetailComic>({
   id: (route.query.id as string) || '',
   title: '加载中...',
   coverUrl: '',
@@ -112,6 +126,10 @@ const fetchComicDetail = async () => {
     tagSources.value = data.tagSources || []
     onlineTagsList.value = data.onlineTagsList || []
     offlineAddTagsList.value = data.offlineAddTagsList || []
+    // Round11-Opt3：备注回填 + 预览重置（标题/备注编辑后刷新）
+    remarkText.value = data.remark || ''
+    previewPages.value = []
+    detailTab.value = 'info'
   } catch (err) {
     console.error('获取漫画详情失败:', err)
     const msg = err instanceof Error ? err.message : ''
@@ -318,6 +336,103 @@ const handleDelete = async () => {
     deleting.value = false
   }
 }
+
+// --------------------------------------------------
+// Round11-Opt3：画廊预览 / 修改标题 / 本地备注 / 跳转在线画廊
+// --------------------------------------------------
+const detailTab = ref<'info' | 'preview'>('info')
+const PREVIEW_LIMIT = 20 // 决策点 D5：预览前 20 张
+const previewPages = ref<{ index: number; url: string }[]>([])
+const loadingPreview = ref(false)
+
+const previewCount = computed(() => Math.min(PREVIEW_LIMIT, comic.value.pageCount || 0))
+
+const switchPreview = () => {
+  detailTab.value = 'preview'
+  if (previewPages.value.length === 0) fetchPreview()
+}
+
+const fetchPreview = async () => {
+  if (!comic.value.id || loadingPreview.value) return
+  loadingPreview.value = true
+  try {
+    const data = await http<{ total?: number; pages?: unknown[] }>('/comics/' + comic.value.id + '/pages')
+    const total = typeof data.total === "number" ? data.total : Array.isArray(data.pages) ? data.pages.length : 0
+    const count = Math.min(PREVIEW_LIMIT, total || comic.value.pageCount || 0)
+    previewPages.value = Array.from({ length: count }, (_, i) => ({
+      index: i,
+      url: API_BASE + '/comics/' + comic.value.id + '/page/' + i,
+    }))
+  } catch (err) {
+    console.error('加载预览失败:', err)
+    toast.error('预览加载失败')
+  } finally {
+    loadingPreview.value = false
+  }
+}
+
+const openPreviewPage = (index: number) => {
+  if (!comic.value.id) return
+  router.push({
+    path: '/reader',
+    query: { id: comic.value.id, source: 'offline', page: String(index + 1) },
+  })
+}
+
+// 修改标题（Round11-Opt3 / D6）：清空输入 = 恢复原标题
+const editTitleBusy = ref(false)
+const handleEditTitle = async () => {
+  if (!comic.value.id || editTitleBusy.value) return
+  const input = await modal.prompt('请输入新标题（清空并确定 = 恢复原标题）', comic.value.title, '修改标题')
+  if (input === null) return // 取消
+  editTitleBusy.value = true
+  try {
+    const res = await http<{ data: { title: string; originalTitle?: string } }>('/comics/' + comic.value.id, {
+      method: 'PUT',
+      body: JSON.stringify({ title: input.trim() }),
+    })
+    const restored = input.trim() === ''
+    comic.value.title = res.data.title
+    toast.success(restored ? "已恢复原标题" : "标题已更新")
+    await fetchComicDetail()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "修改标题失败")
+  } finally {
+    editTitleBusy.value = false
+  }
+}
+
+// 本地备注
+const remarkText = ref("")
+const savingRemark = ref(false)
+const saveRemark = async () => {
+  if (!comic.value.id || savingRemark.value) return
+  savingRemark.value = true
+  try {
+    await http('/comics/' + comic.value.id, {
+      method: 'PUT',
+      body: JSON.stringify({ remark: remarkText.value }),
+    })
+    comic.value.remark = remarkText.value
+    toast.success('备注已保存')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "保存备注失败")
+  } finally {
+    savingRemark.value = false
+  }
+}
+
+// 跳转在线画廊（需 gid/token；无关联时置灰）
+const goOnlineGallery = () => {
+  const gid = comic.value.gid
+  if (!gid) {
+    toast.info('该画廊无 E 站在线关联（可能为本地导入）')
+    return
+  }
+  const token = comic.value.token || ''
+  const url = '/online/detail?id=' + encodeURIComponent(gid) + '&token=' + encodeURIComponent(token)
+  window.open(url, '_blank')
+}
 </script>
 
 <template>
@@ -336,6 +451,16 @@ const handleDelete = async () => {
         </button>
 
         <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
+
+        <!-- Round11-Opt3：跳转 E 站在线画廊（无 gid 置灰） -->
+        <button
+          class="online-link-btn"
+          :disabled="!comic.gid"
+          title="跳转 E 站在线画廊"
+          @click="goOnlineGallery"
+        >
+          🌐 在线
+        </button>
 
         <button
           v-if="userStore.isAdmin"
@@ -360,6 +485,10 @@ const handleDelete = async () => {
 
       <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
 
+      <button class="online-link-btn" :disabled="!comic.gid" @click="goOnlineGallery">
+        🌐 在线
+      </button>
+
       <button
         v-if="userStore.isAdmin"
         class="delete-btn"
@@ -370,7 +499,45 @@ const handleDelete = async () => {
       </button>
     </div>
 
-    <div class="main-layout">
+    <!-- Round11-Opt3：信息 / 预览 tab 切换 -->
+    <div class="detail-tabs">
+      <button
+        class="detail-tab-btn"
+        :class="{ active: detailTab === 'info' }"
+        @click="detailTab = 'info'"
+      >
+        📄 信息
+      </button>
+      <button
+        class="detail-tab-btn"
+        :class="{ active: detailTab === 'preview' }"
+        @click="switchPreview"
+      >
+        🖼️ 画廊预览 ({{ previewCount }})
+      </button>
+    </div>
+
+    <!-- 预览面板：前 20 张缩略图，点击跳转阅读器定位 -->
+    <div v-if="detailTab === 'preview'" class="preview-panel">
+      <div v-if="loadingPreview" class="preview-loading">加载预览中...</div>
+      <div v-else-if="previewPages.length === 0" class="preview-loading">
+        暂无可用预览（画廊无页面）
+      </div>
+      <div v-else class="preview-grid">
+        <div
+          v-for="p in previewPages"
+          :key="p.index"
+          class="preview-thumb"
+          :title="'第 ' + (p.index + 1) + ' 页，点击阅读'"
+          @click="openPreviewPage(p.index)"
+        >
+          <img :src="p.url" :alt="'第 ' + (p.index + 1) + ' 页'" loading="lazy" />
+          <span class="preview-page-num">{{ p.index + 1 }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="main-layout">
       <div class="left-cover">
         <img :src="comic.coverUrl" :alt="comic.title" />
       </div>
@@ -386,9 +553,18 @@ const handleDelete = async () => {
         </div>
 
         <div class="title-wrap">
-          <h1 class="title">{{ comic.titleJpn || comic.title }}</h1>
+          <!-- Round11-Opt3：主标题优先显示可编辑的 comic.title（修改立即可见），
+               日文原名在与之不同时作为副标题展示 -->
+          <h1 class="title">{{ comic.title }}</h1>
+          <button
+            class="edit-title-btn"
+            title="修改标题（清空可恢复原标题）"
+            @click="handleEditTitle"
+          >
+            ✎
+          </button>
           <span v-if="comic.titleJpn && comic.titleJpn !== comic.title" class="subtitle">
-            {{ comic.title }}
+            {{ comic.titleJpn }}
           </span>
         </div>
 
@@ -473,6 +649,21 @@ const handleDelete = async () => {
               <span class="v path-text">{{ comic.localPath }}</span>
               <button class="copy-btn" @click="copyPath">复制</button>
             </div>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <h3 class="card-title">📝 本地备注</h3>
+          <textarea
+            v-model="remarkText"
+            class="remark-input"
+            rows="3"
+            placeholder="添加本地备注（仅本应用可见，扫描不会覆盖）..."
+          ></textarea>
+          <div class="remark-actions">
+            <button class="add-tag-btn" :disabled="savingRemark" @click="saveRemark">
+              {{ savingRemark ? '保存中…' : '保存备注' }}
+            </button>
           </div>
         </div>
 
@@ -956,6 +1147,152 @@ const handleDelete = async () => {
     max-width: 100%;
     white-space: normal;
     word-break: break-all;
+  }
+}
+
+/* Round11-Opt3：详情页新增元素样式 */
+.online-link-btn {
+  background: rgba(124, 77, 255, 0.15);
+  border: 1px solid rgba(124, 77, 255, 0.5);
+  color: #b39dff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+.online-link-btn:hover:not(:disabled) {
+  background: rgba(124, 77, 255, 0.28);
+  border-color: #b39dff;
+}
+.online-link-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.edit-title-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px dashed var(--app-border-3);
+  color: var(--app-text-3);
+  width: 30px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.edit-title-btn:hover {
+  border-color: #3d5afe;
+  color: #3d5afe;
+  background: rgba(61, 90, 254, 0.1);
+}
+
+.remark-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
+  border-radius: 6px;
+  color: var(--app-text-strong);
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+}
+.remark-input:focus {
+  border-color: #007acc;
+}
+.remark-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* 信息 / 预览 tab 切换 */
+.detail-tabs {
+  display: inline-flex;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.detail-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--app-text-3);
+  padding: 8px 18px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.detail-tab-btn.active {
+  background: var(--app-surface-3);
+  color: #3d5afe;
+  font-weight: 600;
+}
+
+/* 预览面板 */
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+}
+.preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: var(--app-text-3);
+  font-size: 0.9rem;
+}
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.preview-thumb {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border-2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.preview-thumb:hover {
+  border-color: #3d5afe;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.preview-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.preview-page-num {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.7rem;
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+/* 移动形态：在线按钮与操作条保持一致 */
+@media (max-width: 1024px) {
+  .online-link-btn {
+    padding: 8px 12px;
+    font-size: 0.82rem;
   }
 }
 </style>

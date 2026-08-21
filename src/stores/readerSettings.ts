@@ -82,6 +82,11 @@ export interface ReaderSettings {
   gamepadNextKeys: number[] // 下一页按键索引（可多个：D-Pad右 / A）
   gamepadPrevKeys: number[] // 上一页按键索引（可多个：D-Pad左 / B）
   gamepadToggleKeys: number[] // 切换设置菜单按键索引（Start / Select）
+  // Round14：双击快速确认切本 + modal 手柄确认（可自定义，防与翻页键冲突）
+  gamepadDoubleTapConfirm: boolean // 双击「下一页/上一页」快速确认切换漫画
+  gamepadDoubleTapWindow: number // 双击时间窗（毫秒，默认 500）
+  gamepadConfirmKeys: number[] // 确认按键（modal 确认 / 双击切本，默认 [A]）
+  gamepadCancelKeys: number[] // 取消按键（modal 取消，默认 [B]）
 
   // ── 性能 / 扩展 ──
   preloadOnline: number // 预加载图片数量(在线模式)
@@ -121,6 +126,10 @@ const defaultSettings: ReaderSettings = {
   gamepadNextKeys: [GAMEPAD_BUTTONS.DPAD_RIGHT, GAMEPAD_BUTTONS.A],
   gamepadPrevKeys: [GAMEPAD_BUTTONS.DPAD_LEFT, GAMEPAD_BUTTONS.B],
   gamepadToggleKeys: [GAMEPAD_BUTTONS.START, GAMEPAD_BUTTONS.SELECT],
+  gamepadDoubleTapConfirm: true,
+  gamepadDoubleTapWindow: 500,
+  gamepadConfirmKeys: [GAMEPAD_BUTTONS.A],
+  gamepadCancelKeys: [GAMEPAD_BUTTONS.B],
 
   preloadOnline: 10,
   preloadOffline: 10,

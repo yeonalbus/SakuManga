@@ -14,12 +14,16 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { readerSettings } from '@/stores/readerSettings'
 
 export interface GamepadCallbacks {
-  /** 下一页（阅读器内部已兼容 RTL / Webtoon 方向） */
-  onNext?: () => void
-  /** 上一页 */
-  onPrev?: () => void
+  /** 下一页（阅读器内部已兼容 RTL / Webtoon 方向）；参数为按键触发时间戳（供双击检测） */
+  onNext?: (t?: number) => void
+  /** 上一页；参数为按键触发时间戳（供双击检测） */
+  onPrev?: (t?: number) => void
   /** 切换设置菜单 */
   onToggle?: () => void
+  /** Round14：确认（modal 确认 / 双击切本），对应 gamepadConfirmKeys */
+  onConfirm?: () => void
+  /** Round14：取消（modal 取消），对应 gamepadCancelKeys */
+  onCancel?: () => void
 }
 
 export function useGamepad(callbacks: GamepadCallbacks = {}) {
@@ -50,9 +54,19 @@ export function useGamepad(callbacks: GamepadCallbacks = {}) {
       if (nowPressed.has(idx) && !prevPressed.has(idx)) fn?.()
     }
 
-    gamepadNextKeys.forEach((i) => fireOnce(i, callbacks.onNext))
-    gamepadPrevKeys.forEach((i) => fireOnce(i, callbacks.onPrev))
+    const { gamepadConfirmKeys, gamepadCancelKeys } = readerSettings
+
+    const fireOnceWithTime = (idx: number, fn?: (t?: number) => void): void => {
+      // 上升沿：本次按下 && 上次未按 → 携带触发时间戳
+      if (nowPressed.has(idx) && !prevPressed.has(idx)) fn?.(Date.now())
+    }
+
+    gamepadNextKeys.forEach((i) => fireOnceWithTime(i, callbacks.onNext))
+    gamepadPrevKeys.forEach((i) => fireOnceWithTime(i, callbacks.onPrev))
     gamepadToggleKeys.forEach((i) => fireOnce(i, callbacks.onToggle))
+    // Round14：确认 / 取消按键（modal 与双击切本共用）
+    gamepadConfirmKeys.forEach((i) => fireOnce(i, callbacks.onConfirm))
+    gamepadCancelKeys.forEach((i) => fireOnce(i, callbacks.onCancel))
 
     prevPressed = nowPressed
   }

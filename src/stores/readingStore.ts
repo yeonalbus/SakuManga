@@ -135,6 +135,23 @@ export const getNextComicInQueue = (
   return list[currentIndex + 1]
 }
 
+/** Round14：获取队列中指定作品的前一个作品（供阅读器第一页双击「上一页」回退上一本） */
+export const getPrevComicInQueue = (
+  currentId: string,
+  source: 'online' | 'offline',
+): ComicItem | null => {
+  const list = source === 'online' ? onlineReadingList.value : offlineReadingList.value
+
+  if (!list || list.length === 0) return null
+
+  const currentIndex = list.findIndex((item) => item.id === currentId)
+
+  if (currentIndex === -1) return null
+  if (currentIndex <= 0) return null
+
+  return list[currentIndex - 1]
+}
+
 // 页面隐藏（关闭/刷新/切后台）时兜底 flush：若防抖窗口内存在未同步的阅读清单，
 // 立即用 keepalive fetch 将最新整表 PUT 到后端（幂等整体覆盖），避免「改完立即关闭」丢失改动。
 // 回调幂等：有挂起计时器的 source 才上报；与在途写入链的极小时序竞态可忽略（后端按整表覆盖）。

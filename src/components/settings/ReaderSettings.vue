@@ -293,6 +293,32 @@
       <button class="preset-btn" @click="applyMicroPreset">🔄 恢复 8BitDo Micro 默认键位</button>
     </div>
 
+    <!-- Round14：双击快速确认切本 -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">双击翻页键快速切本</div>
+        <div class="item-subtext">
+          读到最后一页双击「下一页」（第一页双击「上一页」）直接切到清单下一/上一本，无需弹窗确认；单击仍弹确认框防误触
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="readerSettings.gamepadDoubleTapConfirm" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">双击时间窗（毫秒）</div>
+        <div class="item-subtext">两次按键间隔小于该值视为双击确认</div>
+      </div>
+      <select v-model="readerSettings.gamepadDoubleTapWindow" class="setting-select">
+        <option :value="300">300ms（快速）</option>
+        <option :value="500">500ms（默认）</option>
+        <option :value="800">800ms（宽松）</option>
+      </select>
+    </div>
+
     <!-- ── 性能 / 扩展 ── -->
     <div class="section-title">⚡ 性能 / 扩展</div>
 
@@ -388,6 +414,9 @@ const keySlots = [
   { key: 'gamepadNextKeys', label: '下一页按键' },
   { key: 'gamepadPrevKeys', label: '上一页按键' },
   { key: 'gamepadToggleKeys', label: '切换设置菜单' },
+  // Round14：确认/取消（modal 与双击切本共用；可自定义防与翻页键冲突）
+  { key: 'gamepadConfirmKeys', label: '确认按键' },
+  { key: 'gamepadCancelKeys', label: '取消按键' },
 ] as const
 
 type GamepadKeySlot = (typeof keySlots)[number]['key']
@@ -447,6 +476,11 @@ function applyMicroPreset(): void {
   readerSettings.gamepadNextKeys = [GAMEPAD_BUTTONS.DPAD_RIGHT, GAMEPAD_BUTTONS.A]
   readerSettings.gamepadPrevKeys = [GAMEPAD_BUTTONS.DPAD_LEFT, GAMEPAD_BUTTONS.B]
   readerSettings.gamepadToggleKeys = [GAMEPAD_BUTTONS.START, GAMEPAD_BUTTONS.SELECT]
+  // Round14：确认/取消按键恢复默认（A=确认 B=取消）
+  readerSettings.gamepadConfirmKeys = [GAMEPAD_BUTTONS.A]
+  readerSettings.gamepadCancelKeys = [GAMEPAD_BUTTONS.B]
+  readerSettings.gamepadDoubleTapConfirm = true
+  readerSettings.gamepadDoubleTapWindow = 500
   toast.success('已恢复 8BitDo Micro 默认键位')
 }
 

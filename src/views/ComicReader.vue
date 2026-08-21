@@ -2,13 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
-import { getNextComicInQueue, onlineReadingList, offlineReadingList } from '@/stores/readingStore'
+import { getNextComicInQueue, getPrevComicInQueue, onlineReadingList, offlineReadingList } from '@/stores/readingStore'
 // Round11-Bug3：阅读器进度写回时恢复标题/封面（在线模式从清单/历史取，避免把历史污染成 gid 乱码）
 import { onlineHistoryList, offlineHistoryList } from '@/stores/historyStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic, ComicItem } from '@/types/comic'
-import { fetchOfflineComics, offlineComics } from '@/stores/comicStore'
+import { fetchOfflineComics, offlineComics, recordComicClick } from '@/stores/comicStore'
 import { http } from '@/utils/request'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 // Round3-任务1：阅读进度按账号写回后端 /history
@@ -387,37 +387,104 @@ const scheduleSyncProgress = () => {
   }, 1000)
 }
 
-// --------------------------------------------------
 // 📖 连贯读取队列调度核心
 // --------------------------------------------------
-const handleNextInQueue = async () => {
+// Round14：force=true 时跳过确认框直接切本（手柄双击快速确认用）
+const handleNextInQueue = async (force = false) => {
   // 查找队列里的下一作品
   const nextComic = getNextComicInQueue(comicId.value, source.value)
 
   if (nextComic) {
-    const confirmed = await modal.confirm(
-      `《${nextComic.title}》\n是否直接继续阅读清单中的下一本？`,
-      '当前本子已全部读完 📖',
-    )
-
-    if (confirmed) {
-      toast.success(`自动无缝切入：《${nextComic.title}》`)
-
-      // 问题5：连续切本用 replace（阅读器在历史栈上始终只有一帧），
-      // 退出按钮 back() 才能一步回到进入阅读前的页面，而不是逐本回退。
-      const query: Record<string, string> = {
-        id: nextComic.id,
-        source: nextComic.source,
-      }
-      if (nextComic.source === 'online') {
-        query.token = (nextComic as OnlineComic).token || ''
-      }
-      router.replace({ path: '/reader', query })
+    if (!force) {
+      const confirmed = await modal.confirm(
+        `《${nextComic.title}》\n是否直接继续阅读清单中的下一本？`,
+        '当前本子已全部读完 📖',
+      )
+      if (!confirmed) return
     }
+    toast.success(`自动无缝切入：《${nextComic.title}》`)
+
+    // 问题5：连续切本用 replace（阅读器在历史栈上始终只有一帧），
+    // 退出按钮 back() 才能一步回到进入阅读前的页面，而不是逐本回退。
+    const query: Record<string, string> = {
+      id: nextComic.id,
+      source: nextComic.source,
+    }
+    if (nextComic.source === 'online') {
+      query.token = (nextComic as OnlineComic).token || ''
+    }
+    router.replace({ path: '/reader', query })
   } else {
     // 队列中已经没有更多本子了
     await modal.alert('清单中的所有本子都已经全部读完啦！🎉', '阅读完毕')
   }
+}
+
+// Round14：第一页双击「上一页」→ 切到队列上一本（force 直接切换，不弹确认）
+const handlePrevInQueue = async (force = false) => {
+  const prevComic = getPrevComicInQueue(comicId.value, source.value)
+  if (!prevComic) {
+    toast.info('已经是第一本了')
+    return
+  }
+  if (!force) {
+    const confirmed = await modal.confirm(
+      `《${prevComic.title}》\n是否回退到清单中的上一本？`,
+      '回退上一本',
+    )
+    if (!confirmed) return
+  }
+  toast.success(`回退到：《${prevComic.title}》`)
+  const query: Record<string, string> = {
+    id: prevComic.id,
+    source: prevComic.source,
+  }
+  if (prevComic.source === 'online') {
+    query.token = (prevComic as OnlineComic).token || ''
+  }
+  router.replace({ path: '/reader', query })
+}
+
+// ── Round14：手柄双击快速确认切本 ──
+// 记录「下一页/上一页」最近一次触发时间，窗口内再次触发且处于边界页 → 强制切本
+let lastNextAt = 0
+let lastPrevAt = 0
+const isAtLastPage = computed(
+  () => totalPages.value > 0 && currentPage.value >= totalPages.value,
+)
+const isAtFirstPage = computed(() => currentPage.value <= 1)
+
+const handleGamepadNext = (t?: number) => {
+  const now = t ?? Date.now()
+  const windowMs = readerSettings.gamepadDoubleTapWindow
+  // 双击确认：边界页 + 配置开启 + 上次触发在窗口内
+  if (
+    readerSettings.gamepadDoubleTapConfirm &&
+    isAtLastPage.value &&
+    now - lastNextAt <= windowMs
+  ) {
+    lastNextAt = 0 // 消费双击，防三连击再次触发
+    void handleNextInQueue(true)
+    return
+  }
+  lastNextAt = now
+  turnByPhysicalDirection('next')
+}
+
+const handleGamepadPrev = (t?: number) => {
+  const now = t ?? Date.now()
+  const windowMs = readerSettings.gamepadDoubleTapWindow
+  if (
+    readerSettings.gamepadDoubleTapConfirm &&
+    isAtFirstPage.value &&
+    now - lastPrevAt <= windowMs
+  ) {
+    lastPrevAt = 0
+    void handlePrevInQueue(true)
+    return
+  }
+  lastPrevAt = now
+  turnByPhysicalDirection('prev')
 }
 
 // --------------------------------------------------
@@ -753,8 +820,8 @@ const turnByPhysicalDirection = (dir: 'next' | 'prev') => {
 
 // 5.2 手柄绑定（8BitDo Micro：D-Pad右/A=下一页，D-Pad左/B=上一页，Start/Select=设置）
 const { isConnected: gamepadConnected, gamepadName } = useGamepad({
-  onNext: () => turnByPhysicalDirection('next'),
-  onPrev: () => turnByPhysicalDirection('prev'),
+  onNext: handleGamepadNext,
+  onPrev: handleGamepadPrev,
   onToggle: () => {
     showSettings.value = !showSettings.value
   },
@@ -950,6 +1017,9 @@ watch(
     if (!newId) return
     currentPage.value = 1
     isZoomed.value = false
+    // Round14-Bug1：进入/切换离线漫画即记录阅读次数（详情页不再单独计次，避免双计）。
+    // 覆盖清单入口、详情入口、书架入口与连续切本（router.replace 换 id）。
+    if (source.value === 'offline') recordComicClick(comicId.value)
     loadComicPages()
   },
   { immediate: true },

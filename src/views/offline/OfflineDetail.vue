@@ -5,7 +5,7 @@ import { useUI } from '@/composables/useUI'
 import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/bookshelfStore'
 import { offlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { getMyRating, setMyRating } from '@/stores/ratingStore'
-import { fetchOfflineComics, recordComicClick, deleteOfflineComics } from '@/stores/comicStore'
+import { fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
@@ -292,8 +292,7 @@ const isComicInShelf = (shelfId: string) => {
 
 const handleStartReading = async () => {
   if (!comic.value || !comic.value.id) return
-  recordComicClick(comic.value.id)
-  comic.value.readCount = (comic.value.readCount || 0) + 1
+  // Round14-Bug1：阅读次数改由阅读器统一记录（详情页不再计次，避免从详情进入双计）
   // Round7-任务1/3：显式计算起始页并携带 ?page=N（历史入口总是恢复，否则按偏好开关）
   const fromHistory = route.query.resume === '1'
   const resumePage = await resolveResumePage('offline', comic.value.id, {

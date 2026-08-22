@@ -80,6 +80,48 @@ async function bug3(browser) {
   await context.close()
 }
 
+// ---------- 书架返回：fullPath（含书架 id）保留 ----------
+async function bookshelfBack(browser) {
+  const context = await browser.newContext({ viewport: { width: 800, height: 900 } })
+  await context.addInitScript(pwaInit)
+  const page = await context.newPage()
+  page.setDefaultTimeout(25000)
+  await page.goto(BASE + "/login")
+  await page.fill("#login-username", USER)
+  await page.fill("#login-password", PASS)
+  await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".login-btn")])
+  await page.waitForSelector(".top-bar, .card-grid", { timeout: 15000 })
+
+  // 创建书架并加入一本 → 进入书架页 → 点卡片 → 详情 → 返回
+  const sh = await api("/bookshelves", { method: "POST", body: { name: "返回测试书架" }, token })
+  const shelfId = sh.json.data?.id
+  await api("/bookshelves/" + shelfId + "/comics", { method: "POST", body: { comicId: COMIC_A.id }, token })
+
+  await page.goto(BASE + "/offline/bookshelf?id=" + shelfId)
+  await page.waitForSelector(".item-card", { timeout: 20000 })
+  await page.waitForTimeout(1000)
+  const cardCount = await page.locator(".item-card").count()
+  if (cardCount > 0) ok("书架返回 书架页有卡片")
+  else fail("书架返回 书架页无卡片")
+
+  await page.locator(".item-card").first().click()
+  await page.waitForSelector(".offline-detail-page, .detail-page", { timeout: 20000 })
+  await page.waitForTimeout(1500)
+  if (!page.url().includes("/offline/detail")) fail("书架返回 未进入详情")
+
+  await page.locator(".back-btn, .detail-fab-back").first().click()
+  await page.waitForTimeout(2000)
+  const backUrl = page.url()
+  if (backUrl.includes("/offline/bookshelf") && backUrl.includes("id=" + shelfId)) {
+    ok("书架返回 回到书架页且保留书架 id（fullPath 生效）")
+  } else {
+    fail("书架返回 URL 异常: " + backUrl)
+  }
+  // 清理测试书架
+  await api("/bookshelves/" + shelfId, { method: "DELETE", token })
+  await context.close()
+}
+
 // ---------- 代码级断言 ----------
 async function codeChecks() {
   const fs = await import("fs")
@@ -99,6 +141,13 @@ async function codeChecks() {
   const od = fs.readFileSync("src/views/online/OnlineDetail.vue", "utf8")
   if (!od.includes("isStandalonePWA()")) ok("OnlineDetail 已移除 PWA push 首页分支")
   else fail("OnlineDetail 仍有 PWA 分支")
+  // App.vue fixed inset-0（iPad 底部窄长条）
+  const app = fs.readFileSync("src/App.vue", "utf8")
+  if (app.includes("position: fixed") && app.includes("inset: 0")) ok("App.vue app-container 已改 fixed inset-0（修底部窄条）")
+  else fail("App.vue 未用 fixed inset-0")
+  // detailNav fromFullPath
+  if (dn.includes("fromFullPath")) ok("detailNav 已记录 fullPath（含书架 id）")
+  else fail("detailNav 缺 fromFullPath")
   // RandomView provider
   const rv = fs.readFileSync("src/views/RandomView.vue", "utf8")
   if (rv.includes("setListStateProvider('/random'")) ok("RandomView 注册列表状态 provider")
@@ -108,6 +157,7 @@ async function codeChecks() {
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })
 try {
   await bug3(browser)
+  await bookshelfBack(browser)
   await codeChecks()
 } finally { await browser.close() }
 

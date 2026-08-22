@@ -258,6 +258,9 @@ body {
   overscroll-behavior-y: none;
   overflow-x: hidden; /* 兜底防横向溢出（iPad 移动模式等） */
   width: 100%;
+  /* Round17.2：iPad PWA 底部窄长条——html/body 撑满视口，避免容器超出露出背景 */
+  height: 100%;
+  min-height: 100%;
 }
 body {
   background-color: var(--app-bg);
@@ -296,10 +299,13 @@ body {
 
 .app-container {
   display: flex;
+  /* Round17.2：fixed inset-0 撑满 visualViewport —— 修复 iPad PWA 横屏底部窄长条
+     （WebKit bug 313800：standalone 下 dvh/svh 可能大于可视高度，容器底部超出露出背景）；
+     保留 height 兜底链兼容旧浏览器 */
+  position: fixed;
+  inset: 0;
   height: 100vh;
-  /* 移动端动态视口：避免浏览器地址栏收起/展开导致布局跳动 */
   height: 100dvh;
-  /* Round15-Bug1：iPad PWA 横屏 dvh 异常时兜底（svh=小视口高度，稳定） */
   height: 100svh;
   width: 100vw;
   overflow: hidden;

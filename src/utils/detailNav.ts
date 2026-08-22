@@ -91,8 +91,10 @@ const BACK_KEY_PREFIX = 'saku_back_'
 
 /** 新标签返回时所需的来源列表状态 */
 export interface DetailBackState {
-  /** 来源列表路由路径（path 级别，不带 query） */
+  /** 来源列表路由路径（path 级别，不带 query；用作 rememberListState 的 key） */
   fromPath: string
+  /** Round17.2：来源列表完整路径（含 query，如 /offline/bookshelf?id=xxx，router.replace 用） */
+  fromFullPath?: string
   /** 来源列表滚动位置 */
   top: number
   /** 来源列表分页页码（可选） */
@@ -137,6 +139,8 @@ export function recordBackStateForDetail(comic: ComicNavTarget): void {
   const listState = captureActiveListState()
   recordBackState(comic.id, {
     fromPath: window.location.pathname,
+    // Round17.2：保留完整路径（含 query），返回时才能回到带书架 id 的页面
+    fromFullPath: window.location.pathname + window.location.search,
     top: listState?.top ?? 0,
     page: listState?.page,
   })

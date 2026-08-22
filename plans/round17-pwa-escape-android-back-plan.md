@@ -119,6 +119,15 @@
 - RandomView 注册 listStateProvider（/random）。
 - scripts/verify-round17.mjs 全部通过：top=0 返回来源页、manifest/全局拦截/无条件写入代码级断言。
 
+## Round17.2 追加修复（用户测试反馈）
+
+- **书架返回仍回首页**：根因 = `recordBackStateForDetail` 用 `window.location.pathname` 记录 fromPath，丢失 query（书架 id）；返回 `router.replace(/offline/bookshelf)` 无 id → 显示全部作品（误为首页）。
+  - 修复：`DetailBackState` 增加 `fromFullPath`（含 query）；`recordBackStateForDetail` 同时记录 pathname + fullPath；两个详情页 handleBack 用 fullPath replace、pathname 做 rememberListState key。
+  - 验证：书架页点卡片 → 返回 → 回到 `/offline/bookshelf?id=<书架id>`（fullPath 生效）。
+- **iPad PWA 底部窄长条**：根因 = WebKit bug 313800（standalone 下 dvh/svh 可能大于 visualViewport，容器底部超出露出 body 背景）。
+  - 修复（参考 claude-wormhole PR#47）：`.app-container` 改 `position: fixed; inset: 0`（撑满 visualViewport）+ html/body `height:100%; min-height:100%`。
+  - 验证：代码级断言 fixed inset-0 已应用（真机需 iPad 复核）。
+
 ## 待确认后再开工
 
 请确认 D1~D3 后开始实现。

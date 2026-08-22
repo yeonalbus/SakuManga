@@ -374,8 +374,10 @@ const handleBack = () => {
   // Round7-任务4：opener 已关闭 → 回到来源列表并恢复位置（读取打开时记录的状态）
   const backState = consumeBackState(gid)
   if (backState) {
+    // Round17.2：rememberListState 用 path 级别 key（列表页注册用），
+    // router.replace 用完整路径（含 query，如书架 id）回到正确页面
     rememberListState(backState.fromPath, { top: backState.top, page: backState.page })
-    router.replace(backState.fromPath)
+    router.replace(backState.fromFullPath || backState.fromPath)
     return
   }
   // S11：由本应用新标签打开（sessionStorage 标记）→ 关闭标签返回列表

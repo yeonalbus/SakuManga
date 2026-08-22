@@ -251,6 +251,14 @@ watch(
   margin: 0;
   padding: 0;
 }
+/* Round17.2：Vue 根节点铺满 —— 修复 iPad PWA 底部手势条安全区避让（Letterbox）导致的窄长条 */
+#app {
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
 /* 移动端防误触：禁止双击缩放/长按选择，交给组件自行处理 */
 html,
 body {
@@ -391,15 +399,15 @@ body {
   border-radius: 3px;
 }
 
-/* 右侧主体包装层：垂直排列顶栏和内容 */
+/* 右侧主体包装层：垂直排列顶栏和内容。
+   Round17.2：容器已是 fixed inset-0，right-wrapper 用 flex:1 撑满即可；
+   不再显式设 100dvh/svh（会与 fixed 容器叠加超出，露出底部窄条） */
 .right-wrapper {
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  /* Round15-Bug1：同上兜底 */
-  height: 100svh;
+  height: auto;
+  min-height: 0;
   overflow: hidden;
   min-width: 0; /* 允许内部内容收缩，避免溢出 */
 }

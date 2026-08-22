@@ -141,10 +141,17 @@ async function codeChecks() {
   const od = fs.readFileSync("src/views/online/OnlineDetail.vue", "utf8")
   if (!od.includes("isStandalonePWA()")) ok("OnlineDetail 已移除 PWA push 首页分支")
   else fail("OnlineDetail 仍有 PWA 分支")
-  // App.vue fixed inset-0（iPad 底部窄长条）
+  // App.vue fixed inset-0 + #app 铺满 + right-wrapper auto（iPad 底部窄长条）
   const app = fs.readFileSync("src/App.vue", "utf8")
   if (app.includes("position: fixed") && app.includes("inset: 0")) ok("App.vue app-container 已改 fixed inset-0（修底部窄条）")
   else fail("App.vue 未用 fixed inset-0")
+  if (app.includes("#app") && app.includes("min-height: 100dvh")) ok("App.vue #app 根节点铺满（防 Letterbox）")
+  else fail("App.vue #app 未铺满")
+  if (app.includes("height: auto") && app.includes("min-height: 0")) ok("App.vue right-wrapper 改 flex 撑满（不再 100dvh 叠加）")
+  else fail("App.vue right-wrapper 未改 auto")
+  const idx = fs.readFileSync("index.html", "utf8")
+  if (idx.includes("maximum-scale=1.0") && idx.includes("user-scalable=no")) ok("index.html viewport 补全（防 iOS Letterbox）")
+  else fail("index.html viewport 未补全")
   // detailNav fromFullPath
   if (dn.includes("fromFullPath")) ok("detailNav 已记录 fullPath（含书架 id）")
   else fail("detailNav 缺 fromFullPath")

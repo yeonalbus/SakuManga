@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ModeToggle from '@/components/ModeToggle.vue'
 import OnlineSidebar from '@/components/OnlineSidebar.vue' // 引入两个侧边栏组件
@@ -18,6 +18,20 @@ const tagStore = useTagStore()
 const userStore = useUserStore()
 const modeStore = useModeStore()
 
+// Round15-Bug4：阅读器路由隐藏全局外壳（TopBar + 侧栏 + 移动 padding 归零）
+const isReaderRoute = computed(() => route.path === '/reader')
+
+// Round15-Bug1：iPad PWA 横屏 dvh 计算异常 → 旋转后强制重布局 + 重算 safe-area
+const handleOrientationChange = () => {
+  // 读取 innerHeight 触发一次同步 reflow，迫使浏览器重算 100dvh/100svh 与 env(safe-area-*)
+  const h = window.innerHeight
+  document.documentElement.style.setProperty('--vp-h', h + 'px')
+  // 兜底：延迟再次触发（iOS 旋转动画期间 dvh 可能仍在过渡）
+  setTimeout(() => {
+    document.documentElement.style.setProperty('--vp-h', window.innerHeight + 'px')
+  }, 300)
+}
+
 // 🍔 窄屏汉堡抽屉状态（<1024px 生效；桌面端侧边栏常驻，汉堡按钮隐藏）
 const isSidebarOpen = ref(false)
 const closeSidebar = () => {
@@ -28,7 +42,10 @@ const handleResize = () => {
   if (window.innerWidth >= 1024) isSidebarOpen.value = false
 }
 onMounted(() => window.addEventListener('resize', handleResize))
-onUnmounted(() => window.removeEventListener('resize', handleResize))
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('orientationchange', handleOrientationChange)
+})
 
 // 🖥️ 布局模式：把 styleSettings.layoutMode 解析为有效形态并写到 <html data-layout>（auto/desktop/mobile）
 useLayoutMode()
@@ -47,6 +64,8 @@ const handleMainScroll = (e: Event) => {
 }
 
 onMounted(() => {
+  // Round15-Bug1：监听横竖屏切换，重算动态视口高度与安全区
+  window.addEventListener('orientationchange', handleOrientationChange)
   // 🚀 应用启动时异步获取翻译字典
   tagStore.fetchTagDictionary()
 
@@ -102,9 +121,9 @@ watch(
     <!-- 抽屉遮罩（窄屏抽屉打开时显示，点击关闭） -->
     <div v-if="isSidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
 
-    <!-- 左侧导航栏（错误边界包裹：单区渲染错误不影响其他区域） -->
+    <!-- 左侧导航栏（错误边界包裹：单区渲染错误不影响其他区域；Round15-Bug4 阅读器隐藏） -->
     <ErrorBoundary>
-      <aside class="sidebar">
+      <aside v-show="!isReaderRoute" class="sidebar">
         <div class="logo-area">
           <span class="logo">E-Manager</span>
           <ModeToggle />
@@ -127,14 +146,19 @@ watch(
 
     <!-- 2. 右侧主体包装层（包含顶栏 + 内容区） -->
     <div class="right-wrapper">
-      <!-- 顶部操作栏 直接调用整合好的顶栏组件（搜索栏在顶栏内，错误边界兜底） -->
+      <!-- 顶部操作栏 直接调用整合好的顶栏组件（搜索栏在顶栏内，错误边界兜底；Round15-Bug4 阅读器隐藏） -->
       <ErrorBoundary>
-        <TopBar />
+        <TopBar v-show="!isReaderRoute" />
       </ErrorBoundary>
 
       <!-- 页面主体显示区 -->
       <ErrorBoundary>
-        <main id="main-content" class="main-content" @scroll="handleMainScroll">
+        <main
+          id="main-content"
+          class="main-content"
+          :class="{ 'reader-fullscreen': isReaderRoute }"
+          @scroll="handleMainScroll"
+        >
           <router-view v-slot="{ Component }">
             <keep-alive>
               <component :is="Component" :key="$route.fullPath" />
@@ -275,6 +299,8 @@ body {
   height: 100vh;
   /* 移动端动态视口：避免浏览器地址栏收起/展开导致布局跳动 */
   height: 100dvh;
+  /* Round15-Bug1：iPad PWA 横屏 dvh 异常时兜底（svh=小视口高度，稳定） */
+  height: 100svh;
   width: 100vw;
   overflow: hidden;
 }
@@ -366,6 +392,8 @@ body {
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
+  /* Round15-Bug1：同上兜底 */
+  height: 100svh;
   overflow: hidden;
   min-width: 0; /* 允许内部内容收缩，避免溢出 */
 }
@@ -401,6 +429,12 @@ body {
   -webkit-overflow-scrolling: touch;
   /* Round12：禁用浏览器原生 scroll anchoring，避免其自选锚点与面板滚动补偿叠加双重位移 */
   overflow-anchor: none;
+}
+
+/* Round15-Bug4：阅读器路由全屏外壳——无 TopBar/侧栏占位，padding 归零 */
+.main-content.reader-fullscreen {
+  padding: 0 !important;
+  background-color: #000;
 }
 
 /* ─────────────────────────────────────────

@@ -12,7 +12,7 @@ import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
 import { API_BASE } from '@/config/api'
 import { useUserStore } from '@/stores/userStore'
-import { isDetailNewTab, consumeBackState } from '@/utils/detailNav'
+import { isDetailNewTab, consumeBackState, isStandalonePWA } from '@/utils/detailNav'
 import { rememberListState } from '@/utils/scrollMemory'
 // Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
 import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
@@ -196,6 +196,11 @@ const handleBack = () => {
   // S11：由本应用新标签打开（sessionStorage 标记）→ 关闭标签返回列表
   if (isDetailNewTab(comicId)) {
     window.close()
+    return
+  }
+  // Round15-Bug3：PWA 下 history 栈异常，back() 会整页刷新；直接回来源/首页
+  if (isStandalonePWA()) {
+    router.push('/offline/home')
     return
   }
   if (window.history.length > 1) {

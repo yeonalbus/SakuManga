@@ -17,6 +17,18 @@ import { captureActiveListState } from '@/utils/scrollMemory'
 
 const NEWTAB_KEY_PREFIX = 'saku_newtab_'
 
+/**
+ * Round15-Bug3：判断是否独立 PWA 窗口（iOS 添加到主屏幕 / Android standalone）。
+ * PWA 下 window.open 受限（不产生可继承 sessionStorage 的新标签），
+ * 返回语义需走「同标签导航 + 来源记录」，否则 router.back() 会触发整页刷新。
+ */
+export function isStandalonePWA(): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.matchMedia('(display-mode: standalone)').matches) return true
+  if ((window.navigator as unknown as { standalone?: boolean }).standalone === true) return true
+  return false
+}
+
 export type ComicNavSource = 'online' | 'offline'
 
 export interface ComicNavTarget {
@@ -129,7 +141,14 @@ export function openComicDetailInNewTab(comic: ComicNavTarget): void {
   }
   markComicOpenedInNewTab(comic.id)
   const href = buildDetailHref(comic)
-  if (href) window.open(href, '_blank')
+  if (!href) return
+  // Round15-Bug3：独立 PWA 窗口下 window.open 不产生可继承 sessionStorage 的新标签，
+  // 改用同标签导航（backState 已写入 sessionStorage，详情返回走 consumeBackState 恢复）。
+  if (isStandalonePWA()) {
+    window.location.href = href
+    return
+  }
+  window.open(href, '_blank')
 }
 
 /**

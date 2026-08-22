@@ -256,6 +256,34 @@ const handleOutsideClick = (e: MouseEvent) => {
   }
 }
 
+// ── Round15-Bug5：收起键盘后正确关闭搜索历史/联想面板 ──
+// iOS 点键盘「收起」不触发 blur/click，用 visualViewport 高度恢复检测键盘收起。
+let blurTimer: number | null = null
+const handleInputBlur = () => {
+  // 延迟关闭：让联想项 mousedown/touchstart 先触发（mousedown 在 blur 前），避免误关
+  blurTimer = window.setTimeout(() => {
+    isFocused.value = false
+  }, 120)
+}
+const handleInputFocus = () => {
+  if (blurTimer) {
+    clearTimeout(blurTimer)
+    blurTimer = null
+  }
+  isFocused.value = true
+}
+// visualViewport：键盘弹起视口变矮，收起后恢复全高 → 关闭面板
+let vvHeight = typeof window !== 'undefined' && window.visualViewport ? window.visualViewport.height : 0
+const handleVisualViewport = () => {
+  if (!window.visualViewport) return
+  const prev = vvHeight
+  vvHeight = window.visualViewport.height
+  if (prev > 0 && vvHeight >= prev && isFocused.value) {
+    // 键盘收起（视口高度恢复）→ 关闭搜索历史/联想
+    isFocused.value = false
+  }
+}
+
 // 📱 移动形态（≤1024px）：搜索框提示文案精简，节省横向空间
 const narrowMql = window.matchMedia('(max-width: 1024px)')
 const isNarrow = ref(narrowMql.matches)
@@ -270,11 +298,21 @@ onMounted(() => {
   loadSearchHistory()
   window.addEventListener('click', handleOutsideClick)
   narrowMql.addEventListener('change', onNarrowChange)
+  // Round15-Bug5：键盘收起监听
+  if (window.visualViewport) {
+    vvHeight = window.visualViewport.height
+    window.visualViewport.addEventListener('resize', handleVisualViewport)
+  }
 })
 
 onUnmounted(() => {
   window.removeEventListener('click', handleOutsideClick)
   narrowMql.removeEventListener('change', onNarrowChange)
+  // Round15-Bug5
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', handleVisualViewport)
+  }
+  if (blurTimer) clearTimeout(blurTimer)
 })
 
 // 🎛️ 筛选并入搜索：入口在搜索框内（FilterDrawer 全屏抽屉，按当前模式分域保存不串味）
@@ -326,7 +364,8 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
         type="text"
         class="search-input"
         :placeholder="searchPlaceholder"
-        @focus="isFocused = true"
+        @focus="handleInputFocus"
+        @blur="handleInputBlur"
         @keyup.enter="triggerSearch()"
       />
       <!-- 🎛️ 筛选入口（原 TopBar 齿轮按钮移入搜索框内，激活态显示红点） -->

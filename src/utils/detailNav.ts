@@ -128,9 +128,9 @@ export function consumeBackState(id: string): DetailBackState | undefined {
 }
 
 /** 在新浏览器标签打开漫画详情，并写入新标签标记（供 S11 返回语义判断） */
-export function openComicDetailInNewTab(comic: ComicNavTarget): void {
+/** 记录来源列表状态（SPA 跳转前调用，sessionStorage 共享供返回恢复） */
+export function recordBackStateForDetail(comic: ComicNavTarget): void {
   if (!comic?.id) return
-  // Round7：打开详情前记录来源列表状态，供新标签在 opener 已关闭时返回并恢复位置
   const listState = captureActiveListState()
   if (listState) {
     recordBackState(comic.id, {
@@ -139,16 +139,35 @@ export function openComicDetailInNewTab(comic: ComicNavTarget): void {
       page: listState.page,
     })
   }
+}
+
+/**
+ * 打开漫画详情（Round16：统一 SPA 同标签跳转，根治 PWA 逃逸）。
+ * - 调用方（组件内 useRouter）拿到 href 后 router.push 到该路径；
+ * - 跳转前调用 recordBackStateForDetail 记录来源（返回恢复滚动/页码）；
+ * - 不再使用 window.location.href / window.open（iOS PWA 下整页导航会逃逸到 Safari 标签页）。
+ */
+export function buildDetailRoute(comic: ComicNavTarget): { path: string; query: Record<string, string> } | null {
+  if (!comic?.id) return null
+  if (comic.source === 'offline') {
+    return { path: '/offline/detail', query: { id: comic.id, ...(comic.resume ? { resume: '1' } : {}) } }
+  }
+  const query: Record<string, string> = { id: comic.id }
+  if (comic.token) query.token = comic.token
+  if (comic.resume) query.resume = '1'
+  return { path: '/online/detail', query }
+}
+
+/**
+ * 在新浏览器标签打开漫画详情（Round16 起仅供非 PWA 桌面场景使用；
+ * 内部记录来源 + 新标签标记，返回靠 window.opener/backState）。
+ */
+export function openComicDetailInNewTab(comic: ComicNavTarget): void {
+  if (!comic?.id) return
+  recordBackStateForDetail(comic)
   markComicOpenedInNewTab(comic.id)
   const href = buildDetailHref(comic)
-  if (!href) return
-  // Round15-Bug3：独立 PWA 窗口下 window.open 不产生可继承 sessionStorage 的新标签，
-  // 改用同标签导航（backState 已写入 sessionStorage，详情返回走 consumeBackState 恢复）。
-  if (isStandalonePWA()) {
-    window.location.href = href
-    return
-  }
-  window.open(href, '_blank')
+  if (href) window.open(href, '_blank')
 }
 
 /**

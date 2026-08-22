@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
-import { openComicDetailInNewTab } from '@/utils/detailNav'
+import { buildDetailRoute, recordBackStateForDetail } from '@/utils/detailNav'
+import { useRouter } from 'vue-router'
 
 const props = withDefaults(
   defineProps<{
@@ -18,9 +19,14 @@ defineEmits<{
 }>()
 
 /** 左上角标题作为触发键：点击在新浏览器标签打开完整详情（等价中键 / Ctrl / Meta + 点击；S10 统一入口） */
+const router = useRouter()
 const openFullDetail = () => {
   if (!props.open || !props.gid) return
-  openComicDetailInNewTab({ id: props.gid, token: props.token, source: 'online' })
+  // Round16：SPA 同标签跳转（根治 PWA 逃逸）
+  const target = { id: props.gid, token: props.token, source: 'online' as const }
+  recordBackStateForDetail(target)
+  const route = buildDetailRoute(target)
+  if (route) router.push(route)
 }
 </script>
 

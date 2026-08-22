@@ -12,7 +12,7 @@ import {
   subscribeActiveDownloads,
 } from '@/stores/downloadTasksStore'
 import { useUI } from '@/composables/useUI'
-import { openComicDetailInNewTab } from '@/utils/detailNav'
+import { openComicDetailInNewTab, buildDetailRoute, recordBackStateForDetail } from '@/utils/detailNav'
 // Round10-Bug2：卡片评分统一走「生效评分」（离线优先个人评分，回退社区评分）
 import { getEffectiveRating } from '@/stores/ratingStore'
 
@@ -141,16 +141,25 @@ const handlePointerUp = () => {
 // 4. 点击卡片主体：选择模式切换选中，否则跳转详情页
 // --------------------------------------------------
 // 🆕 中键 / Ctrl / Meta + 点击 → 新浏览器标签打开详情（web 原生优势；S10 统一入口）
-const openInNewTab = () => {
+// Round16：打开详情——默认 SPA 同标签跳转（根治 PWA 逃逸，返回保留来源状态）；
+// forceNewTab=true（中键/Ctrl+点击）时保持新标签（桌面习惯）。
+const openDetailNav = (forceNewTab = false) => {
   if (!props.comic?.id) return
   addHistory(props.comic)
-  openComicDetailInNewTab({
+  const target = {
     id: props.comic.id,
     token: props.comic.source === 'online' ? onlineComic.value?.token || '' : undefined,
     source: props.comic.source === 'online' ? 'online' : 'offline',
-    // Round7-任务6：历史入口卡片始终从上次位置开始
     resume: props.fromHistory,
-  })
+  } as const
+  if (forceNewTab) {
+    openComicDetailInNewTab({ ...target })
+    return
+  }
+  // SPA 同标签跳转：记录来源（返回恢复滚动/页码），再 router.push
+  recordBackStateForDetail({ ...target })
+  const route = buildDetailRoute({ ...target })
+  if (route) router.push(route)
 }
 
 const handleCardClick = (event?: MouseEvent) => {
@@ -171,7 +180,7 @@ const handleCardClick = (event?: MouseEvent) => {
   // 🆕 中键 / Ctrl / Meta + 点击 → 新标签打开详情
   if (event && (event.button === 1 || event.ctrlKey || event.metaKey)) {
     event.preventDefault()
-    openInNewTab()
+    openDetailNav(true)
     return
   }
 
@@ -195,8 +204,8 @@ const handleCardClick = (event?: MouseEvent) => {
       },
     })
   } else {
-    // S10：离线卡片点击 → 新标签打开详情（返回语义见 S11）
-    openComicDetailInNewTab({ id: props.comic.id, source: 'offline', resume: props.fromHistory })
+    // Round16：离线卡片点击 → SPA 同标签打开详情（返回保留来源页状态；不再 window.open 避免 PWA 逃逸）
+    openDetailNav()
   }
 }
 

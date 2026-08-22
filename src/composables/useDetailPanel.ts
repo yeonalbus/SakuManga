@@ -1,12 +1,12 @@
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   getDetailPanelState,
   openDetailPanel,
   closeDetailPanel,
   migrateDetailPanel,
 } from '@/stores/detailPanelStore'
-import { openComicDetailInNewTab } from '@/utils/detailNav'
+import { buildDetailRoute, recordBackStateForDetail } from '@/utils/detailNav'
 // Round12：面板开/关引起网格重排后，滚动补偿保持被锚定卡片在视线焦点
 import { getMainContent } from '@/utils/scrollMemory'
 
@@ -83,6 +83,7 @@ const compensateAfterLayout = async (anchor: HTMLElement | null, before: number 
 
 export function useDetailPanel() {
   const route = useRoute()
+  const router = useRouter()
 
   const isWide = ref(false)
   const isPanelOpen = ref(false)
@@ -156,13 +157,16 @@ export function useDetailPanel() {
       // Round12：布局稳定后把被点卡片平移回原视口位置（保持视线焦点）
       if (!wasOpen) void compensateAfterLayout(anchorEl, anchorBefore)
     } else {
-      // 窄屏 / 强制移动：面板不渲染，新标签打开完整详情
-      openComicDetailInNewTab({
+      // 窄屏 / 强制移动：面板不渲染 → SPA 同标签打开完整详情（Round16 根治 PWA 逃逸）
+      const target = {
         id: comic.id,
         token: comic.token || '',
-        source: 'online',
+        source: 'online' as const,
         resume: opts.fromHistory,
-      })
+      }
+      recordBackStateForDetail(target)
+      const route = buildDetailRoute(target)
+      if (route) router.push(route)
     }
   }
 

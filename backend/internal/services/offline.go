@@ -1344,6 +1344,10 @@ func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	if err := db.Delete(&comic).Error; err != nil {
 		return fmt.Errorf("删除漫画记录失败: %v", err)
 	}
+	// Round20-Bug1/Bug4：删除后清理各用户引用（历史/书架/离线阅读清单）。
+	// 若存在同 gid 的其他记录（查重删除场景），引用迁移到该记录；否则直接清除孤儿引用。
+	replacement := FindReplacementByGID(db, comic.GID, comicID)
+	CleanupComicReferences(db, comicID, replacement)
 	// 需求4：删除记录视为书库变更，记录时间戳供「队列空闲>1min」自动增量维护查重判断。
 	MarkLibraryChanged()
 	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)

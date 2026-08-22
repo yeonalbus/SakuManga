@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -436,11 +437,45 @@ func (h *LibraryHandler) GetHistory(c *gin.Context) {
 	}
 
 	var records []models.HistoryRecord
-	if err := q.Order("last_read_at desc").Limit(limit).Find(&records).Error; err != nil {
+	// Round20-Bug1：离线历史按 gid 合并去重（同 gid 不同 comic_id 视为同一本子，保留最新一条）。
+	// 为避免重复条目挤占 limit 名额，离线先多取（2 倍，上限 1000）再按 gid 去重后截断。
+	fetchLimit := limit
+	if source == "offline" {
+		fetchLimit = limit * 2
+		if fetchLimit > 1000 {
+			fetchLimit = 1000
+		}
+	}
+	if err := q.Order("last_read_at desc").Limit(fetchLimit).Find(&records).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取历史失败"})
 		return
 	}
+	if source == "offline" {
+		records = dedupeHistoryByGid(records)
+		if len(records) > limit {
+			records = records[:limit]
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"items": records, "total": len(records)})
+}
+
+// dedupeHistoryByGid 按 gid（缺省回退 comic_id）去重历史记录，保留首次出现（最新）的一条。
+// 入参 records 须已按 last_read_at 降序。
+func dedupeHistoryByGid(records []models.HistoryRecord) []models.HistoryRecord {
+	seen := map[string]bool{}
+	out := make([]models.HistoryRecord, 0, len(records))
+	for _, r := range records {
+		key := r.GID
+		if key == "" {
+			key = r.ComicID
+		}
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	return out
 }
 
 // AddHistory 写入/更新一条历史记录 POST /api/v1/history
@@ -454,6 +489,7 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 	var req struct {
 		ComicID          string `json:"comicId" binding:"required"`
 		Source           string `json:"source" binding:"required"`
+		Gid              string `json:"gid"`
 		ComicTitle       string `json:"comicTitle"`
 		CoverURL         string `json:"coverUrl"`
 		Token            string `json:"token"`
@@ -470,11 +506,22 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 		return
 	}
 
+	// Round20-Bug1：离线历史同 gid 合并——同 gid 不同 comic_id（更新替换/重扫产生的新旧 id）
+	// 视为同一本子，写入前删除该用户同 gid 的其他行，保证每本每用户仅一条历史。
+	if req.Source == "offline" && req.Gid != "" {
+		if err := h.db.Where("user_id = ? AND source = ? AND g_id = ? AND comic_id != ?",
+			user.ID, req.Source, req.Gid, req.ComicID).
+			Delete(&models.HistoryRecord{}).Error; err != nil {
+			log.Printf("[LIBRARY-WARN] 合并同 gid 历史失败: %v", err)
+		}
+	}
+
 	var rec models.HistoryRecord
 	if err := h.db.Where("user_id = ? AND comic_id = ? AND source = ?", user.ID, req.ComicID, req.Source).First(&rec).Error; err != nil {
 		rec = models.HistoryRecord{
 			UserID:     user.ID,
 			ComicID:    req.ComicID,
+			GID:        req.Gid,
 			Source:     models.ComicSource(req.Source),
 			ComicTitle: req.ComicTitle,
 			CoverURL:   req.CoverURL,
@@ -502,6 +549,10 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 	}
 	if req.TotalPageCount > 0 {
 		rec.TotalPageCount = req.TotalPageCount
+	}
+	// Round20-Bug1：已有记录缺 gid 时回填（旧数据/迁移场景，供后续按 gid 合并去重）
+	if rec.GID == "" && req.Gid != "" {
+		rec.GID = req.Gid
 	}
 	rec.LastReadAt = time.Now()
 	if err := h.db.Save(&rec).Error; err != nil {

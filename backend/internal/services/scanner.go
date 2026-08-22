@@ -344,6 +344,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 				log.Printf("%s [scan] gid=%s 由压缩包 %q 升级为文件夹 %q，移除旧压缩包记录",
 					dlLogTag, meta.GID, existing.LocalPath, localPath)
 				database.DB.Delete(&existing)
+				// Round20-Bug1/Bug4：压缩包记录被替换 → 历史/书架/阅读清单引用迁移到新文件夹记录
+				CleanupComicReferences(database.DB, existing.ID, comicID)
 			}
 		}
 	}

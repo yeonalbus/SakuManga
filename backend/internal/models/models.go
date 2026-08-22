@@ -125,6 +125,7 @@ type HistoryRecord struct {
 	ID               uint        `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID           uint        `gorm:"index" json:"userId"`
 	ComicID          string      `gorm:"index" json:"comicId"`
+	GID              string      `gorm:"index" json:"gid,omitempty"` // 画廊 GID（Round20：离线历史按 gid 合并去重；在线历史与 comicId 相同）
 	Source           ComicSource `json:"source"`
 	ComicTitle       string      `json:"comicTitle"`
 	CoverURL         string      `json:"coverUrl"`

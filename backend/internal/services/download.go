@@ -317,6 +317,9 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 		if err := m.db.Delete(&old).Error; err != nil {
 			log.Printf("%s [update] 任务 %s 删除旧版记录失败: %v", dlErrTag, task.ID, err)
 		} else {
+			// Round20-Bug1/Bug4：旧版记录删除后清理引用（历史/书架/离线阅读清单）。
+			// 新版本记录由后续扫描生成（此时尚不存在），无法迁移 → 直接清除旧 id 的孤儿引用。
+			CleanupComicReferences(m.db, old.ID, "")
 			// 需求4：旧版已删除 → 记录书库变更 + 使维护查重结果过期（被删项移除）
 			MarkLibraryChanged()
 			InvalidateMaintainDedupResult([]string{old.ID})

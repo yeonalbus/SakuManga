@@ -311,15 +311,17 @@ body {
 
 .app-container {
   display: flex;
-  /* Round18：对齐 sunpanel 思路——去掉 fixed inset-0（会把上下钉死，底部贴不到真实屏幕底，
-     漏出安全区残余白条）；改文档流 + 顶部 padding 让出 safe-area，把内容整体下推到状态栏之下，
-     底部自然贴底不再溢出。 */
-  height: 100vh;
+  /* Round18：对齐 sunpanel 思路——去 fixed inset-0，改文档流；
+     高度用 100vh 优先（iOS standalone 下 = 完整屏幕含状态栏，比被偏小布局视口钳制的
+     100dvh/svh 更接近真实屏，修复底部截断条）；100dvh/svh 仅兜底。
+     顶部 padding 保留：让出 safe-area，防误触下拉通知栏（用户确认保留）。 */
+  /* 100vh 放最后 = 最终生效（iOS standalone 下 = 完整屏幕）；dvh/svh 仅旧浏览器兜底 */
   height: 100dvh;
   height: 100svh;
+  height: 100vh;
   width: 100vw;
   overflow: hidden;
-  /* 顶部让位：iOS PWA 状态栏高度（竖屏顶部刘海 / 横屏两侧） */
+  /* 顶部让位：iOS PWA 状态栏高度（竖屏顶部刘海 / 横屏两侧），防误触下拉通知栏 */
   padding-top: var(--safe-top);
   /* 安全区区域与内容同色 */
   background-color: var(--app-bg);

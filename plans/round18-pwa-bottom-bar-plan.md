@@ -1,41 +1,34 @@
-# Round18 修复 iPad PWA 底部白色窄条（sunpanel 方案：顶部让出 safe-area 下推内容）
+# Round18.2 修复 iPad PWA 底部截断条（改用 100vh 全屏 + 背景铺满）
 
-## 现象与线索
+## 现象与根因（用户两张截图确认）
 
-| 线索 | 结论 |
+| 现象 | 结论 |
 |------|------|
-| 仅 iPad PWA（standalone）出现；桌面/手机/Safari 均无 | iOS PWA 特有 |
-| 横竖屏都有、滚动到底部无变化、不影响交互 | 静态孤儿条（安全区残余） |
-| 窄条像 Home Indicator 把界面顶上去，随后 Home Indicator 消失只留窄条 | 底部安全区区域未被正确占据 |
-| sunpanel / sillytavern 同为 PWA 无此问题，做法是「顶部留出 safe-area 高度 + 内容往下移」 | 修复方向：顶部让位下推，底部不再溢出 |
-| 用户确认：方向 = 顶部留出 safe-area + 内容下移；背景色 = var(--app-bg) | 决策已定 |
+| 底部窄条 = 纯背景色空白，无边框 | 是容器高度不足露出的背景，非元素 |
+| 窄条横向略超内容区，截断卡片网格 | 容器底部到不了真实屏幕底 |
+| 深色/浅色主题都有 | 与颜色无关，是布局高度问题 |
+| 顶部无空隙，底部却有一条 | 顶部贴近（safe-top 生效），底部 dvh 算小 |
+
+### 根因：dvh/百分号被偏小的布局视口钳制
+
+- `.app-container` 用 `height: 100dvh / 100svh`，但父链 `#app`、`html/body` 都是 `height: 100%`；
+- **iPad PWA standalone 下，`html/body` 的 100% 与 `#app` 的 100% 基于「布局视口」**（WebKit bug 313800：比真实屏幕矮一截），`.app-container` 的 `100dvh` 被这个偏小的父级钳制 → 容器高度 < 真实屏幕 → 底部漏出背景条；
+- `position: fixed; inset: 0`（Round17.2）同样贴布局视口 ≠ 真实屏幕；
+- **`100vh` 在 iOS standalone 下 = 完整屏幕（含状态栏）**，比 `100dvh`/`svh` 更接近真实屏幕——sunpanel 全屏蓝图正是如此。
 
 ---
 
-## 根因
-
-- [App.vue](src/App.vue) `.app-container` 用 `position: fixed; inset: 0`（[312-324 行](src/App.vue:312)）：
-  - `top:0` 使内容**顶到状态栏下沿**（延伸进状态栏区域）；
-  - `bottom:0` 参考的底边是**布局视口**（iOS standalone 下比真实屏幕矮，WebKit bug 313800）→ 容器底部贴不到真实屏幕底 → 屏幕最底部漏出安全区残余白条；
-- `fixed inset-0` 把上下都钉死，无法「往下挤」——与 sunpanel 思路冲突。
-
----
-
-## 修复方案（对齐 sunpanel：顶部让位下推，底部贴底）
+## 修复方案
 
 **1a. [App.vue](src/App.vue) `.app-container`**：
-   - 去掉 `position: fixed; inset: 0`；
-   - 改回文档流：`height: 100vh / 100dvh / 100svh`（兜底链保留），`width: 100vw`，`overflow: hidden`；
-   - **顶部 `padding-top: var(--safe-top)`**：把整个应用内容（含侧栏 + 顶栏）**往下推到状态栏之下**，让出顶部安全区；
-   - 背景色 `background-color: var(--app-bg)`（html 已设，容器也铺上保证安全区同色）。
+   - 去掉 `padding-top: var(--safe-top)`（竖屏 safe-top 用 padding 下推反而在 dvh 偏小时把顶部也漏出，且 iPad 竖屏无刘海 safe-top 本就 ≈0）；
+   - `height: 100vh` 作为**首要单位**（iOS standalone 下等于完整屏），`100dvh`/`100svh` 仅作兜底；
+   - 背景 `background-color: var(--app-bg)`（已设，保留，安全区区域同色）；
+   - 保留文档流（非 fixed）。
 
-**1b. [App.vue](src/App.vue) `.right-wrapper`**：
-   - 改回 `height: 100%`（在文档流 flex 容器内撑满剩余高度），`min-height: 0` 保留；
-   - 不再依赖 fixed 容器。
+**1b. `.main-content`**：`padding: 24px` 保留；滚动 `overflow-y: auto` 保留（卡片网格可滚动）。
 
-**1c. [App.vue](src/App.vue) html**：保留 Round17.2 已加的 `background-color: var(--app-bg)`（D1=A，安全区区域同色兜底）。
-
-**1d. 顶部 TopBar 内部**：`.top-bar` 高 56px 不变；由于 app-container 已整体下移 safe-top，TopBar 自然位于状态栏下方。
+**1c. html/body/#app**：保留 `height: 100%` + `background-color: var(--app-bg)`（铺满到状态栏/安全区）。
 
 ---
 
@@ -43,27 +36,26 @@
 
 | 文件 | 改动 |
 |------|------|
-| src/App.vue | app-container 去 fixed、加 padding-top safe-top；right-wrapper height:100% |
-| scripts/verify-round18.mjs | 代码级断言（无 fixed inset-0、有 padding-top safe-top、html 背景色） |
-| plans/round18-pwa-bottom-bar-plan.md | 本计划 |
+| src/App.vue | app-container：去 padding-top，height 首用 100vh |
+| scripts/verify-round18.mjs | 断言 app-container 无 padding-top、height 含 100vh 首项 |
+| plans/round18-pwa-bottom-bar-plan.md | 追加本方案 |
 
 ---
 
 ## 验证方案
 
 1. type-check + 构建 + 同步 dist；
-2. verify-round18.mjs：断言 app-container 无 position:fixed、有 padding-top: var(--safe-top)、html/body 背景色；
-3. 真机复核：iPad PWA 横竖屏底部白条消失、顶部内容从状态栏下方开始。
+2. verify-round18.mjs：断言容器无 padding-top、height:100vh 优先；
+3. 真机复核：iPad PWA 竖/横屏底部截断条消失、内容铺满。
 
-## 实施结果
+## Round18.2 实施结果
 
-- `.app-container`：去掉 `position: fixed; inset: 0`（会把上下钉死，底部贴不到真实屏幕底漏白条）；改文档流 + `padding-top: var(--safe-top)` 顶部让位下推（sunpanel 思路），保留 dvh/svh 兜底；
-- `.right-wrapper`：改回 `height: 100%`（文档流 flex 撑满）；
-- `.main-content`（mobile 形态）：`padding-top: calc(56px + var(--safe-top))` → `56px`（外层已下移，去重复 safe-top）；
-- html/body 已设 `background-color: var(--app-bg)`（D1=A，安全区残余同色兜底）。
-- `verify-round18.mjs` 全部通过（去 fixed / 加 safe-top / dvh 兜底 / html 背景色）。
+- 用户确认：保留 padding-top（防误触下拉通知栏）+ 同意 100vh 方案；
+- `.app-container`：`100vh` 最后声明（最终生效 = iOS standalone 完整屏），dvh/svh 前置兜底；padding-top 保留；
+- 构建产物确认 `.app-container{height:100vh;...}` 生效；
+- `verify-round18.mjs` 全部通过（去 fixed / padding-top 保留 / 100vh 最后 / html 背景色）。
 
-## 决策已确认（用户 2026-08-22）
+## 待确认
 
-- 方向：顶部留出 safe-area 高度 + 内容往下移，底部不再溢出；
-- 背景色：var(--app-bg)。
+- 方案核心 = 用 iOS standalone 下等于完整屏的 `100vh` 替代被偏小布局视口钳制的 `100dvh`。
+- 若 100vh 仍出现底部条，则退一步用 `visualViewport.height` JS 动态撑高（DEV 文章验证的 display 翻转重算技巧）。

@@ -16,10 +16,13 @@ async function codeChecks() {
   const cont = app.slice(app.indexOf(".app-container {"), app.indexOf(".sidebar {"))
   if (cont.includes("position: fixed") && cont.includes("inset: 0")) fail("app-container 仍为 fixed inset-0")
   else ok("app-container 已去 fixed inset-0（改文档流）")
-  if (cont.includes("padding-top: var(--safe-top)")) ok("app-container 已加顶部 safe-area 下推")
+  if (cont.includes("padding-top: var(--safe-top)")) ok("app-container 保留顶部 safe-area（防误触下拉通知栏）")
   else fail("app-container 缺 padding-top: var(--safe-top)")
-  if (cont.includes("height: 100dvh") && cont.includes("height: 100svh")) ok("app-container 保留 dvh/svh 兜底")
-  else fail("app-container 缺 dvh/svh 兜底")
+  // 100vh 应最后声明（最终生效，iOS standalone 完整屏）；dvh/svh 在前仅旧浏览器兜底
+  const vhIdx = cont.indexOf("height: 100vh")
+  const dvhIdx = cont.indexOf("height: 100dvh")
+  if (vhIdx >= 0 && dvhIdx >= 0 && vhIdx > dvhIdx) ok("app-container 100vh 最后声明（最终生效）")
+  else fail("app-container 100vh 未最后声明: " + cont.slice(cont.indexOf("height:"), cont.indexOf("width:")))
   // 2) right-wrapper height:100%
   const wrap = app.slice(app.indexOf(".right-wrapper {"), app.indexOf("/* 顶部操作栏 */"))
   if (wrap.includes("height: 100%")) ok("right-wrapper 文档流内 height:100% 撑满")

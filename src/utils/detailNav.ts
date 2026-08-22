@@ -1,21 +1,22 @@
 /**
- * 漫画详情「新标签导航」与「返回语义」公共工具（S10 / S11）
+ * 漫画详情「新标签导航」与「返回语义」公共工具（S10 / S11 / Round21 平台分流）
  *
  * 背景：S10 统一「在线窄屏 / 离线卡片」点击在浏览器新标签打开完整详情页；
  * 详情页返回按钮（S11）需区分两种来源：
  *   1. 由本应用 window.open 打开的新标签 → 返回 = 关闭标签（window.close）；
  *   2. 同标签路由跳转 → 返回 = 浏览器历史回退 / 首页兜底。
  *
- * 判定依据（双保险）：
- *   - window.opener 存在：window.open 建立的同源父子窗口关系；
- *   - sessionStorage 标记 saku_newtab_<id>：父标签在 window.open「之前」写入，
- *     新标签因「同源首次导航会复制 opener 的 sessionStorage」继承该标记；
- *     关闭标签即自动清理该会话，无需手动清除。
+ * Round21（平台分流）：PC 桌面（宽视口 + 非 PWA）内容类跳转恢复新标签，
+ * PWA / 窄屏维持 SPA 同标签。返回关闭标签仅当「opener 存活（来源标签在）+
+ * 当前路由 == 标签入口路由（防误关）+ 非单标签」三者同时成立，否则回来源。
  */
 
 import { captureActiveListState } from '@/utils/scrollMemory'
+// Round21：openContentTab 弹窗被拦截时降级同标签跳转（需访问 router 实例）
+import router from '@/router'
 
-const NEWTAB_KEY_PREFIX = 'saku_newtab_'
+// Round21：新标签「标签入口路由」记录（返回时判定「当前页==入口才允许 close」）
+const TAB_ENTRY_KEY_PREFIX = 'saku_tab_entry_'
 
 /**
  * Round15-Bug3：判断是否独立 PWA 窗口（iOS 添加到主屏幕 / Android standalone）。
@@ -29,6 +30,81 @@ export function isStandalonePWA(): boolean {
   return false
 }
 
+/**
+ * Round21：PC 桌面判定——内容类跳转（详情/阅读）是否开新标签。
+ * 条件：宽视口（≥1025px）且非 PWA standalone 且非强制移动形态。
+ * PWA（iPad/Android 主屏）与窄屏一律同标签 SPA（Round15/16 修复不得回归）。
+ */
+export function contentOpensNewTab(): boolean {
+  if (typeof window === 'undefined') return false
+  if (isStandalonePWA()) return false
+  const layout = document.documentElement.getAttribute('data-layout')
+  if (layout === 'mobile') return false
+  return window.matchMedia('(min-width: 1025px)').matches
+}
+
+// ── Round21：标签入口路由记录（防误关） ──
+
+/** 写入「该 id 被以新标签打开时的入口路由」（仅 window.open 成功后才写） */
+function setTabEntry(id: string, href: string): void {
+  if (!id || !href) return
+  try {
+    sessionStorage.setItem(`${TAB_ENTRY_KEY_PREFIX}${id}`, href)
+  } catch {
+    /* 存储不可用时静默降级 */
+  }
+}
+
+/** 读取标签入口路由（不消费，标签生命周期内保留；关闭后随会话消失） */
+function readTabEntry(id: string): string | undefined {
+  if (!id) return undefined
+  try {
+    return sessionStorage.getItem(`${TAB_ENTRY_KEY_PREFIX}${id}`) || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Round21：统一内容页打开（详情/阅读器）。
+ * - 应开新标签（PC 桌面 / force 强制）→ 记录来源 + 入口路由，window.open；
+ *   弹窗被拦截（open 返回 null）→ 不写任何标记，降级同标签跳转；
+ * - 不应开新标签（PWA/窄屏）→ 同标签 SPA 跳转。
+ * @returns true=已在新标签打开
+ */
+export function openContentTab(opts: { href: string; id: string }, forceNewTab = false): boolean {
+  const { href, id } = opts
+  if (!href || !id) return false
+  const shouldNewTab = forceNewTab || contentOpensNewTab()
+  if (!shouldNewTab) {
+    router.push(href)
+    return false
+  }
+  recordBackStateForDetail({ id })
+  const w = window.open(href, '_blank')
+  if (w) {
+    setTabEntry(id, href)
+    return true
+  }
+  // 弹窗被拦截：降级同标签跳转（不写标记，避免残留导致后续误判新标签）
+  router.push(href)
+  return false
+}
+
+/**
+ * Round21：返回时是否应关闭当前标签页。
+ * 规则（决策 D2=A+自定义 / D5=A）：
+ * ① 存在来源标签（opener 存活）——关闭后用户仍有可回页面；
+ * ② 当前路由 == 该标签被打开时的入口路由——标签内后续 SPA 导航不误关。
+ * 仅剩单标签（无 opener / opener 已关）或已离开入口页 → false（回来源不关）。
+ */
+export function shouldCloseTab(id: string, currentFullPath: string): boolean {
+  if (!id || typeof window === 'undefined') return false
+  if (!window.opener || window.opener.closed) return false
+  const entry = readTabEntry(id)
+  return !!entry && entry === currentFullPath
+}
+
 export type ComicNavSource = 'online' | 'offline'
 
 export interface ComicNavTarget {
@@ -40,29 +116,6 @@ export interface ComicNavTarget {
   source?: ComicNavSource
   /** Round7：历史入口打开详情时标记，详情页「立即阅读」从上次位置开始 */
   resume?: boolean
-}
-
-/** 写入「由本应用新标签打开」标记。必须在 window.open 之前调用，新标签才能继承 */
-export function markComicOpenedInNewTab(id: string): void {
-  if (!id) return
-  try {
-    sessionStorage.setItem(`${NEWTAB_KEY_PREFIX}${id}`, '1')
-  } catch {
-    /* 隐私模式 / 存储不可用时静默降级（仍有 window.opener 判定兜底） */
-  }
-}
-
-/** 读取并消费新标签标记（读取后删除，避免残留污染同标签后续返回语义） */
-export function consumeComicNewTabMark(id: string): boolean {
-  if (!id) return false
-  try {
-    const key = `${NEWTAB_KEY_PREFIX}${id}`
-    const hit = sessionStorage.getItem(key) === '1'
-    if (hit) sessionStorage.removeItem(key)
-    return hit
-  } catch {
-    return false
-  }
 }
 
 /** 构造详情页路由 URL（应用 createWebHistory() 无 base，直接拼接绝对路径） */
@@ -164,24 +217,11 @@ export function buildDetailRoute(comic: ComicNavTarget): { path: string; query: 
 }
 
 /**
- * 在新浏览器标签打开漫画详情（Round16 起仅供非 PWA 桌面场景使用；
- * 内部记录来源 + 新标签标记，返回靠 window.opener/backState）。
+ * 在新浏览器标签打开漫画详情（强制新标签：中键/Ctrl 点击、对比页入口）。
+ * Round21：统一走 openContentTab（记录来源 + 入口路由；open 被拦截时降级同标签）。
  */
 export function openComicDetailInNewTab(comic: ComicNavTarget): void {
   if (!comic?.id) return
-  recordBackStateForDetail(comic)
-  markComicOpenedInNewTab(comic.id)
   const href = buildDetailHref(comic)
-  if (href) window.open(href, '_blank')
-}
-
-/**
- * 判断当前详情页是否由本应用新标签打开：
- * - window.opener 非空（window.open 建立的父子关系）；
- * - 或 sessionStorage 新标签标记命中（opener 被导航 / 关闭时兜底）。
- * 命中则详情页返回按钮应 window.close() 关闭标签。
- */
-export function isDetailNewTab(id: string): boolean {
-  if (window.opener) return true
-  return consumeComicNewTabMark(id)
+  if (href) openContentTab({ href, id: comic.id }, true)
 }

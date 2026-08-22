@@ -15,6 +15,8 @@ import type { ComicItem } from '@/types/comic'
 // Round11-Opt1：从书架快速导入（仅离线，增量式、按书架内顺序）
 import { bookshelves, loadBookshelves } from '@/stores/bookshelfStore'
 import { offlineComics, fetchOfflineComics } from '@/stores/comicStore'
+// Round21：PC 桌面新标签打开阅读器
+import { openContentTab } from '@/utils/detailNav'
 
 const router = useRouter()
 const { toast, modal } = useUI()
@@ -41,7 +43,9 @@ const handleRead = (comic: ComicItem) => {
   if (src === 'online') {
     query.token = (comic as { token?: string }).token || ''
   }
-  router.push({ path: '/reader', query })
+  // Round21：PC 桌面新标签打开阅读器；PWA/窄屏或弹窗被拦截 → 降级同标签
+  const href = router.resolve({ path: '/reader', query }).href
+  openContentTab({ href, id: comic.id })
 }
 
 // 移出清单（Round10-Opt2：显式、幂等，只影响清单本身）

@@ -12,7 +12,7 @@ import {
   subscribeActiveDownloads,
 } from '@/stores/downloadTasksStore'
 import { useUI } from '@/composables/useUI'
-import { openComicDetailInNewTab, buildDetailRoute, recordBackStateForDetail } from '@/utils/detailNav'
+import { openComicDetailInNewTab, buildDetailRoute, recordBackStateForDetail, contentOpensNewTab } from '@/utils/detailNav'
 // Round10-Bug2：卡片评分统一走「生效评分」（离线优先个人评分，回退社区评分）
 import { getEffectiveRating } from '@/stores/ratingStore'
 
@@ -141,8 +141,8 @@ const handlePointerUp = () => {
 // 4. 点击卡片主体：选择模式切换选中，否则跳转详情页
 // --------------------------------------------------
 // 🆕 中键 / Ctrl / Meta + 点击 → 新浏览器标签打开详情（web 原生优势；S10 统一入口）
-// Round16：打开详情——默认 SPA 同标签跳转（根治 PWA 逃逸，返回保留来源状态）；
-// forceNewTab=true（中键/Ctrl+点击）时保持新标签（桌面习惯）。
+// Round21：默认跳转按平台分流——PC 桌面（宽视口非 PWA）内容类新标签，
+// PWA/窄屏维持 SPA 同标签（返回保留来源状态）；forceNewTab=true（中键/Ctrl）时强制新标签。
 const openDetailNav = (forceNewTab = false) => {
   if (!props.comic?.id) return
   addHistory(props.comic)
@@ -152,11 +152,12 @@ const openDetailNav = (forceNewTab = false) => {
     source: props.comic.source === 'online' ? 'online' : 'offline',
     resume: props.fromHistory,
   } as const
-  if (forceNewTab) {
+  if (forceNewTab || contentOpensNewTab()) {
+    // PC 桌面 / 强制：新标签打开（记录来源+入口路由；弹窗被拦截时自动降级同标签）
     openComicDetailInNewTab({ ...target })
     return
   }
-  // SPA 同标签跳转：记录来源（返回恢复滚动/页码），再 router.push
+  // SPA 同标签跳转（PWA/窄屏）：记录来源（返回恢复滚动/页码），再 router.push
   recordBackStateForDetail({ ...target })
   const route = buildDetailRoute({ ...target })
   if (route) router.push(route)
@@ -190,31 +191,8 @@ const handleCardClick = (event?: MouseEvent) => {
     return
   }
 
-  addHistory(props.comic)
-
-  if (props.comic.source === 'online') {
-    // 🟢 在线模式：传递 id (GID) 和 token（历史入口加 resume=1 标记，始终从上次位置开始）
-    // Round17-Bug3：在线卡片同样记录来源（返回恢复来源页），与离线一致
-    const token = onlineComic.value?.token || ''
-    const target = {
-      id: props.comic.id,
-      token,
-      source: 'online' as const,
-      resume: props.fromHistory,
-    }
-    recordBackStateForDetail(target)
-    router.push({
-      path: '/online/detail',
-      query: {
-        id: props.comic.id,
-        token,
-        ...(props.fromHistory ? { resume: '1' } : {}),
-      },
-    })
-  } else {
-    // Round16：离线卡片点击 → SPA 同标签打开详情（返回保留来源页状态；不再 window.open 避免 PWA 逃逸）
-    openDetailNav()
-  }
+  // Round21：在线/离线统一走 openDetailNav（PC 新标签 / PWA·窄屏同标签）
+  openDetailNav()
 }
 
 // --------------------------------------------------

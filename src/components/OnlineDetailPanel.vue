@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
-import { buildDetailRoute, recordBackStateForDetail } from '@/utils/detailNav'
+import { buildDetailRoute, recordBackStateForDetail, openContentTab, buildDetailHref } from '@/utils/detailNav'
 import { useRouter } from 'vue-router'
 
 const props = withDefaults(
@@ -18,12 +18,16 @@ defineEmits<{
   (e: 'close'): void
 }>()
 
-/** 左上角标题作为触发键：点击在新浏览器标签打开完整详情（等价中键 / Ctrl / Meta + 点击；S10 统一入口） */
+/** 左上角标题作为触发键：PC 桌面新标签打开完整详情；PWA/窄屏同标签（Round21 平台分流） */
 const router = useRouter()
 const openFullDetail = () => {
   if (!props.open || !props.gid) return
-  // Round16：SPA 同标签跳转（根治 PWA 逃逸）
   const target = { id: props.gid, token: props.token, source: 'online' as const }
+  const href = buildDetailHref(target)
+  if (href && openContentTab({ href, id: props.gid })) {
+    return
+  }
+  // 同标签 / open 被拦截降级：SPA 跳转
   recordBackStateForDetail(target)
   const route = buildDetailRoute(target)
   if (route) router.push(route)

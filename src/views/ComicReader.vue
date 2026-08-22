@@ -18,6 +18,9 @@ import { syncHistory } from '@/stores/historyStore'
 import { useUserStore } from '@/stores/userStore'
 // Round20：加载失败诊断上报（Bug2 PWA 跳转链 / Bug4 书架 404 取证）
 import { reportError } from '@/utils/errorReporter'
+// Round21：阅读器返回按统一决策（PC 新标签=关标签，单标签/深链回来源）
+import { shouldCloseTab, consumeBackState } from '@/utils/detailNav'
+import { rememberListState } from '@/utils/scrollMemory'
 // Round7-任务1：本地进度存储统一委托公共工具（与详情页「立即阅读」恢复共用同一实现）
 import {
   getProgressStorageKey,
@@ -265,6 +268,30 @@ const loadComicPages = async () => {
 const retryLoad = () => {
   loadError.value = ''
   loadComicPages()
+}
+
+/**
+ * Round21：阅读器「退出阅读 / 返回」统一决策——
+ * PC 新标签打开的阅读器（入口路由匹配 + 来源标签存活）→ 关闭标签；
+ * 仅剩单标签 / 标签内深链 / PWA 同标签 → 回来源（consumeBackState）→ history.back → 首页。
+ */
+const handleReaderBack = () => {
+  const id = comicId.value
+  if (shouldCloseTab(id, route.fullPath)) {
+    window.close()
+    return
+  }
+  const backState = consumeBackState(id)
+  if (backState) {
+    rememberListState(backState.fromPath, { top: backState.top, page: backState.page })
+    router.replace(backState.fromFullPath || backState.fromPath)
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push(source.value === 'online' ? '/online/home' : '/offline/home')
+  }
 }
 
 // 按预加载数量（在线/本地分别配置）预先拉取后续图片
@@ -1072,14 +1099,14 @@ watch(
         <p class="reader-error-msg">{{ loadError }}</p>
         <div class="reader-error-actions">
           <button class="reader-error-btn" @click="retryLoad">🔄 重试</button>
-          <button class="reader-error-btn primary" @click="router.back()">‹ 返回</button>
+          <button class="reader-error-btn primary" @click="handleReaderBack">‹ 返回</button>
         </div>
       </div>
     </div>
 
     <Transition name="fade-top">
       <div v-if="showControls" class="floating-header">
-        <button class="back-btn" @click="router.back()">‹ 退出阅读</button>
+        <button class="back-btn" @click="handleReaderBack">‹ 退出阅读</button>
 
         <div class="header-info">
           <span class="comic-title">📖 作品ID: {{ comicId }}</span>

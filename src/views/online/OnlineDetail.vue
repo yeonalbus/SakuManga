@@ -11,7 +11,7 @@ import { resolveDefaultDownloadScheme } from '@/api/download'
 import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
-import { isDetailNewTab, consumeBackState, isStandalonePWA } from '@/utils/detailNav'
+import { consumeBackState, isStandalonePWA, shouldCloseTab, openContentTab } from '@/utils/detailNav'
 import { API_BASE } from '@/config/api'
 import { rememberListState } from '@/utils/scrollMemory'
 // Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
@@ -366,23 +366,19 @@ const handleAddToReadingList = () => {
 
 const handleBack = () => {
   const gid = effectiveGid.value || ''
-  // Round7-任务4：opener 存在（来源标签仍打开）→ 直接关闭本标签，来源列表保持原位
-  if (window.opener) {
+  // Round21：新标签内容页（PC）——仅「入口路由匹配 + 来源标签存活」才关闭标签；
+  // 仅剩单标签（opener 已关/无 opener）或已离开入口页 → 不关，走回来源
+  if (shouldCloseTab(gid, route.fullPath)) {
     window.close()
     return
   }
-  // Round7-任务4：opener 已关闭 → 回到来源列表并恢复位置（读取打开时记录的状态）
+  // 回来源列表并恢复位置（读取打开时记录的状态）
   const backState = consumeBackState(gid)
   if (backState) {
     // Round17.2：rememberListState 用 path 级别 key（列表页注册用），
     // router.replace 用完整路径（含 query，如书架 id）回到正确页面
     rememberListState(backState.fromPath, { top: backState.top, page: backState.page })
     router.replace(backState.fromFullPath || backState.fromPath)
-    return
-  }
-  // S11：由本应用新标签打开（sessionStorage 标记）→ 关闭标签返回列表
-  if (isDetailNewTab(gid)) {
-    window.close()
     return
   }
   // Round17-Bug3：PWA 下同标签 SPA 历史栈正常，back() 与手机返回一致（Android 已验证）；
@@ -421,27 +417,19 @@ const handleStartReading = async (targetPage?: number) => {
     })
     page = resumePage ?? 1
   }
+  // Round21：PC 桌面新标签打开阅读器（记录来源+入口路由，返回=关标签/回来源）；
+  // PWA/窄屏或弹窗被拦截 → openContentTab 自动降级同标签 SPA 跳转
+  const openReader = (query: Record<string, string | number | undefined>) => {
+    const id = String(query.id || '')
+    const href = router.resolve({ path: '/reader', query }).href
+    openContentTab({ href, id })
+  }
   // S1 本地优先：有本地副本且未手动切回在线 → 走本地阅读（/reader source=offline）
   if (isLocalMode.value && localVersion.value) {
-    router.push({
-      path: '/reader',
-      query: {
-        id: localVersion.value.comicId,
-        source: 'offline',
-        page,
-      },
-    })
+    openReader({ id: localVersion.value.comicId, source: 'offline', page })
     return
   }
-  router.push({
-    path: '/reader',
-    query: {
-      id: comic.value.id,
-      token: comic.value.token,
-      source: 'online',
-      page,
-    },
-  })
+  openReader({ id: comic.value.id, token: comic.value.token, source: 'online', page })
 }
 
 // 6. 下载功能：GP 面板 + 创建下载任务

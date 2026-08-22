@@ -27,10 +27,9 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 	}
 
 	// 2. 指向 /watched 端点
-	// eh_sub.go 构造 URL 逻辑
-	baseURL := GetBaseURL(account, setting)
-
-	reqURL, _ := url.Parse(baseURL)
+	// Round15-Bug2：订阅（Watched）是 E 站表站功能，EX 站 /watched 无内容（返回首页/空），
+	// 固定指向 e-hentai.org（ex 账号 Cookie 访问表站 /watched 仍能读取订阅列表）。
+	reqURL, _ := url.Parse("https://e-hentai.org/")
 	q := reqURL.Query()
 
 	// 3. 拼接搜索关键词

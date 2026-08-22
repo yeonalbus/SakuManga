@@ -15,7 +15,7 @@ SakuHentai 用一套开箱即用的程序，打通**资源刮削 → 本地存�
 
 [!NOTE]  
 **项目更新状态（Project Status）**  
-项目已恢复迭代。v1.4.0 一次性汇总自 v1.3.2 以来的书架 / 手柄 / iPad PWA / 阅读体验等修复与新功能，并继续推进稳定性与体验主线。
+v1.4.0 一次性汇总自 v1.3.2 以来的书架 / 手柄 / iPad PWA / 阅读体验等修复与新功能，并继续推进稳定性与体验主线。
 
 **v1.4.0**（2026-08）：自 v1.3.2 以来的大版本汇总——书架自定义排序与置顶、全部书架检索浮层、手柄支持、阅读器颜色跟随主题、离线历史按 gid 合并去重、离线/在线 tag 筛选统一（本地遵循线上 f_search 格式）、iPad PWA 布局与返回链路修复、订阅固定 E 站表站、封面缩略图缓存等。
 
@@ -34,7 +34,8 @@ SakuHentai 用一套开箱即用的程序，打通**资源刮削 → 本地存�
 
 # 🗺️ 后续计划
 
-v1.4.0 汇总了 v1.3.2 以来的书架、手柄、iPad PWA 与阅读体验改进。后续将延续稳定性与体验主线：持续收敛下载稳定性与资源占用、完善跨设备进度同步、补充离线端更丰富的检索与维护能力（含抽卡负向排除的后端采样补位），并探索搜索结果的进一步精准化。
+v1.4.0 汇总了 v1.3.2 以来的书架、手柄、iPad PWA 与阅读体验改进。  
+后续将延续稳定性与体验主线：持续收敛下载稳定性与资源占用、完善跨设备进度同步、补充离线端更丰富的检索与维护能力（含抽卡负向排除的后端采样补位），并探索搜索结果的进一步精准化。
 
 # 🚀 构建与运行
 
@@ -66,11 +67,11 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 ## 在线界面
 
-<img width="2445" height="1273" alt="image" src="https://github.com/user-attachments/assets/cecca7a8-0e23-4927-832e-84939721cbe8" />
+<img width="2455" height="1288" alt="image" src="https://github.com/user-attachments/assets/5d7e5672-f52c-4a59-9c98-d793af510cf5" />
 
-## 客制化本地管理
+## 本地书架
 
-<img width="2439" height="1286" alt="image" src="https://github.com/user-attachments/assets/e82458a1-ab7d-4494-8453-1277b533fc82" />
+<img width="2454" height="1287" alt="image" src="https://github.com/user-attachments/assets/a30e7fac-ad1a-466f-a7d6-ae1ef8cf6a24" />
 
 ## 智能联网查询更新
 

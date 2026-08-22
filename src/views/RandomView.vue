@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useUI } from '@/composables/useUI'
+// Round17-Bug3：注册列表状态提供者（返回恢复滚动位置）
+import { setListStateProvider, clearListStateProvider, getMainContent } from '@/utils/scrollMemory'
 import ItemCard from '@/components/ItemCard.vue'
 import TagChip from '@/components/TagChip.vue'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
@@ -301,6 +303,17 @@ const handleStartDraw = async () => {
     toast.error(err instanceof Error ? err.message : '抽卡失败，请稍后重试')
   }
 }
+
+// Round17-Bug3：抽卡界面返回恢复滚动位置（来源页状态保留）
+onMounted(() => {
+  setListStateProvider('/random', () => ({
+    top: getMainContent()?.scrollTop || 0,
+    page: 1,
+  }))
+})
+onBeforeUnmount(() => {
+  clearListStateProvider('/random')
+})
 </script>
 
 <template>

@@ -194,7 +194,15 @@ const handleCardClick = (event?: MouseEvent) => {
 
   if (props.comic.source === 'online') {
     // 🟢 在线模式：传递 id (GID) 和 token（历史入口加 resume=1 标记，始终从上次位置开始）
+    // Round17-Bug3：在线卡片同样记录来源（返回恢复来源页），与离线一致
     const token = onlineComic.value?.token || ''
+    const target = {
+      id: props.comic.id,
+      token,
+      source: 'online' as const,
+      resume: props.fromHistory,
+    }
+    recordBackStateForDetail(target)
     router.push({
       path: '/online/detail',
       query: {

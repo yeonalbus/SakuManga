@@ -16,6 +16,7 @@ import { safeSetItem } from '@/utils/storage'
 // 🎯 f_search 标准语法格式化：联想点击时按模式输出（在线标准语法 / 离线裸格式）
 // 🎯 多 tag 联想：extractSuggestQuery 提取输入串的「最后一个 token」作为联想词
 import { formatFSearchTag, extractSuggestQuery } from '@/utils/tagFilter'
+import { isStandalonePWA } from '@/utils/detailNav'
 
 const router = useRouter()
 const route = useRoute()
@@ -208,8 +209,14 @@ const triggerSearch = (queryText?: string) => {
 
   isFocused.value = false
   const targetPath = modeStore.isOffline ? '/offline/home' : '/online/home'
-  const url = router.resolve({ path: targetPath, query: { kw: finalQuery } }).href
-  window.open(url, '_blank')
+  const routeObj = { path: targetPath, query: { kw: finalQuery } }
+  // Round17：PWA 下无多标签 → SPA 同标签（防逃逸）；桌面保持新标签
+  if (isStandalonePWA()) {
+    router.push(routeObj)
+  } else {
+    const url = router.resolve(routeObj).href
+    window.open(url, '_blank')
+  }
 }
 
 // 清空按钮：懒更新（S9/D7）——仅清空输入框，不写 Store、不导航；

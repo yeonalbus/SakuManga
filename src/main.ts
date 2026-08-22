@@ -75,5 +75,48 @@ window.addEventListener('app:unauthorized', () => {
   }
 })
 
+
+// ─────────────────────────────────────────────────────────────
+// Round17：iOS PWA 链接逃逸防护
+//
+// iOS standalone 模式下，点击同源 <a>（含 Vue Router router-link 的底层
+// <a href>）可能触发原生导航，逃逸出 PWA 显示 Safari 顶栏/底部工具栏。
+// 在捕获阶段拦截：PWA 下对「同源 + 非 target=_blank」的 <a> 点击
+// preventDefault，改由 Vue Router 完成 SPA 导航（保持 standalone）。
+// 跨域/外链（target=_blank）保持默认，iOS 会走 SFSafariViewController。
+// ─────────────────────────────────────────────────────────────
+const isStandaloneMode = (): boolean => {
+  if (typeof window === 'undefined') return false
+  if (window.matchMedia('(display-mode: standalone)').matches) return true
+  if ((window.navigator as unknown as { standalone?: boolean }).standalone === true) return true
+  return false
+}
+
+const preventPwaLinkEscape = (e: MouseEvent) => {
+  if (!isStandaloneMode()) return
+  // 仅拦截主键左键（不拦截中键/Ctrl 新标签语义）
+  if (e.button !== 0 && e.button !== undefined) return
+  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+  const target = e.target as Element | null
+  const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null
+  if (!anchor) return
+  if (anchor.target === '_blank') return // 外链/新标签走系统浏览器，不拦截
+  const href = anchor.getAttribute('href') || ''
+  if (!href || href.startsWith('javascript:')) return
+  // 同源判断：相对路径或同 origin 绝对路径
+  let url: URL
+  try {
+    url = new URL(href, window.location.origin)
+  } catch {
+    return
+  }
+  if (url.origin !== window.location.origin) return // 跨域交给系统浏览器
+  // 拦截原生导航 → 交给 Vue Router SPA 处理
+  e.preventDefault()
+  e.stopPropagation()
+  void router.push(url.pathname + url.search + url.hash)
+}
+document.addEventListener('click', preventPwaLinkEscape, true)
+
 app.use(router)
 app.mount('#app')

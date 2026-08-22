@@ -7,6 +7,7 @@ import { useModeStore } from '@/stores/modeStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
 // 🎯 f_search 标准语法格式化：在线按 E-Hentai 规范（namespace:"key$"），离线保持裸格式
 import { formatFSearchTag } from '@/utils/tagFilter'
+import { isStandalonePWA } from '@/utils/detailNav'
 
 export interface TagData {
   namespace: string
@@ -133,10 +134,14 @@ const handleClick = () => {
       router.push('/offline/home')
     }
   } else {
-    // 🆕 在线：用真实浏览器新标签打开搜索页（URL 携带关键词），
-    // 原标签页的列表位点/详情面板/滚动位置完全不受影响（web 原生多标签优势）
-    const url = router.resolve({ path: '/online/home', query: { kw: queryTag } }).href
-    window.open(url, '_blank')
+    // 🆕 在线：默认新标签打开搜索页（保留原页位点）；PWA 下无多标签 → SPA 同标签
+    const routeObj = { path: '/online/home', query: { kw: queryTag } }
+    if (isStandalonePWA()) {
+      router.push(routeObj)
+    } else {
+      const url = router.resolve(routeObj).href
+      window.open(url, '_blank')
+    }
   }
 }
 </script>

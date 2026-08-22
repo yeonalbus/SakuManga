@@ -198,11 +198,7 @@ const handleBack = () => {
     window.close()
     return
   }
-  // Round15-Bug3：PWA 下 history 栈异常，back() 会整页刷新；直接回来源/首页
-  if (isStandalonePWA()) {
-    router.push('/offline/home')
-    return
-  }
+  // Round17-Bug3：PWA 下同标签 SPA 历史栈正常，back() 与手机返回一致（Android 已验证）
   if (window.history.length > 1) {
     router.back()
   } else {
@@ -434,8 +430,14 @@ const goOnlineGallery = () => {
     return
   }
   const token = comic.value.token || ''
-  const url = '/online/detail?id=' + encodeURIComponent(gid) + '&token=' + encodeURIComponent(token)
-  window.open(url, '_blank')
+  // Round17：同源详情跳转 → PWA 下 SPA 同标签（防逃逸）；桌面保持新标签
+  const routeObj = { path: '/online/detail', query: { id: gid, token } }
+  if (isStandalonePWA()) {
+    router.push(routeObj)
+  } else {
+    const url = '/online/detail?id=' + encodeURIComponent(gid) + '&token=' + encodeURIComponent(token)
+    window.open(url, '_blank')
+  }
 }
 </script>
 

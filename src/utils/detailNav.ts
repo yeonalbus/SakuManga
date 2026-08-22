@@ -131,14 +131,15 @@ export function consumeBackState(id: string): DetailBackState | undefined {
 /** 记录来源列表状态（SPA 跳转前调用，sessionStorage 共享供返回恢复） */
 export function recordBackStateForDetail(comic: ComicNavTarget): void {
   if (!comic?.id) return
+  // Round17-Bug3：无条件记录来源路径（即使未滚动 scrollTop=0 也要写 fromPath），
+  // 否则返回时 consumeBackState 未命中 → 走首页兜底而非回到来源页。
+  // top/page 有则带上（恢复滚动/页码），无则回落 0。
   const listState = captureActiveListState()
-  if (listState) {
-    recordBackState(comic.id, {
-      fromPath: window.location.pathname,
-      top: listState.top,
-      page: listState.page,
-    })
-  }
+  recordBackState(comic.id, {
+    fromPath: window.location.pathname,
+    top: listState?.top ?? 0,
+    page: listState?.page,
+  })
 }
 
 /**

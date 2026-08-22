@@ -383,11 +383,8 @@ const handleBack = () => {
     window.close()
     return
   }
-  // Round15-Bug3：PWA 下 history 栈异常，back() 会整页刷新；直接回来源/首页
-  if (isStandalonePWA()) {
-    router.push('/online/home')
-    return
-  }
+  // Round17-Bug3：PWA 下同标签 SPA 历史栈正常，back() 与手机返回一致（Android 已验证）；
+  // backState 已无条件记录，命中即回来源页；未命中时 history.back() 兜底
   if (window.history.length > 1) {
     router.back()
   } else {

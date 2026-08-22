@@ -1401,7 +1401,7 @@ watch(
 .reader-viewport {
   position: fixed;
   inset: 0;
-  background-color: #0d0d0f;
+  background-color: var(--app-bg-deep); /* Round19：跟随主题 */
   z-index: 3000;
   display: flex;
   flex-direction: column;
@@ -1424,7 +1424,7 @@ watch(
   position: absolute;
   left: 0;
   right: 0;
-  background: rgba(18, 18, 22, 0.92);
+  background: var(--reader-bar-bg);
   backdrop-filter: blur(10px);
   z-index: 3010;
   padding: 12px 24px;
@@ -1435,20 +1435,20 @@ watch(
 .floating-header {
   top: 0;
   justify-content: space-between;
-  border-bottom: 1px solid #2d2d32;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .floating-footer {
   bottom: 0;
   flex-direction: column;
   gap: 12px;
-  border-top: 1px solid #2d2d32;
+  border-top: 1px solid var(--app-border-2);
 }
 
 .back-btn {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #fff;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
@@ -1459,7 +1459,7 @@ watch(
   align-items: center;
   gap: 12px;
   font-size: 0.85rem;
-  color: #aaa;
+  color: var(--app-text-2);
 }
 
 .settings-btn {
@@ -1473,7 +1473,7 @@ watch(
 .collapse-btn {
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--app-text-2);
   font-size: 1rem;
   cursor: pointer;
   padding: 2px 6px;
@@ -1489,9 +1489,9 @@ watch(
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(0, 0, 0, 0.55);
-  color: #ddd;
+  border: 1px solid var(--reader-reveal-border);
+  background: var(--reader-reveal-bg);
+  color: var(--reader-reveal-color);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
@@ -1504,7 +1504,7 @@ watch(
     background 0.2s;
 }
 .controls-reveal:hover {
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--reader-reveal-hover);
 }
 
 /* 呼出按钮淡入淡出 */
@@ -1598,13 +1598,13 @@ watch(
   justify-content: center;
   height: 100%;
   max-width: 100%;
-  background: #000;
+  background: var(--reader-page-bg);
   overflow: hidden;
 }
 
 .manga-page-img {
   max-height: 100vh;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+  box-shadow: var(--reader-img-shadow);
 }
 
 /* 加载中 / 加载失败时隐藏图片，露出容器黑色兜底 */
@@ -1645,8 +1645,8 @@ watch(
   align-items: center;
   justify-content: center;
   gap: 14px;
-  color: #666;
-  background: #000;
+  color: var(--app-text-muted);
+  background: var(--reader-page-bg);
   user-select: none;
 }
 
@@ -1659,15 +1659,15 @@ watch(
   align-items: center;
   justify-content: center;
   gap: 14px;
-  color: #666;
-  background: #000;
+  color: var(--app-text-muted);
+  background: var(--reader-page-bg);
   user-select: none;
 }
 
 .placeholder-spinner {
   width: 34px;
   height: 34px;
-  border: 3px solid #2a2a2f;
+  border: 3px solid var(--app-border-3);
   border-top-color: #7aa2f7;
   border-radius: 50%;
   animation: placeholder-spin 0.8s linear infinite;
@@ -1696,7 +1696,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--app-text-muted);
   font-size: 0.9rem;
   pointer-events: none;
   user-select: none;
@@ -1748,7 +1748,7 @@ watch(
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  color: #888;
+  color: var(--app-text-3);
   font-size: 0.9rem;
   z-index: 3006;
 }
@@ -1765,7 +1765,7 @@ watch(
 .webtoon-item {
   position: relative;
   width: 100%;
-  background: #000;
+  background: var(--reader-page-bg);
 }
 
 .webtoon-img {
@@ -1785,14 +1785,14 @@ watch(
   right: 0;
   bottom: 0;
   width: 300px;
-  background: #18181c;
+  background: var(--app-surface-2);
   z-index: 3020;
-  border-left: 1px solid #2d2d32;
+  border-left: 1px solid var(--app-border-2);
   padding: 20px;
   display: flex;
   flex-direction: column;
   box-shadow: -5px 0 25px rgba(0, 0, 0, 0.5);
-  color: #eee;
+  color: var(--app-fg);
   overflow-y: auto;
 }
 
@@ -1806,7 +1806,7 @@ watch(
 .close-btn {
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--app-text-2);
   font-size: 1.2rem;
   cursor: pointer;
 }
@@ -1833,30 +1833,30 @@ watch(
 .setting-label-row {
   display: flex;
   justify-content: space-between;
-  color: #aaa;
+  color: var(--app-text-2);
   font-size: 0.85rem;
 }
 
 .direction-text {
-  color: #007acc;
+  color: var(--app-accent);
   font-size: 0.85rem;
 }
 
 .setting-select {
-  background: #242428;
-  border: 1px solid #38383c;
-  color: #fff;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
   padding: 4px 8px;
   border-radius: 4px;
 }
 
 .setting-range {
-  accent-color: #007acc;
+  accent-color: var(--app-accent);
   cursor: pointer;
 }
 
 .toggle-switch {
-  accent-color: #007acc;
+  accent-color: var(--app-accent);
   width: 18px;
   height: 18px;
   cursor: pointer;
@@ -1864,14 +1864,14 @@ watch(
 
 .divider {
   border: none;
-  border-top: 1px solid #2a2a2d;
+  border-top: 1px solid var(--app-border);
   margin: 4px 0;
 }
 
 .full-settings-btn {
-  background: #242428;
-  border: 1px solid #3a3a3d;
-  color: #007acc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-accent);
   padding: 10px 16px;
   border-radius: 6px;
   font-size: 0.9rem;
@@ -1880,8 +1880,8 @@ watch(
 }
 
 .full-settings-btn:hover {
-  background-color: #2e2e33;
-  border-color: #007acc;
+  background-color: var(--app-surface-3-hover);
+  border-color: var(--app-accent);
 }
 
 /* ▦ 缩略图进度条（底部横条） */
@@ -1891,9 +1891,9 @@ watch(
   right: 0;
   bottom: 0;
   height: 128px;
-  background: rgba(14, 14, 17, 0.94);
+  background: var(--reader-thumb-bg);
   backdrop-filter: blur(10px);
-  border-top: 1px solid #2d2d32;
+  border-top: 1px solid var(--app-border-2);
   z-index: 3012;
   padding-top: 10px;
   box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.5);
@@ -1909,7 +1909,7 @@ watch(
   height: 96px;
   padding: 2px 12px;
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3f transparent;
+  scrollbar-color: var(--app-border-3) transparent;
 }
 
 .thumb-strip-track::-webkit-scrollbar {
@@ -1917,7 +1917,7 @@ watch(
 }
 
 .thumb-strip-track::-webkit-scrollbar-thumb {
-  background: #3a3a3f;
+  background: var(--app-border-3);
   border-radius: 3px;
 }
 
@@ -1930,7 +1930,7 @@ watch(
   overflow: hidden;
   border: 2px solid transparent;
   cursor: pointer;
-  background: #121214;
+  background: var(--app-bg-alt);
   transition:
     border-color 0.15s,
     transform 0.15s;
@@ -1944,14 +1944,14 @@ watch(
 }
 
 .thumb-strip-item.active {
-  border-color: #007acc;
+  border-color: var(--app-accent);
   transform: translateY(-2px);
 }
 
 .thumb-strip-placeholder {
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, #1a1a1e, #0d0d0f);
+  background: linear-gradient(180deg, var(--app-surface), var(--app-bg-deep));
 }
 
 .thumb-strip-num {
@@ -1972,7 +1972,7 @@ watch(
   display: flex;
   gap: 4px;
   font-size: 0.72rem;
-  color: #aaa;
+  color: #aaa; /* 角标压在缩略图上：深色半透明底恒定，文字保持浅色 */
   background: rgba(0, 0, 0, 0.55);
   padding: 2px 8px;
   border-radius: 10px;
@@ -1986,7 +1986,7 @@ watch(
   width: 100%;
   max-width: 600px;
   font-size: 0.8rem;
-  color: #888;
+  color: var(--app-text-3);
 }
 
 /* 动画效果 */
@@ -2034,7 +2034,7 @@ watch(
 
 .page-slider {
   flex: 1;
-  accent-color: #007acc;
+  accent-color: var(--app-accent);
 }
 
 .control-row {
@@ -2043,9 +2043,9 @@ watch(
 }
 
 .control-btn {
-  background: #242428;
-  border: 1px solid #38383c;
-  color: #ccc;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
   padding: 6px 14px;
   border-radius: 16px;
   font-size: 0.82rem;
@@ -2053,8 +2053,8 @@ watch(
 }
 
 .control-btn.active {
-  background: #007acc;
-  border-color: #007acc;
+  background: var(--app-accent);
+  border-color: var(--app-accent);
   color: #fff;
 }
 

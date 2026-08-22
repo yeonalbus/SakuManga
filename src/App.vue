@@ -204,6 +204,17 @@ watch(
   /* 新增：边框层级 */
   --app-border-2: #26262a;
   --app-border-3: #38383e;
+
+  /* Round19：阅读器专用配色（深色默认；浅色覆盖见下方 light 块）——
+     阅读界面颜色跟随主题：深色模式→深色，浅色模式→浅色 */
+  --reader-page-bg: #000; /* 图片容器 / 加载占位底色（浅色=白纸阅读感） */
+  --reader-bar-bg: rgba(18, 18, 22, 0.92); /* 浮动顶/底栏（保留毛玻璃） */
+  --reader-thumb-bg: rgba(14, 14, 17, 0.94); /* 缩略图进度条 */
+  --reader-img-shadow: 0 0 20px rgba(0, 0, 0, 0.8); /* 页图投影 */
+  --reader-reveal-bg: rgba(0, 0, 0, 0.55); /* 悬浮呼出按钮 ⋯ 底色 */
+  --reader-reveal-color: #ddd; /* 悬浮呼出按钮文字 */
+  --reader-reveal-border: rgba(255, 255, 255, 0.25); /* 悬浮呼出按钮边框 */
+  --reader-reveal-hover: rgba(0, 0, 0, 0.75); /* 悬浮呼出按钮 hover */
 }
 
 :root[data-theme='light'] {
@@ -231,6 +242,16 @@ watch(
   /* 新增：边框层级 */
   --app-border-2: #dcdce0;
   --app-border-3: #d0d0d5;
+
+  /* Round19：阅读器专用配色（浅色覆盖） */
+  --reader-page-bg: #ffffff;
+  --reader-bar-bg: rgba(255, 255, 255, 0.92);
+  --reader-thumb-bg: rgba(245, 245, 247, 0.94);
+  --reader-img-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+  --reader-reveal-bg: rgba(255, 255, 255, 0.85);
+  --reader-reveal-color: #333;
+  --reader-reveal-border: rgba(0, 0, 0, 0.15);
+  --reader-reveal-hover: rgba(255, 255, 255, 0.95);
 }
 
 /* 响应式断点与 iOS 安全区变量（供全局各组件参考） */
@@ -451,9 +472,10 @@ body {
 }
 
 /* Round15-Bug4：阅读器路由全屏外壳——无 TopBar/侧栏占位，padding 归零 */
+/* Round19：背景跟随主题（阅读器固定定位铺满，仅过渡/边缘时可见） */
 .main-content.reader-fullscreen {
   padding: 0 !important;
-  background-color: #000;
+  background-color: var(--app-bg);
 }
 
 /* ─────────────────────────────────────────

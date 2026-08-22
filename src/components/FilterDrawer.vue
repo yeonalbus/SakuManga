@@ -61,11 +61,12 @@ const inputKeyword = ref('')
 const inputFocused = ref(false)
 
 // ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
+// Round20-Bug3：插入格式统一为 E-Hentai f_search 语法（本地匹配已按同一语义解析）
 const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
   () => inputKeyword.value,
   8,
   150,
-  (namespace, key) => formatFSearchTag(namespace, key, modeStore.isOffline),
+  (namespace, key) => formatFSearchTag(namespace, key, false),
 )
 
 // 选中联想项：负向项以「- namespace:key」压入队列

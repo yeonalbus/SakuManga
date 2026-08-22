@@ -77,12 +77,13 @@ const keywordInput = ref('')
 const kwInputFocused = ref(false)
 
 // ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
-// 插入格式按抽卡范围区分：仅离线（scopeType === 'offline'）用裸格式，含在线用 E-Hentai f_search 标准语法
+// Round20-Bug3：插入格式统一为 E-Hentai f_search 标准语法（本地匹配已按同一语义解析），
+// 不再区分离线裸格式——「本地遵循线上格式」，离线/在线/全库抽卡共用一套 tag 语义。
 const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
   () => keywordInput.value,
   8,
   150,
-  (namespace, key) => formatFSearchTag(namespace, key, scopeType.value === 'offline'),
+  (namespace, key) => formatFSearchTag(namespace, key, false),
 )
 
 // 选中联想项：负向项以「- namespace:key」压入队列

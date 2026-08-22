@@ -16,7 +16,8 @@ import type { ComicItem, OfflineComic } from '@/types/comic'
 // Round10-Bug3：离线星级筛选统一按「生效评分」（个人评分优先）过滤
 import { getEffectiveRating } from '@/stores/ratingStore'
 // Round3-任务6：负向排除（`- ` 前缀：负向 tag 精确匹配 / 负向关键词子串匹配）
-import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
+// Round20-Bug3：f_search tag 匹配（本地遵循线上格式，$ 精确 / 无 $ 前缀）
+import { matchExcludes, parseKeywordQueue, matchFSearchKeyword } from '@/utils/tagFilter'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
 // 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
 import {
@@ -190,11 +191,13 @@ const filteredComics = computed(() => {
 
   return offlineComics.value.filter((comic) => {
     // 关卡 1：顶栏 SearchBar 的主搜索词匹配
+    // Round20-Bug3：tag 形关键词（含命名空间）额外按 f_search 语义匹配 tagRaws
     if (searchBarKw) {
       const matchTitle = comic.title.toLowerCase().includes(searchBarKw)
+      const tagHit = matchFSearchKeyword(searchBarKw, comic)
       const matchTag =
         matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(searchBarKw))
-      if (!matchTitle && !matchTag) return false
+      if (!matchTitle && !tagHit && !matchTag) return false
     }
 
     // 🟢 关卡 2：筛选抽屉中的“多关键词队列”过滤 (必须同时匹配队列里的每一个正向词)
@@ -203,8 +206,10 @@ const filteredComics = computed(() => {
       const allMatched = parsedQueue.positive.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
         const matchTitle = comic.title.toLowerCase().includes(lowerKw)
+        // Round20-Bug3：tag 形关键词按 f_search 语义精确/前缀匹配 tagRaws
+        const tagHit = matchFSearchKeyword(filterKw, comic)
         const matchTag = matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(lowerKw))
-        return matchTitle || matchTag
+        return matchTitle || tagHit || matchTag
       })
 
       if (!allMatched) return false // 只要有一个正向词不满足，就过滤掉

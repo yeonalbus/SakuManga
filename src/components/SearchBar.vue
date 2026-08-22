@@ -228,7 +228,8 @@ const handleClearInput = () => {
 // 联想点击：仅替换「最后一个 token」，保留前面已选的 tag，并保持输入焦点便于连续输入多 tag
 const handleTagSuggestClick = (tag: TagItem) => {
   const { prefix, negative } = extractSuggestQuery(keyword.value)
-  const inserted = formatFSearchTag(tag.namespace, tag.key, modeStore.isOffline)
+  // Round20-Bug3：插入格式统一为 E-Hentai f_search 语法（本地匹配已按同一语义解析）
+  const inserted = formatFSearchTag(tag.namespace, tag.key, false)
   keyword.value = prefix
     ? `${prefix} ${negative ? '-' : ''}${inserted}`
     : `${negative ? '-' : ''}${inserted}`

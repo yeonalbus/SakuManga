@@ -125,8 +125,9 @@ const onClick = (e: Event) => {
 const handleClick = () => {
   const { namespace, key } = tagData.value
   const isOffline = modeStore.isOffline
-  // 在线输出 E-Hentai f_search 标准语法（多词加引号与 $ 锚定），离线保持裸 namespace:key
-  const queryTag = formatFSearchTag(namespace, key, isOffline)
+  // Round20-Bug3：插入格式统一为 E-Hentai f_search 标准语法（多词加引号与 $ 锚定）。
+  // 离线本地匹配已按同一语义解析（$ 精确 / 无 $ 前缀），不再需要裸 namespace:key 特例。
+  const queryTag = formatFSearchTag(namespace, key, false)
 
   if (isOffline) {
     offlineSearchConfig.value.keyword = queryTag

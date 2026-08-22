@@ -15,6 +15,50 @@ const normalizeTag = (raw: string): string => {
 }
 
 /**
+ * 解析 E-Hentai f_search 语法 token（Round20-Bug3，与后端 tagfilter.go 语义一致）。
+ * 支持 `namespace:"multi word$"` / `namespace:key$` / `namespace:key` / 裸词。
+ */
+export interface ParsedFSearchTag {
+  namespace: string // 小写；裸词为空
+  key: string // 小写、下划线已归一为空格
+  anchored: boolean // 是否带 $ 锚定（$=精确匹配，无 $=前缀匹配）
+  isTag: boolean // 是否为 tag 形（含命名空间）
+  canonical: string // 规范形 `ns:key`
+}
+
+export const parseFSearchTag = (raw: string): ParsedFSearchTag => {
+  let s = (raw || '').trim().replace(/^-\s*/, '').trim()
+  const idx = s.indexOf(':')
+  if (idx <= 0) {
+    return { namespace: '', key: '', anchored: false, isTag: false, canonical: '' }
+  }
+  const namespace = s.slice(0, idx).toLowerCase().trim()
+  let keyPart = s.slice(idx + 1).replace(/"/g, '')
+  const anchored = keyPart.endsWith('$')
+  keyPart = keyPart.replace(/\$$/, '').toLowerCase().trim().replace(/_/g, ' ')
+  const isTag = !!(namespace && keyPart)
+  return {
+    namespace,
+    key: keyPart,
+    anchored,
+    isTag,
+    canonical: isTag ? `${namespace}:${keyPart}` : namespace ? `${namespace}:` : '',
+  }
+}
+
+/**
+ * 判断关键词是否按 E 站 tag 语义命中某漫画（决策 D5=A）：
+ * - tag 形（含命名空间）：$ → tagRaws 精确相等；无 $ → 前缀匹配；
+ * - 裸词：返回 false（由调用方回退子串匹配）。
+ */
+export const matchFSearchKeyword = (raw: string, comic: ComicItem): boolean => {
+  const t = parseFSearchTag(raw)
+  if (!t.isTag) return false
+  const rawTags = collectRawTags(comic)
+  return rawTags.some((tr) => (t.anchored ? tr === t.canonical : tr.startsWith(t.canonical)))
+}
+
+/**
  * 收集作品的"原始 tag 集合"（namespace:key 形态，全部归一化）：
  * - 离线：优先取 tagRaws（已归一为小写、下划线→空格），并额外并入 tags 中含冒号的条目
  * - 在线：tags 本身即原始 namespace:key（如 "female:big breasts"），全部并入
@@ -74,12 +118,20 @@ export const matchExcludes = (comic: ComicItem, rule: ExcludeRule): boolean => {
   const keywords = rule.excludeKeywords || []
   if (tags.length === 0 && keywords.length === 0) return true
 
-  // 负向 tag：原始 tag 集合精确匹配
+  // 负向 tag：原始 tag 集合按 E 站语义匹配
+  // （Round20-Bug3：支持 f_search 语法如 female:"magical girl$"；$ 精确、无 $ 前缀，与 D5 一致）
   if (tags.length > 0) {
     const rawTags = collectRawTags(comic)
     for (const et of tags) {
-      const norm = normalizeTag(et)
-      if (norm && rawTags.includes(norm)) return false
+      const t = parseFSearchTag(et)
+      if (t.isTag) {
+        if (rawTags.some((tr) => (t.anchored ? tr === t.canonical : tr.startsWith(t.canonical)))) {
+          return false
+        }
+      } else {
+        const norm = normalizeTag(et)
+        if (norm && rawTags.includes(norm)) return false
+      }
     }
   }
 

@@ -12,7 +12,7 @@
             :key="item.id"
             class="menu-item"
             :class="{ active: activeTab === item.id }"
-            @click="activeTab = item.id"
+            @click="handleMenuClick(item)"
           >
             <span class="item-icon">{{ item.icon }}</span>
             <span class="item-label">{{ item.label }}</span>
@@ -84,6 +84,7 @@ interface SettingsMenuItem {
   icon: string
   title: string // 面板标题
   adminOnly?: boolean // true=仅管理员可见（网络/下载/Tag维护/更新扫描/高级/日志/安全）
+  href?: string // 🔍 存在时点击跳转路由（如 /diag），而非切换 tab
 }
 
 // 按主题分组的菜单（Round5 步骤10 重组）；adminOnly 过滤逻辑沿用原实现
@@ -144,7 +145,11 @@ const allGroups: SettingsMenuGroup[] = [
   },
   {
     title: '关于',
-    items: [{ id: 'about', label: '关于软件', icon: 'ℹ️', title: '关于软件' }],
+    items: [
+      { id: 'about', label: '关于软件', icon: 'ℹ️', title: '关于软件' },
+      // 🔍 隐藏诊断入口：跳转 /diag（iPad PWA 底部条排查），仅管理员可见
+      { id: 'diag', label: '视口诊断', icon: '🔍', title: '视口诊断', adminOnly: true, href: '/diag' },
+    ],
   },
 ]
 
@@ -167,6 +172,15 @@ const menuGroups = computed(() =>
 // 支持侧边栏快捷入口：/settings?tab=xxx 直达对应设置栏目（越权栏目回退到账户）
 const initialTab = (route.query.tab as string) || 'account'
 const activeTab = ref(isTabAllowed(initialTab) ? initialTab : 'account')
+
+// 🔍 菜单点击：带 href 的项（如视口诊断）跳转路由，否则切换 tab
+const handleMenuClick = (item: SettingsMenuItem & { href?: string }) => {
+  if (item.href) {
+    router.push(item.href)
+    return
+  }
+  activeTab.value = item.id
+}
 
 // 已停留在设置页时，侧边栏再次点击同 URL（仅 query 变化）也能实时切换
 watch(

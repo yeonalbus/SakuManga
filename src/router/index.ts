@@ -144,6 +144,12 @@ const routes: RouteRecordRaw[] = [
     name: 'ComicReader',
     component: () => import('@/views/ComicReader.vue'),
   },
+  // 🔍 视口诊断面板（隐藏调试用：iPad PWA 底部条问题）
+  {
+    path: '/diag',
+    name: 'Diag',
+    component: () => import('@/views/DiagView.vue'),
+  },
   // 404 兜底：任意未匹配路径重定向到 NotFound 页面
   {
     path: '/not-found',

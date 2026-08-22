@@ -200,7 +200,7 @@
 ## 实施结果
 
 - Bug1：`HistoryRecord` 新增 GID 列；`AddHistory` 入参 gid + 同 gid 旧行合并删除 + 缺 gid 回填；`GetHistory` 离线按 gid 去重（多取 2 倍防名额挤占）；新增 `comic_refs.go`（CleanupComicReferences / FindReplacementByGID），接线到 DeleteOfflineComic（查重删除迁移）、finalizeUpdate（更新删旧版清孤儿）、scanner 归档升级（迁移到新文件夹记录）；前端 `OfflineComic.gid` 类型、historyStore 按 gid||id 去重 + 孤儿剔除、libraryInit/历史页先拉列表再载历史。
-- Bug2：eh_reader 新增会话失效/限流识别（classifySessionError），抓取错误统一 410/403/401/429 映射；ComicReader 离线 404 + 纯数字 id 无 token 也 `resolveOnlineToken` 自动切在线；新增阅读器错误层（重试/返回）；错误上报接线。
+- Bug2：eh_reader 新增会话失效/限流识别（classifySessionError），抓取错误统一 410/403/401/429 映射；ComicReader 离线 404 + 纯数字 id 无 token 也 `resolveOnlineToken` 自动切在线；新增阅读器错误层（重试/返回）；错误上报接线。**（2026-08-22 用户 iPad PWA 真机验证通过，链路已确认修复）**
 - Bug3：前后端 f_search 解析器（tagfilter.go / tagFilter.ts），离线匹配对齐 E 站语义（$ 精确 / 无 $ 前缀），random.go 离线分支 + OfflineHome 关卡 1/2 + matchExcludes 升级，RandomView/FilterDrawer/SearchBar/TagChip 联想/点击插入统一为线上格式（本地遵循线上格式）。
 - Bug4：ComicReader/OfflineDetail 404 非阻塞自愈（刷新列表 + purgeOrphanOfflineRefs 清理历史/清单/书架）；router.afterEach 自动取消未决 modal（弹窗不粘滞）；fetchOfflineComics 失败可见 toast。
 - 验证：`go test ./...` 全过（新增 tagfilter / comic_refs / history_gid 单测）；`npm run type-check` 过；`verify-round20.mjs`（新增）与 round18/19 回归全过；round13/14/15 为需起本地服务的 Playwright E2E，本环境未运行。

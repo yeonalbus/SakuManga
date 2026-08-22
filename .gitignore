@@ -48,6 +48,11 @@ backend/data/*.csv.gz
 backend/data/*.csv.gz.etag
 backend/data/*.tmp
 
+# 根目录运行时数据（单 exe 跟随自身目录运行，首次启动在 exe 旁生成 manga.db / data/）
+/manga.db
+/manga.db-*
+/data/
+
 # 单 exe 打包产物
 /SakuHentai.exe
 /SakuHentai-*.exe

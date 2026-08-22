@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v1.3.2 · 最近更新：2026-08
+> 版本：v1.4.0 · 最近更新：2026-08
 
 ## 一、目录总览
 
@@ -11,9 +11,9 @@ SakuHentai/
 ├── backend/                        # Go 后端（Gin + GORM + SQLite，含内嵌前端 webui/）
 ├── src/                            # Vue 3 前端（Vite + Pinia + Vue Router）
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
-├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / E2E 搜索回归）
+├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / verify-round*.mjs 回归验证）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── plans/                          # 功能开发方案文档（Round1~9）
+├── plans/                          # 功能开发方案文档（Round1~20）
 ├── VerNotes/                       # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程
 ├── 计划书/                          # 项目规划文档（已弃用）
 ├── 学习笔记/                        # 学习笔记（已弃用）
@@ -60,6 +60,7 @@ src/
 │   ├── ToplistTypeModal.vue        # 排行榜类型选择弹窗（昨日/月/年/All-Time）
 │   ├── OnlineDetailPanel.vue       # 在线详情紧凑面板（宽屏右分栏/窄屏全屏）
 │   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
+│   ├── BookshelfPickerOverlay.vue  # 全部书架检索/多选加入书架浮层（Round13）
 │   ├── common/
 │   │   ├── ErrorBoundary.vue       # 错误边界（页面级异常兜底）
 │   │   ├── GlobalModal.vue         # 全局弹窗（alert/confirm/prompt）
@@ -129,6 +130,7 @@ src/
     ├── MemberHistory.vue           # 成员历史（管理员，查看任意成员阅读记录）
     ├── RandomView.vue              # 随机抽卡页（在线/离线混合 + 负向排除 + 联想）
     ├── ReadingListView.vue         # 阅读清单页（在线/离线队列管理）
+    ├── DiagView.vue                # 视口诊断面板（/diag，iPad PWA 底部条排查用，管理员入口）
     ├── SettingsView.vue            # 设置中心容器（8 大分组按角色过滤）
     ├── NotFound.vue                # 404 页面
     ├── online/
@@ -150,7 +152,7 @@ src/
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
 
-### 设置面板 `components/settings/` 细分（v1.3.2 八分组）
+### 设置面板 `components/settings/` 细分（v1.4.0 八分组）
 
 | 分组         | 文件                         | 职责                                             | 管理员可见 |
 | ------------ | ---------------------------- | ------------------------------------------------ | :--------: |
@@ -273,6 +275,8 @@ backend/
         ├── offline.go              # 离线更新/查重/老化判定/删除持久化
         ├── offline_task.go         # 离线维护任务结果缓存（stale 失效机制）
         ├── offline_removed.go      # 画廊被删/版权移除状态持久化与过滤
+        ├── comic_refs.go           # 漫画删除/替换后的引用清理与迁移（历史/书架/阅读清单，Round20）
+        ├── tagfilter.go            # E-Hentai f_search tag 解析器（$ 精确/无 $ 前缀，Round20）
         ├── maintain_auto.go        # 维护自动比对（下载后 Reconcile）
         ├── update_scheduler.go     # 更新扫描定时调度（周扫描）
         ├── log_store.go            # 服务端日志存储（四类日志日归档）
@@ -282,7 +286,7 @@ backend/
         └── tag_scheduler.go        # Tag 维护定时调度
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go` 等；handlers 含 `tag_maintain_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
 
 ---
 
@@ -321,6 +325,10 @@ backend/
 | 改详情新标签导航/返回位置恢复                     | `src/utils/detailNav.ts`、`views/online/OnlineDetail.vue`、`views/offline/OfflineDetail.vue`                              |
 | 改本地优先加载 / 默认收藏夹                      | `views/online/OnlineDetail.vue`、`stores/preferenceSettings.ts`、`components/settings/PreferenceSettings.vue`             |
 | 改阅读进度恢复策略                                | `utils/readingProgress.ts`、`utils/pageHideFlush.ts`、`stores/preferenceSettings.ts`                                       |
+| 改离线/在线 tag 筛选统一（f_search 语法）          | `utils/tagFilter.ts`、`backend/internal/services/tagfilter.go`、`handlers/random.go`、`views/offline/OfflineHome.vue`     |
+| 改离线历史 gid 合并去重/孤儿剔除                   | `stores/historyStore.ts`、`backend/internal/handlers/library.go`、`services/comic_refs.go`                                |
+| 改书架 404 自愈/弹窗粘滞                           | `views/ComicReader.vue`、`views/offline/OfflineDetail.vue`、`stores/comicStore.ts`、`router/index.ts`                     |
+| 改视口诊断（iPad PWA 底部条排查）                  | `views/DiagView.vue`                                                                                                       |
 
 ### 后端业务
 
@@ -342,6 +350,8 @@ backend/
 | 改离线更新/维护/删除标记   | `backend/internal/handlers/offline.go`、`services/offline.go`、`offline_task.go`、`offline_removed.go` |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |
+| 改历史 gid 合并/漫画引用清理 | `backend/internal/handlers/library.go`、`services/comic_refs.go`                                    |
+| 改 f_search tag 解析/匹配    | `services/tagfilter.go`、`handlers/random.go`、`handlers/online.go`                                  |
 | 改用户管理/权限            | `backend/internal/handlers/user.go`、`middleware/auth.go`、`services/auth_service.go`、`bootstrap.go` |
 | 改扫描                     | `backend/internal/handlers/scan_path.go`、`services/scanner.go`、`scan_manager.go`                    |
 | 改客户端错误日志           | `backend/internal/handlers/client_log.go`、`src/utils/errorReporter.ts`                               |
@@ -376,9 +386,9 @@ backend/
 
 ---
 
-## 六、发布注意（v1.3.2）
+## 六、发布注意（v1.4.0）
 
-- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `1.3.2`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `1.3.2`）。
+- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `1.4.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `1.4.0`）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
 - **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。

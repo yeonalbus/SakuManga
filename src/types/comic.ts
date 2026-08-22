@@ -55,6 +55,9 @@ export interface OfflineComic extends BaseComic {
 
   // ─── 需求2：本地 tag 搜索 ───
   tagRaws?: string[] // 原始 tag 字符串（含命名空间，如 "female:cat ears"），供本地 tag 搜索/语言过滤精确匹配
+
+  // ─── Round20-Bug1：E 站画廊 GID（离线历史按 gid 合并去重/引用迁移）───
+  gid?: string
 }
 
 /** 本地书架定义 */

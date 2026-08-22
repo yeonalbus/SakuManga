@@ -4,16 +4,20 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { getNextComicInQueue, getPrevComicInQueue, onlineReadingList, offlineReadingList } from '@/stores/readingStore'
 // Round11-Bug3：阅读器进度写回时恢复标题/封面（在线模式从清单/历史取，避免把历史污染成 gid 乱码）
-import { onlineHistoryList, offlineHistoryList } from '@/stores/historyStore'
+// Round20-Bug2：离线 404 + 纯数字 id 时无 token 也兜底解析在线 token 自动切在线
+import { onlineHistoryList, offlineHistoryList, resolveOnlineToken } from '@/stores/historyStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import { useGamepad } from '@/composables/useGamepad'
 import type { OnlineComic, ComicItem } from '@/types/comic'
-import { fetchOfflineComics, offlineComics, recordComicClick } from '@/stores/comicStore'
+// Round20-Bug4：孤儿引用清理（历史/清单/书架）与列表刷新
+import { fetchOfflineComics, offlineComics, recordComicClick, purgeOrphanOfflineRefs } from '@/stores/comicStore'
 import { http } from '@/utils/request'
 import { API_BASE, TOKEN_KEY } from '@/config/api'
 // Round3-任务1：阅读进度按账号写回后端 /history
 import { syncHistory } from '@/stores/historyStore'
 import { useUserStore } from '@/stores/userStore'
+// Round20：加载失败诊断上报（Bug2 PWA 跳转链 / Bug4 书架 404 取证）
+import { reportError } from '@/utils/errorReporter'
 // Round7-任务1：本地进度存储统一委托公共工具（与详情页「立即阅读」恢复共用同一实现）
 import {
   getProgressStorageKey,
@@ -56,6 +60,8 @@ const showSettings = ref(false) // 显示设置面板
 const showThumbnailsPanel = ref(false) // 缩略图面板显隐
 const isZoomed = ref(false) // 双击放大状态
 const isLoading = ref(false) // 加载中
+// Round20-Bug2/Bug4：页列表加载失败的错误层（显示重试/返回，替代裸 toast）
+const loadError = ref('')
 
 // --------------------------------------------------
 // 📖 阅读方向布局（联动 readerSettings.readDirection）
@@ -128,6 +134,7 @@ const loadComicPages = async () => {
   if (!realId) return
 
   isLoading.value = true
+  loadError.value = '' // Round20-Bug2/Bug4：重载/切换漫画时清空错误层
   resetImgStates()
   try {
     if (source.value === 'online') {
@@ -198,43 +205,66 @@ const loadComicPages = async () => {
   } catch (err) {
     console.error('加载画廊失败:', err)
     const msg = err instanceof Error ? err.message : '加载画廊失败'
-    // 离线模式 404：漫画 id 可能已从本地库移除（列表/历史缓存过期），友好提示 + 刷新列表
+    // Round20-Bug2/Bug4：离线模式 404 自愈链（替代原阻塞确认框）
     if (source.value === 'offline' && /找不到该漫画|not found|404/i.test(msg)) {
       // bug3 兜底：本地库漫画 id 是 md5 hex（含字母），纯数字 id 只可能是 E 站 gid。
       // 若以离线模式打开纯数字 gid，说明 source 被误传为 offline（如阅读清单快照缺失 source），
-      // 此时不应误报「漫画已移除」，而是尝试自动纠正为在线模式。
+      // 此时不应误报「漫画已移除」，而是尝试自动纠正为在线模式（决策 D4=A：无 token 也先解析）。
       const isOnlineGid = /^\d+$/.test(realId)
       if (isOnlineGid) {
-        const tok = route.query.token as string
+        let tok = route.query.token as string
+        if (!tok) {
+          tok = await resolveOnlineToken(realId)
+        }
         if (tok) {
           toast.info('检测到该画廊属于在线资源，已自动切换为在线模式')
-          await router.replace({ path: '/reader', query: { ...route.query, source: 'online' } })
+          await router.replace({
+            path: '/reader',
+            query: { ...route.query, source: 'online', token: tok || route.query.token },
+          })
           // watch 只监听 route.query.id，source 变化不会自动重载，需手动重新加载
           await loadComicPages()
           return
         }
-        toast.error('该漫画不在本地库中，且缺少在线画廊 token，无法阅读')
+        toast.error('该漫画不在本地库中，且无法解析在线画廊 token，无法阅读')
         return
       }
-      const confirmed = await modal.confirm(
-        '该漫画可能已从本地库移除，或本地扫描数据已过期。\n是否刷新离线列表后返回？',
-        '找不到该漫画',
-      )
-      if (confirmed) {
-        // 刷新失败也要保证能返回，避免阅读器卡死在该错误态
-        try {
-          await fetchOfflineComics()
-        } catch (refreshErr) {
-          console.error('刷新离线列表失败:', refreshErr)
-        }
-        router.back()
+      // md5 本地 id：刷新离线列表确认漫画是否仍存在（更新替换/删除/扫描重建会换 id 或删记录）
+      await fetchOfflineComics()
+      const stillExists = offlineComics.value.some((c) => c.id === realId)
+      if (!stillExists) {
+        // 决策 D2=A：孤儿引用自动剔除；非阻塞提示（不再弹「是否刷新后返回」确认框）
+        purgeOrphanOfflineRefs(realId)
+        toast.error('该漫画已从本地库移除（可能已更新替换或删除），已刷新离线列表')
+      } else {
+        toast.warning('漫画加载失败，请重试')
       }
+      reportError(
+        'warn',
+        `离线阅读 404：id=${realId}`,
+        err instanceof Error ? err.stack : String(err),
+        `route=${route.fullPath}`,
+      )
+      loadError.value = msg
       return
     }
-    toast.error(msg)
+    // 在线加载失败：可重试错误层（决策 D4=A），不再裸 toast 后留白屏
+    reportError(
+      'warn',
+      `在线阅读加载失败：id=${realId}`,
+      err instanceof Error ? err.stack : String(err),
+      `route=${route.fullPath}`,
+    )
+    loadError.value = msg
   } finally {
     isLoading.value = false
   }
+}
+
+/** Round20-Bug2/Bug4：错误层「重试」——清空错误态后重新加载页列表 */
+const retryLoad = () => {
+  loadError.value = ''
+  loadComicPages()
 }
 
 // 按预加载数量（在线/本地分别配置）预先拉取后续图片
@@ -1033,6 +1063,19 @@ watch(
       class="brightness-overlay"
       :style="{ opacity: (100 - readerSettings.brightnessValue) / 100 }"
     ></div>
+
+    <!-- Round20-Bug2/Bug4：页列表加载失败错误层（重试/返回，替代裸 toast 白屏） -->
+    <div v-if="loadError" class="reader-error-overlay">
+      <div class="reader-error-card">
+        <div class="reader-error-icon">⚠️</div>
+        <p class="reader-error-title">漫画加载失败</p>
+        <p class="reader-error-msg">{{ loadError }}</p>
+        <div class="reader-error-actions">
+          <button class="reader-error-btn" @click="retryLoad">🔄 重试</button>
+          <button class="reader-error-btn primary" @click="router.back()">‹ 返回</button>
+        </div>
+      </div>
+    </div>
 
     <Transition name="fade-top">
       <div v-if="showControls" class="floating-header">
@@ -2101,5 +2144,81 @@ watch(
   .webtoon-container {
     padding-bottom: var(--safe-bottom);
   }
+}
+
+/* ─────────────────────────────────────────
+   Round20-Bug2/Bug4：页列表加载失败错误层
+   （纯主题变量，无硬编码色值，符合 Round19 规范）
+   ───────────────────────────────────────── */
+.reader-error-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+.reader-error-card {
+  width: min(88vw, 420px);
+  padding: 28px 26px;
+  border-radius: 14px;
+  background: var(--reader-bar-bg);
+  border: 1px solid var(--app-border-3);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reader-error-icon {
+  font-size: 2.4rem;
+}
+
+.reader-error-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--app-fg);
+}
+
+.reader-error-msg {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--app-text-2);
+  line-height: 1.6;
+  word-break: break-all;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.reader-error-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.reader-error-btn {
+  padding: 9px 22px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-strong);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.reader-error-btn:hover {
+  opacity: 0.85;
+}
+
+.reader-error-btn.primary {
+  background: var(--app-accent);
+  border-color: transparent;
+  color: #fff;
 }
 </style>

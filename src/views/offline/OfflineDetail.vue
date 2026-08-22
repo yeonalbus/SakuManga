@@ -5,12 +5,14 @@ import { useUI } from '@/composables/useUI'
 import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/bookshelfStore'
 import { offlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { getMyRating, setMyRating } from '@/stores/ratingStore'
-import { fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
+import { fetchOfflineComics, deleteOfflineComics, offlineComics, purgeOrphanOfflineRefs } from '@/stores/comicStore'
 import type { OfflineComic } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
 import { API_BASE } from '@/config/api'
+// Round20-Bug4：离线详情 404 诊断上报
+import { reportError } from '@/utils/errorReporter'
 import { useUserStore } from '@/stores/userStore'
 import { isDetailNewTab, consumeBackState, isStandalonePWA } from '@/utils/detailNav'
 import { rememberListState } from '@/utils/scrollMemory'
@@ -134,9 +136,22 @@ const fetchComicDetail = async () => {
     console.error('获取漫画详情失败:', err)
     const msg = err instanceof Error ? err.message : ''
     if (/找不到该漫画|not found|404/i.test(msg)) {
-      // 漫画 id 不在本地库：可能是扫描数据被重建 / 列表缓存过期，刷新离线列表
-      toast.error('找不到该漫画，可能已从本地库移除，已刷新离线列表')
-      fetchOfflineComics()
+      // Round20-Bug4：漫画 id 不在本地库（更新替换/删除/扫描重建）：
+      // 刷新离线列表确认，仍不存在则清理孤儿引用（历史/清单/书架），非阻塞提示
+      await fetchOfflineComics()
+      const stillExists = offlineComics.value.some((c) => c.id === comicId)
+      if (!stillExists) {
+        purgeOrphanOfflineRefs(comicId)
+        toast.error('找不到该漫画，可能已从本地库移除，已清理其历史/书架引用')
+      } else {
+        toast.warning('漫画详情加载失败，请重试')
+      }
+      reportError(
+        'warn',
+        `离线详情 404：id=${comicId}`,
+        err instanceof Error ? err.stack : String(err),
+        `route=${route.fullPath}`,
+      )
     } else {
       toast.error('连接后端失败')
     }

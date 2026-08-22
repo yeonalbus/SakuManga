@@ -4,6 +4,8 @@ import { TOKEN_KEY } from '@/config/api'
 import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMemory'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { useUserStore } from '@/stores/userStore'
+// Round20-Bug4：路由切换自动取消未决 modal（防全局弹窗跨页面粘滞）
+import { useUI } from '@/composables/useUI'
 
 /**
  * 依据「启动时默认菜单」偏好解析落地页。
@@ -208,6 +210,9 @@ router.beforeEach((to, from) => {
 
 router.afterEach((to) => {
   restoreScroll(to.path)
+  // Round20-Bug4：路由切换自动取消未决 modal（确认框不跨页面残留，避免「切书架仍报错」）
+  const { modalState, handleCancel } = useUI()
+  if (modalState.isOpen) handleCancel()
 })
 
 export default router

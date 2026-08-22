@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { offlineHistoryList, clearHistory } from '@/stores/historyStore'
+import { offlineHistoryList, clearHistory, loadHistory } from '@/stores/historyStore'
+// Round20-Bug1/D2：进入历史页先刷新离线列表与历史（按 gid 去重 + 剔除本地库已移除的孤儿条目）
+import { fetchOfflineComics } from '@/stores/comicStore'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
@@ -32,6 +34,9 @@ const currentPageItems = computed(() => {
 
 // 任务五：进入页面时恢复页码；滚动位置在渲染后恢复
 onMounted(async () => {
+  // Round20-Bug1/D2：刷新离线列表与历史（服务端更新替换换 id / 删除漫画后，历史可能残留孤儿条目）
+  await fetchOfflineComics()
+  await loadHistory('offline')
   const saved = takeListState('/offline/history')
   if (saved?.page && saved.page > 1) {
     currentPage.value = saved.page

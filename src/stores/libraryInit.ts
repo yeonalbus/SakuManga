@@ -6,6 +6,8 @@
 import { http } from '@/utils/request'
 import type { ComicItem } from '@/types/comic'
 import { loadBookshelves, migrateLegacyBookshelves } from './bookshelfStore'
+// Round20-Bug4/D2：先加载离线漫画列表，使 loadHistory('offline') 能剔除本地库已不存在的孤儿历史
+import { fetchOfflineComics } from './comicStore'
 import {
   loadHistory,
   syncHistory,
@@ -80,6 +82,8 @@ const migrateLegacyReadingList = async (source: 'online' | 'offline') => {
  * 登录成功后或页面刷新恢复会话时调用。
  */
 export const loadUserLibrary = async () => {
+  // Round20-Bug4/D2：先拉取离线漫画列表，loadHistory('offline') 据此剔除本地库已不存在的孤儿历史
+  await fetchOfflineComics()
   await Promise.all([
     loadBookshelves(),
     loadHistory('online'),

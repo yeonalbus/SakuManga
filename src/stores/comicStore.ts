@@ -6,6 +6,8 @@ import { ref, computed } from 'vue'
 import type { OnlineComic, OfflineComic } from '@/types/comic'
 import { http } from '@/utils/request'
 import { offlineReadingList } from '@/stores/readingStore'
+// Round20-Bug4：fetchOfflineComics 失败可见（列表停留旧数据会导致点击 404）
+import { useUI } from '@/composables/useUI'
 // 使用命名空间导入 bookshelfStore / historyStore，避免与本文件产生「值初始化时序」上的循环依赖问题
 import * as bookshelfStore from '@/stores/bookshelfStore'
 import * as historyStore from '@/stores/historyStore'
@@ -105,6 +107,12 @@ export const fetchOfflineComics = async () => {
     })
   } catch (err) {
     console.error('拉取离线漫画失败:', err)
+    // Round20-Bug4：失败可见——列表可能停留在旧数据，点击旧条目会 404
+    try {
+      useUI().toast.error('拉取离线漫画列表失败，当前可能显示旧数据，请重试刷新')
+    } catch {
+      /* 提示失败静默 */
+    }
   }
 }
 
@@ -129,6 +137,27 @@ export const recordComicClick = (comicId: string) => {
 export const rankedOfflineComics = computed(() => {
   return [...offlineComics.value].sort((a, b) => (b.readCount || 0) - (a.readCount || 0))
 })
+
+/**
+ * Round20-Bug4：清理「本地库已不存在」的漫画 id 的前端引用（离线历史/离线阅读清单/书架）。
+ * 适用于：服务端更新替换/扫描重建删除了记录、而前端列表已过期（fetch 失败等）导致的孤儿引用。
+ * 注意：不直接操作 offlineComics（列表应由 fetchOfflineComics 刷新后为准）。
+ */
+export const purgeOrphanOfflineRefs = (id: string) => {
+  if (!id) return
+  // 1. 离线历史
+  historyStore.offlineHistoryList.value = historyStore.offlineHistoryList.value.filter(
+    (h) => h.comic.id !== id,
+  )
+  // 2. 离线阅读清单
+  offlineReadingList.value = offlineReadingList.value.filter((c) => c.id !== id)
+  // 3. 书架 comicIds（历史/后端数据异常时 comicIds 可能是非数组，防御跳过）
+  for (const shelf of bookshelfStore.bookshelves.value) {
+    if (Array.isArray(shelf.comicIds) && shelf.comicIds.length) {
+      shelf.comicIds = shelf.comicIds.filter((cid) => cid !== id)
+    }
+  }
+}
 
 // --------------------------------------------------
 // 本地画廊删除

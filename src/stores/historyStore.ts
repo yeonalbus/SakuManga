@@ -3,9 +3,10 @@
  * 持久化迁移到后端 /history API（按登录用户隔离），本地仅保留内存态（最近 50 条）。
  */
 import { ref } from 'vue'
-import type { ComicItem, OnlineComic } from '@/types/comic'
+import type { ComicItem, OfflineComic, OnlineComic } from '@/types/comic'
 import { http } from '@/utils/request'
-import { onlineComics } from './comicStore'
+// 注意：comicStore 以命名空间导入本文件，此处直接导入属既有循环引用模式（运行时取值，无初始化时序问题）
+import { onlineComics, offlineComics } from './comicStore'
 import { onlineReadingList } from './readingStore'
 
 /** 历史记录项 */
@@ -19,6 +20,7 @@ export interface HistoryRecordDTO {
   id?: number
   comicId: string
   source: 'online' | 'offline'
+  gid?: string // Round20-Bug1：离线历史的画廊 GID（按 gid 合并去重）
   comicTitle: string
   coverUrl: string
   token?: string
@@ -35,7 +37,7 @@ const MAX_HISTORY = 50
 export const onlineHistoryList = ref<HistoryItem[]>([])
 export const offlineHistoryList = ref<HistoryItem[]>([])
 
-/** 后端记录 → 前端 HistoryItem（title 与 pageCount 归一化；在线记录透传 token） */
+/** 后端记录 → 前端 HistoryItem（title 与 pageCount 归一化；在线记录透传 token；离线记录透传 gid） */
 const toHistoryItem = (r: HistoryRecordDTO): HistoryItem => ({
   comic: {
     id: r.comicId,
@@ -44,9 +46,19 @@ const toHistoryItem = (r: HistoryRecordDTO): HistoryItem => ({
     source: r.source,
     pageCount: r.totalPageCount || undefined,
     ...(r.source === 'online' ? { token: r.token || '' } : {}),
+    ...(r.source === 'offline' && r.gid ? { gid: r.gid } : {}),
   } as ComicItem,
   readAt: r.lastReadAt,
 })
+
+/**
+ * 历史去重键：优先 gid（离线同 gid 不同 id 视为同一本子），无 gid 回退 comic_id。
+ * 与后端 GetHistory/AddHistory 的合并语义一致（Round20-Bug1）。
+ */
+const historyDedupeKey = (comic: ComicItem): string => {
+  const gid = (comic as OfflineComic).gid
+  return (comic.source === 'offline' && gid ? gid : comic.id) || comic.id
+}
 
 /** 从后端加载指定来源的历史记录 */
 export const loadHistory = async (source: 'online' | 'offline') => {
@@ -54,12 +66,35 @@ export const loadHistory = async (source: 'online' | 'offline') => {
     const data = await http<{ items: HistoryRecordDTO[]; total: number }>(
       `/history?source=${source}&limit=${MAX_HISTORY}`,
     )
-    const items = (data.items || []).map(toHistoryItem)
+    let items = (data.items || []).map(toHistoryItem)
+    if (source === 'offline') {
+      // Round20-Bug1：按 gid||id 去重（后端已去重，前端双保险）
+      items = dedupeHistoryItems(items)
+      // Round20-Bug2/D2：剔除本地库已不存在的孤儿条目（离线列表已加载时）。
+      // 注意：offlineComics 为空（尚未加载）时跳过，避免误删。
+      if (offlineComics.value.length > 0) {
+        const alive = new Set(offlineComics.value.map((c) => c.id))
+        items = items.filter((h) => alive.has(h.comic.id))
+      }
+    }
     if (source === 'online') onlineHistoryList.value = items
     else offlineHistoryList.value = items
   } catch (e) {
     console.error('加载历史失败:', e)
   }
+}
+
+/** 按 gid||id 去重历史项，保留最前（最新）一条 */
+const dedupeHistoryItems = (items: HistoryItem[]): HistoryItem[] => {
+  const seen = new Set<string>()
+  const out: HistoryItem[] = []
+  for (const it of items) {
+    const key = historyDedupeKey(it.comic)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(it)
+  }
+  return out
 }
 
 /** 同步历史的可选进度入参（Round3-任务1：阅读器回传 lastPageIndex/totalPageCount） */
@@ -84,6 +119,8 @@ export const syncHistory = async (
       coverUrl: comic.coverUrl || '',
       lastChapterTitle: '',
       ...(source === 'online' ? { token: (comic as OnlineComic).token || '' } : {}),
+      // Round20-Bug1：离线历史透传 gid，供后端按 gid 合并去重
+      ...(source === 'offline' ? { gid: (comic as OfflineComic).gid || '' } : {}),
     }
     if (opts.lastPageIndex !== undefined) body.lastPageIndex = opts.lastPageIndex
     if (opts.totalPageCount !== undefined) body.totalPageCount = opts.totalPageCount
@@ -144,7 +181,9 @@ export const addHistory = (comic: ComicItem) => {
 
   const source = comic.source === 'online' ? 'online' : 'offline'
   const targetList = source === 'online' ? onlineHistoryList : offlineHistoryList
-  targetList.value = targetList.value.filter((item) => item.comic.id !== comic.id)
+  // Round20-Bug1：按 gid||id 去重（离线同 gid 不同 id 的重复条目一并移除）
+  const key = historyDedupeKey(comic)
+  targetList.value = targetList.value.filter((item) => historyDedupeKey(item.comic) !== key)
 
   targetList.value.unshift({
     comic,

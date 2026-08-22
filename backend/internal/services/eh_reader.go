@@ -34,6 +34,51 @@ func (e *ErrGalleryUnavailable) Error() string {
 	}
 }
 
+// ErrEHSession E 站会话失效/未登录（Cookie 过期或账户凭证未绑定）
+type ErrEHSession struct{}
+
+func (e *ErrEHSession) Error() string {
+	return "E 站会话已失效或未登录，请到「设置-账号」重新绑定并保存 E 站账户凭证"
+}
+
+// ErrRateLimited E 站限流 / IP 风控
+type ErrRateLimited struct{}
+
+func (e *ErrRateLimited) Error() string {
+	return "E 站触发限流或 IP 风控，请稍后重试"
+}
+
+// classifySessionError 识别 E 站会话失效 / 限流 / IP 风控页面。
+// 须在 classifyGalleryUnavailable（removed/copyright）之后调用。
+func classifySessionError(body string, status int) error {
+	lower := strings.ToLower(body)
+	if status == http.StatusTooManyRequests || strings.Contains(lower, "too many requests") {
+		return &ErrRateLimited{}
+	}
+	if strings.Contains(lower, "ip address has been banned") ||
+		(strings.Contains(lower, "banned") && strings.Contains(lower, "ip")) {
+		return &ErrRateLimited{}
+	}
+	if strings.Contains(lower, "member login") ||
+		strings.Contains(lower, "please log in") ||
+		strings.Contains(lower, "your username or password") ||
+		(strings.Contains(lower, "login") && strings.Contains(lower, "password")) {
+		return &ErrEHSession{}
+	}
+	if status == http.StatusForbidden {
+		return &ErrRateLimited{}
+	}
+	return nil
+}
+
+// classifyUnavailableOrSession 统一按「画廊不可用 → 会话/限流 → 其他」顺序识别错误页
+func classifyUnavailableOrSession(body string, status int) error {
+	if gErr := classifyGalleryUnavailable(body); gErr != nil {
+		return gErr
+	}
+	return classifySessionError(body, status)
+}
+
 // classifyGalleryUnavailable 根据 E 站不可用页 HTML 文本识别画廊真实状态
 func classifyGalleryUnavailable(body string) *ErrGalleryUnavailable {
 	lower := strings.ToLower(body)
@@ -136,7 +181,7 @@ func (s *EHService) fetchPageURLsByGDataOnce(client *http.Client, baseURL, gid, 
 
 	if resp.StatusCode != 200 {
 		body := readBodyLimited(resp)
-		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+		if gErr := classifyUnavailableOrSession(body, resp.StatusCode); gErr != nil {
 			return nil, gErr
 		}
 		return nil, fmt.Errorf("gdata 响应状态异常: %d", resp.StatusCode)
@@ -233,7 +278,7 @@ func (s *EHService) fetchPageURLsByHTML(account *models.AccountSetting, gid, tok
 	log.Printf("[EH-READER] 画廊 [%s] 逐页解析完成：%d/%d 成功", gid, success, len(links))
 
 	if success == 0 {
-		return nil, fmt.Errorf("解析原图 URL 全部失败")
+		return nil, fmt.Errorf("解析原图 URL 全部失败（画廊可能已删除，或 E 站会话/网络异常）")
 	}
 	// 🎯 总页数取真实链接数（而非成功数），缺失页由前端按需就近补全
 	return &OnlinePagesResult{Total: len(links), URLs: urls}, nil
@@ -377,7 +422,7 @@ func (s *EHService) fetchPreviewPage(client *http.Client, baseURL, gid, token st
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body := readBodyLimited(resp)
-		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+		if gErr := classifyUnavailableOrSession(body, resp.StatusCode); gErr != nil {
 			return nil, 0, gErr
 		}
 		return nil, 0, fmt.Errorf("预览页状态异常: %d", resp.StatusCode)
@@ -419,7 +464,7 @@ func (s *EHService) fetchOriginalImageURL(client *http.Client, sLink string) (st
 
 	if resp.StatusCode != 200 {
 		body := readBodyLimited(resp)
-		if gErr := classifyGalleryUnavailable(body); gErr != nil {
+		if gErr := classifyUnavailableOrSession(body, resp.StatusCode); gErr != nil {
 			return "", gErr
 		}
 		return "", fmt.Errorf("页面状态异常: %d", resp.StatusCode)

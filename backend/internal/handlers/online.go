@@ -61,6 +61,17 @@ func writeEHServiceError(c *gin.Context, err error) {
 		c.JSON(status, gin.H{"error": gErr.Error()})
 		return
 	}
+	// Round20-Bug2：会话失效 → 401（提示重新绑定凭证）；限流/IP 风控 → 429
+	var sessErr *services.ErrEHSession
+	if errors.As(err, &sessErr) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": sessErr.Error()})
+		return
+	}
+	var rateErr *services.ErrRateLimited
+	if errors.As(err, &rateErr) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": rateErr.Error()})
+		return
+	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }
 

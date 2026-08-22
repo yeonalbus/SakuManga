@@ -142,16 +142,29 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 	randomOffline := func(limit int) []RandomComicItem {
 		q := h.db.Model(&models.OfflineComic{}).Order("RANDOM()").Limit(limit)
 		if kw := strings.TrimSpace(keyword); kw != "" {
-			like := "%" + kw + "%"
+			like := "%" + services.EscapeLike(kw) + "%"
 			q = q.Where("title LIKE ? OR tags LIKE ?", like, like)
 		}
 		// 问题1：多关键词队列按 AND 语义匹配（须全部命中标题或标签，与 OfflineHome 一致）
+		// Round20-Bug3：tag 形关键词（含命名空间，如 female:"magical girl$" / female:yuri$）按
+		// E 站语义匹配 tags JSON 元素（$ 精确、无 $ 前缀）；裸词维持标题/标签子串。
 		for _, raw := range keywords {
 			kw := strings.TrimSpace(raw)
 			if kw == "" {
 				continue
 			}
-			like := "%" + kw + "%"
+			tag := services.ParseFSearchTag(kw)
+			if tag.IsTag {
+				orParts := []string{"title LIKE ? ESCAPE '\\'"}
+				orArgs := []interface{}{"%" + services.EscapeLike(kw) + "%"}
+				for _, p := range tag.TagJSONMatchPatterns() {
+					orParts = append(orParts, "tags LIKE ? ESCAPE '\\'")
+					orArgs = append(orArgs, p)
+				}
+				q = q.Where("("+strings.Join(orParts, " OR ")+")", orArgs...)
+				continue
+			}
+			like := "%" + services.EscapeLike(kw) + "%"
 			q = q.Where("(title LIKE ? OR tags LIKE ?)", like, like)
 		}
 		// Round3-任务6：离线随机负向排除（与前端 matchExcludes 语义一致）
@@ -160,15 +173,27 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 			if tag == "" {
 				continue
 			}
+			// Round20-Bug3：负向 tag 支持 f_search 语法（引号/锚点/下划线归一）
+			pt := services.ParseFSearchTag(tag)
+			if pt.IsTag {
+				notParts := make([]string, 0, 2)
+				notArgs := make([]interface{}, 0, 2)
+				for _, p := range pt.TagJSONMatchPatterns() {
+					notParts = append(notParts, "tags NOT LIKE ? ESCAPE '\\'")
+					notArgs = append(notArgs, p)
+				}
+				q = q.Where("("+strings.Join(notParts, " AND ")+")", notArgs...)
+				continue
+			}
 			// 离线 tags 为 JSON 字符串数组（namespace:key），负向 tag 对整条目精确匹配
-			q = q.Where("tags NOT LIKE ?", "%\""+tag+"\"%")
+			q = q.Where("tags NOT LIKE ?", "%\""+services.EscapeLike(tag)+"\"%")
 		}
 		for _, raw := range excludeKeywords {
 			kw := strings.TrimSpace(raw)
 			if kw == "" {
 				continue
 			}
-			like := "%" + kw + "%"
+			like := "%" + services.EscapeLike(kw) + "%"
 			q = q.Where("(title NOT LIKE ? AND tags NOT LIKE ?)", like, like)
 		}
 		if minRating > 0 {

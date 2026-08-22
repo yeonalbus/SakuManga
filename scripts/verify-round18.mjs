@@ -18,15 +18,20 @@ async function codeChecks() {
   else ok("app-container 已去 fixed inset-0（改文档流）")
   if (cont.includes("padding-top: var(--safe-top)")) ok("app-container 保留顶部 safe-area（防误触下拉通知栏）")
   else fail("app-container 缺 padding-top: var(--safe-top)")
-  // 100vh 应最后声明（最终生效，iOS standalone 完整屏）；dvh/svh 在前仅旧浏览器兜底
-  const vhIdx = cont.indexOf("height: 100vh")
-  const dvhIdx = cont.indexOf("height: 100dvh")
-  if (vhIdx >= 0 && dvhIdx >= 0 && vhIdx > dvhIdx) ok("app-container 100vh 最后声明（最终生效）")
-  else fail("app-container 100vh 未最后声明: " + cont.slice(cont.indexOf("height:"), cont.indexOf("width:")))
+  // Round18.3：纯 100vh，无 dvh/svh 混用（对齐 sun-panel）
+  if (cont.includes("height: 100vh") && !cont.includes("100dvh") && !cont.includes("100svh")) ok("app-container 纯 100vh（无 dvh 混用，对齐 sun-panel）")
+  else fail("app-container 高度仍混用 dvh/svh: " + cont.slice(cont.indexOf("height:"), cont.indexOf("width:")))
   // 2) right-wrapper height:100%
   const wrap = app.slice(app.indexOf(".right-wrapper {"), app.indexOf("/* 顶部操作栏 */"))
   if (wrap.includes("height: 100%")) ok("right-wrapper 文档流内 height:100% 撑满")
   else fail("right-wrapper 高度异常")
+  // 2.5) #app 无 min-height:100dvh（对齐 sun-panel 纯 100% 链）
+  const appBlock = app.slice(app.indexOf("#app {"), app.indexOf("html,\nbody"))
+  if (appBlock && !appBlock.includes("min-height: 100dvh") && appBlock.includes("height: 100%")) ok("#app 纯 height:100%（移除 min-height:100dvh 锚定）")
+  else fail("#app 仍含 min-height:100dvh 或高度异常")
+  // 2.6) body 底部安全区
+  if (app.includes("padding-bottom: env(safe-area-inset-bottom)")) ok("body 底部安全区（sun-panel 同款）")
+  else fail("body 缺底部安全区 padding")
   // 3) main-content 不再双重 safe-top
   if (app.includes("padding-top: 56px;")) ok("main-content 已去重复 safe-top（仅补偿 TopBar 56px）")
   else fail("main-content 仍双重 safe-top")

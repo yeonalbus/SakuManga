@@ -255,7 +255,6 @@ watch(
 #app {
   width: 100%;
   height: 100%;
-  min-height: 100dvh;
   margin: 0;
   padding: 0;
 }
@@ -281,6 +280,9 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
+  /* Round18.3：底部安全区由 body 让出（sun-panel 同款），Home Indicator 区域不挤压内容 */
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* 全局主题化滚动条（明暗主题适配）：统一宽度/圆角，用主题边框色作滑块，避免暗色下白色默认滚动条 */
@@ -311,19 +313,13 @@ body {
 
 .app-container {
   display: flex;
-  /* Round18：对齐 sunpanel 思路——去 fixed inset-0，改文档流；
-     高度用 100vh 优先（iOS standalone 下 = 完整屏幕含状态栏，比被偏小布局视口钳制的
-     100dvh/svh 更接近真实屏，修复底部截断条）；100dvh/svh 仅兜底。
+  /* Round18.3：完全对齐 sun-panel —— 纯 100vh（iOS standalone 下 = 完整屏幕含状态栏），
+     不混用 dvh/svh（standalone 下 dvh 偏小，WebKit bug 313800）；
      顶部 padding 保留：让出 safe-area，防误触下拉通知栏（用户确认保留）。 */
-  /* 100vh 放最后 = 最终生效（iOS standalone 下 = 完整屏幕）；dvh/svh 仅旧浏览器兜底 */
-  height: 100dvh;
-  height: 100svh;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  /* 顶部让位：iOS PWA 状态栏高度（竖屏顶部刘海 / 横屏两侧），防误触下拉通知栏 */
   padding-top: var(--safe-top);
-  /* 安全区区域与内容同色 */
   background-color: var(--app-bg);
   box-sizing: border-box;
 }

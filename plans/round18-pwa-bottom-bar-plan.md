@@ -45,3 +45,17 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 1. type-check + 构建 + 同步 dist；
 2. verify-round18.mjs：新断言全过；
 3. 真机复核：iPad PWA 竖/横屏底部条消失。
+
+## Round18.8 实施结果（用户确认：移除 black-translucent + 高度链切回 100%）
+
+- **根因**：`apple-mobile-web-app-status-bar-style=black-translucent` 让内容延伸到状态栏后 → WebKit 把状态栏区域从布局视口扣减（802），但 100vh 仍按物理屏（834）算 → 容器 834 超出视口 802 的 32px 落出布局视口 → 底部孤儿条。
+- **修复**：
+  - `index.html`：移除 `black-translucent` status-bar-style；
+  - `App.vue`：`#app`/`.app-container` 高度链回切 `100%`（跟随 html/body），移除 `padding-top: var(--safe-top)`（状态栏不透明由 iOS 占位，页面内容从其下方开始）。
+- **依据**：对比 sun-panel 源码——它**没有** black-translucent、高度链用 `html,body,#app{height:100%}`，故 `100vh` 正常、无孤儿条（用户截图证实无底部条）。
+- `verify-round18.mjs` 全部通过（高度链 100%、无 black-translucent、无 padding-top）。
+
+## 真机复核要点（WebKit 316008：安装时机影响行为）
+
+- **删除主屏幕旧图标 → 重新添加**（旧图标保留旧视口行为，必须重装才能让移除 black-translucent 生效）；
+- 若仍出现条，用 `/diag` 测一次，重点看 `100vh` 是否 = `innerH`（应相等 = 无孤儿条）。

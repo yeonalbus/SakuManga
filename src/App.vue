@@ -254,8 +254,9 @@ watch(
 /* Round17.2：Vue 根节点铺满 —— 修复 iPad PWA 底部手势条安全区避让（Letterbox）导致的窄长条 */
 #app {
   width: 100%;
-  /* Round18.6：与 app-container 一致用 100vh（black-translucent 完整屏） */
-  height: 100vh;
+  /* Round18.8（用户确认）：高度链回切 100%（html→body→#app），
+     配合移除 black-translucent —— 视口不再被状态栏扣减，100% 跟随物理屏 */
+  height: 100%;
   margin: 0;
   padding: 0;
 }
@@ -314,14 +315,13 @@ body {
 
 .app-container {
   display: flex;
-  /* Round18.6（WebKit bug 316008 证实）：status-bar-style=black-translucent 时，
-     视口 = 完整屏幕（100vh = 834/1194 正确，内容延伸到状态栏后）；
-     100dvh(=802/1162) 是「普通不透明状态栏」的错误值，会导致底部漏出 32px 孤儿条。
-     故必须用 100vh，且保留 padding-top safe-top 让内容避开状态栏文字。 */
-  height: 100vh;
+  /* Round18.8（用户确认）：高度链 100%（跟随 html/body）——移除 black-translucent 后
+     视口 = 物理屏（无状态栏扣减），100% 铺满；不再 padding-top 下移
+     （不透明状态栏由 iOS 占位，页面内容从其下方开始），
+     TopBar 组件自身用 env(safe-area-inset-top) 避让交互安全区 */
+  height: 100%;
   width: 100vw;
   overflow: hidden;
-  padding-top: var(--safe-top);
   background-color: var(--app-bg);
   box-sizing: border-box;
 }

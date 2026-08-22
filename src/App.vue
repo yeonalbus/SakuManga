@@ -281,9 +281,9 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
-  /* Round18.3：底部安全区由 body 让出（sun-panel 同款），Home Indicator 区域不挤压内容 */
-  padding-bottom: constant(safe-area-inset-bottom);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* Round18.5：移除 body 底部安全区 padding —— 我们 #app/.app-container 用固定 100dvh（802），
+     不占 body padding 空间；body 再加 padding-bottom 会让总高 = 802 + 25 = 827 > 视口 802，
+     产生 25px 多余滚动空间（底部浅色横条）。底部安全区已由 .main-content 内部 padding 处理。 */
 }
 
 /* 全局主题化滚动条（明暗主题适配）：统一宽度/圆角，用主题边框色作滑块，避免暗色下白色默认滚动条 */

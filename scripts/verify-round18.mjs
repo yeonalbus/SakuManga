@@ -31,9 +31,14 @@ async function codeChecks() {
   const appBlock = app.slice(app.indexOf("#app {"), app.indexOf("html,\nbody"))
   if (appBlock && appBlock.includes("height: 100dvh")) ok("#app 用 100dvh（与容器一致）")
   else fail("#app 高度异常: " + (appBlock || "").slice(0, 80))
-  // 2.6) body 底部安全区
-  if (app.includes("padding-bottom: env(safe-area-inset-bottom)")) ok("body 底部安全区（sun-panel 同款）")
-  else fail("body 缺底部安全区 padding")
+  // 2.6) body 无底部安全区 padding（避免 bodyScrollH > 视口产生底部横条，Round18.5）
+  if (!app.includes("env(safe-area-inset-bottom)")) ok("body 无底部安全区 padding（不撑破视口）")
+  else {
+    // 确保 env 只出现在 .main-content 内部（滚动内容安全区），不在 body 顶部
+    const bodyBlock = app.slice(app.indexOf("body {"), app.indexOf("font-family"))
+    if (bodyBlock && !bodyBlock.includes("padding-bottom")) ok("body 无 padding-bottom（底部安全区由 main-content 处理）")
+    else fail("body 仍含底部 padding-bottom")
+  }
   // 3) main-content 不再双重 safe-top
   if (app.includes("padding-top: 56px;")) ok("main-content 已去重复 safe-top（仅补偿 TopBar 56px）")
   else fail("main-content 仍双重 safe-top")

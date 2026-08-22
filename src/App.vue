@@ -269,6 +269,10 @@ body {
   /* Round17.2：iPad PWA 底部窄长条——html/body 撑满视口，避免容器超出露出背景 */
   height: 100%;
   min-height: 100%;
+  /* Round18：html 根元素显式设背景色 —— iOS PWA standalone 下 Home Indicator
+     淡出后留下的安全区残余区域会回退到 html 默认白色（白条），
+     设成与内容一致的主题色即可铺满、消除白条（sunpanel 无此问题即因 html 已铺色） */
+  background-color: var(--app-bg);
 }
 body {
   background-color: var(--app-bg);
@@ -307,16 +311,19 @@ body {
 
 .app-container {
   display: flex;
-  /* Round17.2：fixed inset-0 撑满 visualViewport —— 修复 iPad PWA 横屏底部窄长条
-     （WebKit bug 313800：standalone 下 dvh/svh 可能大于可视高度，容器底部超出露出背景）；
-     保留 height 兜底链兼容旧浏览器 */
-  position: fixed;
-  inset: 0;
+  /* Round18：对齐 sunpanel 思路——去掉 fixed inset-0（会把上下钉死，底部贴不到真实屏幕底，
+     漏出安全区残余白条）；改文档流 + 顶部 padding 让出 safe-area，把内容整体下推到状态栏之下，
+     底部自然贴底不再溢出。 */
   height: 100vh;
   height: 100dvh;
   height: 100svh;
   width: 100vw;
   overflow: hidden;
+  /* 顶部让位：iOS PWA 状态栏高度（竖屏顶部刘海 / 横屏两侧） */
+  padding-top: var(--safe-top);
+  /* 安全区区域与内容同色 */
+  background-color: var(--app-bg);
+  box-sizing: border-box;
 }
 
 /* 侧边栏样式 */
@@ -399,14 +406,12 @@ body {
   border-radius: 3px;
 }
 
-/* 右侧主体包装层：垂直排列顶栏和内容。
-   Round17.2：容器已是 fixed inset-0，right-wrapper 用 flex:1 撑满即可；
-   不再显式设 100dvh/svh（会与 fixed 容器叠加超出，露出底部窄条） */
+/* 右侧主体包装层：垂直排列顶栏和内容（Round18：文档流内 flex 撑满剩余高度） */
 .right-wrapper {
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: auto;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   min-width: 0; /* 允许内部内容收缩，避免溢出 */
@@ -530,11 +535,11 @@ body {
     position: relative; /* 让悬浮的 TopBar 相对该容器定位 */
   }
 
-  /* 主内容区减小留白，充分利用屏幕 */
+  /* 主内容区减小留白，充分利用屏幕。
+     Round18：app-container 已整体下移 safe-top，这里只补偿悬浮 TopBar 高度（56px）不再重复加 safe-top */
   .main-content {
     padding: 8px;
-    /* 顶部补偿悬浮 TopBar（重构后单行搜索栏 ≈ 56px + 安全区）与原有留白 */
-    padding-top: calc(56px + var(--safe-top));
+    padding-top: 56px;
     padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区，滚动到底不贴屏 */
   }
 }
@@ -589,7 +594,7 @@ html[data-layout='mobile'] .right-wrapper {
 }
 html[data-layout='mobile'] .main-content {
   padding: 8px;
-  padding-top: calc(56px + var(--safe-top)); /* 顶部补偿悬浮 TopBar（单行搜索栏） */
+  padding-top: 56px; /* Round18：外层已下移 safe-top，仅补偿悬浮 TopBar 高度 */
   padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区 */
 }
 

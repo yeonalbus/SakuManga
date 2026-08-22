@@ -254,8 +254,9 @@ watch(
 /* Round17.2：Vue 根节点铺满 —— 修复 iPad PWA 底部手势条安全区避让（Letterbox）导致的窄长条 */
 #app {
   width: 100%;
-  /* Round18.6：与 app-container 一致用 100vh（black-translucent 完整屏） */
-  height: 100vh;
+  /* Round18.7（用户方案）：高度链统一 100%（html→body→#app→app-container），
+     不用 100vh（超出 webview 802 的 32px 溢出） */
+  height: 100%;
   margin: 0;
   padding: 0;
 }
@@ -314,14 +315,12 @@ body {
 
 .app-container {
   display: flex;
-  /* Round18.6（WebKit bug 316008 证实）：status-bar-style=black-translucent 时，
-     视口 = 完整屏幕（100vh = 834/1194 正确，内容延伸到状态栏后）；
-     100dvh(=802/1162) 是「普通不透明状态栏」的错误值，会导致底部漏出 32px 孤儿条。
-     故必须用 100vh，且保留 padding-top safe-top 让内容避开状态栏文字。 */
-  height: 100vh;
+  /* Round18.7（用户方案）：webview 已被系统裁剪为 802px（innerH），
+     用 100dvh = 802 = webview 真实高度，避免 100vh(834) 溢出 32px；
+     不再整体 padding-top 下移（状态栏避让下沉到 sidebar/top-bar 各自处理） */
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
-  padding-top: var(--safe-top);
   background-color: var(--app-bg);
   box-sizing: border-box;
 }
@@ -334,6 +333,9 @@ body {
   display: flex;
   flex-direction: column;
   padding: 20px 10px;
+  /* Round18.7（用户方案）：侧栏自己避让状态栏（不再依赖 app-container 整体下移） */
+  padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   flex-shrink: 0;
   /* Round13：书架增多时侧栏整体可滚动，避免「工具/系统」被顶出视口不可达 */
   overflow-y: auto;
@@ -418,6 +420,7 @@ body {
 }
 
 /* 顶部操作栏 */
+/* 顶部操作栏（样式实际由 TopBar.vue 组件定义，此处兜底；移动形态 safe-top 由组件处理） */
 .top-bar {
   height: 56px;
   background-color: var(--app-surface);
@@ -441,6 +444,8 @@ body {
 .main-content {
   flex: 1;
   padding: 24px;
+  /* Round18.7（用户方案）：底部安全区由主内容区让出 */
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   /* iOS 橡皮筋回弹修复：contain 阻止滚出容器边缘露出 body 背景（底部超大黑框根因） */
   overscroll-behavior-y: contain;
   background-color: var(--app-bg);
@@ -536,11 +541,11 @@ body {
   }
 
   /* 主内容区减小留白，充分利用屏幕。
-     Round18：app-container 已整体下移 safe-top，这里只补偿悬浮 TopBar 高度（56px）不再重复加 safe-top */
+     Round18.7：TopBar 自带 safe-top（高度 56+safe-top），悬浮补偿需一致 */
   .main-content {
     padding: 8px;
-    padding-top: 56px;
-    padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区，滚动到底不贴屏 */
+    padding-top: calc(56px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); /* 底部 Home 条安全区 */
   }
 }
 
@@ -594,8 +599,8 @@ html[data-layout='mobile'] .right-wrapper {
 }
 html[data-layout='mobile'] .main-content {
   padding: 8px;
-  padding-top: 56px; /* Round18：外层已下移 safe-top，仅补偿悬浮 TopBar 高度 */
-  padding-bottom: calc(8px + var(--safe-bottom)); /* 底部 Home 条安全区 */
+  padding-top: calc(56px + env(safe-area-inset-top, 0px)); /* Round18.7：TopBar 自带 safe-top */
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); /* 底部 Home 条安全区 */
 }
 
 /* 手动强制桌面：窄视口下覆盖 @media 的抽屉形态，保持侧栏常驻 */

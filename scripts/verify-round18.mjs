@@ -18,17 +18,19 @@ async function codeChecks() {
   else ok("app-container 已去 fixed inset-0（改文档流）")
   if (cont.includes("padding-top: var(--safe-top)")) ok("app-container 保留顶部 safe-area（防误触下拉通知栏）")
   else fail("app-container 缺 padding-top: var(--safe-top)")
-  // Round18.3：纯 100vh，无 dvh/svh 混用（对齐 sun-panel）
-  if (cont.includes("height: 100vh") && !cont.includes("100dvh") && !cont.includes("100svh")) ok("app-container 纯 100vh（无 dvh 混用，对齐 sun-panel）")
-  else fail("app-container 高度仍混用 dvh/svh: " + cont.slice(cont.indexOf("height:"), cont.indexOf("width:")))
+  // Round18.4：真机诊断证实 100dvh = 真实可视高度（innerH），100vh = 物理屏偏大
+  if (cont.includes("height: 100dvh")) ok("app-container 用 100dvh（= innerH 真实可视高度，真机诊断修正）")
+  else fail("app-container 未用 100dvh: " + cont.slice(cont.indexOf("height:"), cont.indexOf("width:")))
+  if (cont.includes("height: 100vh")) fail("app-container 仍含 100vh（物理屏偏大导致底部条）")
+  else ok("app-container 无 100vh（避免超出可视区）")
   // 2) right-wrapper height:100%
   const wrap = app.slice(app.indexOf(".right-wrapper {"), app.indexOf("/* 顶部操作栏 */"))
   if (wrap.includes("height: 100%")) ok("right-wrapper 文档流内 height:100% 撑满")
   else fail("right-wrapper 高度异常")
-  // 2.5) #app 无 min-height:100dvh（对齐 sun-panel 纯 100% 链）
+  // 2.5) #app 用 100dvh（与 app-container 一致，避免父级钳制）
   const appBlock = app.slice(app.indexOf("#app {"), app.indexOf("html,\nbody"))
-  if (appBlock && !appBlock.includes("min-height: 100dvh") && appBlock.includes("height: 100%")) ok("#app 纯 height:100%（移除 min-height:100dvh 锚定）")
-  else fail("#app 仍含 min-height:100dvh 或高度异常")
+  if (appBlock && appBlock.includes("height: 100dvh")) ok("#app 用 100dvh（与容器一致）")
+  else fail("#app 高度异常: " + (appBlock || "").slice(0, 80))
   // 2.6) body 底部安全区
   if (app.includes("padding-bottom: env(safe-area-inset-bottom)")) ok("body 底部安全区（sun-panel 同款）")
   else fail("body 缺底部安全区 padding")

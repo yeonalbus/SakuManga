@@ -254,7 +254,8 @@ watch(
 /* Round17.2：Vue 根节点铺满 —— 修复 iPad PWA 底部手势条安全区避让（Letterbox）导致的窄长条 */
 #app {
   width: 100%;
-  height: 100%;
+  /* Round18.4：与 app-container 一致用 100dvh（真实可视高度），避免父级钳制 */
+  height: 100dvh;
   margin: 0;
   padding: 0;
 }
@@ -313,10 +314,12 @@ body {
 
 .app-container {
   display: flex;
-  /* Round18.3：完全对齐 sun-panel —— 纯 100vh（iOS standalone 下 = 完整屏幕含状态栏），
-     不混用 dvh/svh（standalone 下 dvh 偏小，WebKit bug 313800）；
-     顶部 padding 保留：让出 safe-area，防误触下拉通知栏（用户确认保留）。 */
-  height: 100vh;
+  /* Round18.4（真机诊断证实）：高度必须用 100dvh（= innerH = 真实可视高度）。
+     100vh = 物理屏含状态栏（iPad 834/1194），比可视区（802/1162）高 32px，
+     容器底部超出可视区 → 底部漏出系统默认背景条（这正是所有历史版本失败的原因）。
+     100dvh 底部正好贴可视区底，无条。
+     顶部 padding 保留：让出 safe-top（32px），避开覆盖在视口顶部的状态栏。 */
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   padding-top: var(--safe-top);

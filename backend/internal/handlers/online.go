@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -8,8 +10,11 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -218,6 +223,76 @@ func (h *OnlineComicHandler) resolveProxyAccount(c *gin.Context) *models.Account
 	return services.LoadAdminAccount(h.db)
 }
 
+// ─────────────────────────────────────────────────────────────
+// Round24-P2-7：在线封面代理磁盘缓存（N150 带宽/IO 优化）
+//
+// 根因：cover-proxy 每次从 E 站 CDN 下载同一封面图（列表页/详情页反复请求同一 URL），
+// 小主机带宽与磁盘 IO 被反复占用。
+// 方案：URL → sha256 文件名磁盘缓存（复用 cover_cache 目录），命中直接 c.File；
+// 同 URL 并发单飞，只下载一次。缓存文件带 Cache-Control，浏览器二次零请求。
+// ─────────────────────────────────────────────────────────────
+
+// proxyCoverMu 保护 proxyCoverFetching 单飞表
+var proxyCoverMu sync.Mutex
+var proxyCoverFetching = map[string]chan struct{}{} // url → 完成通知
+
+// proxyCoverCachePath URL → 缓存文件路径（含扩展名，命中时据此回推 Content-Type）
+func proxyCoverCachePath(targetURL string) string {
+	h := sha256.Sum256([]byte(targetURL))
+	ext := ".img"
+	if u, err := url.Parse(targetURL); err == nil {
+		switch strings.ToLower(filepath.Ext(u.Path)) {
+		case ".png":
+			ext = ".png"
+		case ".webp":
+			ext = ".webp"
+		case ".gif":
+			ext = ".gif"
+		case ".avif":
+			ext = ".avif"
+		}
+	}
+	return filepath.Join(services.CoverCacheDir(), "proxy_"+hex.EncodeToString(h[:16])+ext)
+}
+
+// contentTypeOfProxyCache 由缓存文件扩展名回推 Content-Type
+func contentTypeOfProxyCache(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".avif":
+		return "image/avif"
+	default:
+		return "image/jpeg"
+	}
+}
+
+// beginProxyCoverFetch 注册/等待单飞：返回 (ch, true) 表示已有请求在下载同一 URL
+func beginProxyCoverFetch(targetURL string) (chan struct{}, bool) {
+	proxyCoverMu.Lock()
+	defer proxyCoverMu.Unlock()
+	if ch, ok := proxyCoverFetching[targetURL]; ok {
+		return ch, true
+	}
+	ch := make(chan struct{})
+	proxyCoverFetching[targetURL] = ch
+	return ch, false
+}
+
+// endProxyCoverFetch 结束单飞并广播（幂等）
+func endProxyCoverFetch(targetURL string) {
+	proxyCoverMu.Lock()
+	if ch, ok := proxyCoverFetching[targetURL]; ok {
+		delete(proxyCoverFetching, targetURL)
+		close(ch)
+	}
+	proxyCoverMu.Unlock()
+}
+
 // ProxyCover 代理转发 ExHentai / E-Hentai 的封面图片（可选认证，兼容 <img> 媒体加载）
 func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 	targetURL := c.Query("url")
@@ -231,6 +306,29 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "仅允许代理 E 站图片域名"})
 		return
 	}
+
+	// P2-7：磁盘缓存命中短路（同一封面 URL 不再重复下载）
+	cachePath := proxyCoverCachePath(targetURL)
+	if _, statErr := os.Stat(cachePath); statErr == nil {
+		c.Header("Content-Type", contentTypeOfProxyCache(cachePath))
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.File(cachePath)
+		return
+	}
+
+	// P2-7：同 URL 单飞——已有请求在下载时，等待其完成再查缓存
+	waitCh, waiting := beginProxyCoverFetch(targetURL)
+	if waiting {
+		<-waitCh
+		if _, statErr := os.Stat(cachePath); statErr == nil {
+			c.Header("Content-Type", contentTypeOfProxyCache(cachePath))
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.File(cachePath)
+			return
+		}
+		// 对方下载失败 → 继续自行下载
+	}
+	defer endProxyCoverFetch(targetURL)
 
 	account := h.resolveProxyAccount(c)
 	if account == nil || account.IPBMemberID == "" {
@@ -321,10 +419,25 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
+	// P2-7：下载成功 → 落盘缓存（供后续同 URL 请求短路）
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr == nil && len(body) > 0 {
+		if err := services.EnsureCoverCacheDir(); err == nil {
+			if tmpErr := os.WriteFile(cachePath, body, 0o644); tmpErr == nil {
+				log.Printf("[COVER-PROXY] 已缓存封面 url=%s (%d bytes)", targetURL, len(body))
+			}
+		}
+	} else {
+		body = nil // 读取失败则直接透传（不写缓存）
+	}
+
 	c.Header("Content-Type", resp.Header.Get("Content-Type"))
 	c.Header("Cache-Control", "public, max-age=86400")
-
-	_, _ = io.Copy(c.Writer, resp.Body)
+	if body != nil {
+		_, _ = c.Writer.Write(body)
+	} else {
+		_, _ = io.Copy(c.Writer, resp.Body)
+	}
 }
 
 // GetOnlineComicDetail 获取画廊详情

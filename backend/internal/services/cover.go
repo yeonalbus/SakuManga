@@ -132,6 +132,16 @@ func ensureCoverCacheDir() error {
 	return os.MkdirAll(coverCacheDir, 0o755)
 }
 
+// CoverCacheDir 返回封面缓存目录路径（供 handler 层复用，如在线封面代理缓存）
+func CoverCacheDir() string {
+	return coverCacheDir
+}
+
+// EnsureCoverCacheDir 创建封面缓存目录（导出版，供 handler 层调用）
+func EnsureCoverCacheDir() error {
+	return ensureCoverCacheDir()
+}
+
 // readCoverSource 读取封面源图（ZIP 或目录），返回字节 + 源修改时间（缓存失效依据）
 func readCoverSource(comic models.OfflineComic) ([]byte, time.Time, error) {
 	fi, err := os.Stat(comic.LocalPath)
@@ -226,23 +236,102 @@ func decodeAndResize(data []byte) ([]byte, bool) {
 	return buf.Bytes(), true
 }
 
-// GetCoverThumb 获取离线漫画封面缩略图（Round14）：
-//   - 缓存命中且源未变更 → 返回 (nil, cachePath, true)，调用方 c.File(cachePath)；
-//   - 未命中 → 读源图 → 缩放生成缓存 → 返回 (nil, cachePath, true)；
+// ─────────────────────────────────────────────────────────────
+// Round24-P0-1/P0-2：封面生成性能优化
+//
+// P0-1 缓存命中短路：GetCoverThumb 先用 os.Stat 拿缓存文件与源 modtime（便宜），
+//       命中直接返回 c.File，不再 readCoverSource（zip.OpenReader 整个包/解压首图）与解码缩放。
+// P0-2 生成并发限流：全局信号量（2）限制解码缩放并发，防止列表页 24 张卡片首次请求
+//       同时解码打满 N150 四核；per-comic 单飞锁防止同一封面并发重复生成。
+// ─────────────────────────────────────────────────────────────
+
+// coverGenSem 封面生成并发信号量（同时最多 2 个解码缩放任务）
+var coverGenSem = make(chan struct{}, 2)
+
+// coverGenMu 保护 coverGenerating 单飞表
+var coverGenMu sync.Mutex
+var coverGenerating = map[string]chan struct{}{} // comicID → 完成通知
+
+// beginCoverGen 注册/等待单飞：返回 (ch, true) 表示已有其他请求正在生成，等待其完成；
+// 返回 (ch, false) 表示由当前请求负责生成。
+func beginCoverGen(comicID string) (chan struct{}, bool) {
+	coverGenMu.Lock()
+	defer coverGenMu.Unlock()
+	if ch, ok := coverGenerating[comicID]; ok {
+		return ch, true
+	}
+	ch := make(chan struct{})
+	coverGenerating[comicID] = ch
+	return ch, false
+}
+
+// endCoverGen 结束单飞并广播完成（幂等）
+func endCoverGen(comicID string) {
+	coverGenMu.Lock()
+	if ch, ok := coverGenerating[comicID]; ok {
+		delete(coverGenerating, comicID)
+		close(ch)
+	}
+	coverGenMu.Unlock()
+}
+
+// coverSourceModTime 仅获取封面源图修改时间（不读取图片内容）：
+// 文件夹 → WalkDir 找到首图即停再 stat（比读整图便宜得多）；归档 → os.Stat 包文件。
+func coverSourceModTime(comic models.OfflineComic) (time.Time, error) {
+	fi, err := os.Stat(comic.LocalPath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if fi.IsDir() {
+		imgPath, err := GetCoverFromDir(comic.LocalPath)
+		if err != nil {
+			return time.Time{}, err
+		}
+		imgFi, err := os.Stat(imgPath)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return imgFi.ModTime(), nil
+	}
+	return fi.ModTime(), nil
+}
+
+// GetCoverThumb 获取离线漫画封面缩略图（Round14 + Round24 性能优化）：
+//   - 缓存命中且源未变更 → 直接返回 (nil, cachePath, true)，零 zip IO / 零解码（P0-1）；
+//   - 未命中 → 单飞去重（同封面并发只生成一次）+ 信号量限流（最多 2 个并发解码），生成写盘；
 //   - 无需缩放/解码失败 → 返回 (srcData, "", false)，调用方原图直传。
 func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, cached bool, err error) {
-	srcData, srcMod, err := readCoverSource(comic)
+	cachePath = coverCachePath(comic.ID)
+	srcMod, err := coverSourceModTime(comic)
 	if err != nil {
 		return nil, "", false, err
 	}
 
-	cachePath = coverCachePath(comic.ID)
-
-	// 命中判断：缓存存在 && 源修改时间不晚于缓存
+	// P0-1：缓存命中短路（不读源图、不开 zip、不缩放）
 	if fi, statErr := os.Stat(cachePath); statErr == nil {
 		if !srcMod.IsZero() && !fi.ModTime().Before(srcMod) {
 			return nil, cachePath, true, nil
 		}
+	}
+
+	// P0-2a：per-comic 单飞——同一封面正在生成时，等待其完成再查缓存
+	waitCh, waiting := beginCoverGen(comic.ID)
+	if waiting {
+		<-waitCh
+		if _, statErr := os.Stat(cachePath); statErr == nil {
+			return nil, cachePath, true, nil
+		}
+		// 对方生成失败/未写盘 → 继续自行生成
+	}
+	defer endCoverGen(comic.ID)
+
+	// P0-2b：并发信号量限流（防 24 张卡片同时解码缩放打满 CPU）
+	coverGenSem <- struct{}{}
+	defer func() { <-coverGenSem }()
+
+	srcData, _, err := readCoverSource(comic)
+	if err != nil {
+		return nil, "", false, err
 	}
 
 	thumb, ok := decodeAndResize(srcData)

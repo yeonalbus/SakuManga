@@ -10,7 +10,9 @@ import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
-import { addComicsToShelf } from '@/stores/bookshelfStore'
+// Round22：多选快捷加入共享逻辑 + 工具条（替代页内重复实现）
+import { useShelfQuickAdd } from '@/composables/useShelfQuickAdd'
+import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
 import { useUserStore } from '@/stores/userStore'
 import type { ComicItem, OfflineComic } from '@/types/comic'
 // Round10-Bug3：离线星级筛选统一按「生效评分」（个人评分优先）过滤
@@ -34,12 +36,18 @@ const userStore = useUserStore()
 // 任务五/S11：恢复上次离开的列表状态（页码 + 滚动位置），并刷新离线数据。
 // onMounted 与 onActivated 共用：keep-alive 缓存下「同标签返回」只触发 onActivated，
 // 若不在此恢复，页码/滚动会停留在离开前的旧状态。
+// Round24-P1-6：已有数据时后台静默刷新（不阻塞渲染，3000+ 本全量清洗不卡首帧）；
+// 仅首次无数据时等待加载。
 const restoreListState = async () => {
   const saved = takeListState('/offline/home')
   if (saved?.page && saved.page > 1) {
     currentPage.value = saved.page
   }
-  await fetchOfflineComics()
+  if (offlineComics.value.length === 0) {
+    await fetchOfflineComics()
+  } else {
+    void fetchOfflineComics()
+  }
   // 数据就绪（列表已渲染）后再恢复滚动位置，避免内容高度为 0 导致恢复失准
   if (saved && saved.top > 0) {
     await nextTick()
@@ -76,63 +84,15 @@ onBeforeRouteLeave(() => {
 })
 
 // --------------------------------------------------
-// 长按选择 / 批量删除
+// Round22：长按选择 / 快捷加入（共享 composable + 工具条）
 // --------------------------------------------------
-const selectMode = ref(false)
-const selectedIds = ref<string[]>([])
-
-const toggleSelect = (comic: ComicItem) => {
-  const idx = selectedIds.value.indexOf(comic.id)
-  if (idx >= 0) selectedIds.value.splice(idx, 1)
-  else selectedIds.value.push(comic.id)
-}
-
-const handleLongPress = (comic: ComicItem) => {
-  if (comic.source !== 'offline') return
-  selectMode.value = true
-  toggleSelect(comic)
-}
-
-const handleSelect = (comic: ComicItem) => toggleSelect(comic)
-
-const exitSelectMode = () => {
-  selectMode.value = false
-  selectedIds.value = []
-}
-
-// Round13：多选快捷加入书架
-const showShelfPicker = ref(false)
-const openShelfPicker = () => {
-  if (selectedIds.value.length === 0) return
-  showShelfPicker.value = true
-}
-const handleAddToShelf = async (shelfId: string) => {
-  const ids = [...selectedIds.value]
-  showShelfPicker.value = false
-  if (ids.length === 0) return
-  const { added, skipped } = await addComicsToShelf(shelfId, ids)
-  if (added > 0 || skipped > 0) {
-    toast.success(`已加入书架 ${added} 本${skipped > 0 ? `（跳过 ${skipped} 本已在书架）` : ''}`)
-  } else {
-    toast.warning('所选作品均已在该书架中')
-  }
-  exitSelectMode()
-}
-
-const toggleSelectAllPage = () => {
-  const pageIds = currentPageItems.value.map((c) => c.id)
-  const allSelected = pageIds.every((id) => selectedIds.value.includes(id))
-  if (allSelected) {
-    selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id))
-  } else {
-    selectedIds.value = Array.from(new Set([...selectedIds.value, ...pageIds]))
-  }
-}
+const quickAdd = useShelfQuickAdd(() => currentPageItems.value as unknown as ComicItem[])
 
 const handleDeleteSelected = async () => {
-  if (selectedIds.value.length === 0) return
+  const ids = [...quickAdd.selectedIds.value]
+  if (ids.length === 0) return
   const confirmed = await modal.confirm(
-    `确定要删除选中的 ${selectedIds.value.length} 部作品吗？\n将同时移除书架与历史记录中的引用。`,
+    `确定要删除选中的 ${ids.length} 部作品吗？\n将同时移除书架与历史记录中的引用。`,
     '删除选中作品',
   )
   if (!confirmed) return
@@ -140,7 +100,7 @@ const handleDeleteSelected = async () => {
     '是否同时删除本地文件？\n选择「确定」将永久删除磁盘上的漫画文件，无法恢复。',
     '删除本地文件',
   )
-  const okCount = await deleteOfflineComics(selectedIds.value, alsoDeleteFile)
+  const okCount = await deleteOfflineComics(ids, alsoDeleteFile)
   if (okCount > 0) {
     toast.success(
       alsoDeleteFile ? `已删除 ${okCount} 部作品及其本地文件` : `已删除 ${okCount} 部作品`,
@@ -148,7 +108,7 @@ const handleDeleteSelected = async () => {
   } else {
     toast.error('删除失败，请重试')
   }
-  exitSelectMode()
+  quickAdd.exitSelectMode()
 }
 
 const route = useRoute()
@@ -356,27 +316,16 @@ const seekToDate = (date: string) => {
 
 <template>
   <div class="offline-home-view">
-    <!-- 选择模式工具条 -->
-    <div v-if="selectMode" class="select-toolbar">
-      <span class="select-count">已选 {{ selectedIds.length }} 部</span>
-      <button class="toolbar-btn" @click="toggleSelectAllPage">全选本页</button>
-      <button
-        class="toolbar-btn"
-        :disabled="selectedIds.length === 0"
-        @click="openShelfPicker"
-      >
-        📥 加入书架
-      </button>
-      <button
-        v-if="userStore.isAdmin"
-        class="toolbar-btn danger"
-        :disabled="selectedIds.length === 0"
-        @click="handleDeleteSelected"
-      >
-        🗑️ 删除
-      </button>
-      <button class="toolbar-btn" @click="exitSelectMode">取消</button>
-    </div>
+    <!-- Round22：多选快捷加入工具条（共享组件） -->
+    <ShelfQuickAddToolbar
+      v-if="quickAdd.selectMode.value"
+      :count="quickAdd.selectedIds.value.length"
+      :show-delete="userStore.isAdmin"
+      @select-all="quickAdd.toggleSelectAllPage()"
+      @add="quickAdd.openShelfPicker()"
+      @delete="handleDeleteSelected"
+      @close="quickAdd.exitSelectMode()"
+    />
 
     <!-- 时间排序控件（问题1） -->
     <div class="sort-controls">
@@ -403,10 +352,10 @@ const seekToDate = (date: string) => {
     <GridContainer
       :items="currentPageItems"
       :selectable="true"
-      :select-mode="selectMode"
-      :selected-ids="selectedIds"
-      @longpress="handleLongPress"
-      @select="handleSelect"
+      :select-mode="quickAdd.selectMode.value"
+      :selected-ids="quickAdd.selectedIds.value"
+      @longpress="quickAdd.handleLongPress"
+      @select="quickAdd.handleSelect"
     >
       <!-- 通过 #footer 插槽挂载数字分页组件 -->
       <template #footer>
@@ -422,13 +371,13 @@ const seekToDate = (date: string) => {
     <!-- Round4 任务八：悬浮球（刷新 + 日期跳页） -->
     <FloatingToolbar @refresh="fetchOfflineComics" @seek-change="seekToDate" />
 
-    <!-- Round13：多选快捷加入书架（检索浮层 add 模式） -->
+    <!-- Round13/22：多选快捷加入书架（检索浮层 add 模式） -->
     <BookshelfPickerOverlay
-      :open="showShelfPicker"
+      :open="quickAdd.showShelfPicker.value"
       mode="add"
-      :selected-count="selectedIds.length"
-      @close="showShelfPicker = false"
-      @add="handleAddToShelf"
+      :selected-count="quickAdd.selectedIds.value.length"
+      @close="quickAdd.showShelfPicker.value = false"
+      @add="quickAdd.handleAddToShelf"
     />
   </div>
 </template>
@@ -437,57 +386,6 @@ const seekToDate = (date: string) => {
 .offline-home-view {
   padding: 12px 4px;
   min-height: 100%;
-}
-
-.select-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--app-border-2);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background-color: var(--app-surface-2);
-}
-
-.select-count {
-  color: var(--app-text-strong);
-  font-size: 0.95rem;
-  font-weight: 500;
-}
-
-.toolbar-btn {
-  background-color: var(--app-border-2);
-  color: var(--app-text-2);
-  border: 1px solid var(--app-border-3);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s;
-}
-
-.toolbar-btn:hover:not(:disabled) {
-  background-color: var(--app-surface-3-hover);
-  border-color: var(--app-border-3);
-}
-
-.toolbar-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.toolbar-btn.danger {
-  color: #ff7588;
-  border-color: #ff7588;
-}
-
-.toolbar-btn.danger:hover:not(:disabled) {
-  background-color: rgba(255, 117, 136, 0.12);
 }
 
 /* 时间排序控件（问题1） */

@@ -67,7 +67,14 @@ onMounted(() => {
   // Round15-Bug1：监听横竖屏切换，重算动态视口高度与安全区
   window.addEventListener('orientationchange', handleOrientationChange)
   // 🚀 应用启动时异步获取翻译字典
-  tagStore.fetchTagDictionary()
+  // Round24-P1-5：字典为全量 JSON（数千条），N150 低配解析慢且阻塞首屏 →
+  // 改空闲期加载（requestIdleCallback 兜底 setTimeout），首屏渲染优先。
+  const loadDict = () => tagStore.fetchTagDictionary()
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(loadDict, { timeout: 3000 })
+  } else {
+    setTimeout(loadDict, 2000)
+  }
 
   // 🖥️ 偏好设置：以全屏模式启动（受浏览器用户手势限制，被拦截时静默忽略）
   if (preferenceSettings.startInFullscreen && document.documentElement.requestFullscreen) {
@@ -160,7 +167,9 @@ watch(
           @scroll="handleMainScroll"
         >
           <router-view v-slot="{ Component }">
-            <keep-alive>
+            <!-- Round24-P1-4：keep-alive 加 :max 上限（此前无限制，搜索等场景按 fullPath
+                 无限缓存组件实例 → DOM/内存累积卡顿；6 个足够覆盖常用页往返） -->
+            <keep-alive :max="6">
               <component :is="Component" :key="$route.fullPath" />
             </keep-alive>
           </router-view>

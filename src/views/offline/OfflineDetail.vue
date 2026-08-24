@@ -92,6 +92,9 @@ const offlineAddTagsList = ref<string[]>([])
 const offlineRemoveTagsList = ref<string[]>([])
 // Round23：隐藏页（自定义删除页面）
 const hiddenPagesList = ref<number[]>([])
+// Round24：后端新旧探测 + 旧后端降级（线上旧版后端不返回三态字段，删除后本地移除显示）
+const backendHasTriState = ref(false)
+const legacyRemovedRaws = ref<Set<string>>(new Set()) // 旧后端下本会话已删除的 raw（显示过滤）
 
 // 兜底：由 TagItem/原始 tag 反查原始字符串（优先使用后端返回的 tagRaws）
 const rawTagOf = (t: string | { namespace?: string; key?: string }): string => {
@@ -113,14 +116,23 @@ interface DisplayTag {
 
 const displayTags = computed<DisplayTag[]>(() => {
   const removeSet = new Set(offlineRemoveTagsList.value)
-  const hasTriState = onlineTagsList.value.length > 0 || offlineAddTagsList.value.length > 0
-  if (!hasTriState && Array.isArray(comic.value.tags) && comic.value.tags.length > 0) {
-    // 旧数据回退：无三态列表时按合并展示列表（tagRaws 与 tags 一一对应）
-    return (comic.value.tags as unknown[]).map((t, idx) => ({
-      raw: tagRaws.value[idx] || rawTagOf(t as never),
-      source: tagSource(idx),
-      removed: false,
-    }))
+  const hasTriStateData =
+    onlineTagsList.value.length > 0 ||
+    offlineAddTagsList.value.length > 0 ||
+    offlineRemoveTagsList.value.length > 0
+  // 回退分支：旧版后端（不返回三态字段）或新后端但该漫画无三态数据（遗留 Tags 列）。
+  // 旧后端下删除的 tag 由 legacyRemovedRaws 本地过滤（后端无法回传删除状态）。
+  if (!backendHasTriState.value || !hasTriStateData) {
+    if (Array.isArray(comic.value.tags) && comic.value.tags.length > 0) {
+      return (comic.value.tags as unknown[])
+        .map((t, idx) => ({
+          raw: tagRaws.value[idx] || rawTagOf(t as never),
+          source: tagSource(idx),
+          removed: false,
+        }))
+        .filter((dt) => !legacyRemovedRaws.value.has(dt.raw))
+    }
+    return []
   }
   const out: DisplayTag[] = []
   for (const raw of onlineTagsList.value) {
@@ -170,6 +182,12 @@ const fetchComicDetail = async () => {
     // Round23：隐藏页（自定义删除页面）
     hiddenPagesList.value = data.hiddenPagesList || []
     hiddenPageSet.value = new Set(data.hiddenPagesList || [])
+    // Round24：后端新旧探测（旧版后端不返回三态字段）
+    backendHasTriState.value =
+      Array.isArray(data.onlineTagsList) ||
+      Array.isArray(data.offlineAddTagsList) ||
+      Array.isArray(data.offlineRemoveTagsList)
+    legacyRemovedRaws.value = new Set()
     // Round11-Opt3：备注回填 + 预览重置（标题/备注编辑后刷新）
     remarkText.value = data.remark || ''
     previewPages.value = []
@@ -323,6 +341,12 @@ const handleRemoveTag = async (dt: DisplayTag) => {
       method: 'PUT',
       body: JSON.stringify({ addTags: [], removeTags: [raw] }),
     })
+    if (!backendHasTriState.value) {
+      // Round24：旧版后端降级——后端无三态返回，本地过滤显示（避免「删了还在」），不支持恢复
+      legacyRemovedRaws.value = new Set([...legacyRemovedRaws.value, raw])
+      toast.info(`已移除标签「${raw}」（旧版后端不支持恢复，建议升级服务端）`)
+      return
+    }
     toast.info(dt.source === 'local' ? `已移除标签「${raw}」` : `已叉除标签「${raw}」（点击可恢复）`)
     await fetchComicDetail()
   } catch (err) {

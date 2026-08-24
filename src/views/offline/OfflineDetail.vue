@@ -49,6 +49,9 @@ interface OfflineDetailDTO {
   remark?: string
   gid?: string
   token?: string
+  // Round23：自定义删除页面（隐藏页软删除）
+  hiddenPagesList?: number[]
+  originalPageCount?: number
 }
 
 const route = useRoute()
@@ -77,6 +80,8 @@ const comic = ref<OfflineDetailComic>({
   localPath: '',
   fileSize: 0,
   readCount: 0,
+  originalPageCount: 0,
+  hiddenPagesList: [],
 })
 
 // 双轨三态展示辅助数据（与后端 GetOfflineComicDetail 返回对应）
@@ -84,6 +89,9 @@ const tagRaws = ref<string[]>([])
 const tagSources = ref<('online' | 'local')[]>([])
 const onlineTagsList = ref<string[]>([])
 const offlineAddTagsList = ref<string[]>([])
+const offlineRemoveTagsList = ref<string[]>([])
+// Round23：隐藏页（自定义删除页面）
+const hiddenPagesList = ref<number[]>([])
 
 // 兜底：由 TagItem/原始 tag 反查原始字符串（优先使用后端返回的 tagRaws）
 const rawTagOf = (t: string | { namespace?: string; key?: string }): string => {
@@ -94,7 +102,37 @@ const rawTagOf = (t: string | { namespace?: string; key?: string }): string => {
 
 // 该 tag 属于官方(online) 还是 本地新增(local)
 const tagSource = (idx: number): 'online' | 'local' => tagSources.value[idx] || 'online'
-const tagClass = (idx: number) => (tagSource(idx) === 'local' ? 'tag-local' : 'tag-official')
+
+// ── Round23：Tag 增删优化（原生 tag 删除置灰可恢复，本地 tag 物理删除）──
+// 展示列表 = 全量 online tag（含被叉除的）+ 本地新增 tag
+interface DisplayTag {
+  raw: string // 原始 tag 串（后端精确匹配）
+  source: 'online' | 'local'
+  removed: boolean // 仅 online 有效：处于 OfflineRemoveTags（已叉除，点击可恢复）
+}
+
+const displayTags = computed<DisplayTag[]>(() => {
+  const removeSet = new Set(offlineRemoveTagsList.value)
+  const hasTriState = onlineTagsList.value.length > 0 || offlineAddTagsList.value.length > 0
+  if (!hasTriState && Array.isArray(comic.value.tags) && comic.value.tags.length > 0) {
+    // 旧数据回退：无三态列表时按合并展示列表（tagRaws 与 tags 一一对应）
+    return (comic.value.tags as unknown[]).map((t, idx) => ({
+      raw: tagRaws.value[idx] || rawTagOf(t as never),
+      source: tagSource(idx),
+      removed: false,
+    }))
+  }
+  const out: DisplayTag[] = []
+  for (const raw of onlineTagsList.value) {
+    if (!raw) continue
+    out.push({ raw, source: 'online', removed: removeSet.has(raw) })
+  }
+  for (const raw of offlineAddTagsList.value) {
+    if (!raw) continue
+    out.push({ raw, source: 'local', removed: false })
+  }
+  return out
+})
 
 // 向 Go 后端拉取单本漫画真实数据
 const fetchComicDetail = async () => {
@@ -128,9 +166,18 @@ const fetchComicDetail = async () => {
     tagSources.value = data.tagSources || []
     onlineTagsList.value = data.onlineTagsList || []
     offlineAddTagsList.value = data.offlineAddTagsList || []
+    offlineRemoveTagsList.value = data.offlineRemoveTagsList || []
+    // Round23：隐藏页（自定义删除页面）
+    hiddenPagesList.value = data.hiddenPagesList || []
+    hiddenPageSet.value = new Set(data.hiddenPagesList || [])
     // Round11-Opt3：备注回填 + 预览重置（标题/备注编辑后刷新）
     remarkText.value = data.remark || ''
     previewPages.value = []
+    visibleTotal.value = 0
+    physicalTotal.value = 0
+    manageMode.value = false
+    manageIndices.value = []
+    selectedPages.value = new Set()
     detailTab.value = 'info'
   } catch (err) {
     console.error('获取漫画详情失败:', err)
@@ -267,19 +314,35 @@ const handleAddTag = async () => {
   }
 }
 
-const handleRemoveTag = async (index: number) => {
-  // 优先使用后端返回的原始 tag 字符串精确匹配（官方/本地都能正确剔除）
-  const raw = tagRaws.value[index] || rawTagOf(comic.value.tags[index] as never)
+// 删除/叉除 tag：本地 tag 物理移除；原生(online) tag 记入 OfflineRemoveTags（软删除，展示置灰可恢复）
+const handleRemoveTag = async (dt: DisplayTag) => {
+  const raw = dt.raw || ''
   if (!raw) return
   try {
     await http(`/comics/${comic.value.id}/tags`, {
       method: 'PUT',
       body: JSON.stringify({ addTags: [], removeTags: [raw] }),
     })
-    toast.info(`已移除标签「${raw}」`)
+    toast.info(dt.source === 'local' ? `已移除标签「${raw}」` : `已叉除标签「${raw}」（点击可恢复）`)
     await fetchComicDetail()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '移除标签失败')
+  }
+}
+
+// 恢复被叉除的原生(online) tag：从 OfflineRemoveTags 剔除
+const handleRestoreTag = async (dt: DisplayTag) => {
+  const raw = dt.raw || ''
+  if (!raw) return
+  try {
+    await http(`/comics/${comic.value.id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ addTags: [raw], removeTags: [] }),
+    })
+    toast.success(`已恢复标签「${raw}」`)
+    await fetchComicDetail()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '恢复标签失败')
   }
 }
 
@@ -353,30 +416,48 @@ const handleDelete = async () => {
 
 // --------------------------------------------------
 // Round11-Opt3：画廊预览 / 修改标题 / 本地备注 / 跳转在线画廊
+// Round23：预览增量加载（每批 20 张）+ 管理模式（多选隐藏/恢复页面）
 // --------------------------------------------------
 const detailTab = ref<'info' | 'preview'>('info')
-const PREVIEW_LIMIT = 20 // 决策点 D5：预览前 20 张
-const previewPages = ref<{ index: number; url: string }[]>([])
+const PREVIEW_BATCH = 20 // 每次点击「加载更多」追加的张数（对齐在线预览方案）
+const previewPages = ref<number[]>([]) // 普通模式：已加载的有效页索引（0-based，分批）
+const visibleTotal = ref(0) // 有效总页数（物理 − 隐藏）
+const physicalTotal = ref(0) // 物理总页数（含隐藏）
+const hiddenPageSet = ref<Set<number>>(new Set()) // 隐藏的物理页索引集合
 const loadingPreview = ref(false)
 
-const previewCount = computed(() => Math.min(PREVIEW_LIMIT, comic.value.pageCount || 0))
+// 管理模式（Round23 自定义删除页面）
+const manageMode = ref(false)
+const manageIndices = ref<number[]>([]) // 管理模式：全量物理页索引（含隐藏）
+const selectedPages = ref<Set<number>>(new Set()) // 管理模式中选中的物理页索引
+const savingHidden = ref(false)
+
+const hiddenCount = computed(() => hiddenPageSet.value.size)
+const previewCount = computed(() => visibleTotal.value) // 预览 tab 标题显示有效页数
 
 const switchPreview = () => {
   detailTab.value = 'preview'
-  if (previewPages.value.length === 0) fetchPreview()
+  if (previewPages.value.length === 0 && visibleTotal.value === 0) fetchPreview()
 }
 
 const fetchPreview = async () => {
   if (!comic.value.id || loadingPreview.value) return
   loadingPreview.value = true
   try {
-    const data = await http<{ total?: number; pages?: unknown[] }>('/comics/' + comic.value.id + '/pages')
-    const total = typeof data.total === "number" ? data.total : Array.isArray(data.pages) ? data.pages.length : 0
-    const count = Math.min(PREVIEW_LIMIT, total || comic.value.pageCount || 0)
-    previewPages.value = Array.from({ length: count }, (_, i) => ({
-      index: i,
-      url: API_BASE + '/comics/' + comic.value.id + '/page/' + i,
-    }))
+    const data = await http<{ total?: number; pages?: unknown[]; originalTotal?: number; hiddenPages?: number[] }>(
+      '/comics/' + comic.value.id + '/pages',
+    )
+    visibleTotal.value = typeof data.total === 'number' ? data.total : 0
+    physicalTotal.value =
+      typeof data.originalTotal === 'number'
+        ? data.originalTotal
+        : visibleTotal.value || comic.value.pageCount || 0
+    if (Array.isArray(data.hiddenPages)) {
+      hiddenPageSet.value = new Set(data.hiddenPages)
+    }
+    // 初始加载第一批（普通模式）
+    const firstBatch = Math.min(PREVIEW_BATCH, visibleTotal.value)
+    previewPages.value = Array.from({ length: firstBatch }, (_, i) => i)
   } catch (err) {
     console.error('加载预览失败:', err)
     toast.error('预览加载失败')
@@ -385,10 +466,108 @@ const fetchPreview = async () => {
   }
 }
 
-const openPreviewPage = (index: number) => {
+// 点击加载更多：每次追加 PREVIEW_BATCH 个有效页索引
+const loadMorePreview = () => {
+  const start = previewPages.value.length
+  const end = Math.min(start + PREVIEW_BATCH, visibleTotal.value)
+  for (let i = start; i < end; i++) previewPages.value.push(i)
+}
+
+// 进入管理模式：一次性展开全量物理页（含隐藏页，隐藏的加遮罩）
+const enterManageMode = () => {
+  manageMode.value = true
+  selectedPages.value = new Set()
+  if (manageIndices.value.length !== physicalTotal.value) {
+    manageIndices.value = Array.from({ length: physicalTotal.value }, (_, i) => i)
+  }
+}
+
+const exitManageMode = () => {
+  manageMode.value = false
+  selectedPages.value = new Set()
+  manageIndices.value = []
+  // 退出后普通预览回到分批状态
+  const back = Math.min(PREVIEW_BATCH, visibleTotal.value)
+  previewPages.value = Array.from({ length: back }, (_, i) => i)
+}
+
+const isHiddenPage = (physicalIdx: number) => hiddenPageSet.value.has(physicalIdx)
+const isSelectedPage = (physicalIdx: number) => selectedPages.value.has(physicalIdx)
+
+const toggleSelectPage = (physicalIdx: number) => {
+  const s = new Set(selectedPages.value)
+  if (s.has(physicalIdx)) {
+    s.delete(physicalIdx)
+  } else {
+    s.add(physicalIdx)
+  }
+  selectedPages.value = s
+}
+
+// 保存隐藏页列表（软删除）：同步重算有效页数并记录原页数
+const saveHiddenPages = async (hidden: number[]) => {
+  if (!comic.value.id || savingHidden.value) return
+  savingHidden.value = true
+  try {
+    const res = await http<{ pageCount: number; originalPageCount: number; hiddenPages: number[] }>(
+      `/comics/${comic.value.id}/hidden-pages`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ hiddenPages: hidden }),
+      },
+    )
+    // 手动同步详情字段（不触发 fetchComicDetail，避免预览被重置、管理模式被打断）
+    comic.value.pageCount = res.pageCount
+    comic.value.originalPageCount = res.originalPageCount
+    hiddenPagesList.value = res.hiddenPages || []
+    hiddenPageSet.value = new Set(res.hiddenPages || [])
+    visibleTotal.value = res.pageCount
+    physicalTotal.value = Math.max(physicalTotal.value, res.originalPageCount || physicalTotal.value)
+    selectedPages.value = new Set()
+    // 普通预览索引从有效索引 0 重建（隐藏变化导致后续有效索引错位）
+    previewPages.value = Array.from({ length: Math.min(PREVIEW_BATCH, visibleTotal.value) }, (_, i) => i)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '保存失败')
+    return false
+  } finally {
+    savingHidden.value = false
+  }
+  return true
+}
+
+const hideSelectedPages = async () => {
+  const toHide = [...selectedPages.value].filter((i) => !hiddenPageSet.value.has(i))
+  if (toHide.length === 0) {
+    toast.info('请先选择未隐藏的页面')
+    return
+  }
+  const next = [...hiddenPageSet.value, ...toHide]
+  const ok = await saveHiddenPages(next)
+  if (ok) toast.success(`已隐藏 ${toHide.length} 页（有效页数 ${comic.value.pageCount} 页）`)
+}
+
+const restoreSelectedPages = async () => {
+  const toRestore = [...selectedPages.value].filter((i) => hiddenPageSet.value.has(i))
+  if (toRestore.length === 0) {
+    toast.info('请先选择已隐藏的页面')
+    return
+  }
+  const next = [...hiddenPageSet.value].filter((i) => !toRestore.includes(i))
+  const ok = await saveHiddenPages(next)
+  if (ok) toast.success(`已恢复 ${toRestore.length} 页（有效页数 ${comic.value.pageCount} 页）`)
+}
+
+// 普通模式预览图片 URL（有效页索引，后端自动映射物理页）
+const previewPageUrl = (visibleIdx: number) =>
+  API_BASE + '/comics/' + comic.value.id + '/page/' + visibleIdx
+// 管理模式预览图片 URL（物理页索引直读）
+const rawPageUrl = (physicalIdx: number) =>
+  API_BASE + '/comics/' + comic.value.id + '/raw-page/' + physicalIdx
+
+const openPreviewPage = (visibleIdx: number) => {
   if (!comic.value.id) return
   // Round21：PC 桌面新标签打开阅读器定位；其余同标签
-  const query = { id: comic.value.id, source: 'offline', page: String(index + 1) }
+  const query = { id: comic.value.id, source: 'offline', page: String(visibleIdx + 1) }
   const href = router.resolve({ path: '/reader', query }).href
   openContentTab({ href, id: comic.value.id })
 }
@@ -537,23 +716,87 @@ const goOnlineGallery = () => {
       </button>
     </div>
 
-    <!-- 预览面板：前 20 张缩略图，点击跳转阅读器定位 -->
+    <!-- 预览面板：分批加载缩略图，点击跳转阅读器；管理模式可多选隐藏/恢复页面 -->
     <div v-if="detailTab === 'preview'" class="preview-panel">
+      <!-- Round23：管理模式工具条 -->
+      <div v-if="manageMode" class="manage-toolbar">
+        <span class="manage-count">已选 {{ selectedPages.size }} 页</span>
+        <button
+          class="manage-btn hide-btn"
+          :disabled="savingHidden"
+          @click="hideSelectedPages"
+        >
+          ✓ 隐藏选中
+        </button>
+        <button
+          class="manage-btn restore-btn"
+          :disabled="savingHidden"
+          @click="restoreSelectedPages"
+        >
+          ↩ 恢复选中
+        </button>
+        <button class="manage-btn cancel-btn" :disabled="savingHidden" @click="exitManageMode">
+          ✕ 退出
+        </button>
+        <span class="manage-hint">已隐藏 {{ hiddenCount }} 页 · 有效 {{ previewCount }} 页</span>
+      </div>
+
       <div v-if="loadingPreview" class="preview-loading">加载预览中...</div>
+
+      <!-- 管理模式：全量物理页（隐藏页加遮罩，点选多选） -->
+      <div v-else-if="manageMode">
+        <div v-if="manageIndices.length === 0" class="preview-loading">
+          暂无可用预览（画廊无页面）
+        </div>
+        <div v-else class="preview-grid">
+          <div
+            v-for="p in manageIndices"
+            :key="p"
+            class="preview-thumb manage-thumb"
+            :class="{
+              'thumb-hidden': isHiddenPage(p),
+              'thumb-selected': isSelectedPage(p),
+            }"
+            :title="'第 ' + (p + 1) + ' 页' + (isHiddenPage(p) ? '（已隐藏）' : '')"
+            @click="toggleSelectPage(p)"
+          >
+            <img :src="rawPageUrl(p)" :alt="'第 ' + (p + 1) + ' 页'" loading="lazy" />
+            <span class="preview-page-num">{{ p + 1 }}</span>
+            <span v-if="isHiddenPage(p)" class="hidden-mask">已隐藏</span>
+            <span v-if="isSelectedPage(p)" class="select-mask">✓</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 普通模式：有效页（隐藏页不显示） -->
       <div v-else-if="previewPages.length === 0" class="preview-loading">
         暂无可用预览（画廊无页面）
       </div>
       <div v-else class="preview-grid">
         <div
-          v-for="p in previewPages"
-          :key="p.index"
+          v-for="v in previewPages"
+          :key="v"
           class="preview-thumb"
-          :title="'第 ' + (p.index + 1) + ' 页，点击阅读'"
-          @click="openPreviewPage(p.index)"
+          :title="'第 ' + (v + 1) + ' 页，点击阅读'"
+          @click="openPreviewPage(v)"
         >
-          <img :src="p.url" :alt="'第 ' + (p.index + 1) + ' 页'" loading="lazy" />
-          <span class="preview-page-num">{{ p.index + 1 }}</span>
+          <img :src="previewPageUrl(v)" :alt="'第 ' + (v + 1) + ' 页'" loading="lazy" />
+          <span class="preview-page-num">{{ v + 1 }}</span>
         </div>
+      </div>
+
+      <!-- 底部：加载更多 + 管理模式入口 -->
+      <div v-if="!manageMode" class="preview-footer">
+        <button
+          v-if="previewPages.length < visibleTotal"
+          class="load-more-btn"
+          @click="loadMorePreview"
+        >
+          点击加载更多 (已加载 {{ previewPages.length }} / 共 {{ visibleTotal }} 页)
+        </button>
+        <button class="manage-entry-btn" @click="enterManageMode">
+          🛠️ 管理模式（隐藏/恢复页面）
+        </button>
       </div>
     </div>
 
@@ -610,24 +853,37 @@ const goOnlineGallery = () => {
             <button class="add-tag-btn" @click="handleAddTag">➕ 添加 Tag</button>
           </div>
 
-          <!-- 🎯 替换为 TagChip 组件 + 独立删除按钮组合 -->
+          <!-- 🎯 TagChip 组件 + 独立删除按钮组合（Round23：原生 tag 删除置灰可恢复，本地 tag 物理删除） -->
           <div class="tags-cloud">
             <div
-              v-for="(tag, idx) in comic.tags"
-              :key="`${tagRaws[idx] || idx}-${idx}`"
+              v-for="dt in displayTags"
+              :key="dt.raw"
               class="detail-tag-item"
-              :class="tagClass(idx)"
+              :class="[
+                dt.source === 'local' ? 'tag-local' : 'tag-official',
+                dt.removed ? 'tag-removed' : '',
+              ]"
+              :title="dt.removed ? '已叉除，点击恢复此标签' : ''"
+              @click="dt.removed ? handleRestoreTag(dt) : undefined"
             >
-              <TagChip :tag="tag" />
-              <span v-if="tagSource(idx) === 'local'" class="local-badge" title="本地新增标签">
+              <TagChip :tag="dt.raw" :disable-quick-search="dt.removed" />
+              <span v-if="dt.source === 'local'" class="local-badge" title="本地新增标签">
                 本地
               </span>
-              <span class="remove-tag" title="删除此标签" @click.stop="handleRemoveTag(idx)">
+              <span v-else-if="dt.removed" class="removed-badge" title="已叉除，点击恢复">
+                被叉除
+              </span>
+              <span
+                v-if="dt.source === 'local' || !dt.removed"
+                class="remove-tag"
+                :title="dt.source === 'local' ? '删除此标签' : '叉除此标签（可点击恢复）'"
+                @click.stop="handleRemoveTag(dt)"
+              >
                 ✕
               </span>
             </div>
 
-            <span v-if="!comic.tags || comic.tags.length === 0" class="empty-tag-tip">
+            <span v-if="displayTags.length === 0" class="empty-tag-tip">
               暂无标签，点击右上方按钮添加...
             </span>
           </div>
@@ -642,7 +898,15 @@ const goOnlineGallery = () => {
             </div>
             <div class="info-item">
               <span class="k">总页数:</span>
-              <span class="v">{{ comic.pageCount }} 页</span>
+              <span class="v">
+                {{ comic.pageCount }} 页
+                <span
+                  v-if="comic.originalPageCount && comic.originalPageCount > (comic.pageCount || 0)"
+                  class="orig-page-hint"
+                >
+                  （原 {{ comic.originalPageCount }} 页，已隐藏 {{ hiddenPagesList.length }} 页）
+                </span>
+              </span>
             </div>
             <div class="info-item">
               <span class="k">入库时间:</span>
@@ -947,6 +1211,35 @@ const goOnlineGallery = () => {
 }
 .remove-tag:hover {
   color: #ef4444;
+}
+
+/* Round23：被叉除的原生 tag —— 置灰 + 删除线，整体可点击恢复 */
+.detail-tag-item.tag-removed {
+  background-color: var(--app-surface-3);
+  opacity: 0.55;
+  filter: grayscale(0.85);
+  cursor: pointer;
+}
+.detail-tag-item.tag-removed:hover {
+  opacity: 0.85;
+  filter: grayscale(0.4);
+}
+.removed-badge {
+  font-size: 0.62rem;
+  color: #9e9e9e;
+  background-color: rgba(158, 158, 158, 0.18);
+  border: 1px solid rgba(158, 158, 158, 0.45);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.4;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+/* Round23：原页数提示（有效页数 + 已隐藏页数） */
+.orig-page-hint {
+  font-size: 0.78rem;
+  color: #ffb74d;
 }
 
 .empty-tag-tip {
@@ -1306,6 +1599,125 @@ const goOnlineGallery = () => {
   font-size: 0.7rem;
   padding: 0 5px;
   border-radius: 3px;
+}
+
+/* Round23：预览底部（加载更多 + 管理模式入口） */
+.preview-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.load-more-btn {
+  background: var(--app-surface-3);
+  border: 1px dashed #3d5afe;
+  color: #3d5afe;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.load-more-btn:hover {
+  background: rgba(61, 90, 254, 0.12);
+}
+.manage-entry-btn {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.5);
+  color: #ffb74d;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.manage-entry-btn:hover {
+  background: rgba(255, 152, 0, 0.2);
+}
+
+/* Round23：管理模式工具条与页面状态 */
+.manage-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 8px;
+}
+.manage-count {
+  font-size: 0.85rem;
+  color: var(--app-text-strong);
+  font-weight: 600;
+}
+.manage-btn {
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.manage-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.manage-btn.hide-btn {
+  background: rgba(255, 77, 79, 0.85);
+  color: #fff;
+}
+.manage-btn.restore-btn {
+  background: rgba(0, 168, 150, 0.85);
+  color: #fff;
+}
+.manage-btn.cancel-btn {
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
+  border: 1px solid var(--app-border-3);
+}
+.manage-hint {
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+  margin-left: auto;
+}
+.manage-thumb {
+  border: 2px solid transparent;
+}
+.manage-thumb.thumb-selected {
+  border-color: #3d5afe;
+  box-shadow: 0 0 0 2px rgba(61, 90, 254, 0.4);
+}
+.manage-thumb.thumb-hidden img {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
+.hidden-mask {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffb74d;
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 183, 77, 0.5);
+}
+.select-mask {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3d5afe;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 /* 移动形态：在线按钮与操作条保持一致 */

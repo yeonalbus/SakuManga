@@ -58,6 +58,10 @@ export interface OfflineComic extends BaseComic {
 
   // ─── Round20-Bug1：E 站画廊 GID（离线历史按 gid 合并去重/引用迁移）───
   gid?: string
+
+  // ─── Round23：自定义删除页面（隐藏页软删除）───
+  hiddenPagesList?: number[] // 隐藏的物理页索引（0-based 原文件索引）
+  originalPageCount?: number // 原始物理页数（隐藏页后 pageCount 为有效页数）
 }
 
 /** 本地书架定义 */
@@ -65,8 +69,12 @@ export interface Bookshelf {
   id: string
   name: string
   count: number
-  comicIds?: string[] // 该书架收录的漫画 ID 列表
+  comicIds?: string[] // 该书架收录的漫画 ID 列表（Round22 起为按权值排序后的展示顺序）
   pinned?: boolean // 侧栏置顶（Round13）
+  /** Round22 LexoRank：书架列表权值（单书架移动只更新此项） */
+  sortKey?: number
+  /** Round22 LexoRank：书架内本子权值表 {comicId: weight}；缺失权值的项回退 comicIds 数组顺序 */
+  sortKeys?: Record<string, number>
 }
 
 /** 联合类型：UI 层统一处理的单项对象 */

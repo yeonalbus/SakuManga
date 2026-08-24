@@ -369,6 +369,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	// Round11：OriginalTitle / Remark 保留策略。
 	// OriginalTitle 仅首次入库时记录（供「修改标题 → 恢复原标题」）；
 	// 已存在记录（重新扫描/更新）不覆盖 OriginalTitle 与用户备注。
+	// Round23：HiddenPages / OriginalPageCount 为用户客制化（自定义删除页面），重新扫描同样保留，
+	// PageCount 按「物理页数 − 有效隐藏数」重算（隐藏索引随物理页数裁剪）。
 	var existingFull models.OfflineComic
 	if err := database.DB.Where("local_path = ?", localPath).First(&existingFull).Error; err == nil {
 		if existingFull.OriginalTitle != "" {
@@ -379,32 +381,46 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		}
 	}
 
+	// 隐藏页与原始页数：首次入库为空；已存在记录保留用户隐藏配置
+	hiddenPages := ParseHiddenPages(existingFull.HiddenPages)
+	originalPageCount := existingFull.OriginalPageCount
+	if originalPageCount <= 0 {
+		originalPageCount = pageCount
+	}
+	if pageCount > originalPageCount {
+		originalPageCount = pageCount // 物理页变多时同步抬升原页数
+	}
+	hiddenPages = NormalizeHiddenPages(hiddenPages, pageCount) // 物理页变少时裁剪越界索引
+	effectivePageCount := EffectivePageCount(pageCount, hiddenPages)
+
 	// 发布时间：metadata publishTime / ComicInfo 日期（问题1 排序）
 	publishedAt := parsePublishTime(meta.PublishTime)
 
 	comic := models.OfflineComic{
-		ID:             comicID,
-		Title:          title,
-		TitleJpn:       titleJpn,
-		OriginalTitle:  originalTitle,
-		Remark:         remarkPreserve,
-		CoverURL:       coverURL,
-		Source:         models.SourceOffline,
-		Category:       category,             // 写入解析出的分类
-		Tags:           string(tagsJSON),     // 写入解析出的多元标签数组 JSON
-		PageCount:      pageCount,
-		UpdatedAt:      time.Now(),
-		AddedAt:        addedAt,
-		FileModifiedAt: fileModifiedAt,
-		PublishedAt:    publishedAt,
-		IsDownloaded:   true,
-		LocalPath:      localPath,
-		FileSize:       fileSize,
-		ScanPathID:     scanPathID, // 来源额外路径 ID；空 = 下载导入（问题3）
-		GID:            meta.GID,
-		Token:          meta.Token,
-		ParentGID:      meta.ParentGID,
-		SourceMode:     sourceMode,
+		ID:                comicID,
+		Title:             title,
+		TitleJpn:          titleJpn,
+		OriginalTitle:     originalTitle,
+		Remark:            remarkPreserve,
+		CoverURL:          coverURL,
+		Source:            models.SourceOffline,
+		Category:          category,             // 写入解析出的分类
+		Tags:              string(tagsJSON),     // 写入解析出的多元标签数组 JSON
+		PageCount:         effectivePageCount,   // Round23：有效页数（物理 − 隐藏）
+		HiddenPages:       MarshalHiddenPages(hiddenPages),
+		OriginalPageCount: originalPageCount,
+		UpdatedAt:         time.Now(),
+		AddedAt:           addedAt,
+		FileModifiedAt:    fileModifiedAt,
+		PublishedAt:       publishedAt,
+		IsDownloaded:      true,
+		LocalPath:         localPath,
+		FileSize:          fileSize,
+		ScanPathID:        scanPathID, // 来源额外路径 ID；空 = 下载导入（问题3）
+		GID:               meta.GID,
+		Token:             meta.Token,
+		ParentGID:         meta.ParentGID,
+		SourceMode:        sourceMode,
 	}
 
 	// 问题3修复：捕获入库错误，避免「扫描发现 N 本」与实际落库数量不一致的静默失败

@@ -82,6 +82,10 @@ type OfflineComic struct {
 	OfflineRemoveTags string `gorm:"type:text" json:"offlineRemoveTags,omitempty"` // 本地删除的 online tag JSON 数组（刷新略过/写回剔除）
 	LastTagRefreshAt  int64  `json:"lastTagRefreshAt,omitempty"`                   // 上次 Tag 刷新时间戳(ms)
 	TagRefreshCount   int    `json:"tagRefreshCount,omitempty"`                    // 累计刷新次数
+
+	// ── 页面自定义隐藏（剔除汉化组/平台广告页；软删除，不物理删文件）──
+	HiddenPages       string `gorm:"type:text" json:"hiddenPages,omitempty"`     // 隐藏的物理页索引 JSON 数组（0-based 原文件索引，如 [3,20,45]）
+	OriginalPageCount int    `json:"originalPageCount,omitempty"`                // 原始（物理）页数；隐藏页后 pageCount 为有效页数，更新检测/查重须以此比对
 }
 
 // TagMaintainSetting Tag 维护设置（单例 ID=1）
@@ -118,6 +122,9 @@ type Bookshelf struct {
 	ComicIDs  string `gorm:"type:text" json:"comicIds"` // JSON 数组存储: ["id1", "id2"]（顺序即书架内项目自定义排序）
 	SortOrder int    `gorm:"default:0" json:"sortOrder"` // 书架列表自定义排序（Round10，AutoMigrate 自动加列）
 	Pinned    bool   `gorm:"default:false" json:"pinned"` // 侧栏置顶（Round13，AutoMigrate 自动加列）
+	// Round22：LexoRank 浮点权值排序
+	SortKey  float64 `gorm:"default:0" json:"sortKey"`  // 书架列表权值（单书架移动只更新此项，取代全量 sort_order 重写）
+	SortKeys string  `gorm:"type:text" json:"sortKeys"` // 书架内本子权值表 JSON: {"<comicId>": <weight>}；缺失权值的项回退 comicIds 数组顺序
 }
 
 // HistoryRecord 历史记录项（按用户隔离）

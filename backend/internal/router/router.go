@@ -70,6 +70,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		public.GET("/comics/:id/cover", handlers.GetComicCover)
 		public.GET("/comics/:id/pages", handlers.GetComicPages)
 		public.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
+		// Round23：物理页索引直读（管理模式预览展示含隐藏页的全量页面）
+		public.GET("/comics/:id/raw-page/:index", handlers.GetComicRawPageImage)
 	}
 
 	// ─── 3. 受保护路由（需登录）───
@@ -89,6 +91,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/comics/:id", handlers.GetComicDetail)
 		// Round11：离线漫画标题/备注编辑（title 空串=恢复原标题）
 		api.PUT("/comics/:id", handlers.UpdateOfflineComic)
+		// Round23：自定义删除页面（隐藏页软删除，同步重算有效页数并记录原页数）
+		api.PUT("/comics/:id/hidden-pages", handlers.UpdateComicHiddenPages)
 		// 删除本地画廊为系统级写操作（仅管理员），见下方 admin 分组
 		// 阅读次数上报（排行榜持久化，问题9）
 		api.POST("/comics/:id/click", handlers.RecordComicClick)
@@ -164,8 +168,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.DELETE("/bookshelves/:id", libraryHandler.DeleteBookshelf)
 		api.POST("/bookshelves/:id/comics", libraryHandler.AddComicToBookshelf)
 		api.DELETE("/bookshelves/:id/comics", libraryHandler.RemoveComicFromBookshelf)
+		// Round22：书架内多选批量移出（与批量加入对称）
+		api.DELETE("/bookshelves/:id/comics/batch", libraryHandler.BatchRemoveComicsFromBookshelf)
 		// Round10：书架内项目自定义排序 / 书架列表自定义排序
 		api.PUT("/bookshelves/:id/order", libraryHandler.ReorderBookshelfComics)
+		// Round22：书架列表单书架 LexoRank 移动（只更新一项权值）
+		api.PUT("/bookshelves/:id/position", libraryHandler.MoveBookshelfPosition)
 	// Round13：书架置顶 / 批量加入
 	api.PUT("/bookshelves/:id/pin", libraryHandler.SetBookshelfPinned)
 	api.POST("/bookshelves/:id/comics/batch", libraryHandler.BatchAddComicsToBookshelf)

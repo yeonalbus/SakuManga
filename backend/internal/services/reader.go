@@ -90,14 +90,31 @@ func GetPageList(localPath string) ([]string, error) {
 	return images, nil
 }
 
-// GetPageData 获取特定页码的图片二进制流
+// GetPageData 获取特定页码的图片二进制流（物理页索引）
 func GetPageData(localPath string, pageIndex int) ([]byte, string, error) {
 	pages, err := GetPageList(localPath)
 	if err != nil || pageIndex < 0 || pageIndex >= len(pages) {
 		return nil, "", errors.New("页码超出范围")
 	}
+	return getPageDataByName(localPath, pages[pageIndex])
+}
 
-	targetFile := pages[pageIndex]
+// GetVisiblePageData 获取「有效页索引」对应的图片二进制流（自动跳过隐藏页，Round23）。
+// pageIndex 为剔除隐藏页后的有效序号（0-based）：第 N 张可见图 = 物理页列表中第 N 个未隐藏项。
+func GetVisiblePageData(localPath string, pageIndex int, hidden []int) ([]byte, string, error) {
+	pages, err := GetPageList(localPath)
+	if err != nil {
+		return nil, "", err
+	}
+	visible := FilterHiddenPages(pages, hidden)
+	if pageIndex < 0 || pageIndex >= len(visible) {
+		return nil, "", errors.New("页码超出范围")
+	}
+	return getPageDataByName(localPath, visible[pageIndex])
+}
+
+// getPageDataByName 按物理文件名读取图片二进制流（文件夹直读 / ZIP 定位读取）
+func getPageDataByName(localPath string, targetFile string) ([]byte, string, error) {
 	fi, _ := os.Stat(localPath)
 
 	// 1. 散图文件夹直接读取文件

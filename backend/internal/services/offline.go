@@ -156,10 +156,16 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 					log.Printf("%s [update] 漫画 %q(gid=%s) 记录父画廊 gid=%s", dlLogTag, c.Title, c.GID, detail.ParentGID)
 				}
 			}
-			// A4. 在线页数 > 本地页数 → 原画廊被扩充（同一 gid 增量）
-			if detail.PageCount > 0 && c.PageCount > 0 && detail.PageCount > c.PageCount {
+			// A4. 在线页数 > 本地页数 → 原画廊被扩充（同一 gid 增量）。
+			// Round23：自定义隐藏页后 PageCount 为有效页数，须用 OriginalPageCount（原始物理页数）比对，
+			// 否则「90P 隐藏 5P 广告 → 有效 85P」会被在线 90P 误判为画廊扩充。
+			compareBase := c.PageCount
+			if c.OriginalPageCount > 0 {
+				compareBase = c.OriginalPageCount
+			}
+			if detail.PageCount > 0 && compareBase > 0 && detail.PageCount > compareBase {
 				markOfflineUpdate(c, detail.ID, detail.Token,
-					fmt.Sprintf("原画廊新增了 %d 页（在线 %d 页 > 本地 %d 页）", detail.PageCount-c.PageCount, detail.PageCount, c.PageCount))
+					fmt.Sprintf("原画廊新增了 %d 页（在线 %d 页 > 本地 %d 页）", detail.PageCount-compareBase, detail.PageCount, compareBase))
 				changed[c.ID] = true
 				log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
 			}
@@ -616,9 +622,17 @@ func ReconcileOfflineAfterDownload(db *gorm.DB, task *models.DownloadTask) (*Rec
 			result.ParentGIDWritten++
 			changed = true
 		}
-		// 3. PageCount 校正：metadata filecount 更完整时采用
-		if meta.FileCount > c.PageCount {
-			c.PageCount = meta.FileCount
+		// 3. PageCount 校正：metadata filecount 更完整时采用。
+		// Round23：隐藏页后 PageCount 为有效页数，校正须以 OriginalPageCount（原始物理页数）为基准，
+		// 避免「90P 隐藏 5P → 有效 85P」被 metadata filecount=90 覆盖回 90。
+		hidden := ParseHiddenPages(c.HiddenPages)
+		orig := c.OriginalPageCount
+		if orig <= 0 {
+			orig = c.PageCount // 旧数据无原页数记录，以当前页数兜底
+		}
+		if meta.FileCount > orig {
+			c.OriginalPageCount = meta.FileCount
+			c.PageCount = EffectivePageCount(meta.FileCount, hidden)
 			result.PageCountCorrected++
 			changed = true
 		}

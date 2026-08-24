@@ -696,8 +696,9 @@ func MigrateLegacyTags(db *gorm.DB) (int, error) {
 // ─────────────────────────────────────────────────────────────
 
 // EditComicTags 应用单本漫画的 tag 增删。
-// addTags 加入 OfflineAddTags；removeTags 若属于 online 则记入 OfflineRemoveTags，
-// 否则从 OfflineAddTags 移除。
+// addTags 加入 OfflineAddTags；若目标 tag 正处于 OfflineRemoveTags（被叉除的 online tag），
+// 则视为「恢复」——从删除列表剔除（Round23：删除原生 tag 置灰可恢复）。
+// removeTags 若属于 online 则记入 OfflineRemoveTags，否则从 OfflineAddTags 移除。
 func (s *TagMaintainService) EditComicTags(comicID string, addTags, removeTags []string) error {
 	var comic models.OfflineComic
 	if err := s.db.First(&comic, "id = ?", comicID).Error; err != nil {
@@ -712,9 +713,18 @@ func (s *TagMaintainService) EditComicTags(comicID string, addTags, removeTags [
 	for _, t := range online {
 		onlineSet[t] = true
 	}
+	removeSet := map[string]bool{}
+	for _, t := range remove {
+		removeSet[t] = true
+	}
 
-	// 1. 新增 tag → OfflineAddTags
+	// 1. 新增 tag → OfflineAddTags；若正处于删除列表 → 恢复（剔除，无需再入 add）
 	for _, t := range normalizeTags(addTags) {
+		if removeSet[t] {
+			remove = filterOut(remove, []string{t})
+			delete(removeSet, t)
+			continue
+		}
 		if onlineSet[t] {
 			continue // 已是 online tag，无需重复添加
 		}
@@ -724,10 +734,6 @@ func (s *TagMaintainService) EditComicTags(comicID string, addTags, removeTags [
 	}
 
 	// 2. 删除 tag
-	removeSet := map[string]bool{}
-	for _, t := range remove {
-		removeSet[t] = true
-	}
 	// 2a. 新增列表里去掉被删除项
 	add = filterOut(add, removeTags)
 	// 2b. 属于 online 的 → 记入 OfflineRemoveTags

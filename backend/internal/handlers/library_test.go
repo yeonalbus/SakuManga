@@ -158,3 +158,229 @@ func TestBatchAddComicsToBookshelf(t *testing.T) {
 		t.Fatalf("空数组应返回 400，得到 %d", w.Code)
 	}
 }
+
+// Round22：书架列表单书架 LexoRank 移动（PUT /bookshelves/:id/position）
+func TestMoveBookshelfPosition(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	s := seedShelf(t, db, 1, "A", nil)
+
+	r := gin.New()
+	r.PUT("/bookshelves/:id/position", authAs(db, 1), h.MoveBookshelfPosition)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/bookshelves/"+s.ID+"/position", strings.NewReader(`{"sortKey":1500}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("移动返回 %d: %s", w.Code, w.Body.String())
+	}
+	var stored models.Bookshelf
+	if err := db.First(&stored, "id = ?", s.ID).Error; err != nil || stored.SortKey != 1500 {
+		t.Fatalf("SortKey 应为 1500 (err=%v, got=%v)", err, stored.SortKey)
+	}
+
+	// sortKey=0 也须合法（移到顶部时权值可为 0）
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/bookshelves/"+s.ID+"/position", strings.NewReader(`{"sortKey":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("sortKey=0 应合法，得到 %d", w.Code)
+	}
+
+	// 他人书架 → 404
+	other := seedShelf(t, db, 2, "B", nil)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/bookshelves/"+other.ID+"/position", strings.NewReader(`{"sortKey":500}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("他人书架应返回 404，得到 %d", w.Code)
+	}
+}
+
+// Round22：书架内本子单键权值更新（PUT /bookshelves/:id/order {comicId, sortKey}）
+func TestReorderBookshelfComicsSingleKey(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	s := seedShelf(t, db, 1, "A", []string{"c1", "c2", "c3"})
+	// 预置权值 1000/2000/3000
+	if err := db.Model(&s).Update("sort_keys", `{"c1":1000,"c2":2000,"c3":3000}`).Error; err != nil {
+		t.Fatalf("预置权值失败: %v", err)
+	}
+
+	r := gin.New()
+	r.PUT("/bookshelves/:id/order", authAs(db, 1), h.ReorderBookshelfComics)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/bookshelves/"+s.ID+"/order", strings.NewReader(`{"comicId":"c2","sortKey":1500}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("单键更新返回 %d: %s", w.Code, w.Body.String())
+	}
+	var stored models.Bookshelf
+	if err := db.First(&stored, "id = ?", s.ID).Error; err != nil {
+		t.Fatalf("读取书架失败: %v", err)
+	}
+	sk := parseSortKeys(stored.SortKeys)
+	if sk["c2"] != 1500 {
+		t.Fatalf("c2 权值应为 1500，得到 %v", sk["c2"])
+	}
+	// comicIds 数组不应被改动
+	if ids := parseComicIDs(stored.ComicIDs); len(ids) != 3 {
+		t.Fatalf("单键更新不应改变 comicIds: %v", ids)
+	}
+	// 展示顺序：c1(1000) < c2(1500) < c3(3000)
+	ordered := sortedComicIDs(parseComicIDs(stored.ComicIDs), sk)
+	if ordered[0] != "c1" || ordered[1] != "c2" || ordered[2] != "c3" {
+		t.Fatalf("排序结果异常: %v", ordered)
+	}
+}
+
+// Round22：书架内本子全量重排（PUT /bookshelves/:id/order {comicIds}）重建权值 1000*i
+func TestReorderBookshelfComicsFull(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	s := seedShelf(t, db, 1, "A", []string{"c1", "c2"})
+
+	r := gin.New()
+	r.PUT("/bookshelves/:id/order", authAs(db, 1), h.ReorderBookshelfComics)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/bookshelves/"+s.ID+"/order", strings.NewReader(`{"comicIds":["c2","c1"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("全量重排返回 %d: %s", w.Code, w.Body.String())
+	}
+	var stored models.Bookshelf
+	if err := db.First(&stored, "id = ?", s.ID).Error; err != nil {
+		t.Fatalf("读取书架失败: %v", err)
+	}
+	sk := parseSortKeys(stored.SortKeys)
+	if sk["c2"] != 1000 || sk["c1"] != 2000 {
+		t.Fatalf("全量重排应重建权值 1000*i: %v", sk)
+	}
+	ordered := sortedComicIDs(parseComicIDs(stored.ComicIDs), sk)
+	if ordered[0] != "c2" || ordered[1] != "c1" {
+		t.Fatalf("排序结果异常: %v", ordered)
+	}
+}
+
+// Round22：批量移出书架（DELETE /bookshelves/:id/comics/batch）同步清理权值
+func TestBatchRemoveComicsFromBookshelf(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	s := seedShelf(t, db, 1, "A", []string{"c1", "c2", "c3"})
+	if err := db.Model(&s).Update("sort_keys", `{"c1":1000,"c2":2000,"c3":3000}`).Error; err != nil {
+		t.Fatalf("预置权值失败: %v", err)
+	}
+
+	r := gin.New()
+	r.DELETE("/bookshelves/:id/comics/batch", authAs(db, 1), h.BatchRemoveComicsFromBookshelf)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/bookshelves/"+s.ID+"/comics/batch", strings.NewReader(`{"comicIds":["c1","c3"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("批量移出返回 %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Removed int `json:"removed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Removed != 2 {
+		t.Fatalf("应移除 2 本 (err=%v, removed=%d)", err, resp.Removed)
+	}
+	var stored models.Bookshelf
+	if err := db.First(&stored, "id = ?", s.ID).Error; err != nil {
+		t.Fatalf("读取书架失败: %v", err)
+	}
+	ids := parseComicIDs(stored.ComicIDs)
+	if len(ids) != 1 || ids[0] != "c2" {
+		t.Fatalf("剩余应为 [c2]: %v", ids)
+	}
+	sk := parseSortKeys(stored.SortKeys)
+	if _, ok := sk["c1"]; ok {
+		t.Fatalf("c1 权值应被清理: %v", sk)
+	}
+	if sk["c2"] != 2000 {
+		t.Fatalf("c2 权值应保留 2000: %v", sk)
+	}
+
+	// 空数组 → 400
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/bookshelves/"+s.ID+"/comics/batch", strings.NewReader(`{"comicIds":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("空数组应返回 400，得到 %d", w.Code)
+	}
+}
+
+// Round22：GetBookshelves 按 sort_key 排序 + 返回权值表 + 展示顺序按权值
+func TestGetBookshelvesSortKeyAndWeights(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	a := seedShelf(t, db, 1, "A", []string{"c1", "c2"})
+	b := seedShelf(t, db, 1, "B", []string{"c3"})
+	// A 排到 B 之后（A.sort_key=3000, B.sort_key=1000）
+	if err := db.Model(&a).Update("sort_key", 3000).Error; err != nil {
+		t.Fatalf("更新 A sort_key 失败: %v", err)
+	}
+	if err := db.Model(&b).Update("sort_key", 1000).Error; err != nil {
+		t.Fatalf("更新 B sort_key 失败: %v", err)
+	}
+	// B 内权值 c3=1000；A 内 c1=2000 c2=1000（展示顺序应为 c2,c1）
+	if err := db.Model(&a).Update("sort_keys", `{"c1":2000,"c2":1000}`).Error; err != nil {
+		t.Fatalf("更新 A sort_keys 失败: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/bookshelves", authAs(db, 1), h.GetBookshelves)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/bookshelves", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询返回 %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Bookshelves []struct {
+			ID       string             `json:"id"`
+			ComicIDs []string           `json:"comicIds"`
+			SortKey  float64            `json:"sortKey"`
+			SortKeys map[string]float64 `json:"sortKeys"`
+		} `json:"bookshelves"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if len(resp.Bookshelves) != 2 {
+		t.Fatalf("应有 2 个书架: %+v", resp.Bookshelves)
+	}
+	if resp.Bookshelves[0].ID != b.ID || resp.Bookshelves[1].ID != a.ID {
+		t.Fatalf("应按 sort_key 升序 [B,A]: %v", resp.Bookshelves[0].ID+","+resp.Bookshelves[1].ID)
+	}
+	// A 的展示顺序应按权值：c2(1000) 在 c1(2000) 前
+	aShelf := resp.Bookshelves[1]
+	if len(aShelf.ComicIDs) != 2 || aShelf.ComicIDs[0] != "c2" || aShelf.ComicIDs[1] != "c1" {
+		t.Fatalf("A 展示顺序应为 [c2,c1]: %v", aShelf.ComicIDs)
+	}
+	if aShelf.SortKey != 3000 || aShelf.SortKeys["c1"] != 2000 {
+		t.Fatalf("响应应携带权值: sortKey=%v sortKeys=%v", aShelf.SortKey, aShelf.SortKeys)
+	}
+}
+
+// Round22：sortedComicIDs 混合态（有权值在前，无权值按数组顺序排后）
+func TestSortedComicIDsMixed(t *testing.T) {
+	ids := []string{"a", "b", "c", "d"}
+	sk := map[string]float64{"b": 1000, "d": 3000}
+	got := sortedComicIDs(ids, sk)
+	want := []string{"b", "d", "a", "c"} // 有权值 b,d 按权值升序；无权值 a,c 按数组顺序
+	if len(got) != len(want) {
+		t.Fatalf("长度不符: %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("期望 %v 得到 %v", want, got)
+		}
+	}
+}

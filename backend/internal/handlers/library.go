@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -43,6 +44,55 @@ func joinComicIDs(ids []string) string {
 	return string(b)
 }
 
+// parseSortKeys 解析书架内本子权值表（Round22 LexoRank）：JSON map string→float64
+func parseSortKeys(raw string) map[string]float64 {
+	if raw == "" {
+		return map[string]float64{}
+	}
+	var m map[string]float64
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return map[string]float64{}
+	}
+	if m == nil {
+		return map[string]float64{}
+	}
+	return m
+}
+
+// joinSortKeys 序列化权值表为 JSON 字符串
+func joinSortKeys(m map[string]float64) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// sortedComicIDs 按 Round22 权值顺序返回书架内本子 ID：
+// 有权值的按 sortKeys 升序在前，无权值（旧数据/新增）按 comicIds 数组顺序排后。
+func sortedComicIDs(comicIDs []string, sortKeys map[string]float64) []string {
+	type weightedID struct {
+		id string
+		w  float64
+	}
+	keyed := make([]weightedID, 0, len(comicIDs))
+	var unkeyed []string
+	for _, id := range comicIDs {
+		if w, ok := sortKeys[id]; ok {
+			keyed = append(keyed, weightedID{id, w})
+		} else {
+			unkeyed = append(unkeyed, id)
+		}
+	}
+	sort.SliceStable(keyed, func(i, j int) bool { return keyed[i].w < keyed[j].w })
+	out := make([]string, 0, len(comicIDs))
+	for _, k := range keyed {
+		out = append(out, k.id)
+	}
+	out = append(out, unkeyed...)
+	return out
+}
+
 // historyLimit 读取每用户历史记录上限（可配置，默认 200）
 func (h *LibraryHandler) historyLimit() int {
 	return getOrCreateServerSetting(h.db).HistoryLimit
@@ -77,8 +127,9 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 	}
 
 	var shelves []models.Bookshelf
-	// Round10：书架列表按自定义排序 sort_order 输出（未重排的旧数据 sort_order=0，回退 name asc）
-	if err := h.db.Where("user_id = ?", user.ID).Order("sort_order asc, name asc").Find(&shelves).Error; err != nil {
+	// Round10：书架列表按自定义排序 sort_order 输出；Round22：优先按 LexoRank 权值 sort_key 输出
+	// （sort_key 由单书架移动/全量重排维护；旧数据 sort_key=0 回退 sort_order / name）
+	if err := h.db.Where("user_id = ?", user.ID).Order("sort_key asc, sort_order asc, name asc").Find(&shelves).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取书架失败"})
 		return
 	}
@@ -87,12 +138,15 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 	resp := make([]gin.H, 0, len(shelves))
 	for _, s := range shelves {
 		ids := parseComicIDs(s.ComicIDs)
+		sk := parseSortKeys(s.SortKeys)
 		resp = append(resp, gin.H{
 			"id":       s.ID,
 			"name":     s.Name,
 			"count":    len(ids),
-			"comicIds": ids,
+			"comicIds": sortedComicIDs(ids, sk), // Round22：按权值排序后的展示顺序
 			"pinned":   s.Pinned,
+			"sortKey":  s.SortKey,
+			"sortKeys": sk,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"bookshelves": resp})
@@ -115,11 +169,17 @@ func (h *LibraryHandler) CreateBookshelf(c *gin.Context) {
 	}
 
 	// Round10：新书架排在现有书架之后（sort_order = 当前最大值 + 1）
+	// Round22：同时赋予 LexoRank 权值 sort_key = 当前最大权值 + 1000（旧数据 sort_key=0 时按 sort_order 兜底）
 	var maxOrder int
 	h.db.Model(&models.Bookshelf{}).
 		Where("user_id = ?", user.ID).
 		Select("COALESCE(MAX(sort_order), 0)").
 		Scan(&maxOrder)
+	var maxKey float64
+	h.db.Model(&models.Bookshelf{}).
+		Where("user_id = ?", user.ID).
+		Select("COALESCE(MAX(sort_key), 0)").
+		Scan(&maxKey)
 
 	shelf := models.Bookshelf{
 		ID:        "shelf-" + strconv.FormatInt(time.Now().UnixMilli(), 10),
@@ -128,6 +188,8 @@ func (h *LibraryHandler) CreateBookshelf(c *gin.Context) {
 		Count:     0,
 		ComicIDs:  "[]",
 		SortOrder: maxOrder + 1,
+		SortKey:   maxKey + 1000,
+		SortKeys:  "{}",
 	}
 	if err := h.db.Create(&shelf).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建书架失败"})
@@ -334,8 +396,12 @@ func (h *LibraryHandler) RemoveComicFromBookshelf(c *gin.Context) {
 			newIDs = append(newIDs, cid)
 		}
 	}
+	// Round22：同步清理该本子的权值
+	sk := parseSortKeys(shelf.SortKeys)
+	delete(sk, comicID)
 	shelf.ComicIDs = joinComicIDs(newIDs)
 	shelf.Count = len(newIDs)
+	shelf.SortKeys = joinSortKeys(sk)
 	if err := h.db.Save(&shelf).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
 		return
@@ -343,8 +409,65 @@ func (h *LibraryHandler) RemoveComicFromBookshelf(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已移出书架", "data": shelf})
 }
 
-// ReorderBookshelfComics 按自定义顺序整体重排书架内项目 PUT /api/v1/bookshelves/:id/order
-// （Round10：书架内项目自定义排序，comicIds 数组顺序即展示顺序）
+// BatchRemoveComicsFromBookshelf 批量将漫画移出书架 DELETE /api/v1/bookshelves/:id/comics/batch
+// （Round22：书架内多选快捷移除；同步清理权值表，与批量加入 /comics/batch 对称）
+func (h *LibraryHandler) BatchRemoveComicsFromBookshelf(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		ComicIDs []string `json:"comicIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	if len(req.ComicIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 comicIds"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	removedSet := make(map[string]bool, len(req.ComicIDs))
+	for _, id := range req.ComicIDs {
+		if id != "" {
+			removedSet[id] = true
+		}
+	}
+	var newIDs []string
+	removed := 0
+	for _, cid := range parseComicIDs(shelf.ComicIDs) {
+		if removedSet[cid] {
+			removed++
+			continue
+		}
+		newIDs = append(newIDs, cid)
+	}
+	sk := parseSortKeys(shelf.SortKeys)
+	for id := range removedSet {
+		delete(sk, id)
+	}
+	shelf.ComicIDs = joinComicIDs(newIDs)
+	shelf.Count = len(newIDs)
+	shelf.SortKeys = joinSortKeys(sk)
+	if err := h.db.Save(&shelf).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "批量移出完成", "removed": removed, "data": shelf})
+}
+
+// ReorderBookshelfComics 重排书架内项目 PUT /api/v1/bookshelves/:id/order
+// （Round10 全量模式：{comicIds:[...]} 整包重写数组并重建权值表 1000*i；
+//  Round22 单键模式：{comicId, sortKey} 只更新一本的 LexoRank 权值——拖动/移动到的主路径）
 func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	if user == nil {
@@ -358,10 +481,46 @@ func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
 		return
 	}
 
+	raw, _ := c.GetRawData()
+	if len(raw) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	// 权值模式：{sortKeys: {id: weight}}（批量防抖合并）或 {comicId, sortKey}（单键）
+	var single struct {
+		ComicID string             `json:"comicId"`
+		SortKey float64            `json:"sortKey"`
+		SortKeys map[string]float64 `json:"sortKeys"`
+	}
+	if err := json.Unmarshal(raw, &single); err == nil {
+		sk := parseSortKeys(shelf.SortKeys)
+		changed := false
+		if single.ComicID != "" {
+			sk[single.ComicID] = single.SortKey
+			changed = true
+		}
+		if len(single.SortKeys) > 0 {
+			for id, w := range single.SortKeys {
+				sk[id] = w
+			}
+			changed = true
+		}
+		if changed {
+			shelf.SortKeys = joinSortKeys(sk)
+			if err := h.db.Model(&shelf).Update("sort_keys", shelf.SortKeys).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架排序失败"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "书架排序已更新", "data": shelf})
+			return
+		}
+	}
+
+	// 全量模式：{comicIds:[...]}（Round10 向后兼容；精度用尽全量重置时前端同样走此路径）
 	var req struct {
 		ComicIDs []string `json:"comicIds"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
 		return
 	}
@@ -370,6 +529,12 @@ func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
 	}
 	shelf.ComicIDs = joinComicIDs(req.ComicIDs)
 	shelf.Count = len(req.ComicIDs)
+	// Round22：全量重排后权值表重建为 1000*i，与数组顺序一致
+	sk := make(map[string]float64, len(req.ComicIDs))
+	for i, id := range req.ComicIDs {
+		sk[id] = float64((i + 1) * 1000)
+	}
+	shelf.SortKeys = joinSortKeys(sk)
 	if err := h.db.Save(&shelf).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架排序失败"})
 		return
@@ -377,8 +542,39 @@ func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "书架排序已更新", "data": shelf})
 }
 
+// MoveBookshelfPosition 单书架移动 PUT /api/v1/bookshelves/:id/position
+// （Round22：书架列表 LexoRank 单点移动，body {sortKey} 只更新该项权值，取代全量 reorder）
+func (h *LibraryHandler) MoveBookshelfPosition(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		SortKey float64 `json:"sortKey"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	if err := h.db.Model(&shelf).Update("sort_key", req.SortKey).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架顺序失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "书架顺序已更新", "data": shelf})
+}
+
 // ReorderBookshelves 批量重排书架列表顺序 POST /api/v1/bookshelves/reorder
-// （Round10：侧栏书架自定义排序，ids 数组下标即 sort_order）
+// （Round10：侧栏书架自定义排序，ids 数组下标即 sort_order；
+//  Round22：全量重置时同步重建 sort_key=1000*i，与新权值体系一致）
 func (h *LibraryHandler) ReorderBookshelves(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	if user == nil {
@@ -396,7 +592,7 @@ func (h *LibraryHandler) ReorderBookshelves(c *gin.Context) {
 	for i, id := range req.IDs {
 		h.db.Model(&models.Bookshelf{}).
 			Where("id = ? AND user_id = ?", id, user.ID).
-			Update("sort_order", i)
+			Updates(map[string]interface{}{"sort_order": i, "sort_key": float64((i + 1) * 1000)})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "书架顺序已更新"})
 }

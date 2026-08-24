@@ -1,0 +1,62 @@
+/* src/styles/dragSort.css — Round22 拖拽排序全局样式（把手 / 幽灵卡 / 落位指示线） */
+
+/* 独立拖拽把手：touch-action:none 保证把手上触摸拖动不触发列表滚动 */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  color: var(--app-text-3);
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.drag-handle:hover {
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 拖动中的悬浮幽灵卡（fixed 跟随指针；由各视图 Teleport 到 body） */
+/* 决策 D4：left/width 由 useDragReorder 按滚动容器宽度内联注入（视口全宽会横向超出浮层/侧边栏） */
+.drag-ghost {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--app-surface-2);
+  border: 1px solid #007acc;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--app-text-strong);
+  font-size: 0.85rem;
+  opacity: 0.92;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 落位指示线（渲染在目标行之前/之后） */
+.drop-line {
+  height: 2px;
+  background: #007acc;
+  border-radius: 1px;
+  margin: -1px 0;
+  flex-shrink: 0;
+  pointer-events: none;
+}

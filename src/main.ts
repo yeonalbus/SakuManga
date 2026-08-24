@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import { watch } from 'vue'
 import router from './router'
 import App from './App.vue'
+// Round22：拖拽排序全局样式（把手 / 幽灵卡 / 落位指示线）
+import './styles/dragSort.css'
 import { styleSettings } from './stores/styleSettings'
 import { useUserStore } from './stores/userStore'
 import { loadUserLibrary } from './stores/libraryInit'

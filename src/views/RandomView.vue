@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUI } from '@/composables/useUI'
 // Round17-Bug3：注册列表状态提供者（返回恢复滚动位置）
 import { setListStateProvider, clearListStateProvider, getMainContent } from '@/utils/scrollMemory'
 import ItemCard from '@/components/ItemCard.vue'
 import TagChip from '@/components/TagChip.vue'
+// Round22：抽卡结果多选快捷加入书架（仅离线结果可加入，决策 D7）
+import { useShelfQuickAdd } from '@/composables/useShelfQuickAdd'
+import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
+import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import { fetchRandomComicsApi } from '@/api/comic'
 // Round3-任务6：负向排除（抽卡结果前端兜底过滤）
@@ -305,6 +309,14 @@ const handleStartDraw = async () => {
   }
 }
 
+// Round22：抽卡结果多选快捷加入书架（决策 D7：仅离线结果可加入）
+// 长按离线卡片进入选择模式；在线结果不响应（保持只读卡片）。
+const quickAdd = useShelfQuickAdd(() => drawnComics.value)
+// 重新抽卡/更换范围时清空选择态
+watch(drawnComics, () => {
+  quickAdd.exitSelectMode()
+})
+
 // Round17-Bug3：抽卡界面返回恢复滚动位置（来源页状态保留）
 onMounted(() => {
   setListStateProvider('/random', () => ({
@@ -588,13 +600,41 @@ onBeforeUnmount(() => {
         <p>命运的轮盘转动中...</p>
       </div>
 
-      <!-- 真实抽出的卡片网格 -->
-      <div v-else class="results-grid">
-        <div v-for="(comic, index) in drawnComics" :key="comic.id" class="drawn-item-card">
-          <div class="card-badge">NO.{{ index + 1 }}</div>
-          <ItemCard :comic="comic" mode="card" />
+      <!-- Round22：抽卡结果多选快捷加入（仅离线结果可加入，决策 D7） -->
+      <template v-else>
+        <ShelfQuickAddToolbar
+          v-if="quickAdd.selectMode.value"
+          :count="quickAdd.selectedIds.value.length"
+          @select-all="quickAdd.toggleSelectAllPage()"
+          @add="quickAdd.openShelfPicker()"
+          @close="quickAdd.exitSelectMode()"
+        />
+
+        <!-- 真实抽出的卡片网格 -->
+        <div class="results-grid">
+          <div v-for="(comic, index) in drawnComics" :key="comic.id" class="drawn-item-card">
+            <div class="card-badge">NO.{{ index + 1 }}</div>
+            <ItemCard
+              :comic="comic"
+              mode="card"
+              :selectable="true"
+              :select-mode="quickAdd.selectMode.value"
+              :selected="quickAdd.selectedIds.value.includes(comic.id)"
+              @longpress="quickAdd.handleLongPress"
+              @select="quickAdd.handleSelect"
+            />
+          </div>
         </div>
-      </div>
+      </template>
+
+      <!-- Round22：多选快捷加入书架（检索浮层 add 模式） -->
+      <BookshelfPickerOverlay
+        :open="quickAdd.showShelfPicker.value"
+        mode="add"
+        :selected-count="quickAdd.selectedIds.value.length"
+        @close="quickAdd.showShelfPicker.value = false"
+        @add="quickAdd.handleAddToShelf"
+      />
     </div>
   </div>
 </template>

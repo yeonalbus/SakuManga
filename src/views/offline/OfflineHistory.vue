@@ -6,6 +6,10 @@ import { offlineHistoryList, clearHistory, loadHistory } from '@/stores/historyS
 import { fetchOfflineComics } from '@/stores/comicStore'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
+// Round22：历史页多选快捷加入书架（共享 composable + 工具条 + 书架浮层）
+import { useShelfQuickAdd } from '@/composables/useShelfQuickAdd'
+import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
+import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 // 问题3：主滚动容器是 #main-content，翻页回顶必须用它而非 window
 // 任务五：列表状态记忆（页码 + 滚动位置），返回时「从哪里来回哪里去」
 // Round7-任务4：注册列表状态提供者，供打开详情（新标签）前捕获 { top, page }
@@ -73,6 +77,9 @@ const handlePageChange = (newPage: number) => {
   scrollMainToTop('smooth')
 }
 
+// Round22：多选快捷加入书架（历史项均为离线漫画）
+const quickAdd = useShelfQuickAdd(() => currentPageItems.value)
+
 const handleClear = () => {
   clearHistory('offline')
 }
@@ -87,8 +94,26 @@ const handleClear = () => {
       </button>
     </div>
 
+    <!-- Round22：多选快捷加入工具条 -->
+    <ShelfQuickAddToolbar
+      v-if="quickAdd.selectMode.value"
+      :count="quickAdd.selectedIds.value.length"
+      @select-all="quickAdd.toggleSelectAllPage()"
+      @add="quickAdd.openShelfPicker()"
+      @close="quickAdd.exitSelectMode()"
+    />
+
     <!-- Round7-任务6：历史入口卡片，点击详情后「立即阅读」始终从上次位置开始 -->
-    <GridContainer v-if="comics.length > 0" :items="currentPageItems" :from-history="true">
+    <GridContainer
+      v-if="comics.length > 0"
+      :items="currentPageItems"
+      :from-history="true"
+      :selectable="true"
+      :select-mode="quickAdd.selectMode.value"
+      :selected-ids="quickAdd.selectedIds.value"
+      @longpress="quickAdd.handleLongPress"
+      @select="quickAdd.handleSelect"
+    >
       <!-- 通过 #footer 插槽挂载数字分页组件 -->
       <template #footer>
         <Pagination
@@ -101,6 +126,15 @@ const handleClear = () => {
     </GridContainer>
 
     <div v-else class="empty-tip">暂无本地浏览记录</div>
+
+    <!-- Round22：多选快捷加入书架（检索浮层 add 模式） -->
+    <BookshelfPickerOverlay
+      :open="quickAdd.showShelfPicker.value"
+      mode="add"
+      :selected-count="quickAdd.selectedIds.value.length"
+      @close="quickAdd.showShelfPicker.value = false"
+      @add="quickAdd.handleAddToShelf"
+    />
   </div>
 </template>
 

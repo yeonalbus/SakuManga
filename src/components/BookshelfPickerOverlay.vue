@@ -13,8 +13,12 @@ import {
   setBookshelfPinned,
   renameBookshelf,
   removeBookshelf,
-  moveBookshelf,
+  moveShelfToPosition,
+  moveShelfToTop,
 } from "@/stores/bookshelfStore"
+// Round22：全部书架浮层拖拽排序（把手拖动 / 操作菜单；作用于全局书架顺序）
+import { useDragReorder } from "@/composables/useDragReorder"
+import SortRowMenu from "@/components/SortRowMenu.vue"
 
 const props = withDefaults(
   defineProps<{
@@ -106,6 +110,43 @@ const handleCreate = async () => {
     toast.success(`书架「${name.trim()}」创建成功！`)
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Round22：全部书架拖拽排序（把手拖动 / 移到顶部 / 移动到第 X 位，作用于全局顺序）
+// ─────────────────────────────────────────────────────────────
+const pickerDrag = useDragReorder({
+  getScrollContainer: () => document.querySelector(".picker-list"),
+  rowSelector: ".picker-item",
+  getGhostText: (i) => filtered.value[i]?.name || "",
+  onReorder: (from, to) => {
+    const moved = filtered.value[from]
+    if (!moved || from === to) return
+    void moveShelfToPosition(moved.id, to + 1)
+  },
+})
+
+// 解构 ref 供模板自动解包（模板内嵌套对象的 ref 不会自动解包）
+const {
+  dragging: pickerDragging,
+  dragIndex: pickerDragIndex,
+  indicatorIndex: pickerIndicatorIndex,
+  ghostTop: pickerGhostTop,
+  ghostHeight: pickerGhostHeight,
+  ghostLeft: pickerGhostLeft,
+  ghostWidth: pickerGhostWidth,
+  onHandlePointerDown: pickerHandleDown,
+  ghostText: pickerGhostText,
+} = pickerDrag
+
+/** 操作菜单：移到顶部（全局第 1 位） */
+const handleShelfMoveTop = (shelfId: string) => {
+  void moveShelfToTop(shelfId)
+}
+
+/** 操作菜单：移动到第 X 位（1-based，全局书架顺序） */
+const handleShelfMoveTo = (shelfId: string, position: number) => {
+  void moveShelfToPosition(shelfId, position)
+}
 </script>
 
 <template>
@@ -128,23 +169,64 @@ const handleCreate = async () => {
               {{ keyword ? "无匹配书架" : "暂无书架，点击下方「新建书架」创建" }}
             </div>
 
-            <div v-for="shelf in filtered" :key="shelf.id" class="picker-item" :class="{ pinned: shelf.pinned }">
-              <button class="item-main" @click="mode === 'add' ? handleAdd(shelf.id) : handleEnter(shelf.id)">
-                <span class="pin-badge" :class="{ on: shelf.pinned }">📌</span>
-                <span class="shelf-name" :title="shelf.name">{{ shelf.name }}</span>
-                <span class="shelf-count">{{ shelf.count || 0 }}</span>
-              </button>
-
-              <div class="item-actions">
-                <button class="mini-btn pin" :title="shelf.pinned ? '取消置顶' : '置顶到侧栏'" @click="togglePin(shelf.id, !!shelf.pinned)">
-                  {{ shelf.pinned ? "取消置顶" : "置顶" }}
+            <template v-for="(shelf, idx) in filtered" :key="shelf.id">
+              <div class="picker-item" :class="{ pinned: shelf.pinned }">
+                <button class="item-main" @click="mode === 'add' ? handleAdd(shelf.id) : handleEnter(shelf.id)">
+                  <span class="pin-badge" :class="{ on: shelf.pinned }">📌</span>
+                  <span class="shelf-name" :title="shelf.name">{{ shelf.name }}</span>
+                  <span class="shelf-count">{{ shelf.count || 0 }}</span>
                 </button>
-                <button class="mini-btn move" title="上移" @click="moveBookshelf(shelf.id, -1)">↑</button>
-                <button class="mini-btn move" title="下移" @click="moveBookshelf(shelf.id, 1)">↓</button>
-                <button class="mini-btn rename" title="重命名" @click="handleRename(shelf)">✎</button>
-                <button class="mini-btn danger" title="删除" @click="handleDelete(shelf.id, shelf.name)">✕</button>
+
+                <div class="item-actions">
+                  <button class="mini-btn pin" :title="shelf.pinned ? '取消置顶' : '置顶到侧栏'" @click="togglePin(shelf.id, !!shelf.pinned)">
+                    {{ shelf.pinned ? "取消置顶" : "置顶" }}
+                  </button>
+                  <!-- Round22：拖拽把手（拖动排序；把手触摸不滚动列表） -->
+                  <span
+                    class="drag-handle"
+                    title="拖动排序"
+                    @pointerdown="(e) => pickerHandleDown(e as PointerEvent, idx)"
+                    @click.stop.prevent
+                  >
+                    ⠿
+                  </span>
+                  <!-- Round22：排序操作菜单（移到顶部 / 移动到第 X 位） -->
+                  <SortRowMenu
+                    :total="filtered.length"
+                    @move-top="handleShelfMoveTop(shelf.id)"
+                    @move-to="(p) => handleShelfMoveTo(shelf.id, p)"
+                  />
+                  <button class="mini-btn rename" title="重命名" @click="handleRename(shelf)">✎</button>
+                  <button class="mini-btn danger" title="删除" @click="handleDelete(shelf.id, shelf.name)">✕</button>
+                </div>
               </div>
-            </div>
+              <!-- Round22：拖拽落位指示线 -->
+              <div
+                v-if="pickerDragging && pickerIndicatorIndex === idx"
+                class="drop-line picker-drop-line"
+              />
+            </template>
+            <!-- 拖到末尾的落位指示线 -->
+            <div
+              v-if="pickerDragging && pickerIndicatorIndex === filtered.length"
+              class="drop-line picker-drop-line"
+            />
+
+            <!-- Round22：拖拽幽灵卡（fixed 跟随指针） -->
+            <Teleport to="body">
+              <div
+                v-if="pickerDragging"
+                class="drag-ghost"
+                :style="{
+                  top: pickerGhostTop + 'px',
+                  left: pickerGhostLeft + 'px',
+                  width: pickerGhostWidth + 'px',
+                  height: pickerGhostHeight + 'px',
+                }"
+              >
+                📚 {{ pickerGhostText(pickerDragIndex) }}
+              </div>
+            </Teleport>
           </div>
 
           <div class="picker-footer">
@@ -289,9 +371,13 @@ const handleCreate = async () => {
 }
 .mini-btn.pin { color: #e6b800; border-color: rgba(230, 184, 0, 0.4); }
 .mini-btn.pin:hover { background: rgba(230, 184, 0, 0.15); }
-.mini-btn.move:hover { color: #10b981; border-color: #10b981; }
 .mini-btn.rename:hover { color: #3d5afe; border-color: #3d5afe; }
 .mini-btn.danger:hover { color: #ef4444; border-color: #ef4444; }
+/* Round22：浮层拖拽落位指示线（行内边距） */
+.picker-drop-line {
+  margin-left: 10px;
+  margin-right: 10px;
+}
 .picker-footer {
   display: flex;
   justify-content: space-between;

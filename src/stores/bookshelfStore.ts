@@ -2,11 +2,14 @@
  * 本地书架 Store：书架 CRUD 与动态作品数量统计
  * 持久化迁移到后端 /bookshelves API（按登录用户隔离），本地仅保留内存态。
  * 首次登录时会把旧 localStorage（app_bookshelves）数据迁移到后端。
+ * Round22：书架列表 / 书架内本子采用 LexoRank 浮点权值排序（单点移动只更新一项权值，
+ * 防抖合并持久化；精度用尽时异步全量重置）。
  */
 import { ref, computed } from 'vue'
 import type { Bookshelf } from '@/types/comic'
 import { http } from '@/utils/request'
 import { loadStorage } from '@/utils/storage'
+import { between, needsReweight, reweightAll, orderByWeights } from '@/utils/lexoRank'
 
 /** 后端 Bookshelf 记录结构 */
 interface BookshelfDTO {
@@ -15,6 +18,8 @@ interface BookshelfDTO {
   count?: number
   comicIds?: string[]
   pinned?: boolean
+  sortKey?: number
+  sortKeys?: Record<string, number>
   createdAt?: string
   updatedAt?: string
 }
@@ -52,6 +57,8 @@ export const loadBookshelves = async () => {
       count: s.count || 0,
       comicIds: toComicIdArray(s.comicIds),
       pinned: !!s.pinned,
+      sortKey: typeof s.sortKey === 'number' ? s.sortKey : 0,
+      sortKeys: s.sortKeys && typeof s.sortKeys === 'object' ? s.sortKeys : {},
     }))
   } catch (e) {
     // 后端不可用时回退旧 localStorage 数据，保证离线调试可用
@@ -60,6 +67,8 @@ export const loadBookshelves = async () => {
       name: s.name,
       count: s.count || 0,
       comicIds: toComicIdArray(s.comicIds),
+      sortKey: 0,
+      sortKeys: {},
     }))
     console.error('加载书架失败:', e)
   }
@@ -221,12 +230,191 @@ export const removeComicFromShelf = async (shelfId: string, comicId: string) => 
 }
 
 
-/** 按自定义顺序整体重排书架内项目（Round10，PUT /bookshelves/:id/order） */
+// ══════════════════════════════════════════════════════════════
+// Round22：LexoRank 排序（书架列表 sortKey / 书架内本子 sortKeys）
+// 单点移动只更新一项权值并防抖合并持久化；精度用尽时异步全量重置 1000*i。
+// ══════════════════════════════════════════════════════════════
+
+/** 书架内本子展示顺序：按权值升序（有权值在前），无权值项按 comicIds 数组顺序排后 */
+export const orderedShelfComicIds = (shelf: Bookshelf | undefined): string[] => {
+  const ids = shelf?.comicIds || []
+  return orderByWeights(ids, (id) => shelf?.sortKeys?.[id])
+}
+
+/**
+ * 确保书架内所有本子都有权值（旧数据惰性迁移）。
+ * 存在无权值项时本地赋 1000*i（保持当前展示顺序不变）并全量持久化一次。
+ */
+export const ensureShelfComicWeights = async (shelfId: string) => {
+  const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  if (!shelf || !shelf.comicIds || shelf.comicIds.length === 0) return
+  if (!shelf.sortKeys) shelf.sortKeys = {}
+  const hasMissing = shelf.comicIds.some((id) => shelf.sortKeys?.[id] === undefined)
+  if (!hasMissing) return
+  const { weights } = reweightAll(shelf.comicIds)
+  shelf.sortKeys = Object.fromEntries(weights)
+  try {
+    await http(`/bookshelves/${shelfId}/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ comicIds: [...shelf.comicIds] }),
+    })
+  } catch (e) {
+    console.error('初始化书架权值失败:', e)
+  }
+}
+
+// ── 书架列表（sortKey）防抖持久化 ──
+let shelfFlushTimer: ReturnType<typeof setTimeout> | null = null
+const pendingShelfPositions = new Map<string, number>()
+
+const scheduleShelfPositionFlush = (shelfId: string, weight: number) => {
+  pendingShelfPositions.set(shelfId, weight)
+  if (shelfFlushTimer) clearTimeout(shelfFlushTimer)
+  shelfFlushTimer = setTimeout(() => {
+    void flushShelfPositions()
+  }, 300)
+}
+
+const flushShelfPositions = async () => {
+  shelfFlushTimer = null
+  const pending = new Map(pendingShelfPositions)
+  pendingShelfPositions.clear()
+  for (const [shelfId, weight] of pending) {
+    try {
+      await http(`/bookshelves/${shelfId}/position`, {
+        method: 'PUT',
+        body: JSON.stringify({ sortKey: weight }),
+      })
+    } catch (e) {
+      console.error('保存书架顺序失败:', e)
+    }
+  }
+}
+
+// ── 书架内本子（sortKeys）防抖持久化 ──
+let comicFlushTimer: ReturnType<typeof setTimeout> | null = null
+const pendingComicWeights = new Map<string, Map<string, number>>()
+
+const scheduleComicWeightsFlush = (shelfId: string, comicId: string, weight: number) => {
+  if (!pendingComicWeights.has(shelfId)) pendingComicWeights.set(shelfId, new Map())
+  pendingComicWeights.get(shelfId)!.set(comicId, weight)
+  if (comicFlushTimer) clearTimeout(comicFlushTimer)
+  comicFlushTimer = setTimeout(() => {
+    void flushComicWeights()
+  }, 300)
+}
+
+const flushComicWeights = async () => {
+  comicFlushTimer = null
+  const pending = new Map(pendingComicWeights)
+  pendingComicWeights.clear()
+  for (const [shelfId, weights] of pending) {
+    try {
+      await http(`/bookshelves/${shelfId}/order`, {
+        method: 'PUT',
+        body: JSON.stringify({ sortKeys: Object.fromEntries(weights) }),
+      })
+    } catch (e) {
+      console.error('保存书架排序失败:', e)
+    }
+  }
+}
+
+/** 立即冲刷未持久化的排序改动（离开页面 / 完成排序时调用） */
+export const flushPendingSort = () => {
+  if (shelfFlushTimer) {
+    clearTimeout(shelfFlushTimer)
+    void flushShelfPositions()
+  }
+  if (comicFlushTimer) {
+    clearTimeout(comicFlushTimer)
+    void flushComicWeights()
+  }
+}
+
+/**
+ * 把书架移动到列表第 target 位（0-based），返回新权值；null 表示触发全量重置（无需再单点持久化）。
+ */
+const applyShelfMove = (id: string, target: number): number | null => {
+  const arr = [...bookshelves.value]
+  const idx = arr.findIndex((b) => b.id === id)
+  if (idx < 0 || target === idx) return null
+  const [item] = arr.splice(idx, 1)
+  arr.splice(target, 0, item)
+  const prevW = target > 0 ? arr[target - 1].sortKey : undefined
+  const nextW = target < arr.length - 1 ? arr[target + 1].sortKey : undefined
+  if (prevW !== undefined && nextW !== undefined && needsReweight(prevW, nextW)) {
+    // 精度用尽：按新顺序全量重置 1000*i（该项天然落在目标位），异步持久化一次
+    const { weights } = reweightAll(arr.map((b) => b.id))
+    arr.forEach((b) => {
+      b.sortKey = weights.get(b.id) ?? 0
+    })
+    bookshelves.value = arr
+    void reorderBookshelves(arr.map((b) => b.id))
+    return null
+  }
+  const w = between(prevW, nextW)
+  item.sortKey = w
+  bookshelves.value = arr
+  return w
+}
+
+/** 把书架移动到第 position 位（1-based） */
+export const moveShelfToPosition = async (id: string, position: number) => {
+  const target = Math.max(0, Math.min(position - 1, Math.max(0, bookshelves.value.length - 1)))
+  const w = applyShelfMove(id, target)
+  if (w !== null) scheduleShelfPositionFlush(id, w)
+}
+
+/** 书架列表「移到顶部」（第 1 位；与 Round13「置顶到侧栏」pinned 语义区分） */
+export const moveShelfToTop = async (id: string) => {
+  await moveShelfToPosition(id, 1)
+}
+
+/**
+ * 把书架内本子移动到第 position 位（1-based，相对该书架展示顺序）。
+ * 仅更新该本子的 LexoRank 权值，防抖持久化。
+ */
+export const moveComicToPosition = async (shelfId: string, comicId: string, position: number) => {
+  await ensureShelfComicWeights(shelfId)
+  const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  if (!shelf) return
+  const ids = orderedShelfComicIds(shelf)
+  const target = Math.max(0, Math.min(position - 1, Math.max(0, ids.length - 1)))
+  const idx = ids.indexOf(comicId)
+  if (idx < 0 || target === idx) return
+  const arr = [...ids]
+  arr.splice(idx, 1)
+  arr.splice(target, 0, comicId)
+  const prevW = target > 0 ? shelf.sortKeys?.[arr[target - 1]] : undefined
+  const nextW = target < arr.length - 1 ? shelf.sortKeys?.[arr[target + 1]] : undefined
+  if (prevW !== undefined && nextW !== undefined && needsReweight(prevW, nextW)) {
+    // 精度用尽：按新顺序全量重置 1000*i 并持久化一次
+    const { weights } = reweightAll(arr)
+    shelf.sortKeys = Object.fromEntries(weights)
+    shelf.comicIds = arr
+    void reorderShelfComics(shelfId, arr)
+    return
+  }
+  const w = between(prevW, nextW)
+  shelf.sortKeys = { ...shelf.sortKeys, [comicId]: w }
+  shelf.comicIds = arr
+  scheduleComicWeightsFlush(shelfId, comicId, w)
+}
+
+/** 书架内本子「置顶」（移到第 1 位） */
+export const moveComicToTop = async (shelfId: string, comicId: string) => {
+  await moveComicToPosition(shelfId, comicId, 1)
+}
+
+/** 按自定义顺序整体重排书架内项目（Round10 全量模式；Round22 精度用尽全量重置复用） */
 export const reorderShelfComics = async (shelfId: string, comicIds: string[]) => {
   const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  const { weights } = reweightAll(comicIds)
   if (shelf) {
     shelf.comicIds = [...comicIds]
     shelf.count = comicIds.length
+    shelf.sortKeys = Object.fromEntries(weights)
   }
   try {
     await http(`/bookshelves/${shelfId}/order`, {
@@ -254,13 +442,16 @@ export const renameBookshelf = async (id: string, name: string) => {
   }
 }
 
-/** 按自定义顺序批量重排书架列表（Round10，POST /bookshelves/reorder） */
+/** 按自定义顺序批量重排书架列表（Round10 全量模式；Round22 全量重置同步重建 sortKey=1000*i） */
 export const reorderBookshelves = async (ids: string[]) => {
   const orderMap = new Map(ids.map((id, i) => [id, i]))
   bookshelves.value = [...bookshelves.value].sort((a, b) => {
     const ia = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER
     const ib = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER
     return ia - ib
+  })
+  bookshelves.value.forEach((b, i) => {
+    b.sortKey = (i + 1) * 1000
   })
   try {
     await http('/bookshelves/reorder', {
@@ -272,15 +463,27 @@ export const reorderBookshelves = async (ids: string[]) => {
   }
 }
 
-/** 上移/下移单个书架（Round10，侧栏 ↑/↓） */
-export const moveBookshelf = async (id: string, dir: -1 | 1) => {
-  const idx = bookshelves.value.findIndex((b) => b.id === id)
-  const newIdx = idx + dir
-  if (idx < 0 || newIdx < 0 || newIdx >= bookshelves.value.length) return
-  const arr = [...bookshelves.value]
-  const [item] = arr.splice(idx, 1)
-  arr.splice(newIdx, 0, item)
-  await reorderBookshelves(arr.map((b) => b.id))
+/** 批量将漫画移出书架（Round22，多选快捷移除；同步清理权值，不删本地文件/历史） */
+export const removeComicsFromShelf = async (shelfId: string, comicIds: string[]) => {
+  const set = new Set(comicIds.filter(Boolean))
+  const shelf = bookshelves.value.find((b) => b.id === shelfId)
+  if (shelf) {
+    const before = (shelf.comicIds || []).length
+    shelf.comicIds = (shelf.comicIds || []).filter((c) => !set.has(c))
+    const removed = before - (shelf.comicIds || []).length
+    if (removed > 0) shelf.count = Math.max(0, (shelf.count || 0) - removed)
+    if (shelf.sortKeys) {
+      for (const id of set) delete shelf.sortKeys[id]
+    }
+  }
+  try {
+    await http(`/bookshelves/${shelfId}/comics/batch`, {
+      method: 'DELETE',
+      body: JSON.stringify({ comicIds: [...set] }),
+    })
+  } catch (e) {
+    console.error('批量移出书架失败:', e)
+  }
 }
 
 /** 书架展示列表：数量优先使用后端实时 count，缺失时回退 comicIds 长度 */

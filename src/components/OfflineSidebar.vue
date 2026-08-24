@@ -9,10 +9,14 @@ import {
   addBookshelf,
   removeBookshelf,
   renameBookshelf,
-  moveBookshelf,
+  moveShelfToPosition,
+  moveShelfToTop,
   setBookshelfPinned,
 } from '@/stores/bookshelfStore'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
+import SortRowMenu from '@/components/SortRowMenu.vue'
+// Round22：侧栏置顶书架拖拽排序（把手拖动 / 操作菜单）
+import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
 
 const router = useRouter()
@@ -68,6 +72,75 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Round22：置顶书架拖拽排序（决策 D1：把手为主；D6：菜单用「移到顶部」）
+// 置顶组顺序 = 全局书架顺序的子序列；拖拽/菜单换算为全局位置后走 LexoRank 单点移动。
+// ─────────────────────────────────────────────────────────────
+const pinnedDrag = useDragReorder({
+  getScrollContainer: () => document.querySelector('.sidebar'),
+  rowSelector: '.sub-nav-item',
+  getGhostText: (i) => pinnedBookshelves.value[i]?.name || '',
+  onReorder: (from, to) => handlePinnedReorder(from, to),
+})
+
+// 解构 ref 供模板自动解包（模板内嵌套对象的 ref 不会自动解包）
+const {
+  dragging: pinnedDragging,
+  dragIndex: pinnedDragIndex,
+  indicatorIndex: pinnedIndicatorIndex,
+  ghostTop: pinnedGhostTop,
+  ghostHeight: pinnedGhostHeight,
+  ghostLeft: pinnedGhostLeft,
+  ghostWidth: pinnedGhostWidth,
+  onHandlePointerDown: pinnedHandleDown,
+  consumeSuppressClick: pinnedConsumeClick,
+  ghostText: pinnedGhostText,
+} = pinnedDrag
+
+/** 拖拽落位（from/to 为置顶组下标；to 为移除被拖项后的插入下标）→ 换算全局位置 */
+const handlePinnedReorder = (from: number, to: number) => {
+  const pinned = pinnedBookshelves.value
+  const moved = pinned[from]
+  if (!moved || from === to) return
+  const newPinned = [...pinned]
+  newPinned.splice(from, 1)
+  newPinned.splice(to, 0, moved)
+  const removed = bookshelves.value.map((b) => b.id).filter((id) => id !== moved.id)
+  const movedPos = newPinned.indexOf(moved)
+  const next = movedPos < newPinned.length - 1 ? newPinned[movedPos + 1] : null
+  const prev = movedPos > 0 ? newPinned[movedPos - 1] : null
+  let target = -1
+  if (next) target = removed.indexOf(next.id)
+  else if (prev) target = removed.indexOf(prev.id) + 1
+  else return
+  if (target < 0) return
+  void moveShelfToPosition(moved.id, target + 1)
+}
+
+/** 操作菜单：移到顶部（置顶组第 1 位） */
+const handleShelfMoveTop = (shelfId: string) => {
+  const from = pinnedBookshelves.value.findIndex((b) => b.id === shelfId)
+  if (from < 0) return
+  handlePinnedReorder(from, 0)
+}
+
+/** 操作菜单：移动到第 X 位（1-based，作用于置顶组） */
+const handleShelfMoveTo = (shelfId: string, position: number) => {
+  const pinned = pinnedBookshelves.value
+  const from = pinned.findIndex((b) => b.id === shelfId)
+  if (from < 0) return
+  const to = Math.max(0, Math.min(position - 1, pinned.length - 1))
+  handlePinnedReorder(from, to)
+}
+
+/** 拖动刚结束时抑制行内点击（避免拖拽落点触发跳转书架） */
+const onLinkClick = (e: MouseEvent) => {
+  if (pinnedConsumeClick()) {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+}
 </script>
 
 <template>
@@ -92,32 +165,34 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
           💡 在「全部书架」中点击 ⭐ 置顶常用书架（最多 {{ PIN_LIMIT }} 个）
         </div>
 
-        <template v-for="shelf in pinnedBookshelves" :key="shelf.id">
+        <template v-for="(shelf, idx) in pinnedBookshelves" :key="shelf.id">
           <router-link
             :to="`/offline/bookshelf?id=${shelf.id}`"
             class="sub-nav-item"
             :class="{ active: route.query.id === shelf.id }"
+            @click="onLinkClick"
           >
             <span class="shelf-name"><span class="pin-dot">📌</span> {{ shelf.name }}</span>
 
             <div class="shelf-right-info">
               <span class="shelf-count">{{ shelf.count || 0 }}</span>
 
-              <!-- Round10：书架顺序自定义排序（hover 显示 ↑/↓，置顶书架顺序 = 全局顺序） -->
+              <!-- Round22：拖拽把手（拖动排序；把手触摸不滚动列表） -->
               <span
-                class="move-btn"
-                title="书架上移"
-                @click.stop.prevent="moveBookshelf(shelf.id, -1)"
+                class="drag-handle"
+                title="拖动排序"
+                @pointerdown="(e) => pinnedHandleDown(e as PointerEvent, idx)"
+                @click.stop.prevent
               >
-                ↑
+                ⠿
               </span>
-              <span
-                class="move-btn"
-                title="书架下移"
-                @click.stop.prevent="moveBookshelf(shelf.id, 1)"
-              >
-                ↓
-              </span>
+
+              <!-- Round22：排序操作菜单（移到顶部 / 移动到第 X 位） -->
+              <SortRowMenu
+                :total="pinnedBookshelves.length"
+                @move-top="handleShelfMoveTop(shelf.id)"
+                @move-to="(p) => handleShelfMoveTo(shelf.id, p)"
+              />
 
               <!-- Round13：取消置顶 -->
               <span
@@ -129,7 +204,33 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
               </span>
             </div>
           </router-link>
+          <!-- Round22：拖拽落位指示线 -->
+          <div
+            v-if="pinnedDragging && pinnedIndicatorIndex === idx"
+            class="drop-line sidebar-drop-line"
+          />
         </template>
+        <!-- 拖到末尾的落位指示线 -->
+        <div
+          v-if="pinnedDragging && pinnedIndicatorIndex === pinnedBookshelves.length"
+          class="drop-line sidebar-drop-line"
+        />
+
+        <!-- Round22：拖拽幽灵卡（fixed 跟随指针） -->
+        <Teleport to="body">
+          <div
+            v-if="pinnedDragging"
+            class="drag-ghost"
+            :style="{
+              top: pinnedGhostTop + 'px',
+              left: pinnedGhostLeft + 'px',
+              width: pinnedGhostWidth + 'px',
+              height: pinnedGhostHeight + 'px',
+            }"
+          >
+            📌 {{ pinnedGhostText(pinnedDragIndex) }}
+          </div>
+        </Teleport>
 
         <!-- Round13：全部书架检索浮层入口 -->
         <button class="all-shelf-btn" @click="openShelfPicker">
@@ -227,7 +328,13 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 .shelf-right-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+}
+
+/* Round22：侧栏拖拽落位指示线（整行宽） */
+.sidebar-drop-line {
+  margin-left: 8px;
+  margin-right: 8px;
 }
 
 .shelf-count {
@@ -239,8 +346,7 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 }
 
 .delete-btn,
-.rename-btn,
-.move-btn {
+.rename-btn {
   font-size: 0.75rem;
   color: var(--app-text-2);
   padding: 0 4px;
@@ -252,8 +358,7 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 }
 
 .sub-nav-item:hover .delete-btn,
-.sub-nav-item:hover .rename-btn,
-.sub-nav-item:hover .move-btn {
+.sub-nav-item:hover .rename-btn {
   opacity: 1;
 }
 
@@ -265,11 +370,6 @@ const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
 .rename-btn:hover {
   color: #3d5afe !important;
   background-color: rgba(61, 90, 254, 0.15);
-}
-
-.move-btn:hover {
-  color: #10b981 !important;
-  background-color: rgba(16, 185, 129, 0.15);
 }
 
 .pin-hint {

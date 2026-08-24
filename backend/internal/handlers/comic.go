@@ -217,17 +217,6 @@ func GetComicCover(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, data)
 }
 
-// GetComicDetail 获取单本漫画详情
-func GetComicDetail(c *gin.Context) {
-	id := c.Param("id")
-	var comic models.OfflineComic
-	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该漫画记录"})
-		return
-	}
-	c.JSON(http.StatusOK, comic)
-}
-
 // UpdateOfflineComic 修改离线漫画标题/本地备注 PUT /api/v1/comics/:id
 // Round11-Opt3：title 传空字符串 = 恢复原标题（OriginalTitle，首次入库标题）；
 // remark 为本地备注；两者均为指针，未传字段不修改。

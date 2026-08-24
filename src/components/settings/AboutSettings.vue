@@ -7,6 +7,14 @@
       </div>
     </div>
 
+    <!-- Round24：服务端构建标识（部署后新旧核对；旧版后端无该接口显示 —） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">服务端构建</div>
+        <div class="item-subtext">{{ serverBuild || '—' }}</div>
+      </div>
+    </div>
+
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">创作者</div>
@@ -27,10 +35,23 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { version } from '../../../package.json'
 import { useUI } from '@/composables/useUI'
+import { http } from '@/utils/request'
 
 const { toast } = useUI()
+
+// Round24：服务端构建标识（部署后新旧核对；旧版后端无该接口 → 保持 —）
+const serverBuild = ref('')
+onMounted(async () => {
+  try {
+    const res = await http<{ build?: string }>('/system/version')
+    if (res?.build) serverBuild.value = res.build
+  } catch {
+    serverBuild.value = ''
+  }
+})
 
 const handleOpenLink = (url: string) => {
   window.open(url, '_blank')

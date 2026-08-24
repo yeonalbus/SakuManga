@@ -46,7 +46,14 @@ if exist "app.ico" (
     echo    [提示] 未找到 app.ico，沿用已提交的 rsrc_windows_amd64.syso
 )
 
-go build -trimpath -ldflags "-s -w" -o "..\SakuHentai.exe" .
+rem ---- 注入构建标识（YYYYMMDDHHMM-g<git短哈希>，供 /api/v1/system/version 显示，Round24）----
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmm"') do set "TS=%%i"
+for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set "GITSHA=%%i"
+if not defined GITSHA set "GITSHA=unknown"
+set "BUILD_ID=%TS%-g%GITSHA%"
+echo    构建标识: %BUILD_ID%
+
+go build -trimpath -ldflags "-s -w -X SakuHentai/internal/version.Build=%BUILD_ID%" -o "..\SakuHentai.exe" .
 if errorlevel 1 (
     popd
     echo [错误] 后端构建失败

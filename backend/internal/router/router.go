@@ -88,7 +88,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 漫画数据与封面（封面/页图为公开路由，见上方 public 分组）
 		api.GET("/comics/offline", handlers.GetOfflineComics)
-		api.GET("/comics/:id", handlers.GetComicDetail)
+		// Round24-BugFix：详情接口改用 GetOfflineComicDetail（返回双轨三态 tag + 隐藏页信息）。
+		// 此前误绑 GetComicDetail（原始 model，tags 为字符串、无 onlineTagsList 等字段），
+		// 导致前端永远判定为「旧版后端」，tag 置灰/恢复功能无法生效。
+		api.GET("/comics/:id", handlers.GetOfflineComicDetail)
 		// Round11：离线漫画标题/备注编辑（title 空串=恢复原标题）
 		api.PUT("/comics/:id", handlers.UpdateOfflineComic)
 		// Round23：自定义删除页面（隐藏页软删除，同步重算有效页数并记录原页数）
@@ -106,6 +109,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/client/log", handlers.ReportClientLog)
 		// 日志大小查询（清除为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/client/log/size", handlers.GetClientLogSize)
+
+		// Round24：服务端版本与构建标识（部署后新旧核对）
+		api.GET("/system/version", handlers.GetSystemVersion)
 
 		// 四类系统日志：查询 / 实时监控 / 开关设置读取（清理与设置保存为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/logs/categories", handlers.GetLogCategories)

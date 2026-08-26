@@ -8,7 +8,11 @@ import { getNextComicInQueue, getPrevComicInQueue, onlineReadingList, offlineRea
 import { onlineHistoryList, offlineHistoryList, resolveOnlineToken } from '@/stores/historyStore'
 import { readerSettings, parseReadDirection } from '@/stores/readerSettings'
 import { useGamepad } from '@/composables/useGamepad'
-import type { OnlineComic, ComicItem } from '@/types/comic'
+import type { OnlineComic, OfflineComic, ComicItem } from '@/types/comic'
+// Round24：侧栏抽屉（缩略图/章节大纲/书签，仅本地）
+import ReaderSidebar, { type SidebarChapter, type SidebarPage } from '@/components/reader/ReaderSidebar.vue'
+// Round24：顶栏文字按显示宽度截断
+import { truncateByWidth } from '@/utils/truncate'
 // Round20-Bug4：孤儿引用清理（历史/清单/书架）与列表刷新
 import { fetchOfflineComics, offlineComics, recordComicClick, purgeOrphanOfflineRefs } from '@/stores/comicStore'
 import { http } from '@/utils/request'
@@ -33,13 +37,6 @@ import {
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
 interface WakeLockManager {
   request(type: 'screen'): Promise<WakeLockSentinel>
-}
-// 电量 API 的类型声明（避免 any）
-interface BatteryManager {
-  level: number
-  charging: boolean
-  chargingTime: number
-  dischargingTime: number
 }
 
 const router = useRouter()
@@ -79,6 +76,9 @@ const effectiveRTL = computed(() =>
 )
 
 const pageUrls = ref<string[]>([])
+// Round24：离线物理索引锚点——可见物理页序列（0-based 原文件索引），
+// 图片一律按物理索引直读 /raw-page（URL 稳定可缓存，修复隐藏页后错位问题）。
+const physicalIndices = ref<number[]>([])
 
 // 在阅读器内切换 单页/双页（同步写回全局设置）
 const togglePageLayout = () => {
@@ -166,27 +166,41 @@ const loadComicPages = async () => {
       onlineId = realId
       onlineToken = tok
     } else {
-      // 📚 离线模式：请求本地画廊页列表接口
-      const data = await http<{ total?: number; pages?: unknown[] }>(`/comics/${realId}/pages`)
-      let pageCount = 0
-      if (typeof data.total === 'number') {
-        pageCount = data.total
+      // 📚 离线模式：物理索引锚点（Round24）
+      // /pages 返回 originalTotal(物理页数) + hiddenPages(隐藏物理索引)；
+      // 前端构建「可见物理序列」，图片按物理索引直读 /raw-page（URL 稳定可缓存，
+      // 修复隐藏页后「有效序号」URL 强缓存错位的问题）。
+      const data = await http<{
+        total?: number
+        pages?: unknown[]
+        originalTotal?: number
+        hiddenPages?: number[]
+      }>(`/comics/${realId}/pages`)
+      const physicalTotal = typeof data.originalTotal === 'number' ? data.originalTotal : 0
+      const hidden = new Set(data.hiddenPages || [])
+      const visible: number[] = []
+      if (physicalTotal > 0) {
+        for (let p = 0; p < physicalTotal; p++) {
+          if (!hidden.has(p)) visible.push(p)
+        }
+      } else if (typeof data.total === 'number') {
+        for (let i = 0; i < data.total; i++) visible.push(i)
       } else if (Array.isArray(data.pages)) {
-        pageCount = data.pages.length
+        for (let i = 0; i < data.pages.length; i++) visible.push(i)
       }
-      if (pageCount === 0) {
+      if (visible.length === 0) {
         toast.error('该画廊没有任何页面')
         isLoading.value = false
         return
       }
-      totalPages.value = pageCount
-      pageUrls.value = Array.from(
-        { length: pageCount },
-        (_, i) => `${API_BASE}/comics/${realId}/page/${i}`,
-      )
+      physicalIndices.value = visible
+      totalPages.value = visible.length
+      pageUrls.value = visible.map((phys) => `${API_BASE}/comics/${realId}/raw-page/${phys}`)
+      // Round24：侧栏标记数据（仅离线）
+      void fetchMarks()
     }
 
-    // 恢复起始页码：优先路由 page 参数（预览图点击进入），其次历史进度
+    // 恢复起始页码：优先路由 page 参数（预览图点击进入，可见序号），其次历史进度
     const targetPage = Number(route.query.page)
     let startPage = 1
     if (Number.isInteger(targetPage) && targetPage >= 1 && targetPage <= totalPages.value) {
@@ -197,7 +211,15 @@ const loadComicPages = async () => {
         fromHistory: route.query.resume === '1',
         resumePreference: isResumeFromLastPageEnabled(),
       })
-      if (last !== null) startPage = Math.min(Math.max(1, last), totalPages.value)
+      if (last !== null) {
+        if (source.value === 'offline') {
+          // Round24：离线进度按物理索引存储；旧数据（有效序号）作废——定位不到时回退第 1 页
+          const idx = physicalIndices.value.indexOf(last)
+          startPage = idx >= 0 ? idx + 1 : 1
+        } else {
+          startPage = Math.min(Math.max(1, last), totalPages.value)
+        }
+      }
     }
     currentPage.value = startPage
     if (isWebtoon.value) scrollToPage(startPage)
@@ -400,6 +422,100 @@ const getProgressMap = (): Record<string, number> => getSharedProgressMap(curren
 const saveProgress = (src: 'online' | 'offline', id: string, page: number): void =>
   saveSharedProgress(currentUid(), src, id, page)
 
+// Round24：当前显示序号对应的物理索引（离线按物理索引存进度；在线保持显示序号）
+const currentPhysicalIndex = (): number =>
+  source.value === 'offline'
+    ? (physicalIndices.value[currentPage.value - 1] ?? -1)
+    : currentPage.value
+
+// --------------------------------------------------
+// Round24：侧栏抽屉（缩略图网格 / 章节大纲 / 书签，仅本地）
+// --------------------------------------------------
+const sidebarOpen = ref(false)
+const sidebarTab = ref<'thumbs' | 'outline' | 'bookmarks'>('thumbs')
+const readerChapters = ref<SidebarChapter[]>([])
+const readerBookmarks = ref<number[]>([])
+
+/** 当前物理索引（0-based，离线；在线无侧栏） */
+const currentPhysicalIndex0 = computed(() =>
+  source.value === 'offline' ? (physicalIndices.value[currentPage.value - 1] ?? -1) : -1,
+)
+/** 侧栏可见页序列（物理索引 ↔ raw-page URL，与 pageUrls 同序） */
+const sidebarPages = computed<SidebarPage[]>(() =>
+  physicalIndices.value.map((phys, i) => ({ physical: phys, url: pageUrls.value[i] ?? '' })),
+)
+
+// 拉取书签 / 章节（仅离线）
+const fetchMarks = async () => {
+  if (source.value !== 'offline' || !comicId.value) return
+  try {
+    const bm = await http<{ bookmarks?: number[] }>(`/comics/${comicId.value}/bookmarks`)
+    readerBookmarks.value = bm.bookmarks || []
+    const ch = await http<{ chapters?: SidebarChapter[] }>(`/comics/${comicId.value}/chapters`)
+    readerChapters.value = ch.chapters || []
+  } catch (err) {
+    console.warn('加载书签/章节失败:', err)
+  }
+}
+
+const openSidebar = () => {
+  sidebarOpen.value = !sidebarOpen.value
+  if (sidebarOpen.value) void fetchMarks()
+}
+
+// 跳转（物理索引 → 显示序号）
+const jumpFromSidebar = (phys: number) => {
+  const idx = physicalIndices.value.indexOf(phys)
+  if (idx >= 0) {
+    currentPage.value = idx + 1
+    if (isWebtoon.value) scrollToPage(idx + 1)
+  }
+}
+
+// 书签切换（整体覆盖）
+const toggleBookmark = async (phys: number) => {
+  if (source.value !== 'offline' || !comicId.value) return
+  const next = readerBookmarks.value.includes(phys)
+    ? readerBookmarks.value.filter((b) => b !== phys)
+    : [...readerBookmarks.value, phys].sort((a, b) => a - b)
+  try {
+    const res = await http<{ bookmarks?: number[] }>(`/comics/${comicId.value}/bookmarks`, {
+      method: 'PUT',
+      body: JSON.stringify({ bookmarks: next }),
+    })
+    readerBookmarks.value = res.bookmarks || next
+  } catch {
+    toast.error('书签保存失败')
+  }
+}
+
+// 添加章节
+const addChapter = async (payload: { title: string; level: number; parentId: number; pageIndex: number }) => {
+  if (source.value !== 'offline' || !comicId.value) return
+  try {
+    await http(`/comics/${comicId.value}/chapters`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    await fetchMarks()
+    toast.success('章节已添加')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '章节添加失败')
+  }
+}
+
+// 删除章节（连同子树）
+const removeChapter = async (id: number) => {
+  if (source.value !== 'offline' || !comicId.value) return
+  try {
+    await http(`/comics/${comicId.value}/chapters/${id}`, { method: 'DELETE' })
+    readerChapters.value = readerChapters.value.filter((c) => c.id !== id)
+    toast.success('章节已删除')
+  } catch {
+    toast.error('章节删除失败')
+  }
+}
+
 // Round3-任务1：当前阅读作品元信息（供后端进度写回；离线优先取库内真实条目）
 // Round11-Bug3：fallback 不得把 title 设为 comicId（会把后端历史标题污染成 gid 乱码、封面丢失）。
 // 从阅读清单 / 历史记录中恢复真实标题与封面；仍缺失时 title 留空串，由后端 AddHistory 空值不覆盖保护。
@@ -429,6 +545,49 @@ const currentComicMeta = computed<ComicItem | null>(() => {
   } as ComicItem
 })
 
+// Round24：顶栏标题显示日文原名（优先），缺失回退普通标题/ID
+const readerTitle = computed(() => {
+  const meta = currentComicMeta.value
+  if (meta) {
+    const jpn = (meta as Partial<OfflineComic>).titleJpn
+    if (jpn) return jpn
+    if (meta.title) return meta.title
+  }
+  return comicId.value
+})
+
+// Round24：顶栏名称/章节路径按「显示宽度」截断（宽度阈值可由设置选择紧凑/宽松）
+const headerTitleLimit = computed(() => (readerSettings.headerTextWidth === 'loose' ? 16 : 12))
+const headerPathLimit = computed(() => (readerSettings.headerTextWidth === 'loose' ? 30 : 22))
+const readerTitleDisplay = computed(() =>
+  truncateByWidth(readerTitle.value, headerTitleLimit.value),
+)
+
+// 当前物理页所属章节路径（顶栏小字，复用侧栏同款定位逻辑）
+const currentChapterPath = computed<SidebarChapter[]>(() => {
+  const phys = currentPhysicalIndex0.value
+  if (phys < 0 || readerChapters.value.length === 0) return []
+  let leaf: SidebarChapter | null = null
+  for (const c of readerChapters.value) {
+    if (c.pageIndex > phys) continue
+    if (!leaf) leaf = c
+    else if (c.pageIndex > leaf.pageIndex || (c.pageIndex === leaf.pageIndex && c.level > leaf.level))
+      leaf = c
+  }
+  if (!leaf) return []
+  const path: SidebarChapter[] = []
+  let cur: SidebarChapter | null = leaf
+  while (cur) {
+    path.unshift(cur)
+    cur = readerChapters.value.find((c) => c.id === cur!.parentId) ?? null
+  }
+  return path
+})
+const readerChapterPathText = computed(() => {
+  const text = currentChapterPath.value.map((c) => c.title).join(' › ')
+  return text ? truncateByWidth(text, headerPathLimit.value) : ''
+})
+
 // Round3-任务1：翻页进度 debounce 写回后端（避免高频请求；离线/后端不可用时静默失败）
 let progressSyncTimer: ReturnType<typeof setTimeout> | null = null
 const scheduleSyncProgress = () => {
@@ -437,8 +596,11 @@ const scheduleSyncProgress = () => {
     if (!currentComicMeta.value || totalPages.value <= 0) return
     // Round7-任务1：第 1 页不写回后端进度，避免把历史进度清零（第 1 页无需恢复）
     if (currentPage.value <= 1) return
+    // Round24：进度按物理索引写回（离线），在线保持显示序号
+    const phys = currentPhysicalIndex()
+    if (phys < 0) return
     syncHistory(source.value, currentComicMeta.value, {
-      lastPageIndex: currentPage.value,
+      lastPageIndex: phys,
       totalPageCount: totalPages.value,
     })
   }, 1000)
@@ -663,10 +825,11 @@ const handleRightClick = () => {
   else handleNextPage()
 }
 
-// 中间三等分区：拉起阅读器设置边栏
+// 中间三等分区：单击画面切换上下控制条显隐（Round24，触屏友好；设置改从 ⚙️ 进入）
 const handleMidClick = () => {
   if (didDrag) return
-  showSettings.value = !showSettings.value
+  showControls.value = !showControls.value
+  showSettings.value = false
 }
 
 // Webtoon 滚动容器
@@ -738,10 +901,9 @@ const scrollThumbIntoView = () => {
   })
 }
 
-// 缩略图进度条显隐（点击底部区域 / 顶栏 ▦ 按钮切换；功能开关关闭时不响应）
+// 缩略图进度条显隐（点击底部区域切换；缩略图功能常驻可用）
 const toggleThumbStrip = () => {
   if (didDrag) return
-  if (!readerSettings.showThumbnails) return
   showThumbnailsPanel.value = !showThumbnailsPanel.value
   if (showThumbnailsPanel.value) {
     scrollThumbIntoView()
@@ -796,28 +958,6 @@ const toggleFullscreen = () => {
     if (document.exitFullscreen) {
       document.exitFullscreen()
       isFullscreen.value = false
-    }
-  }
-}
-
-// 4. 时钟与电量刷新
-let clockTimer: ReturnType<typeof setInterval> | null = null
-const currentTime = ref('')
-const batteryLevel = ref('100%')
-const updateStatusInfo = async () => {
-  const now = new Date()
-  currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
-  if ('getBattery' in navigator) {
-    try {
-      const getBattery = (navigator as Navigator & { getBattery?: () => Promise<BatteryManager> })
-        .getBattery
-      if (getBattery) {
-        const b = await getBattery()
-        batteryLevel.value = `${Math.round(b.level * 100)}%`
-      }
-    } catch {
-      batteryLevel.value = '100%'
     }
   }
 }
@@ -1007,8 +1147,6 @@ onMounted(() => {
   showControls.value = !readerSettings.immersiveMode
   // 缩略图进度条默认隐藏（按需通过底部区域 / 顶栏 ▦ 按钮唤起）
   showThumbnailsPanel.value = false
-  updateStatusInfo()
-  clockTimer = setInterval(updateStatusInfo, 30000) // 30秒更新一次状态
   // 滑动翻页：非 passive 监听 touchmove 以允许 preventDefault
   const stage = canvasStage.value
   if (stage) {
@@ -1027,7 +1165,6 @@ onUnmounted(() => {
   }
   document.removeEventListener('click', onCaptureClick, true)
   if (autoTurnTimer) clearInterval(autoTurnTimer)
-  if (clockTimer) clearInterval(clockTimer)
   if (wakeLockSentinel) wakeLockSentinel.release().catch(() => {})
   // Round7-任务1：退出时立即 flush 未完成的后端进度同步（仅当前页 > 1 时，
   // 避免第 1 页入口快速退出把后端已有进度清零）
@@ -1035,10 +1172,13 @@ onUnmounted(() => {
     clearTimeout(progressSyncTimer)
     progressSyncTimer = null
     if (currentPage.value > 1 && currentComicMeta.value && totalPages.value > 0) {
-      syncHistory(source.value, currentComicMeta.value, {
-        lastPageIndex: currentPage.value,
-        totalPageCount: totalPages.value,
-      })
+      const phys = currentPhysicalIndex()
+      if (phys >= 0) {
+        syncHistory(source.value, currentComicMeta.value, {
+          lastPageIndex: phys,
+          totalPageCount: totalPages.value,
+        })
+      }
     }
   }
 })
@@ -1050,7 +1190,9 @@ onUnmounted(() => {
 // 监听当前页码变化：实时触发预加载 + 保存进度
 watch(currentPage, (newPg) => {
   if (comicId.value) {
-    saveProgress(source.value, comicId.value, newPg)
+    // Round24：进度存物理索引（离线），在线保持显示序号
+    const phys = currentPhysicalIndex()
+    if (phys >= 0) saveProgress(source.value, comicId.value, phys)
     // Round3-任务1：翻页 debounce 写回后端（按账号），页面数就绪后再同步
     if (totalPages.value > 0) {
       scheduleSyncProgress()
@@ -1106,12 +1248,28 @@ watch(
 
     <Transition name="fade-top">
       <div v-if="showControls" class="floating-header">
-        <button class="back-btn" @click="handleReaderBack">‹ 退出阅读</button>
+        <button class="topbar-btn" title="退出阅读" @click="handleReaderBack">‹</button>
+
+        <!-- Round24：侧栏抽屉开关（仅本地；横屏/窄屏均折叠保沉浸） -->
+        <button
+          v-if="source === 'offline'"
+          class="topbar-btn"
+          :class="{ active: sidebarOpen }"
+          @click.stop="openSidebar"
+          title="侧栏（缩略图/大纲/书签）"
+        >
+          ☰
+        </button>
 
         <div class="header-info">
-          <span class="comic-title">📖 作品ID: {{ comicId }}</span>
-          <span class="source-tag">{{
-            source === 'online' ? '🌐 在线流加载' : '📚 本地挂载'
+          <div class="title-row">
+            <span class="comic-title" :title="readerTitle">{{ readerTitleDisplay }}</span>
+            <span class="source-tag">{{
+              source === 'online' ? '🌐 在线流加载' : '📚 本地挂载'
+            }}</span>
+          </div>
+          <span v-if="readerChapterPathText" class="chapter-path" :title="readerChapterPathText">{{
+            readerChapterPathText
           }}</span>
         </div>
 
@@ -1123,27 +1281,10 @@ watch(
           >
             🎮<span class="gamepad-name">{{ gamepadName }}</span>
           </span>
-          <span v-if="readerSettings.showClock" class="widget-item">🕒 {{ currentTime }}</span>
-          <span v-if="readerSettings.showBattery" class="widget-item"> 🔋 {{ batteryLevel }} </span>
-          <span v-if="readerSettings.showProgress" class="page-indicator"
-            >{{ currentPage }} / {{ totalPages }}</span
-          >
-          <button
-            v-if="readerSettings.showThumbnails"
-            class="settings-btn"
-            title="缩略图"
-            @click.stop="showThumbnailsPanel = !showThumbnailsPanel"
-          >
-            ▦
-          </button>
-          <button class="settings-btn" @click.stop="showSettings = !showSettings" title="阅读设置">
+          <button class="topbar-btn" @click.stop="showSettings = !showSettings" title="阅读设置">
             ⚙️
           </button>
-          <button
-            class="settings-btn collapse-btn"
-            @click.stop="showControls = false"
-            title="隐藏控制条"
-          >
+          <button class="topbar-btn" @click.stop="showControls = false" title="隐藏控制条">
             ✕
           </button>
         </div>
@@ -1276,7 +1417,7 @@ watch(
 
     <Transition name="fade-bottom">
       <div v-if="showControls" class="floating-footer">
-        <div v-if="readerSettings.showScrollbar && readerSettings.showProgress" class="slider-row">
+        <div v-if="readerSettings.showBottomBar" class="slider-row">
           <button class="step-btn" @click="handlePrevPage">‹</button>
           <input
             :value="currentPage"
@@ -1307,24 +1448,11 @@ watch(
           </button>
         </div>
 
-        <div v-if="readerSettings.showBottomStatus" class="status-row">
+        <div v-if="readerSettings.showBottomBar" class="status-row">
           <span>{{ directionLabel }}</span>
           <span>{{ currentPage }} / {{ totalPages }} P</span>
         </div>
       </div>
-    </Transition>
-
-    <!-- ✋ 控制条隐藏时的悬浮呼出按钮（底部居中，层级高于点击热区） -->
-    <Transition name="fade">
-      <button
-        v-if="!showControls"
-        class="controls-reveal"
-        @click="showControls = true"
-        title="显示控制条"
-        aria-label="显示控制条"
-      >
-        ⋯
-      </button>
     </Transition>
 
     <!-- ⚙️ 阅读器内设置抽屉 -->
@@ -1374,21 +1502,6 @@ watch(
           <div class="setting-item switch-row">
             <label>屏幕常亮</label>
             <input v-model="readerSettings.keepAwake" type="checkbox" class="toggle-switch" />
-          </div>
-
-          <div class="setting-item switch-row">
-            <label>显示时钟</label>
-            <input v-model="readerSettings.showClock" type="checkbox" class="toggle-switch" />
-          </div>
-
-          <div class="setting-item switch-row">
-            <label>显示进度</label>
-            <input v-model="readerSettings.showProgress" type="checkbox" class="toggle-switch" />
-          </div>
-
-          <div class="setting-item switch-row">
-            <label>显示电量</label>
-            <input v-model="readerSettings.showBattery" type="checkbox" class="toggle-switch" />
           </div>
 
           <div class="setting-item column">
@@ -1464,6 +1577,22 @@ watch(
         </div>
       </div>
     </Transition>
+
+    <!-- Round24：侧栏抽屉（缩略图/章节大纲/书签，仅本地） -->
+    <ReaderSidebar
+      v-model:active-tab="sidebarTab"
+      :open="sidebarOpen"
+      :pages="sidebarPages"
+      :current-physical="currentPhysicalIndex0"
+      :physical-total="totalPages"
+      :chapters="readerChapters"
+      :bookmarks="readerBookmarks"
+      @close="sidebarOpen = false"
+      @jump="jumpFromSidebar"
+      @toggle-bookmark="toggleBookmark"
+      @add-chapter="addChapter"
+      @remove-chapter="removeChapter"
+    />
   </div>
 </template>
 
@@ -1505,6 +1634,7 @@ watch(
 .floating-header {
   top: 0;
   justify-content: space-between;
+  gap: 10px; /* Round24：拉开按钮间距，避免挤成一团 */
   border-bottom: 1px solid var(--app-border-2);
 }
 
@@ -1515,13 +1645,22 @@ watch(
   border-top: 1px solid var(--app-border-2);
 }
 
-.back-btn {
+/* Round24：顶栏按钮对齐原型（有底、边框、圆角，随主题；浅色=浅底深字、深色=深底浅字） */
+.topbar-btn {
   background: var(--app-surface-3);
-  border: 1px solid var(--app-border-3);
+  border: 1px solid var(--app-border-3, var(--app-border-2));
   color: var(--app-text-strong);
-  padding: 6px 14px;
+  padding: 6px 11px;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 1rem;
+  white-space: nowrap;
+  line-height: 1;
+}
+.topbar-btn.active {
+  background: var(--app-accent);
+  border-color: transparent;
+  color: #fff;
 }
 
 .status-widgets {
@@ -1531,22 +1670,40 @@ watch(
   font-size: 0.85rem;
   color: var(--app-text-2);
 }
-
-.settings-btn {
-  background: transparent;
-  border: none;
-  font-size: 1.2rem;
-  cursor: pointer;
-  padding: 2px 6px;
+/* Round24：标题区占满中间——名称行（含来源标签）+ 章节路径小字，按原型两行布局 */
+.header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
 }
-/* 顶栏收起控制条按钮 */
-.collapse-btn {
-  background: transparent;
-  border: none;
+.header-info .title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.header-info .comic-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-info .source-tag {
+  font-size: 0.72rem;
   color: var(--app-text-2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 2px 6px;
+  white-space: nowrap;
+  flex: none;
+}
+.header-info .chapter-path {
+  font-size: 0.72rem;
+  color: var(--app-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 控制条隐藏时的悬浮呼出按钮（底部居中，层级高于点击热区） */
@@ -2100,6 +2257,20 @@ watch(
   gap: 12px;
   width: 100%;
   max-width: 600px;
+}
+
+/* Round24：底部翻页按钮对齐原型（方形圆角、有底边框；此前无样式=默认浏览器按钮） */
+.step-btn {
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+  color: var(--app-text-strong);
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  flex: none;
+  line-height: 1;
 }
 
 .page-slider {

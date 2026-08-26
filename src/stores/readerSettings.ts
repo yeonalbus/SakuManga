@@ -62,13 +62,9 @@ export interface ReaderSettings {
 
   // ── 界面显隐 ──
   immersiveMode: boolean // 开启沉浸模式：进入阅读器时隐藏顶部标题栏
-  showThumbnails: boolean // 显示缩略图
-  showScrollbar: boolean // 显示滚动条(进度条)
-  showBottomStatus: boolean // 底部显示状态信息
+  showBottomBar: boolean // 显示底部栏（滚动条 + 状态信息，Round24 合并）
   enableBottomMenu: boolean // 开启底部菜单
-  showClock: boolean // 显示时钟
-  showProgress: boolean // 显示进度
-  showBattery: boolean // 显示电量
+  headerTextWidth: 'compact' | 'loose' // 顶栏名称/章节路径截断宽度（Round24：紧凑 12/22，宽松 16/30）
 
   // ── 设备能力 ──
   keepAwake: boolean // 阅读时屏幕不自动锁定 (Wake Lock)
@@ -108,13 +104,9 @@ const defaultSettings: ReaderSettings = {
   enableTurnAnimation: true,
 
   immersiveMode: false,
-  showThumbnails: true,
-  showScrollbar: true,
-  showBottomStatus: true,
+  showBottomBar: true,
   enableBottomMenu: false,
-  showClock: true,
-  showProgress: true,
-  showBattery: true,
+  headerTextWidth: 'compact',
 
   keepAwake: false,
   customBrightness: false,
@@ -135,10 +127,16 @@ const defaultSettings: ReaderSettings = {
   preloadOffline: 10,
 }
 
+// Round24：清理旧版残留的失效设置项（时钟/电量组件已移除、缩略图/进度/滚动条/状态项已合并，旧键一并剔除）
+const storedSettings = loadStorage<Partial<ReaderSettings>>(STORAGE_KEY, {})
+for (const stale of ['showClock', 'showBattery', 'showThumbnails', 'showScrollbar', 'showBottomStatus', 'showProgress'] as const) {
+  delete (storedSettings as Record<string, unknown>)[stale]
+}
+
 /** 响应式阅读器设置（自动持久化） */
 export const readerSettings = reactive<ReaderSettings>({
   ...defaultSettings,
-  ...loadStorage<Partial<ReaderSettings>>(STORAGE_KEY, {}),
+  ...storedSettings,
 })
 
 watch(

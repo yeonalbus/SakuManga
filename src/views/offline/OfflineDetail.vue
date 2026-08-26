@@ -444,7 +444,8 @@ const handleDelete = async () => {
 // --------------------------------------------------
 const detailTab = ref<'info' | 'preview'>('info')
 const PREVIEW_BATCH = 20 // 每次点击「加载更多」追加的张数（对齐在线预览方案）
-const previewPages = ref<number[]>([]) // 普通模式：已加载的有效页索引（0-based，分批）
+const previewPages = ref<number[]>([]) // 普通模式：已加载的可见物理页索引（0-based，分批）
+const visiblePhysicalList = ref<number[]>([]) // 可见物理索引序列（Round24，物理索引锚点）
 const visibleTotal = ref(0) // 有效总页数（物理 − 隐藏）
 const physicalTotal = ref(0) // 物理总页数（含隐藏）
 const hiddenPageSet = ref<Set<number>>(new Set()) // 隐藏的物理页索引集合
@@ -479,9 +480,18 @@ const fetchPreview = async () => {
     if (Array.isArray(data.hiddenPages)) {
       hiddenPageSet.value = new Set(data.hiddenPages)
     }
+    // Round24：可见物理索引序列（物理索引锚点，普通预览与阅读器/管理模式统一）
+    const list: number[] = []
+    if (physicalTotal.value > 0) {
+      for (let i = 0; i < physicalTotal.value; i++) {
+        if (!hiddenPageSet.value.has(i)) list.push(i)
+      }
+    } else if (typeof data.total === 'number') {
+      for (let i = 0; i < data.total; i++) list.push(i)
+    }
+    visiblePhysicalList.value = list
     // 初始加载第一批（普通模式）
-    const firstBatch = Math.min(PREVIEW_BATCH, visibleTotal.value)
-    previewPages.value = Array.from({ length: firstBatch }, (_, i) => i)
+    previewPages.value = list.slice(0, PREVIEW_BATCH)
   } catch (err) {
     console.error('加载预览失败:', err)
     toast.error('预览加载失败')
@@ -490,11 +500,11 @@ const fetchPreview = async () => {
   }
 }
 
-// 点击加载更多：每次追加 PREVIEW_BATCH 个有效页索引
+// 点击加载更多：每次追加 PREVIEW_BATCH 个可见物理页索引
 const loadMorePreview = () => {
   const start = previewPages.value.length
-  const end = Math.min(start + PREVIEW_BATCH, visibleTotal.value)
-  for (let i = start; i < end; i++) previewPages.value.push(i)
+  const end = Math.min(start + PREVIEW_BATCH, visiblePhysicalList.value.length)
+  for (let i = start; i < end; i++) previewPages.value.push(visiblePhysicalList.value[i])
 }
 
 // 进入管理模式：一次性展开全量物理页（含隐藏页，隐藏的加遮罩）
@@ -510,9 +520,8 @@ const exitManageMode = () => {
   manageMode.value = false
   selectedPages.value = new Set()
   manageIndices.value = []
-  // 退出后普通预览回到分批状态
-  const back = Math.min(PREVIEW_BATCH, visibleTotal.value)
-  previewPages.value = Array.from({ length: back }, (_, i) => i)
+  // 退出后普通预览回到分批状态（从可见物理序列取首批）
+  previewPages.value = visiblePhysicalList.value.slice(0, PREVIEW_BATCH)
 }
 
 const isHiddenPage = (physicalIdx: number) => hiddenPageSet.value.has(physicalIdx)
@@ -548,8 +557,13 @@ const saveHiddenPages = async (hidden: number[]) => {
     visibleTotal.value = res.pageCount
     physicalTotal.value = Math.max(physicalTotal.value, res.originalPageCount || physicalTotal.value)
     selectedPages.value = new Set()
-    // 普通预览索引从有效索引 0 重建（隐藏变化导致后续有效索引错位）
-    previewPages.value = Array.from({ length: Math.min(PREVIEW_BATCH, visibleTotal.value) }, (_, i) => i)
+    // Round24：重算可见物理序列，普通预览从物理序列重建（隐藏变化导致后续序列错位）
+    const list: number[] = []
+    for (let i = 0; i < physicalTotal.value; i++) {
+      if (!hiddenPageSet.value.has(i)) list.push(i)
+    }
+    visiblePhysicalList.value = list
+    previewPages.value = list.slice(0, PREVIEW_BATCH)
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '保存失败')
     return false
@@ -581,17 +595,59 @@ const restoreSelectedPages = async () => {
   if (ok) toast.success(`已恢复 ${toRestore.length} 页（有效页数 ${comic.value.pageCount} 页）`)
 }
 
-// 普通模式预览图片 URL（有效页索引，后端自动映射物理页）
-const previewPageUrl = (visibleIdx: number) =>
-  API_BASE + '/comics/' + comic.value.id + '/page/' + visibleIdx
+// Round24：范围排除（管理模式，起止页码 1-based，如 P1-P30；多语言版画廊按段屏蔽）
+const rangeFrom = ref(1)
+const rangeTo = ref(30)
+const hideRange = async () => {
+  const a = Math.min(rangeFrom.value, rangeTo.value)
+  const b = Math.max(rangeFrom.value, rangeTo.value)
+  const toHide: number[] = []
+  for (let p = a; p <= b; p++) {
+    const idx = p - 1 // 转 0-based 物理索引
+    if (idx >= 0 && idx < physicalTotal.value && !hiddenPageSet.value.has(idx)) {
+      toHide.push(idx)
+    }
+  }
+  if (toHide.length === 0) {
+    toast.info('区间内没有未隐藏的页面')
+    return
+  }
+  const next = [...hiddenPageSet.value, ...toHide]
+  const ok = await saveHiddenPages(next)
+  if (ok) toast.success(`已隐藏区间 P${a}-P${b}（${toHide.length} 页）`)
+}
+const restoreRange = async () => {
+  const a = Math.min(rangeFrom.value, rangeTo.value)
+  const b = Math.max(rangeFrom.value, rangeTo.value)
+  const toRestore: number[] = []
+  for (let p = a; p <= b; p++) {
+    const idx = p - 1
+    if (hiddenPageSet.value.has(idx)) toRestore.push(idx)
+  }
+  if (toRestore.length === 0) {
+    toast.info('区间内没有已隐藏的页面')
+    return
+  }
+  const next = [...hiddenPageSet.value].filter((i) => !toRestore.includes(i))
+  const ok = await saveHiddenPages(next)
+  if (ok) toast.success(`已恢复区间 P${a}-P${b}（${toRestore.length} 页）`)
+}
+
+// 普通模式预览图片 URL（Round24：物理索引直读 /raw-page，URL 稳定可缓存，
+// 修复隐藏页后「有效序号」URL 强缓存错位的问题）
+const previewPageUrl = (physicalIdx: number) =>
+  API_BASE + '/comics/' + comic.value.id + '/raw-page/' + physicalIdx
 // 管理模式预览图片 URL（物理页索引直读）
 const rawPageUrl = (physicalIdx: number) =>
   API_BASE + '/comics/' + comic.value.id + '/raw-page/' + physicalIdx
 
-const openPreviewPage = (visibleIdx: number) => {
+const openPreviewPage = (physicalIdx: number) => {
   if (!comic.value.id) return
   // Round21：PC 桌面新标签打开阅读器定位；其余同标签
-  const query = { id: comic.value.id, source: 'offline', page: String(visibleIdx + 1) }
+  // Round24：page 参数传「可见序号」（物理索引在可见序列中的位置+1）
+  const idx = visiblePhysicalList.value.indexOf(physicalIdx)
+  const page = idx >= 0 ? idx + 1 : physicalIdx + 1
+  const query = { id: comic.value.id, source: 'offline', page: String(page) }
   const href = router.resolve({ path: '/reader', query }).href
   openContentTab({ href, id: comic.value.id })
 }
@@ -763,6 +819,20 @@ const goOnlineGallery = () => {
           ✕ 退出
         </button>
         <span class="manage-hint">已隐藏 {{ hiddenCount }} 页 · 有效 {{ previewCount }} 页</span>
+      </div>
+
+      <!-- Round24：范围排除（起止页码，如 P1-P30，多语言版画廊按段屏蔽） -->
+      <div v-if="manageMode" class="range-bar">
+        <span class="range-label">范围排除</span>
+        <input v-model.number="rangeFrom" type="number" min="1" :max="Math.max(physicalTotal, 1)" class="range-input" />
+        <span class="range-dash">—</span>
+        <input v-model.number="rangeTo" type="number" min="1" :max="Math.max(physicalTotal, 1)" class="range-input" />
+        <button class="manage-btn hide-btn" :disabled="savingHidden" @click="hideRange">
+          隐藏区间
+        </button>
+        <button class="manage-btn restore-btn" :disabled="savingHidden" @click="restoreRange">
+          恢复区间
+        </button>
       </div>
 
       <div v-if="loadingPreview" class="preview-loading">加载预览中...</div>
@@ -1742,6 +1812,36 @@ const goOnlineGallery = () => {
   font-weight: 700;
   border-radius: 50%;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Round24：范围排除工具条 */
+.range-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.range-label {
+  font-size: 0.75rem;
+  color: var(--app-text-2);
+}
+.range-input {
+  width: 60px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  color: var(--app-text-strong);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+.range-dash {
+  color: var(--app-text-2);
 }
 
 /* 移动形态：在线按钮与操作条保持一致 */

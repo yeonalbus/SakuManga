@@ -129,64 +129,36 @@
 
     <div class="setting-item">
       <div class="item-info">
-        <div class="item-title">底部显示状态信息</div>
+        <div class="item-title">显示底部栏</div>
+        <div class="item-subtext">底部页码进度条与状态信息（合并）</div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showBottomStatus" />
+        <input type="checkbox" v-model="readerSettings.showBottomBar" />
         <span class="slider"></span>
       </label>
     </div>
 
     <div class="setting-item">
       <div class="item-info">
-        <div class="item-title">显示滚动条</div>
-        <div class="item-subtext">底部页码进度条</div>
+        <div class="item-title">顶栏文字宽度</div>
+        <div class="item-subtext">名称/章节路径超长截断：紧凑 12/22、宽松 16/30（按显示宽度）</div>
       </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showScrollbar" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示缩略图</div>
-        <div class="item-subtext">阅读器底部缩略图进度条（点击底部区域切换显隐）</div>
+      <div class="seg-control">
+        <button
+          class="seg-btn"
+          :class="{ active: readerSettings.headerTextWidth === 'compact' }"
+          @click="readerSettings.headerTextWidth = 'compact'"
+        >
+          紧凑
+        </button>
+        <button
+          class="seg-btn"
+          :class="{ active: readerSettings.headerTextWidth === 'loose' }"
+          @click="readerSettings.headerTextWidth = 'loose'"
+        >
+          宽松
+        </button>
       </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showThumbnails" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示时钟</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showClock" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示进度</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showProgress" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">显示电量</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="readerSettings.showBattery" />
-        <span class="slider"></span>
-      </label>
     </div>
 
     <!-- ── 设备能力 ── -->
@@ -795,5 +767,24 @@ input:checked + .slider:before {
 .preset-btn:hover {
   border-color: #ff7588;
   color: #ff7588;
+}
+/* Round24：顶栏文字宽度 分段选择 */
+.seg-control {
+  display: flex;
+  gap: 6px;
+}
+.seg-btn {
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.seg-btn.active {
+  background: var(--app-accent);
+  border-color: transparent;
+  color: #fff;
 }
 </style>

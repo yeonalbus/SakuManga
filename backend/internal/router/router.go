@@ -96,6 +96,13 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.PUT("/comics/:id", handlers.UpdateOfflineComic)
 		// Round23：自定义删除页面（隐藏页软删除，同步重算有效页数并记录原页数）
 		api.PUT("/comics/:id/hidden-pages", handlers.UpdateComicHiddenPages)
+		// Round24：书签 / 章节标记（仅本地阅读器，绑定物理页索引）
+		api.GET("/comics/:id/bookmarks", handlers.GetComicBookmarks)
+		api.PUT("/comics/:id/bookmarks", handlers.PutComicBookmarks)
+		api.GET("/comics/:id/chapters", handlers.GetComicChapters)
+		api.POST("/comics/:id/chapters", handlers.CreateComicChapter)
+		api.PUT("/comics/:id/chapters/:chId", handlers.UpdateComicChapter)
+		api.DELETE("/comics/:id/chapters/:chId", handlers.DeleteComicChapter)
 		// 删除本地画廊为系统级写操作（仅管理员），见下方 admin 分组
 		// 阅读次数上报（排行榜持久化，问题9）
 		api.POST("/comics/:id/click", handlers.RecordComicClick)

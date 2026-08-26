@@ -391,11 +391,16 @@ func UpdateComicHiddenPages(c *gin.Context) {
 		return
 	}
 
+	// Round24：隐藏页联动清理（被隐藏物理页 → 其书签/章节标记清除；失败不阻断隐藏保存）
+	removedBookmarks, removedChapters, _ := services.PurgeHiddenMarks(database.DB, id, hidden)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":           "已更新隐藏页",
 		"pageCount":         comic.PageCount,
 		"originalPageCount": comic.OriginalPageCount,
 		"hiddenPages":       hidden,
+		"removedBookmarks":  removedBookmarks,
+		"removedChapters":   removedChapters,
 	})
 }
 
@@ -435,4 +440,161 @@ func RecordComicClick(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "readCount": res.RowsAffected})
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round24：书签 / 章节标记（仅本地阅读器，绑定物理页索引）
+// ─────────────────────────────────────────────────────────────
+
+// GetComicBookmarks 读取书签列表 GET /api/v1/comics/:id/bookmarks
+func GetComicBookmarks(c *gin.Context) {
+	id := c.Param("id")
+	pages, err := services.GetComicBookmarks(database.DB, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"bookmarks": pages})
+}
+
+// PutComicBookmarks 整体覆盖书签列表 PUT /api/v1/comics/:id/bookmarks
+// body: { bookmarks: [物理页索引(0-based)...] }（传空数组 = 清空全部书签）
+func PutComicBookmarks(c *gin.Context) {
+	id := c.Param("id")
+	var comic models.OfflineComic
+	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
+		return
+	}
+	physicalCount, err := services.CountPages(comic.LocalPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取画廊失败: " + err.Error()})
+		return
+	}
+	var req struct {
+		Bookmarks []int `json:"bookmarks"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return
+	}
+	norm, err := services.ReplaceComicBookmarks(database.DB, id, req.Bookmarks, physicalCount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已更新书签", "bookmarks": norm})
+}
+
+// GetComicChapters 读取章节标记列表 GET /api/v1/comics/:id/chapters
+func GetComicChapters(c *gin.Context) {
+	id := c.Param("id")
+	list, err := services.ListComicChapters(database.DB, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []models.ComicChapter{}
+	}
+	c.JSON(http.StatusOK, gin.H{"chapters": list})
+}
+
+// bindChapterInput 解析章节入参
+func bindChapterInput(c *gin.Context) (services.ChapterInput, bool) {
+	var in services.ChapterInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
+		return in, false
+	}
+	return in, true
+}
+
+// loadComicForMark 校验漫画存在并返回物理页数
+func loadComicForMark(c *gin.Context, id string) (int, bool) {
+	var comic models.OfflineComic
+	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
+		return 0, false
+	}
+	physicalCount, err := services.CountPages(comic.LocalPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取画廊失败: " + err.Error()})
+		return 0, false
+	}
+	return physicalCount, true
+}
+
+// createMarkErrorStatus 将标记服务错误映射为 HTTP 状态码（业务错误=400/404，其余=500）
+func createMarkErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, services.ErrMarkChapterNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, services.ErrMarkInvalidLevel),
+		errors.Is(err, services.ErrMarkPageOutOfRange),
+		errors.Is(err, services.ErrMarkParentNotFound),
+		errors.Is(err, services.ErrMarkParentLevel),
+		errors.Is(err, services.ErrMarkParentCycle):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// CreateComicChapter 创建章节标记 POST /api/v1/comics/:id/chapters
+func CreateComicChapter(c *gin.Context) {
+	id := c.Param("id")
+	physicalCount, ok := loadComicForMark(c, id)
+	if !ok {
+		return
+	}
+	in, ok := bindChapterInput(c)
+	if !ok {
+		return
+	}
+	ch, err := services.CreateComicChapter(database.DB, id, in, physicalCount)
+	if err != nil {
+		c.JSON(createMarkErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已创建章节", "chapter": ch})
+}
+
+// UpdateComicChapter 更新章节标记 PUT /api/v1/comics/:id/chapters/:chId
+func UpdateComicChapter(c *gin.Context) {
+	id := c.Param("id")
+	var chID uint
+	if _, err := fmt.Sscanf(c.Param("chId"), "%d", &chID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的章节 id"})
+		return
+	}
+	physicalCount, ok := loadComicForMark(c, id)
+	if !ok {
+		return
+	}
+	in, ok := bindChapterInput(c)
+	if !ok {
+		return
+	}
+	ch, err := services.UpdateComicChapter(database.DB, id, chID, in, physicalCount)
+	if err != nil {
+		c.JSON(createMarkErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已更新章节", "chapter": ch})
+}
+
+// DeleteComicChapter 删除章节标记（连同子树）DELETE /api/v1/comics/:id/chapters/:chId
+func DeleteComicChapter(c *gin.Context) {
+	id := c.Param("id")
+	var chID uint
+	if _, err := fmt.Sscanf(c.Param("chId"), "%d", &chID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的章节 id"})
+		return
+	}
+	if err := services.DeleteComicChapter(database.DB, id, chID); err != nil {
+		c.JSON(createMarkErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除章节"})
 }

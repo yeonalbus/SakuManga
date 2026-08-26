@@ -35,6 +35,8 @@ func InitDB() {
 		&models.DownloadSetting{},
 		&models.TagMaintainSetting{},
 		&models.UpdateScanSetting{},
+		&models.ComicBookmark{},
+		&models.ComicChapter{},
 	)
 
 	migrateFavoriteStateTable()

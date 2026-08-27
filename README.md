@@ -61,7 +61,7 @@ cd backend && go run .        # 后端 http://127.0.0.1:8081
 npm run dev                   # 前端开发服务器（Vite 代理到后端 API）
 ```
 
-> 后端 `//go:embed all:dist` 编译必需 `backend/webui/dist`（该目录不常驻仓库）：开发模式下请先执行一次 `npm run build` 并将 `dist/` 拷贝到 `backend/webui/dist`，或直接运行一次 `build-release.bat`。
+> 后端 `//go:embed all:dist` 编译必需 `backend/webui/dist`（前端构建产物，随仓库维护）：前端改动后请执行一次 `npm run build` 并将根目录 `dist/` 拷贝到 `backend/webui/dist`，或直接运行一次 `build-release.bat`。
 
 # 🖼️ 预览图
 

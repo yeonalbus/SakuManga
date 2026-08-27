@@ -188,7 +188,7 @@ backend/
 ├── webui/                          # 内嵌前端（单 exe 打包）
 │   ├── embed.go                    # go:embed all:dist + SPA 回退静态服务（/api 404 不吞错）
 │   └── favicon.ico                 # 前端图标副本
-│   # 注：dist/ 不常驻仓库，由 build-release.bat 打包前从前端 dist/ 拷贝（go:embed 编译必需）
+│   # 注：dist/ 为前端构建产物，随仓库维护（前端改动后执行 npm run build 并拷贝同步，go:embed 编译必需）
 │
 ├── cmd_debug/                      # 调试用命令行工具（独立 main，不影响主程序）
 │   └── main.go                     # cmd_debug 目录调试入口
@@ -394,5 +394,5 @@ backend/
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
 - `manga.db`、`data/` 为**运行时数据**，已加入 `.gitignore`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。
-- `backend/webui/dist/` **不常驻仓库**：由 `build-release.bat` 打包前从前端 `dist/` 拷贝生成，`//go:embed all:dist` 编译必需（`go build` 前须先准备该目录）。
+- `backend/webui/dist/` 为前端构建产物，**随仓库维护**：前端源码改动后执行 `npm run build` 并将根目录 `dist/` 拷贝到 `backend/webui/dist/`（`//go:embed all:dist` 编译必需）；发布打包时由 `build-release.bat` 自动重新拷贝。
 - `cmd_debug/` 为调试工具，不影响主程序；如需精简发布产物可从 `go build` 目标中排除。

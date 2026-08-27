@@ -68,10 +68,13 @@ export const scrollMainToTop = (behavior: ScrollBehavior = 'smooth'): void => {
   }
 }
 
-/** 尝试立即恢复滚动位置；若目标尚未渲染完成（高度为 0），则用 rAF 重试 */
-export const restoreScroll = (path: string, retries = 5): void => {
+/**
+ * 尝试立即恢复滚动位置；若目标尚未渲染完成（高度为 0），则用 rAF 重试。
+ * @returns 是否消费到了缓存的滚动位置（true=返回/恢复场景；false=新进入，需回顶）
+ */
+export const restoreScroll = (path: string, retries = 5): boolean => {
   const saved = takeScroll(path)
-  if (saved === undefined) return
+  if (saved === undefined) return false
 
   let attempt = 0
   const tryRestore = (): void => {
@@ -93,6 +96,7 @@ export const restoreScroll = (path: string, retries = 5): void => {
   }
 
   requestAnimationFrame(tryRestore)
+  return true
 }
 
 // ─────────────────────────────────────────────────────────────

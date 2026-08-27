@@ -1,7 +1,7 @@
 //配置路由表
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { TOKEN_KEY } from '@/config/api'
-import { getMainContent, rememberScroll, restoreScroll } from '@/utils/scrollMemory'
+import { getMainContent, rememberScroll, restoreScroll, scrollMainToTop } from '@/utils/scrollMemory'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { useUserStore } from '@/stores/userStore'
 // Round20-Bug4：路由切换自动取消未决 modal（防全局弹窗跨页面粘滞）
@@ -209,7 +209,13 @@ router.beforeEach((to, from) => {
 })
 
 router.afterEach((to) => {
-  restoreScroll(to.path)
+  // Round25-Bug3：只有「返回/恢复」场景才保留滚动位置；无缓存（新进入页面）时
+  // 必须回顶——此前同标签 SPA 跳转（PWA/窄屏）会把上个页面的 scrollTop 残留到
+  // 新页面（如进入详情停留在中部），而 PC 浏览器详情开新标签（Round21）天然在顶部。
+  const restored = restoreScroll(to.path)
+  if (!restored) {
+    scrollMainToTop('auto')
+  }
   // Round20-Bug4：路由切换自动取消未决 modal（确认框不跨页面残留，避免「切书架仍报错」）
   const { modalState, handleCancel } = useUI()
   if (modalState.isOpen) handleCancel()

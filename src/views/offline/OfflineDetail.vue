@@ -460,6 +460,60 @@ const savingHidden = ref(false)
 const hiddenCount = computed(() => hiddenPageSet.value.size)
 const previewCount = computed(() => visibleTotal.value) // 预览 tab 标题显示有效页数
 
+// ─── 管理模式折叠（优化）：前导隐藏段一律折叠 + 中间隐藏大段（≥20 页）折叠，末尾段不折叠 ───
+// 目的：管理模式一次性展开全量物理页时，前导段（如 P1-P880）渲染损耗大且翻页耗时，
+// 折叠后默认不渲染该段缩略图，用户按需展开（展开后仍可多选恢复操作）。
+const MANAGE_FOLD_MIN_MIDDLE = 20 // 中间隐藏段达到该页数才折叠（零星隐藏不打扰）
+
+/** 隐藏连续段（run-length）：按物理序扫描 hiddenPageSet */
+const hiddenSegments = computed(() => {
+  const hidden = hiddenPageSet.value
+  if (hidden.size === 0 || physicalTotal.value <= 0) return []
+  const segs: { start: number; end: number }[] = []
+  let start = -1
+  for (let i = 0; i < physicalTotal.value; i++) {
+    if (hidden.has(i)) {
+      if (start < 0) start = i
+    } else if (start >= 0) {
+      segs.push({ start, end: i - 1 })
+      start = -1
+    }
+  }
+  if (start >= 0) segs.push({ start, end: physicalTotal.value - 1 })
+  return segs
+})
+
+/** 管理模式需要折叠的段：前导段（start===0）一律折叠；末尾段（到物理末尾）不折叠；中间段 ≥20 页才折叠 */
+const manageFoldSegments = computed(() => {
+  const last = physicalTotal.value - 1
+  return hiddenSegments.value.filter((seg) => {
+    if (seg.start === 0) return true
+    if (seg.end >= last) return false
+    return seg.end - seg.start + 1 >= MANAGE_FOLD_MIN_MIDDLE
+  })
+})
+
+// 每个折叠段独立展开状态（key = 段起始物理索引；页面内临时，进入管理模式默认全部收起）
+const manageFoldExpanded = ref<Set<number>>(new Set())
+const isManageFoldExpanded = (start: number) => manageFoldExpanded.value.has(start)
+const toggleManageFold = (start: number) => {
+  const s = new Set(manageFoldExpanded.value)
+  if (s.has(start)) s.delete(start)
+  else s.add(start)
+  manageFoldExpanded.value = s
+}
+
+/** 管理模式渲染列表：全量物理页 − 未展开折叠段（折叠段缩略图不渲染） */
+const manageRenderIndices = computed(() => {
+  const folded = manageFoldSegments.value.filter((seg) => !manageFoldExpanded.value.has(seg.start))
+  if (folded.length === 0) return manageIndices.value
+  const skip = new Set<number>()
+  for (const seg of folded) {
+    for (let i = seg.start; i <= seg.end; i++) skip.add(i)
+  }
+  return manageIndices.value.filter((p) => !skip.has(p))
+})
+
 const switchPreview = () => {
   detailTab.value = 'preview'
   if (previewPages.value.length === 0 && visibleTotal.value === 0) fetchPreview()
@@ -507,10 +561,11 @@ const loadMorePreview = () => {
   for (let i = start; i < end; i++) previewPages.value.push(visiblePhysicalList.value[i])
 }
 
-// 进入管理模式：一次性展开全量物理页（含隐藏页，隐藏的加遮罩）
+// 进入管理模式：一次性展开全量物理页（含隐藏页，隐藏的加遮罩）；折叠段默认收起
 const enterManageMode = () => {
   manageMode.value = true
   selectedPages.value = new Set()
+  manageFoldExpanded.value = new Set() // 折叠段默认全部收起
   if (manageIndices.value.length !== physicalTotal.value) {
     manageIndices.value = Array.from({ length: physicalTotal.value }, (_, i) => i)
   }
@@ -520,6 +575,7 @@ const exitManageMode = () => {
   manageMode.value = false
   selectedPages.value = new Set()
   manageIndices.value = []
+  manageFoldExpanded.value = new Set()
   // 退出后普通预览回到分批状态（从可见物理序列取首批）
   previewPages.value = visiblePhysicalList.value.slice(0, PREVIEW_BATCH)
 }
@@ -839,32 +895,55 @@ const goOnlineGallery = () => {
 
       <div v-if="loadingPreview" class="preview-loading">加载预览中...</div>
 
-      <!-- 管理模式：全量物理页（隐藏页加遮罩，点选多选） -->
+      <!-- 管理模式：全量物理页（隐藏页加遮罩，点选多选）；前导/中间大段隐藏默认折叠防卡顿 -->
       <div v-else-if="manageMode">
         <div v-if="manageIndices.length === 0" class="preview-loading">
           暂无可用预览（画廊无页面）
         </div>
-        <div v-else class="preview-grid">
+        <div v-else>
+          <!-- 折叠条：前导隐藏段一律折叠 + 中间隐藏大段（≥20 页）折叠；末尾段不折叠 -->
           <div
-            v-for="p in manageIndices"
-            :key="p"
-            class="preview-thumb manage-thumb"
-            :class="{
-              'thumb-hidden': isHiddenPage(p),
-              'thumb-selected': isSelectedPage(p),
-            }"
-            :title="'第 ' + (p + 1) + ' 页' + (isHiddenPage(p) ? '（已隐藏）' : '')"
-            @click="toggleSelectPage(p)"
+            v-for="seg in manageFoldSegments"
+            :key="'fold-' + seg.start"
+            class="leading-fold-bar"
+            :class="{ expanded: isManageFoldExpanded(seg.start) }"
+            :title="
+              isManageFoldExpanded(seg.start) ? '点击收起该段隐藏页' : '点击展开该段隐藏页（可多选恢复）'
+            "
+            @click="toggleManageFold(seg.start)"
           >
-            <img :src="rawPageUrl(p)" :alt="'第 ' + (p + 1) + ' 页'" loading="lazy" />
-            <span class="preview-page-num">{{ p + 1 }}</span>
-            <span v-if="isHiddenPage(p)" class="hidden-mask">已隐藏</span>
-            <span v-if="isSelectedPage(p)" class="select-mask">✓</span>
+            <span class="fold-caret">{{ isManageFoldExpanded(seg.start) ? '▾' : '▸' }}</span>
+            <span class="fold-text">
+              {{
+                isManageFoldExpanded(seg.start)
+                  ? `收起隐藏页（P${seg.start + 1}-P${seg.end + 1}）`
+                  : `展开隐藏页（P${seg.start + 1}-P${seg.end + 1}，共 ${seg.end - seg.start + 1} 页已隐藏）`
+              }}
+            </span>
+          </div>
+
+          <div class="preview-grid">
+            <div
+              v-for="p in manageRenderIndices"
+              :key="p"
+              class="preview-thumb manage-thumb"
+              :class="{
+                'thumb-hidden': isHiddenPage(p),
+                'thumb-selected': isSelectedPage(p),
+              }"
+              :title="'第 ' + (p + 1) + ' 页' + (isHiddenPage(p) ? '（已隐藏）' : '')"
+              @click="toggleSelectPage(p)"
+            >
+              <img :src="rawPageUrl(p)" :alt="'第 ' + (p + 1) + ' 页'" loading="lazy" />
+              <span class="preview-page-num">{{ p + 1 }}</span>
+              <span v-if="isHiddenPage(p)" class="hidden-mask">已隐藏</span>
+              <span v-if="isSelectedPage(p)" class="select-mask">✓</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 普通模式：有效页（隐藏页不显示） -->
+      <!-- 普通模式：有效页（隐藏页不显示，保持原逻辑） -->
       <div v-else-if="previewPages.length === 0" class="preview-loading">
         暂无可用预览（画廊无页面）
       </div>
@@ -1660,6 +1739,32 @@ const goOnlineGallery = () => {
   min-height: 200px;
   color: var(--app-text-3);
   font-size: 0.9rem;
+}
+/* 管理模式折叠条（前导/中间大段隐藏页，点击展开/收起） */
+.leading-fold-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px dashed var(--app-border-3);
+  background: rgba(255, 152, 0, 0.06);
+  color: var(--app-text-2);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s;
+  margin-bottom: 12px;
+}
+.leading-fold-bar:hover {
+  background: rgba(255, 152, 0, 0.12);
+  border-color: rgba(255, 152, 0, 0.5);
+}
+.fold-caret {
+  font-size: 0.8rem;
+  color: #ffb74d;
+}
+.fold-text {
+  font-size: 0.85rem;
 }
 .preview-grid {
   display: grid;

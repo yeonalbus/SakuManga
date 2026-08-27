@@ -264,7 +264,10 @@ const handleApply = () => {
                 @mousedown.prevent
                 @click="pickSuggestion(sug)"
               >
-                <TagChip :tag="sug" />
+                <!-- Bug：联想项内 TagChip 必须禁用快捷搜索（与 SearchBar 下拉一致），
+                     否则 TagChip 会 stopPropagation 抢占点击并触发快捷搜索跳页，
+                     导致联想词被填进搜索栏而非压入过滤队列（PWA 端 SPA 导航尤其明显） -->
+                <TagChip :tag="sug" :disable-quick-search="true" />
                 <span v-if="sug.count" class="tag-count-badge"
                   >🔥 {{ sug.count.toLocaleString() }}</span
                 >

@@ -120,11 +120,22 @@ export const fetchOfflineComics = async () => {
 // 阅读统计与排行榜
 // --------------------------------------------------
 
-/** 记录离线漫画阅读频次自增（详情页阅读按钮调用）。
+/** 记录离线漫画阅读频次自增（阅读器进入/切换漫画时调用）。
  * 本地自增保证界面即时反馈；同时 fire-and-forget 上报后端 DB 原子自增，
  * 确保刷新/换设备后排行榜计数不归零（问题9）。
+ * Round25-Bug2：短窗口幂等——同一本子在窗口内重复进入阅读器（进详情→开始阅读→
+ * 退出→再进，keep-alive + page 参数导致重新挂载）只计一次，避免次数叠加。
  */
+const lastClickAt = new Map<string, number>()
+const CLICK_DEDUP_WINDOW_MS = 10 * 60 * 1000 // 幂等窗口：10 分钟
+
 export const recordComicClick = (comicId: string) => {
+  const now = Date.now()
+  const last = lastClickAt.get(comicId)
+  if (last !== undefined && now - last < CLICK_DEDUP_WINDOW_MS) {
+    return // 幂等窗口内重复进入，不重复计数
+  }
+  lastClickAt.set(comicId, now)
   const comic = offlineComics.value.find((c) => c.id === comicId)
   if (comic) {
     comic.readCount = (comic.readCount || 0) + 1

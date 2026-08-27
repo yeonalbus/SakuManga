@@ -635,8 +635,38 @@ func (m *DownloadManager) CancelTask(taskID string) (*models.DownloadTask, error
 	// 因旧引擎尚未释放线程而排队等待（"线程不足"）。
 	m.waitArchiveStopped(taskID)
 	m.waitGalleryStopped(taskID)
+	// BUG1：解压失败类错误任务取消时，清理损坏压缩包与半解压残留目录。
+	// 否则坏 zip（目录头完整但内部数据损坏）残留，下次同画廊下载时 isValidZip
+	// 弱校验误判"完整"，跳过下载直接解压坏文件，反复解压失败。
+	if task.Mode == models.DownloadModeArchive && strings.HasPrefix(task.Error, errExtractFailedPrefix) {
+		m.cleanupCorruptArchive(&task)
+	}
 	log.Printf("%s 取消任务 %s（gid=%s）", dlLogTag, taskID, task.GID)
 	return &task, nil
+}
+
+// cleanupCorruptArchive 清理解压失败任务遗留的损坏压缩包与半解压残留目录
+// （archivePath/archive - gid - 标题.zip 与 extractPath/archive - gid - 标题/）。
+// 目录名与归档引擎 run() 中 dirName 的计算规则保持一致。
+func (m *DownloadManager) cleanupCorruptArchive(task *models.DownloadTask) {
+	if task == nil || task.ArchivePath == "" {
+		return
+	}
+	dirName := fmt.Sprintf("archive - %s - %s", task.GID, cleanFolderName(task.Title))
+	zipPath := filepath.Join(task.ArchivePath, dirName+".zip")
+	if err := os.Remove(zipPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("%s 取消任务 %s 清理损坏压缩包失败: %v", dlWarnTag, task.ID, err)
+	} else if err == nil {
+		log.Printf("%s 取消任务 %s 已删除损坏压缩包: %q", dlLogTag, task.ID, zipPath)
+	}
+	if task.ExtractPath != "" {
+		extractDir := filepath.Join(task.ExtractPath, dirName)
+		if err := os.RemoveAll(extractDir); err != nil && !os.IsNotExist(err) {
+			log.Printf("%s 取消任务 %s 清理解压残留目录失败: %v", dlWarnTag, task.ID, err)
+		} else if err == nil {
+			log.Printf("%s 取消任务 %s 已清理解压残留目录: %q", dlLogTag, task.ID, extractDir)
+		}
+	}
 }
 
 // SetTaskPriority 修改任务优先级并触发抢占调度（计划书 5.5 / 5.6）。

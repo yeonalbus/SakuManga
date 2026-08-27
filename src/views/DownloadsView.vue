@@ -110,9 +110,17 @@ const callAction = async (id: string, action: string, successMsg: string) => {
 const handlePause = (t: DownloadTask) => callAction(t.id, 'pause', '已暂停任务')
 const handleResume = (t: DownloadTask) => callAction(t.id, 'resume', '已恢复任务')
 const handleCancel = async (t: DownloadTask) => {
-  const ok = await modal.confirm(`确定取消下载《${t.title}》吗？`)
+  // BUG1：解压失败（压缩包损坏）任务取消 = 同时删除损坏 zip 与半解压残留，
+  // 明确提示用户，避免误以为取消后还能直接续用旧压缩包
+  const isCorruptArchive =
+    t.status === 'error' && t.mode === 'archive' && (t.error || '').startsWith('解压失败')
+  const ok = await modal.confirm(
+    isCorruptArchive
+      ? `《${t.title}》解压失败（压缩包已损坏）。取消将删除损坏的压缩包与半解压文件，下次下载需重新下载。确定取消吗？`
+      : `确定取消下载《${t.title}》吗？`,
+  )
   if (ok) {
-    await callAction(t.id, 'cancel', '已取消任务')
+    await callAction(t.id, 'cancel', isCorruptArchive ? '已取消并删除损坏压缩包' : '已取消任务')
   }
 }
 const handleRetry = (t: DownloadTask) => callAction(t.id, 'retry', '已重试任务')

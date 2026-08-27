@@ -560,6 +560,12 @@ var errHathdlOnly = errors.New("该画廊仅支持 H@H Downloader 且直链解�
 // 再次失败才任务报错（用户手动重试时从零全新下载）。
 var errZipCorrupt = errors.New("下载完成但 zip 校验失败（文件损坏，已清除缓存）")
 
+// errExtractFailedPrefix 解压失败类错误的 Error 前缀。
+// extractAndFinish 解压失败时任务 Error 以该前缀开头（"解压失败: <原因>"），
+// 供 CancelTask 识别「损坏压缩包」场景：取消时删除坏 zip 与半解压残留目录，
+// 避免下次下载时 isValidZip（仅验目录头）误判 zip 完整、跳过下载反复解压坏文件。
+const errExtractFailedPrefix = "解压失败"
+
 // isHathdlOnly 判断页面是否属于「仅 H@H Downloader」画廊：
 // 存在 hathdl_xres 隐藏表单即判定（hathdl_xres 为 H@H Downloader 表单的特征字段；
 // 正常画廊创建归档后应返回 archiver_key 表单，不会走到此判断）

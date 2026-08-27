@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-var digitChunkRegexp = regexp.MustCompile(`\d+|\D+`)
+// 自然排序拆块：数字块按数值比较，非数字块按字符串比较。
+// 注意：`.` 单独成块（不可并入 \D+），否则 "img.jpg" 会被贪婪匹配为
+// 整块 ["img.jpg"]，与 "img0001.jpg" 的 ["img","0001",".jpg"] 比较时，
+// 短前缀 "img" < "img.jpg" 会把 img.jpg 错误排到 img0029.jpg 之后（Round25-Bug1）。
+var digitChunkRegexp = regexp.MustCompile(`\d+|[^\d.]+|\.`)
 
 // 自然文件名排序：将字符串拆分为“数字”与“非数字”块分别比较
 func sortFilenames(files []string) {

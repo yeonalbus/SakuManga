@@ -1,17 +1,20 @@
 // scripts/diag-persist.mjs
 // 持久化 bug 浏览器诊断脚本（Playwright-core + 系统 Edge channel 'msedge'）
-// 针对 https://manga.yeon.top:8443 线上构建验证偏好设置持久化行为：
+// 针对线上构建验证偏好设置持久化行为：
 //   A. 干净状态：设置「默认收藏夹」→ 刷新 → 应保留（证明线上代码正常）
 //   C. 配额写满（用恰好 300 条的进度 map 填充，trimProgressMaps 不会裁剪）：
 //      删掉设置键后改「默认收藏夹」（= 新增键写入）→ 刷新 → 预期丢失（复现用户症状）
 // 用法：node scripts/diag-persist.mjs
-// 环境变量：SAKU_TEST_USER / SAKU_TEST_PASS 可覆盖账号（默认 Yeon / Yeon2249291）
+// 环境变量：SAKU_TEST_BASE（目标站点）/ SAKU_TEST_USER / SAKU_TEST_PASS（必填，不内置默认值）
 import { chromium } from 'playwright-core'
 
-// SAKU_TEST_BASE 可覆盖为本地验证构建（如 http://localhost:5199）
-const BASE = process.env.SAKU_TEST_BASE || 'https://manga.yeon.top:8443'
-const USER = process.env.SAKU_TEST_USER || 'Yeon'
-const PASS = process.env.SAKU_TEST_PASS || 'Yeon2249291'
+const BASE = process.env.SAKU_TEST_BASE
+const USER = process.env.SAKU_TEST_USER
+const PASS = process.env.SAKU_TEST_PASS
+if (!BASE || !USER || !PASS) {
+  console.error('请设置环境变量 SAKU_TEST_BASE / SAKU_TEST_USER / SAKU_TEST_PASS 后再运行')
+  process.exit(1)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const fmt = (n) =>

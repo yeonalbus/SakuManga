@@ -6,14 +6,18 @@
 //   D 修复#1 fetchMe 仅 401 才清 token；网络/服务端错误(500)保留会话
 // 用法：node scripts/verify-release-fixes.mjs
 //   BASE   = http://localhost:5198（dist-verify 的 vite preview 地址，可用 SAKU_VERIFY_BASE 覆盖）
-//   API    = https://manga.yeon.top:8443/api/v1（已嵌入构建，此处仅供页面内 fetch 使用）
-//   SAKU_VERIFY_USER / SAKU_VERIFY_PASS 可覆盖账号（默认 Yeon / Yeon2249291）
+//   API    = 线上后端地址，可用 SAKU_VERIFY_API 覆盖（不内置默认值）
+//   SAKU_VERIFY_USER / SAKU_VERIFY_PASS 必填（不内置默认值）
 import { chromium } from 'playwright-core'
 
 const BASE = process.env.SAKU_VERIFY_BASE || 'http://localhost:5198'
-const API = 'https://manga.yeon.top:8443/api/v1'
-const USER = process.env.SAKU_VERIFY_USER || 'Yeon'
-const PASS = process.env.SAKU_VERIFY_PASS || 'Yeon2249291'
+const API = process.env.SAKU_VERIFY_API
+const USER = process.env.SAKU_VERIFY_USER
+const PASS = process.env.SAKU_VERIFY_PASS
+if (!API || !USER || !PASS) {
+  console.error('请设置环境变量 SAKU_VERIFY_API / SAKU_VERIFY_USER / SAKU_VERIFY_PASS 后再运行')
+  process.exit(1)
+}
 
 const results = []
 const check = (name, ok, detail = '') => {

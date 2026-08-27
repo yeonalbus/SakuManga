@@ -6,15 +6,19 @@
 //   问题3c 补全位置错误（huge penis → huge male:"huge penis$"）
 //
 // 复用 verify-fix.mjs 的登录 + msedge 模式。
-// 用法：
-//   线上复现：set "SAKU_TEST_BASE=https://manga.yeon.top:8443" && node scripts/e2e-search-suggest.mjs
-//   本地回归：set "SAKU_TEST_BASE=http://localhost:5173" && set "SAKU_TEST_USER=admin" && set "SAKU_TEST_PASS=admin123" && node scripts/e2e-search-suggest.mjs
+// 用法（站点与账号通过环境变量提供，不内置默认值）：
+//   线上复现：set "SAKU_TEST_BASE=<站点>" && set "SAKU_TEST_USER=..." && set "SAKU_TEST_PASS=..." && node scripts/e2e-search-suggest.mjs
+//   本地回归：set "SAKU_TEST_BASE=http://localhost:5173" && set "SAKU_TEST_USER=admin" && set "SAKU_TEST_PASS=..." && node scripts/e2e-search-suggest.mjs
 //   本地+路由拦截（确定性前端验证）：再 set "SAKU_MOCK=1"
 import { chromium } from 'playwright-core'
 
-const BASE = process.env.SAKU_TEST_BASE || 'https://manga.yeon.top:8443'
-const USER = process.env.SAKU_TEST_USER || (BASE.includes('localhost') || BASE.includes('127.0.0.1') ? 'admin' : 'Yeon')
-const PASS = process.env.SAKU_TEST_PASS || (USER === 'admin' ? 'admin123' : 'Yeon2249291')
+const BASE = process.env.SAKU_TEST_BASE
+const USER = process.env.SAKU_TEST_USER
+const PASS = process.env.SAKU_TEST_PASS
+if (!BASE || !USER || !PASS) {
+  console.error('请设置环境变量 SAKU_TEST_BASE / SAKU_TEST_USER / SAKU_TEST_PASS 后再运行')
+  process.exit(1)
+}
 const MOCK = process.env.SAKU_MOCK === '1'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

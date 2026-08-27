@@ -2,12 +2,16 @@
 // 修复验证脚本：确认「配额写满时设置仍能持久化（刷新不丢）」。
 // 与 diag-persist.mjs（复现脚本）同构，但 reload 后直接读 localStorage（不依赖设置页 UI），
 // 规避本地 vite preview 将 /api 相对路径代理到本机 8081 导致页面卡顿的干扰。
-// 用法：set "SAKU_TEST_BASE=http://localhost:5198" && node scripts/verify-fix.mjs
+// 用法：set "SAKU_TEST_BASE=http://localhost:5198" && set "SAKU_TEST_USER=..." && set "SAKU_TEST_PASS=..." && node scripts/verify-fix.mjs
 import { chromium } from 'playwright-core'
 
-const BASE = process.env.SAKU_TEST_BASE || 'https://manga.yeon.top:8443'
-const USER = process.env.SAKU_TEST_USER || 'Yeon'
-const PASS = process.env.SAKU_TEST_PASS || 'Yeon2249291'
+const BASE = process.env.SAKU_TEST_BASE
+const USER = process.env.SAKU_TEST_USER
+const PASS = process.env.SAKU_TEST_PASS
+if (!BASE || !USER || !PASS) {
+  console.error('请设置环境变量 SAKU_TEST_BASE / SAKU_TEST_USER / SAKU_TEST_PASS 后再运行')
+  process.exit(1)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 function log(mark, msg) {

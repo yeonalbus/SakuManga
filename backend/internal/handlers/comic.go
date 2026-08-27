@@ -532,6 +532,8 @@ func createMarkErrorStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, services.ErrMarkInvalidLevel),
 		errors.Is(err, services.ErrMarkPageOutOfRange),
+		errors.Is(err, services.ErrMarkRootHasParent),
+		errors.Is(err, services.ErrMarkNoParent),
 		errors.Is(err, services.ErrMarkParentNotFound),
 		errors.Is(err, services.ErrMarkParentLevel),
 		errors.Is(err, services.ErrMarkParentCycle):

@@ -6,7 +6,7 @@
  * 仅本地阅读器使用；数据（章节/书签）由父组件从后端获取并传入。
  * 交互：跳页、书签增删、章节添加（名称+层级+父节点）/删除。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 
 export interface SidebarChapter {
   id: number
@@ -57,6 +57,27 @@ const chapterChildren = (parentId: number) =>
   props.chapters.filter((c) => c.parentId === parentId)
 const rootChapters = computed(() => chapterChildren(0))
 
+/**
+ * 收纳状态（内存态）：默认收纳——有子级的节点初始加入 folded；
+ * 用户点开后移出集合，切换 Tab / 关闭重开侧栏都不重置，保持展开。
+ */
+const folded = ref<Set<number>>(new Set())
+watch(
+  () => props.chapters,
+  (chs) => {
+    const hasChild = new Set<number>()
+    for (const c of chs) if (c.parentId !== 0) hasChild.add(c.parentId)
+    for (const pid of hasChild) if (!folded.value.has(pid)) folded.value.add(pid)
+  },
+  { immediate: true },
+)
+const toggleFold = (id: number) => {
+  const s = new Set(folded.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  folded.value = s
+}
+
 /** 当前物理页所属章节路径（起始页 ≤ 当前物理页 且最靠后，同页取最深） */
 const chapterPath = computed<SidebarChapter[]>(() => {
   let leaf: SidebarChapter | null = null
@@ -87,13 +108,28 @@ const showAddForm = ref(false)
 const addTitle = ref('')
 const addLevel = ref<1 | 2 | 3>(1)
 const addParentId = ref(0)
-/** 可挂子节点的候选父节点（level < 3 的现存节点） */
-const parentCandidates = computed(() =>
-  props.chapters.filter((c) => c.level < 3).map((c) => ({ id: c.id, label: c.title })),
-)
+/**
+ * 父级候选：严格按 level-1 过滤——一级为根无父级；
+ * 二级只能选一级、三级只能选二级（杜绝跨级选爷节点）。
+ */
+const parentCandidates = computed(() => {
+  if (addLevel.value === 1) return []
+  const want = addLevel.value - 1
+  return props.chapters.filter((c) => c.level === want).map((c) => ({ id: c.id, label: c.title }))
+})
+/** 切换层级时重置父级选择（避免残留非法父级） */
+const onLevelChange = () => {
+  addParentId.value = 0
+}
+const canSubmit = computed(() => {
+  if (!addTitle.value.trim()) return false
+  if (addLevel.value === 1) return true
+  return parentCandidates.value.length > 0 && addParentId.value !== 0
+})
 const submitAddChapter = () => {
   const title = addTitle.value.trim()
   if (!title) return
+  if (addLevel.value > 1 && (addParentId.value === 0 || parentCandidates.value.length === 0)) return
   emit('addChapter', {
     title,
     level: addLevel.value,
@@ -101,9 +137,36 @@ const submitAddChapter = () => {
     pageIndex: props.currentPhysical,
   })
   addTitle.value = ''
+  addLevel.value = 1
   addParentId.value = 0
   showAddForm.value = false
 }
+
+// ---------------------------------------------------------------
+// 缩略图 Tab：打开侧栏 / 切回缩略图时，将当前页所在「行」置顶
+// ---------------------------------------------------------------
+const bodyEl = ref<HTMLElement | null>(null)
+const scrollCurrentRowTop = () => {
+  const body = bodyEl.value
+  if (!body) return
+  const cur = body.querySelector<HTMLElement>('.rs-thumb.current')
+  if (!cur) return
+  const curRect = cur.getBoundingClientRect()
+  const thumbs = Array.from(body.querySelectorAll<HTMLElement>('.rs-thumb'))
+  // 同行 = top 坐标相同（±1px）；行首 = 同行中 left 最小
+  let lead: HTMLElement | null = null
+  for (const t of thumbs) {
+    const r = t.getBoundingClientRect()
+    if (Math.abs(r.top - curRect.top) <= 1 && (!lead || r.left < lead.getBoundingClientRect().left)) lead = t
+  }
+  ;(lead ?? cur).scrollIntoView({ block: 'start', behavior: 'auto' })
+}
+watch(
+  () => [props.open, props.activeTab],
+  ([open, tab]) => {
+    if (open && tab === 'thumbs') nextTick(() => requestAnimationFrame(scrollCurrentRowTop))
+  },
+)
 
 // ---------------------------------------------------------------
 // 跳页 / 标记
@@ -165,27 +228,34 @@ const jumpAndClose = (physical: number) => {
         <div class="rs-form-row">
           <label class="rs-fld">
             层级
-            <select v-model.number="addLevel" class="rs-select">
+            <select v-model.number="addLevel" class="rs-select" @change="onLevelChange">
               <option :value="1">一级</option>
               <option :value="2">二级</option>
               <option :value="3">三级</option>
             </select>
           </label>
-          <label class="rs-fld">
+          <label v-if="addLevel > 1" class="rs-fld">
             父级
             <select v-model.number="addParentId" class="rs-select">
-              <option :value="0">（无，作为根）</option>
+              <option v-if="parentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
               <option v-for="p in parentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
             </select>
           </label>
+          <div v-else class="rs-fld">
+            <span>父级</span>
+            <span class="rs-hint">一级为根，无需父级</span>
+          </div>
         </div>
+        <p v-if="addLevel > 1 && parentCandidates.length === 0" class="rs-form-hint">
+          暂无可选父级，请先创建{{ addLevel === 2 ? '一级' : '二级' }}章节
+        </p>
         <div class="rs-form-actions">
-          <button class="rs-btn ok" :disabled="!addTitle.trim()" @click="submitAddChapter">确定</button>
+          <button class="rs-btn ok" :disabled="!canSubmit" @click="submitAddChapter">确定</button>
           <button class="rs-btn" @click="showAddForm = false">取消</button>
         </div>
       </div>
 
-      <div class="rs-body">
+      <div ref="bodyEl" class="rs-body">
         <!-- ▦ 缩略图网格 -->
         <div v-if="activeTab === 'thumbs'" class="rs-grid">
           <div
@@ -217,33 +287,56 @@ const jumpAndClose = (physical: number) => {
                 :class="{ current: isPathOf(c1, 0) }"
                 @click="jumpAndClose(c1.pageIndex)"
               >
+                <button
+                  v-if="chapterChildren(c1.id).length"
+                  class="rs-fold"
+                  :title="folded.has(c1.id) ? '展开子级' : '收纳子级'"
+                  @click.stop="toggleFold(c1.id)"
+                >
+                  {{ folded.has(c1.id) ? '▸' : '▾' }}
+                </button>
+                <span v-else class="rs-fold-spacer"></span>
                 <span class="rs-node-name">{{ c1.title }}</span>
                 <span class="rs-node-page">P{{ c1.pageIndex + 1 }}</span>
                 <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c1.id)">✕</button>
               </div>
-              <div v-for="c2 in chapterChildren(c1.id)" :key="c2.id" class="rs-node lv2">
-                <div
-                  class="rs-node-row"
-                  :class="{ current: isPathOf(c2, 1) }"
-                  @click="jumpAndClose(c2.pageIndex)"
-                >
-                  <span class="rs-node-name">{{ c2.title }}</span>
-                  <span class="rs-node-page">P{{ c2.pageIndex + 1 }}</span>
-                  <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c2.id)">✕</button>
-                </div>
-                <div
-                  v-for="c3 in chapterChildren(c2.id)"
-                  :key="c3.id"
-                  class="rs-node lv3"
-                >
+              <div v-if="!folded.has(c1.id)">
+                <div v-for="c2 in chapterChildren(c1.id)" :key="c2.id" class="rs-node lv2">
                   <div
                     class="rs-node-row"
-                    :class="{ current: isPathOf(c3, 2) }"
-                    @click="jumpAndClose(c3.pageIndex)"
+                    :class="{ current: isPathOf(c2, 1) }"
+                    @click="jumpAndClose(c2.pageIndex)"
                   >
-                    <span class="rs-node-name">{{ c3.title }}</span>
-                    <span class="rs-node-page">P{{ c3.pageIndex + 1 }}</span>
-                    <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c3.id)">✕</button>
+                    <button
+                      v-if="chapterChildren(c2.id).length"
+                      class="rs-fold"
+                      :title="folded.has(c2.id) ? '展开子级' : '收纳子级'"
+                      @click.stop="toggleFold(c2.id)"
+                    >
+                      {{ folded.has(c2.id) ? '▸' : '▾' }}
+                    </button>
+                    <span v-else class="rs-fold-spacer"></span>
+                    <span class="rs-node-name">{{ c2.title }}</span>
+                    <span class="rs-node-page">P{{ c2.pageIndex + 1 }}</span>
+                    <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c2.id)">✕</button>
+                  </div>
+                  <div v-if="!folded.has(c2.id)">
+                    <div
+                      v-for="c3 in chapterChildren(c2.id)"
+                      :key="c3.id"
+                      class="rs-node lv3"
+                    >
+                      <div
+                        class="rs-node-row"
+                        :class="{ current: isPathOf(c3, 2) }"
+                        @click="jumpAndClose(c3.pageIndex)"
+                      >
+                        <span class="rs-fold-spacer"></span>
+                        <span class="rs-node-name">{{ c3.title }}</span>
+                        <span class="rs-node-page">P{{ c3.pageIndex + 1 }}</span>
+                        <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c3.id)">✕</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -413,6 +506,16 @@ const jumpAndClose = (physical: number) => {
   padding: 4px 6px;
   font-size: 0.78rem;
 }
+.rs-hint {
+  font-size: 0.72rem;
+  color: var(--app-text-2);
+  padding: 4px 2px;
+}
+.rs-form-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #ffb74d;
+}
 .rs-form-actions {
   display: flex;
   gap: 8px;
@@ -506,6 +609,24 @@ const jumpAndClose = (physical: number) => {
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
+}
+.rs-fold {
+  background: transparent;
+  border: none;
+  color: var(--app-text-2);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 2px;
+  flex: none;
+  width: 16px;
+  text-align: center;
+}
+.rs-fold:hover {
+  color: var(--app-text-strong);
+}
+.rs-fold-spacer {
+  flex: none;
+  width: 16px;
 }
 .rs-node-row:hover {
   background: var(--app-surface-3, #242428);

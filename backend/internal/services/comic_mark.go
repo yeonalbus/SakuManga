@@ -18,6 +18,8 @@ import (
 var (
 	ErrMarkInvalidLevel    = errors.New("章节层级仅支持 1~3")
 	ErrMarkPageOutOfRange  = errors.New("起始页超出物理页数")
+	ErrMarkRootHasParent   = errors.New("一级章节为根节点，不能选择父级")
+	ErrMarkNoParent        = errors.New("二、三级章节必须选择父级")
 	ErrMarkParentNotFound  = errors.New("父章节不存在")
 	ErrMarkParentLevel     = errors.New("父章节层级必须为当前层级减一")
 	ErrMarkChapterNotFound = errors.New("章节不存在")
@@ -72,10 +74,41 @@ func ReplaceComicBookmarks(db *gorm.DB, comicID string, pages []int, limit int) 
 	return norm, nil
 }
 
-// ListComicChapters 读取章节标记（按 order_no, id 排序）
+// FixOrphanChapters 修复历史宽松规则遗留的孤儿节点（parentId=0 但 level>1）：
+// 幂等迁移——挂靠到「物理页码 ≤ 自身、层级 = level-1」的最近节点下；
+// 无合适父级则保持为根。先修二级再修三级，保证父子链逐级收敛。
+func FixOrphanChapters(db *gorm.DB, comicID string) (fixed int, err error) {
+	var orphans []models.ComicChapter
+	if err := db.Where("comic_id = ? AND parent_id = 0 AND level > 1", comicID).
+		Order("level ASC, id ASC").Find(&orphans).Error; err != nil {
+		return 0, err
+	}
+	for _, o := range orphans {
+		var cand models.ComicChapter
+		err := db.Where("comic_id = ? AND level = ? AND page_index <= ?",
+			comicID, o.Level-1, o.PageIndex).
+			Order("page_index DESC, id DESC").First(&cand).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue // 无合适父级，保持为根
+			}
+			return fixed, err
+		}
+		if err := db.Model(&o).Update("parent_id", cand.ID).Error; err != nil {
+			return fixed, err
+		}
+		fixed++
+	}
+	return fixed, nil
+}
+
+// ListComicChapters 读取章节标记（同级按物理页码升序，id 作次级稳定序）
 func ListComicChapters(db *gorm.DB, comicID string) ([]models.ComicChapter, error) {
+	if _, err := FixOrphanChapters(db, comicID); err != nil {
+		return nil, err
+	}
 	var list []models.ComicChapter
-	err := db.Where("comic_id = ?", comicID).Order("order_no ASC, id ASC").Find(&list).Error
+	err := db.Where("comic_id = ?", comicID).Order("page_index ASC, id ASC").Find(&list).Error
 	return list, err
 }
 
@@ -89,7 +122,7 @@ type ChapterInput struct {
 }
 
 // validateChapter 校验章节层级 / 父节点 / 起始页
-// 允许跳级：任意 level 可直接作为根（ParentID=0），或挂在 level-1 的父节点下。
+// 严格顺序：一级必为根（不可选父级）；二级父级必为一级；三级父级必为二级。
 func validateChapter(db *gorm.DB, comicID string, parentID uint, level, pageIndex, physicalCount int) error {
 	if level < 1 || level > 3 {
 		return ErrMarkInvalidLevel
@@ -97,8 +130,15 @@ func validateChapter(db *gorm.DB, comicID string, parentID uint, level, pageInde
 	if pageIndex < 0 || (physicalCount >= 0 && pageIndex >= physicalCount) {
 		return ErrMarkPageOutOfRange
 	}
-	if parentID == 0 {
+	if level == 1 {
+		if parentID != 0 {
+			return ErrMarkRootHasParent
+		}
 		return nil
+	}
+	// 二 / 三级：必须选择父级，且父级层级严格为 level-1
+	if parentID == 0 {
+		return ErrMarkNoParent
 	}
 	var parent models.ComicChapter
 	if err := db.Where("id = ? AND comic_id = ?", parentID, comicID).First(&parent).Error; err != nil {

@@ -536,7 +536,8 @@ func createMarkErrorStatus(err error) int {
 		errors.Is(err, services.ErrMarkNoParent),
 		errors.Is(err, services.ErrMarkParentNotFound),
 		errors.Is(err, services.ErrMarkParentLevel),
-		errors.Is(err, services.ErrMarkParentCycle):
+		errors.Is(err, services.ErrMarkParentCycle),
+		errors.Is(err, services.ErrMarkHasChildren):
 		return http.StatusBadRequest
 	default:
 		return http.StatusInternalServerError

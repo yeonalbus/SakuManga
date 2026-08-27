@@ -39,6 +39,7 @@ const emit = defineEmits<{
   (e: 'jump', physical: number): void
   (e: 'toggleBookmark', physical: number): void
   (e: 'addChapter', payload: { title: string; level: number; parentId: number; pageIndex: number }): void
+  (e: 'updateChapter', payload: { id: number; title: string; level: number; parentId: number; pageIndex: number }): void
   (e: 'removeChapter', id: number): void
 }>()
 
@@ -60,14 +61,20 @@ const rootChapters = computed(() => chapterChildren(0))
 /**
  * 收纳状态（内存态）：默认收纳——有子级的节点初始加入 folded；
  * 用户点开后移出集合，切换 Tab / 关闭重开侧栏都不重置，保持展开。
+ * 注意：数据刷新（增删改章节后 fetchMarks）时只把「新出现的父节点」默认收纳，
+ * 已存在的节点保持用户设定的展开/收纳状态，绝不主动收回。
  */
 const folded = ref<Set<number>>(new Set())
+const seenParents = new Set<number>()
 watch(
   () => props.chapters,
   (chs) => {
     const hasChild = new Set<number>()
     for (const c of chs) if (c.parentId !== 0) hasChild.add(c.parentId)
-    for (const pid of hasChild) if (!folded.value.has(pid)) folded.value.add(pid)
+    for (const pid of hasChild) {
+      if (!seenParents.has(pid)) folded.value.add(pid) // 新父节点默认收纳
+      seenParents.add(pid)
+    }
   },
   { immediate: true },
 )
@@ -108,15 +115,14 @@ const showAddForm = ref(false)
 const addTitle = ref('')
 const addLevel = ref<1 | 2 | 3>(1)
 const addParentId = ref(0)
-/**
- * 父级候选：严格按 level-1 过滤——一级为根无父级；
- * 二级只能选一级、三级只能选二级（杜绝跨级选爷节点）。
- */
-const parentCandidates = computed(() => {
-  if (addLevel.value === 1) return []
-  const want = addLevel.value - 1
-  return props.chapters.filter((c) => c.level === want).map((c) => ({ id: c.id, label: c.title }))
-})
+/** 父级候选：严格按 level-1 过滤——一级为根无父级；二级只能选一级、三级只能选二级（杜绝跨级选爷节点）。excludeId 用于编辑时排除自身。 */
+const parentCandidatesOf = (level: number, excludeId: number) =>
+  level <= 1
+    ? []
+    : props.chapters
+        .filter((c) => c.level === level - 1 && c.id !== excludeId)
+        .map((c) => ({ id: c.id, label: c.title }))
+const parentCandidates = computed(() => parentCandidatesOf(addLevel.value, 0))
 /** 切换层级时重置父级选择（避免残留非法父级） */
 const onLevelChange = () => {
   addParentId.value = 0
@@ -140,6 +146,44 @@ const submitAddChapter = () => {
   addLevel.value = 1
   addParentId.value = 0
   showAddForm.value = false
+}
+
+// ---------------------------------------------------------------
+// 章节行内编辑（名称 / 层级 / 父级归属；起始页不支持编辑，原样带回）
+// ---------------------------------------------------------------
+const editingId = ref<number | null>(null)
+const editTitle = ref('')
+const editLevel = ref<1 | 2 | 3>(1)
+const editParentId = ref(0)
+const editParentCandidates = computed(() => parentCandidatesOf(editLevel.value, editingId.value ?? 0))
+const editParentValid = computed(() => {
+  if (editLevel.value === 1) return true
+  return editParentCandidates.value.some((p) => p.id === editParentId.value)
+})
+const canSaveEdit = computed(() => {
+  if (!editTitle.value.trim()) return false
+  return editParentValid.value
+})
+const startEdit = (c: SidebarChapter) => {
+  editingId.value = c.id
+  editTitle.value = c.title
+  editLevel.value = (c.level >= 1 && c.level <= 3 ? c.level : 1) as 1 | 2 | 3
+  editParentId.value = c.parentId
+}
+const onEditLevelChange = () => {
+  editParentId.value = 0
+}
+const saveEdit = (id: number) => {
+  const ch = props.chapters.find((c) => c.id === id)
+  if (!ch || !canSaveEdit.value) return
+  emit('updateChapter', {
+    id,
+    title: editTitle.value.trim(),
+    level: editLevel.value,
+    parentId: editParentId.value,
+    pageIndex: ch.pageIndex, // 起始页不参与编辑，原样提交（后端必填并校验越界）
+  })
+  editingId.value = null
 }
 
 // ---------------------------------------------------------------
@@ -282,7 +326,27 @@ const jumpAndClose = (physical: number) => {
           </div>
           <div v-else>
             <div v-for="c1 in rootChapters" :key="c1.id" class="rs-node lv1">
+              <div v-if="editingId === c1.id" class="rs-edit-row">
+                <input
+                  v-model="editTitle"
+                  class="rs-input"
+                  placeholder="章节名称"
+                  @keyup.enter="saveEdit(c1.id)"
+                />
+                <select v-model.number="editLevel" class="rs-select" @change="onEditLevelChange">
+                  <option :value="1">一级</option>
+                  <option :value="2">二级</option>
+                  <option :value="3">三级</option>
+                </select>
+                <select v-if="editLevel > 1" v-model.number="editParentId" class="rs-select">
+                  <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
+                  <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
+                </select>
+                <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c1.id)">✓</button>
+                <button class="rs-btn" @click="editingId = null">✕</button>
+              </div>
               <div
+                v-else
                 class="rs-node-row"
                 :class="{ current: isPathOf(c1, 0) }"
                 @click="jumpAndClose(c1.pageIndex)"
@@ -298,11 +362,32 @@ const jumpAndClose = (physical: number) => {
                 <span v-else class="rs-fold-spacer"></span>
                 <span class="rs-node-name">{{ c1.title }}</span>
                 <span class="rs-node-page">P{{ c1.pageIndex + 1 }}</span>
+                <button class="rs-del" title="编辑章节" @click.stop="startEdit(c1)">✎</button>
                 <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c1.id)">✕</button>
               </div>
               <div v-if="!folded.has(c1.id)">
                 <div v-for="c2 in chapterChildren(c1.id)" :key="c2.id" class="rs-node lv2">
+                  <div v-if="editingId === c2.id" class="rs-edit-row">
+                    <input
+                      v-model="editTitle"
+                      class="rs-input"
+                      placeholder="章节名称"
+                      @keyup.enter="saveEdit(c2.id)"
+                    />
+                    <select v-model.number="editLevel" class="rs-select" @change="onEditLevelChange">
+                      <option :value="1">一级</option>
+                      <option :value="2">二级</option>
+                      <option :value="3">三级</option>
+                    </select>
+                    <select v-if="editLevel > 1" v-model.number="editParentId" class="rs-select">
+                      <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
+                      <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
+                    </select>
+                    <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c2.id)">✓</button>
+                    <button class="rs-btn" @click="editingId = null">✕</button>
+                  </div>
                   <div
+                    v-else
                     class="rs-node-row"
                     :class="{ current: isPathOf(c2, 1) }"
                     @click="jumpAndClose(c2.pageIndex)"
@@ -318,6 +403,7 @@ const jumpAndClose = (physical: number) => {
                     <span v-else class="rs-fold-spacer"></span>
                     <span class="rs-node-name">{{ c2.title }}</span>
                     <span class="rs-node-page">P{{ c2.pageIndex + 1 }}</span>
+                    <button class="rs-del" title="编辑章节" @click.stop="startEdit(c2)">✎</button>
                     <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c2.id)">✕</button>
                   </div>
                   <div v-if="!folded.has(c2.id)">
@@ -326,7 +412,27 @@ const jumpAndClose = (physical: number) => {
                       :key="c3.id"
                       class="rs-node lv3"
                     >
+                      <div v-if="editingId === c3.id" class="rs-edit-row">
+                        <input
+                          v-model="editTitle"
+                          class="rs-input"
+                          placeholder="章节名称"
+                          @keyup.enter="saveEdit(c3.id)"
+                        />
+                        <select v-model.number="editLevel" class="rs-select" @change="onEditLevelChange">
+                          <option :value="1">一级</option>
+                          <option :value="2">二级</option>
+                          <option :value="3">三级</option>
+                        </select>
+                        <select v-if="editLevel > 1" v-model.number="editParentId" class="rs-select">
+                          <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
+                          <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
+                        </select>
+                        <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c3.id)">✓</button>
+                        <button class="rs-btn" @click="editingId = null">✕</button>
+                      </div>
                       <div
+                        v-else
                         class="rs-node-row"
                         :class="{ current: isPathOf(c3, 2) }"
                         @click="jumpAndClose(c3.pageIndex)"
@@ -334,6 +440,7 @@ const jumpAndClose = (physical: number) => {
                         <span class="rs-fold-spacer"></span>
                         <span class="rs-node-name">{{ c3.title }}</span>
                         <span class="rs-node-page">P{{ c3.pageIndex + 1 }}</span>
+                        <button class="rs-del" title="编辑章节" @click.stop="startEdit(c3)">✎</button>
                         <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c3.id)">✕</button>
                       </div>
                     </div>
@@ -627,6 +734,25 @@ const jumpAndClose = (physical: number) => {
 .rs-fold-spacer {
   flex: none;
   width: 16px;
+}
+.rs-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  flex-wrap: wrap;
+}
+.rs-edit-row .rs-input {
+  flex: 1 1 100px;
+  font-size: 0.78rem;
+}
+.rs-edit-row .rs-select {
+  font-size: 0.74rem;
+  max-width: 110px;
+}
+.rs-edit-row .rs-btn {
+  font-size: 0.72rem;
+  padding: 3px 8px;
 }
 .rs-node-row:hover {
   background: var(--app-surface-3, #242428);

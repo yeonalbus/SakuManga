@@ -24,6 +24,7 @@ var (
 	ErrMarkParentLevel     = errors.New("父章节层级必须为当前层级减一")
 	ErrMarkChapterNotFound = errors.New("章节不存在")
 	ErrMarkParentCycle     = errors.New("父章节不能是自己或自己的后代")
+	ErrMarkHasChildren     = errors.New("该章节下还有子级，无法修改层级（可先调整或删除子级）")
 )
 
 // normalizeMarkPages 归一化书签页索引：排序去重、裁剪越界（limit<0 不裁剪）
@@ -208,6 +209,18 @@ func UpdateComicChapter(db *gorm.DB, comicID string, id uint, in ChapterInput, p
 	}
 	if err := validateChapter(db, comicID, in.ParentID, in.Level, in.PageIndex, physicalCount); err != nil {
 		return nil, err
+	}
+	// 子级一致性：节点改层级时必须无子级（否则子级层级链断裂——子级固定为 level+1，
+	// 父级层级变化后不再满足「父级层级 = 子级层级 - 1」）。层级不变时改父级/名称不受限。
+	if in.Level != ch.Level {
+		var childCount int64
+		if err := db.Model(&models.ComicChapter{}).
+			Where("comic_id = ? AND parent_id = ?", comicID, id).Count(&childCount).Error; err != nil {
+			return nil, err
+		}
+		if childCount > 0 {
+			return nil, ErrMarkHasChildren
+		}
 	}
 	ch.ParentID = in.ParentID
 	ch.Level = in.Level

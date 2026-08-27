@@ -517,6 +517,27 @@ const addChapter = async (payload: { title: string; level: number; parentId: num
   }
 }
 
+// 更新章节（名称 / 层级 / 父级归属；起始页原样带回）
+const updateChapter = async (payload: {
+  id: number
+  title: string
+  level: number
+  parentId: number
+  pageIndex: number
+}) => {
+  if (source.value !== 'offline' || !comicId.value) return
+  try {
+    await http(`/comics/${comicId.value}/chapters/${payload.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    await fetchMarks()
+    toast.success('章节已更新')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '章节更新失败')
+  }
+}
+
 // 删除章节（连同子树）
 const removeChapter = async (id: number) => {
   if (source.value !== 'offline' || !comicId.value) return
@@ -1609,6 +1630,7 @@ watch(
       @jump="jumpFromSidebar"
       @toggle-bookmark="toggleBookmark"
       @add-chapter="addChapter"
+      @update-chapter="updateChapter"
       @remove-chapter="removeChapter"
     />
   </div>

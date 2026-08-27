@@ -46,6 +46,8 @@ interface OfflineDetailDTO {
   readCount?: number
   // Round11-Opt3：原标题（恢复用）、本地备注、E 站在线关联（跳转在线画廊）
   originalTitle?: string
+  // BUG2：首次入库日文标题（恢复主标题用，后端下发）
+  originalTitleJpn?: string
   remark?: string
   gid?: string
   token?: string
@@ -650,21 +652,23 @@ const openPreviewPage = (physicalIdx: number) => {
   openContentTab({ href, id: comic.value.id })
 }
 
-// 修改标题（Round11-Opt3 / D6）：清空输入 = 恢复原标题
+// 修改标题（BUG2）：编辑「主标题」= titleJpn（日文原名优先显示，缺失回退 title）；
+// 清空输入 = 恢复首次入库日文原名（后端从 OriginalTitleJpn 恢复），副标题（罗马音 title）不受影响。
 const editTitleBusy = ref(false)
 const handleEditTitle = async () => {
   if (!comic.value.id || editTitleBusy.value) return
-  const input = await modal.prompt('请输入新标题（清空并确定 = 恢复原标题）', comic.value.title, '修改标题')
+  const currentMain = comic.value.titleJpn || comic.value.title
+  const input = await modal.prompt('请输入新标题（清空并确定 = 恢复日文原名）', currentMain, '修改标题')
   if (input === null) return // 取消
   editTitleBusy.value = true
   try {
-    const res = await http<{ data: { title: string; originalTitle?: string } }>('/comics/' + comic.value.id, {
+    const res = await http<{ data: { titleJpn?: string; originalTitleJpn?: string } }>('/comics/' + comic.value.id, {
       method: 'PUT',
-      body: JSON.stringify({ title: input.trim() }),
+      body: JSON.stringify({ titleJpn: input.trim() }),
     })
     const restored = input.trim() === ''
-    comic.value.title = res.data.title
-    toast.success(restored ? "已恢复原标题" : "标题已更新")
+    comic.value.titleJpn = res.data.titleJpn || ''
+    toast.success(restored ? '已恢复日文原名' : '标题已更新')
     await fetchComicDetail()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : "修改标题失败")
@@ -908,18 +912,18 @@ const goOnlineGallery = () => {
         </div>
 
         <div class="title-wrap">
-          <!-- Round11-Opt3：主标题优先显示可编辑的 comic.title（修改立即可见），
-               日文原名在与之不同时作为副标题展示 -->
-          <h1 class="title">{{ comic.title }}</h1>
+          <!-- BUG2：主标题日文原名优先（与卡片/在线详情/阅读器一致），
+               罗马音标题作为副标题；修改标题编辑主标题（titleJpn），清空恢复日文原名 -->
+          <h1 class="title">{{ comic.titleJpn || comic.title }}</h1>
           <button
             class="edit-title-btn"
-            title="修改标题（清空可恢复原标题）"
+            title="修改标题（清空可恢复日文原名）"
             @click="handleEditTitle"
           >
             ✎
           </button>
-          <span v-if="comic.titleJpn && comic.titleJpn !== comic.title" class="subtitle">
-            {{ comic.titleJpn }}
+          <span v-if="comic.titleJpn && comic.title && comic.title !== comic.titleJpn" class="subtitle">
+            {{ comic.title }}
           </span>
         </div>
 

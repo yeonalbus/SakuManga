@@ -6,6 +6,8 @@ import { ref } from 'vue'
 export interface OfflineDetailComic {
   id: string
   title: string
+  // BUG2：日文原名（主标题优先显示，缺失回退 title）
+  titleJpn?: string
   coverUrl: string
   category?: string
   pageCount?: number
@@ -97,7 +99,9 @@ const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜�
         <div v-else class="odp-cover-fallback">📚</div>
       </div>
 
-      <h3 class="odp-title-main">{{ comic.title }}</h3>
+      <h3 class="odp-title-main" :title="comic.titleJpn ? comic.title : undefined">
+        {{ comic.titleJpn || comic.title }}
+      </h3>
 
       <div class="odp-chips">
         <span v-if="comic.category" class="odp-chip">{{ comic.category }}</span>

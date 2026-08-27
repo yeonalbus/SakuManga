@@ -364,6 +364,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 
 	// Round11：OriginalTitle 首次入库 = 当前标题；已有记录由下方 existingFull 保留
 	originalTitle := title
+	// BUG2：OriginalTitleJpn 首次入库 = 当前日文标题（用户修改主标题后可恢复）
+	originalTitleJpn := titleJpn
 	remarkPreserve := ""
 
 	// Round11：OriginalTitle / Remark 保留策略。
@@ -371,6 +373,9 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	// 已存在记录（重新扫描/更新）不覆盖 OriginalTitle 与用户备注。
 	// Round23：HiddenPages / OriginalPageCount 为用户客制化（自定义删除页面），重新扫描同样保留，
 	// PageCount 按「物理页数 − 有效隐藏数」重算（隐藏索引随物理页数裁剪）。
+	// BUG2：OriginalTitleJpn 同 OriginalTitle 策略（老数据无此列时用当前 TitleJpn 回填基准）；
+	// 同时保护用户修改的主标题——TitleJpn 与首次入库基准不同 = 用户改过，
+	// 扫描不覆盖，避免重新扫描/离线更新丢失用户自定义主标题。
 	var existingFull models.OfflineComic
 	if err := database.DB.Where("local_path = ?", localPath).First(&existingFull).Error; err == nil {
 		if existingFull.OriginalTitle != "" {
@@ -378,6 +383,17 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		}
 		if existingFull.Remark != "" {
 			remarkPreserve = existingFull.Remark
+		}
+		if existingFull.OriginalTitleJpn == "" && existingFull.TitleJpn != "" {
+			existingFull.OriginalTitleJpn = existingFull.TitleJpn // 存量回填：补首次入库日文基准
+		}
+		if existingFull.OriginalTitleJpn != "" {
+			originalTitleJpn = existingFull.OriginalTitleJpn
+		}
+		// 用户修改过主标题（TitleJpn ≠ 首次入库基准）→ 保留用户值，metadata 新值不覆盖
+		if existingFull.OriginalTitleJpn != "" && existingFull.TitleJpn != "" &&
+			existingFull.TitleJpn != existingFull.OriginalTitleJpn {
+			titleJpn = existingFull.TitleJpn
 		}
 	}
 
@@ -401,6 +417,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		Title:             title,
 		TitleJpn:          titleJpn,
 		OriginalTitle:     originalTitle,
+		OriginalTitleJpn:  originalTitleJpn,
 		Remark:            remarkPreserve,
 		CoverURL:          coverURL,
 		Source:            models.SourceOffline,

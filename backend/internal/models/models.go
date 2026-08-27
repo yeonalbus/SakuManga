@@ -74,7 +74,9 @@ type OfflineComic struct {
 
 	// ── Round11：标题恢复 + 本地备注 ──
 	OriginalTitle string `gorm:"type:text" json:"originalTitle,omitempty"` // 首次入库标题（手动改标题后可恢复，扫描更新不覆盖）
-	Remark        string `gorm:"type:text" json:"remark,omitempty"`        // 本地备注（用户客制化，扫描不覆盖）
+	// BUG2：首次入库日文标题（用户修改主标题 titleJpn 后可恢复；扫描更新不覆盖）
+	OriginalTitleJpn string `gorm:"type:text" json:"originalTitleJpn,omitempty"`
+	Remark           string `gorm:"type:text" json:"remark,omitempty"` // 本地备注（用户客制化，扫描不覆盖）
 
 	// ── Tag 双轨维护字段（本地漫画 Tag 维护系统）──
 	OnlineTags        string `gorm:"type:text" json:"onlineTags,omitempty"`        // E站官方 tag JSON 数组（每日刷新覆盖）

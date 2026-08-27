@@ -275,12 +275,10 @@ const handleBack = () => {
     router.replace(backState.fromFullPath || backState.fromPath)
     return
   }
-  // Round17-Bug3：PWA 下同标签 SPA 历史栈正常，back() 与手机返回一致（Android 已验证）
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push('/offline/home')
-  }
+  // Round17-Bug3：backState 已无条件记录，命中即回来源页；
+  // Round26-Bug：未命中（深链/分享直达详情）→ replace 回模式首页。
+  // 不再 history.back() 逐帧回退（同标签 SPA 层层压栈 + PWA history 栈异常会穿页/退出应用）。
+  router.replace('/offline/home')
 }
 
 const formattedSize = computed(() => {

@@ -168,8 +168,14 @@ watch(
         >
           <router-view v-slot="{ Component }">
             <!-- Round24-P1-4：keep-alive 加 :max 上限（此前无限制，搜索等场景按 fullPath
-                 无限缓存组件实例 → DOM/内存累积卡顿；6 个足够覆盖常用页往返） -->
-            <keep-alive :max="6">
+                 无限缓存组件实例 → DOM/内存累积卡顿；6 个足够覆盖常用页往返）
+                 Round26-Bug：:exclude ComicReader——阅读器实例绝不能被 keep-alive 缓存。
+                 缓存中 deactivated 的 ComicReader 的 watch(route.query.id) 依然活跃，
+                 用户在详情/主页操作时路由 query 变化会触发其 loadComicPages（source 默认
+                 offline），在线 gid 走离线接口 404 → 离线自愈链 router.replace 把当前
+                 页面劫持成 /reader（「点画廊详情固定跳阅读器」恶性 bug 根因）。
+                 阅读器不缓存 = 退出即销毁，watch/飞行请求随实例终结。 -->
+            <keep-alive :max="6" :exclude="['ComicReader']">
               <component :is="Component" :key="$route.fullPath" />
             </keep-alive>
           </router-view>

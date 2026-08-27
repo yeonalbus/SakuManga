@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
-import { buildDetailRoute, recordBackStateForDetail, openContentTab, buildDetailHref } from '@/utils/detailNav'
-import { useRouter } from 'vue-router'
+import { openContentTab, buildDetailHref } from '@/utils/detailNav'
 
 const props = withDefaults(
   defineProps<{
@@ -19,18 +18,14 @@ defineEmits<{
 }>()
 
 /** 左上角标题作为触发键：PC 桌面新标签打开完整详情；PWA/窄屏同标签（Round21 平台分流） */
-const router = useRouter()
 const openFullDetail = () => {
   if (!props.open || !props.gid) return
   const target = { id: props.gid, token: props.token, source: 'online' as const }
   const href = buildDetailHref(target)
-  if (href && openContentTab({ href, id: props.gid })) {
-    return
-  }
-  // 同标签 / open 被拦截降级：SPA 跳转
-  recordBackStateForDetail(target)
-  const route = buildDetailRoute(target)
-  if (route) router.push(route)
+  // Round26-Bug：统一走 openContentTab（内部无条件记录来源）。
+  // 此前 PWA 同标签分支会双重 push（openContentTab push 一次 + 下方降级分支再 push 一次），
+  // 历史栈多出相同帧，详情页退出需 back 两次；且不记录来源导致退出逐帧回退。
+  if (href) openContentTab({ href, id: props.gid })
 }
 </script>
 

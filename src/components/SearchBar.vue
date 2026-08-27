@@ -16,7 +16,7 @@ import { safeSetItem } from '@/utils/storage'
 // 🎯 f_search 标准语法格式化：联想点击时按模式输出（在线标准语法 / 离线裸格式）
 // 🎯 多 tag 联想：extractSuggestQuery 提取输入串的「最后一个 token」作为联想词
 import { formatFSearchTag, extractSuggestQuery } from '@/utils/tagFilter'
-import { isStandalonePWA } from '@/utils/detailNav'
+import { isStandalonePWA, recordBackStateForDetail } from '@/utils/detailNav'
 
 const router = useRouter()
 const route = useRoute()
@@ -193,6 +193,8 @@ const triggerSearch = (queryText?: string) => {
   const ehLink = resolveEHDetailLink(finalQuery)
   if (ehLink) {
     isFocused.value = false
+    // Round26-Bug：记录来源列表（详情页「返回」一步回来源，不再 history.back() 逐帧回退）
+    recordBackStateForDetail({ id: ehLink.id, token: ehLink.token, source: 'online' })
     router.push({ path: '/online/detail', query: { id: ehLink.id, token: ehLink.token } })
     return
   }

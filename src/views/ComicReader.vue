@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// Round26-Bug：显式声明组件名——App.vue 的 keep-alive 以 :exclude="['ComicReader']"
+// 排除阅读器缓存（缓存中 deactivated 实例的 watch 仍活跃，会把详情页劫持成 /reader）。
+defineOptions({ name: 'ComicReader' })
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
@@ -131,10 +134,18 @@ const coverProxyUrl = (url: string) => {
 // --------------------------------------------------
 // 🖼️ 页列表加载（在线 / 离线分流）
 // --------------------------------------------------
+// Round26-Bug：组件卸载/路由离开后终止一切飞行逻辑（自愈链跳转、状态更新）。
+// keep-alive 已 exclude 本组件（退出即销毁），此标记为兜底防线。
+let disposed = false
 const loadComicPages = async () => {
   // 🎯 核心防刷：如果路由里根本没有 id（说明正在退出/跳转到其他页面），直接终止，绝不发请求
   const realId = route.query.id as string
   if (!realId) return
+  // Round26-Bug：双保险——仅当实际处于 /reader 路由时才允许加载。
+  // 历史 bug：本组件曾被 keep-alive 缓存，deactivated 后 watch 仍活跃，
+  // 用户在详情/主页操作时以「当前页面 URL 的 query」（无 source → 默认 offline）触发加载，
+  // 在线 gid 走离线接口 404 → 自愈链 router.replace 劫持当前页面成 /reader。
+  if (route.path !== '/reader') return
 
   isLoading.value = true
   loadError.value = '' // Round20-Bug2/Bug4：重载/切换漫画时清空错误层
@@ -242,6 +253,8 @@ const loadComicPages = async () => {
           tok = await resolveOnlineToken(realId)
         }
         if (tok) {
+          // Round26-Bug：跳转前再次校验实例存活与路由归属，杜绝卸载/离场后残留跳转
+          if (disposed || route.path !== '/reader') return
           toast.info('检测到该画廊属于在线资源，已自动切换为在线模式')
           await router.replace({
             path: '/reader',
@@ -295,7 +308,11 @@ const retryLoad = () => {
 /**
  * Round21：阅读器「退出阅读 / 返回」统一决策——
  * PC 新标签打开的阅读器（入口路由匹配 + 来源标签存活）→ 关闭标签；
- * 仅剩单标签 / 标签内深链 / PWA 同标签 → 回来源（consumeBackState）→ history.back → 首页。
+ * 仅剩单标签 / 标签内深链 / PWA 同标签 → 回来源（consumeBackState）→ 模式首页兜底。
+ * Round26-Bug：兜底不再用 history.back() 逐帧回退——同标签 SPA 下阅读器/详情/搜索
+ * 跳转层层压栈，back() 会一层层穿过所有中间页（含被劫持的阅读器帧），甚至因 PWA
+ * history 栈混入整页加载帧而退出应用。所有阅读入口现已在跳转前记录来源（backState），
+ * 未命中只可能是深链/分享直达 → 直接 replace 回来源模式首页，一步到位。
  */
 const handleReaderBack = () => {
   const id = comicId.value
@@ -309,11 +326,7 @@ const handleReaderBack = () => {
     router.replace(backState.fromFullPath || backState.fromPath)
     return
   }
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push(source.value === 'online' ? '/online/home' : '/offline/home')
-  }
+  router.replace(source.value === 'online' ? '/online/home' : '/offline/home')
 }
 
 // 按预加载数量（在线/本地分别配置）预先拉取后续图片
@@ -1157,6 +1170,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // Round26-Bug：置位卸载标记，终止仍在飞行的异步逻辑（loadComicPages / 自愈链跳转）
+  disposed = true
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('resize', handleResize)
   const stage = canvasStage.value
@@ -1210,10 +1225,13 @@ watch(currentPage, (newPg) => {
 })
 
 // 监听路由 ID 切换时重新加载页列表
+// Round26-Bug：非 /reader 路由时禁止触发加载（历史 bug：组件被 keep-alive 缓存时，
+// deactivated 后 watch 仍活跃，详情/主页路由变化会误触发本加载逻辑并劫持页面）。
 watch(
   () => route.query.id,
   (newId) => {
     if (!newId) return
+    if (route.path !== '/reader') return
     currentPage.value = 1
     isZoomed.value = false
     // Round14-Bug1：进入/切换离线漫画即记录阅读次数（详情页不再单独计次，避免双计）。

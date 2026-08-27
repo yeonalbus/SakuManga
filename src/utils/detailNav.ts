@@ -68,19 +68,24 @@ function readTabEntry(id: string): string | undefined {
 /**
  * Round21：统一内容页打开（详情/阅读器）。
  * - 应开新标签（PC 桌面 / force 强制）→ 记录来源 + 入口路由，window.open；
- *   弹窗被拦截（open 返回 null）→ 不写任何标记，降级同标签跳转；
+ *   弹窗被拦截（open 返回 null）→ 不写入口标记，降级同标签跳转；
  * - 不应开新标签（PWA/窄屏）→ 同标签 SPA 跳转。
+ * Round26-Bug：来源状态（recordBackStateForDetail）无条件记录——此前仅新标签分支记录，
+ * PWA 同标签跳转（详情「阅读」、阅读清单、面板阅读等）退出时 consumeBackState 未命中，
+ * 只能 history.back() 逐帧回退（穿过所有中间页 / PWA 栈异常）。统一记录后，
+ * 阅读器/详情退出可一步 replace 回进入前的页面。
  * @returns true=已在新标签打开
  */
 export function openContentTab(opts: { href: string; id: string }, forceNewTab = false): boolean {
   const { href, id } = opts
   if (!href || !id) return false
   const shouldNewTab = forceNewTab || contentOpensNewTab()
+  // 无条件记录来源（新标签继承 sessionStorage 需在 window.open 之前写入；同标签供退出回源）
+  recordBackStateForDetail({ id })
   if (!shouldNewTab) {
     router.push(href)
     return false
   }
-  recordBackStateForDetail({ id })
   const w = window.open(href, '_blank')
   if (w) {
     setTabEntry(id, href)
@@ -140,6 +145,19 @@ export function buildDetailHref(comic: ComicNavTarget): string {
 // 来源列表，由列表页 takeListState 恢复滚动与页码。
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Round26-Bug：来源记录升级为「栈」结构（同 id 可压多层）。
+ *
+ * 背景：此前为单值覆盖，存在一个致命漏洞——详情页 A 点「阅读」（在线阅读 id=gid=A）
+ * 会用「来源=详情页 A」覆盖 saku_back_A，导致退出阅读回到详情页后，详情页自身的
+ * 来源（列表页）丢失，再退出详情只能回首页而非原始列表。
+ *
+ * 栈语义：每次进入内容页（详情/阅读器）push 一层来源；退出时 pop 最近一层。
+ * 例：列表 → 详情A(push 列表) → 阅读A(push 详情A) → 退出阅读(pop→详情A)
+ *     → 退出详情(pop→列表) —— 全程一步回退，不丢来源。
+ *
+ * 兼容旧格式：历史遗留的单值 JSON（DetailBackState 对象）按单元素栈读取。
+ */
 const BACK_KEY_PREFIX = 'saku_back_'
 
 /** 新标签返回时所需的来源列表状态 */
@@ -154,27 +172,53 @@ export interface DetailBackState {
   page?: number
 }
 
-/** 记录返回来源列表状态（必须在 window.open 之前调用，新标签才能继承 sessionStorage） */
+/** 解析存储值：兼容旧单值对象与新数组栈；非法返回空栈 */
+function parseBackStack(raw: string | null): DetailBackState[] {
+  if (!raw) return []
+  try {
+    const p = JSON.parse(raw)
+    if (Array.isArray(p)) {
+      return p.filter((x) => x && typeof x === 'object') as DetailBackState[]
+    }
+    if (p && typeof p === 'object') return [p as DetailBackState]
+    return []
+  } catch {
+    return []
+  }
+}
+
+/** 记录返回来源列表状态（同 id 压栈；必须在 window.open 之前调用，新标签才能继承 sessionStorage） */
 export function recordBackState(id: string, state: DetailBackState): void {
   if (!id || !state?.fromPath) return
   try {
-    sessionStorage.setItem(`${BACK_KEY_PREFIX}${id}`, JSON.stringify(state))
+    const key = `${BACK_KEY_PREFIX}${id}`
+    const stack = parseBackStack(sessionStorage.getItem(key))
+    // 去重：来源路径与栈顶相同则替换（防同一页重复触发堆积相同帧）
+    const top = stack[stack.length - 1]
+    if (top && top.fromFullPath === state.fromFullPath && top.fromPath === state.fromPath) {
+      stack[stack.length - 1] = state
+    } else {
+      stack.push(state)
+    }
+    // 深度上限 8，防极端长链撑爆存储
+    sessionStorage.setItem(key, JSON.stringify(stack.slice(-8)))
   } catch {
     /* 隐私模式 / 存储不可用时静默降级（window.opener 判定仍可用） */
   }
 }
 
-/** 读取并消费返回来源列表状态（读取后删除） */
+/** 读取并消费返回来源列表状态（弹栈最近一层；弹空后删除） */
 export function consumeBackState(id: string): DetailBackState | undefined {
   if (!id) return undefined
   try {
     const key = `${BACK_KEY_PREFIX}${id}`
-    const raw = sessionStorage.getItem(key)
-    if (raw) sessionStorage.removeItem(key)
-    if (!raw) return undefined
-    const parsed = JSON.parse(raw) as DetailBackState
-    if (parsed && typeof parsed.fromPath === 'string' && typeof parsed.top === 'number') {
-      return parsed
+    const stack = parseBackStack(sessionStorage.getItem(key))
+    if (stack.length === 0) return undefined
+    const state = stack.pop()
+    if (stack.length > 0) sessionStorage.setItem(key, JSON.stringify(stack))
+    else sessionStorage.removeItem(key)
+    if (state && typeof state.fromPath === 'string' && typeof state.top === 'number') {
+      return state
     }
     return undefined
   } catch {

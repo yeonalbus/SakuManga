@@ -7,7 +7,7 @@ import Pagination from '@/components/Pagination.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 // 🟢 1. 正确引入离线数据源 (offlineComics) 与 离线专属搜索筛选配置 (offlineSearchConfig)
 import { offlineComics, fetchOfflineComics, deleteOfflineComics } from '@/stores/comicStore'
-import { offlineSearchConfig } from '@/stores/searchStore'
+import { offlineSearchConfig, applySearchOptionsInherit } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 // Round22：多选快捷加入共享逻辑 + 工具条（替代页内重复实现）
@@ -116,8 +116,11 @@ const route = useRoute()
 // 需求2：URL 驱动搜索——新标签打开 /offline/home?kw=xxx 时写入离线搜索配置，
 // filteredComics 是响应式 computed，写入后自动生效（须在下方 watch 注册前执行，
 // 避免初始设置触发多余动作）。在线端对应逻辑见 OnlineHome.vue 的 kwFromUrl。
+// Bug(筛选继承)：先按「搜索选项继承」偏好（all/category_only/none）重置筛选，再写入 URL 关键词；
+// 「继承全部」时保留持久化恢复的筛选配置（含筛选抽屉关键词队列）。
 const kwFromUrl = route.query.kw
 if (typeof kwFromUrl === 'string' && kwFromUrl.trim()) {
+  applySearchOptionsInherit('offline')
   offlineSearchConfig.value.keyword = kwFromUrl.trim()
 }
 

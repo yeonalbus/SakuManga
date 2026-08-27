@@ -7,7 +7,7 @@ import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useOnlineStore } from '@/stores/onlineStore'
-import { onlineSearchConfig } from '@/stores/searchStore'
+import { onlineSearchConfig, applySearchOptionsInherit } from '@/stores/searchStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 // Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
@@ -50,10 +50,12 @@ const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, toggl
 
 // 🆕 URL 驱动搜索：进入 /online/home?kw=xxx（新标签页/分享链接等）时，把关键词写入搜索配置
 // 必须在下方 watch 注册之前执行，避免初始设置触发一次多余搜索
+// Bug(筛选继承)：先按「搜索选项继承」偏好（all/category_only/none）重置筛选，再写入 URL 关键词；
+// 「继承全部」时保留持久化恢复的筛选配置（含筛选抽屉关键词队列，不再被清空）。
 const kwFromUrl = route.query.kw
 if (typeof kwFromUrl === 'string' && kwFromUrl.trim()) {
+  applySearchOptionsInherit('online')
   onlineSearchConfig.value.keyword = kwFromUrl.trim()
-  onlineSearchConfig.value.keywords = []
 }
 
 // 长按多选 → 批量下载

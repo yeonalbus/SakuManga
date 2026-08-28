@@ -14,6 +14,8 @@ import { useUserStore } from '@/stores/userStore'
 import { consumeBackState, isStandalonePWA, shouldCloseTab, openContentTab } from '@/utils/detailNav'
 import { API_BASE } from '@/config/api'
 import { rememberListState } from '@/utils/scrollMemory'
+// 点击上传者 → 跳转对应搜索界面（f_search 标准语法 uploader:xxx$，与点击 tag 行为一致）
+import { formatFSearchTag } from '@/utils/tagFilter'
 // Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
 import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
 
@@ -398,6 +400,21 @@ const favColors: Record<number, string> = {
   7: '#0000f0',
   8: '#a000a0',
   9: '#f000a0',
+}
+
+// 4.5 点击上传者 → 跳转对应搜索界面（f_search 标准语法 uploader:xxx$，与点击 tag 行为一致：
+// PWA/窄屏同标签，桌面新标签打开 /online/home?kw=...）
+const handleUploaderClick = () => {
+  const uploader = (comic.value.uploader || '').trim()
+  if (!uploader) return
+  const queryTag = formatFSearchTag('uploader', uploader, false)
+  const routeObj = { path: '/online/home', query: { kw: queryTag } }
+  if (isStandalonePWA()) {
+    router.push(routeObj)
+  } else {
+    const url = router.resolve(routeObj).href
+    window.open(url, '_blank')
+  }
 }
 
 // 5. 点击预览切片直接跳页阅读；「立即阅读」按钮不传参 → 显式计算起始页
@@ -846,7 +863,12 @@ watch(
           <div class="metadata-box">
             <div class="meta-row">
               <span class="label">上传作者:</span>
-              <span class="value link">{{ comic.uploader || '匿名' }}</span>
+              <span
+                class="value link"
+                :title="comic.uploader ? `搜索上传者 ${comic.uploader} 的全部作品` : ''"
+                @click="handleUploaderClick"
+                >{{ comic.uploader || '匿名' }}</span
+              >
             </div>
             <div class="meta-row">
               <span class="label">作品分类:</span>

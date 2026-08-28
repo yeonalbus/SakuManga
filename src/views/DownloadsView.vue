@@ -4,6 +4,8 @@ import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { setTaskPriority, type DownloadTask } from '@/api/download'
 import { useUserStore } from '@/stores/userStore'
+// 点击下载条目 → 打开「在线详情界面」（PC 新标签 / PWA 同标签，与列表页一致）
+import { openContentTab, buildDetailHref } from '@/utils/detailNav'
 // Round11-Opt2：下载队列全部完成后 toast + 刷新本地库缓存
 import { fetchOfflineComics } from '@/stores/comicStore'
 
@@ -137,6 +139,21 @@ const displayTaskError = (t: DownloadTask): string => {
   return raw
 }
 
+// ── 点击下载条目 → 查看在线详情 ──
+// 下载任务携带 gid/token，直接打开「在线详情界面」（/online/detail）。
+// token 缺失时详情页内部有 resolveOnlineToken 按 gid 兜底解析，不阻断打开。
+const handleOpenDetail = (t: DownloadTask) => {
+  if (!t.gid) return
+  openContentTab({ href: buildDetailHref({ id: t.gid, token: t.token }), id: t.gid })
+}
+
+// 事件委托：卡片整卡可点，但内部交互控件（操作按钮/优先级增减等）点击不触发跳转
+const handleCardClick = (e: MouseEvent, t: DownloadTask) => {
+  const target = e.target as HTMLElement
+  if (target.closest('button, select, input, a, label')) return
+  handleOpenDetail(t)
+}
+
 // ── 优先级内联修改（数字越大越优先，0-99；completed/cancelled 不可改） ──
 const PRIORITY_MIN = 0
 const PRIORITY_MAX = 99
@@ -266,7 +283,13 @@ onUnmounted(() => {
     <div v-else-if="!tasks.length" class="loading-box">暂无下载任务</div>
 
     <div v-else class="task-list">
-      <div v-for="task in tasks" :key="task.id" class="download-card">
+      <div
+        v-for="task in tasks"
+        :key="task.id"
+        class="download-card"
+        :title="`点击查看《${task.title}》在线详情`"
+        @click="handleCardClick($event, task)"
+      >
         <!-- 封面图 -->
         <div class="cover-box">
           <img
@@ -519,6 +542,13 @@ onUnmounted(() => {
   padding: 12px;
   gap: 16px;
   align-items: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.download-card:hover {
+  border-color: #007acc;
+  background-color: var(--app-surface-1);
 }
 
 .cover-box {

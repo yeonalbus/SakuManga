@@ -88,7 +88,8 @@ const defaultSettings: DownloadSettings = {
 
   autoUpdateGallery: false,
   autoUpdateScheme: 'archive',
-  autoUpdateFallbackToGallery: true,
+  // 与后端 defaultDownloadSetting 保持一致（后端未显式配置该字段 → 零值 false）
+  autoUpdateFallbackToGallery: false,
   autoUpdateDeleteOriginal: true,
 }
 

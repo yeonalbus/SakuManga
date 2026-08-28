@@ -265,7 +265,7 @@
     <div class="setting-item">
       <div class="item-info">
         <div class="item-title">无 H@H 时自动降级为画廊下载</div>
-        <div class="item-subtext">归档下载失败时回退到逐图下载</div>
+        <div class="item-subtext">仅限自动更新画廊任务：归档下载失败时回退到逐图下载；手动发起的归档下载不受此开关控制</div>
       </div>
       <label class="toggle-switch">
         <input type="checkbox" v-model="downloadSettings.autoUpdateFallbackToGallery" />

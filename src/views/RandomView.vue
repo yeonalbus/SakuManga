@@ -436,7 +436,9 @@ onBeforeUnmount(() => {
                 @mousedown.prevent
                 @click="pickSuggestion(sug)"
               >
-                <TagChip :tag="sug" />
+                <!-- Bug：联想项内 TagChip 必须禁用快捷搜索（与 SearchBar/FilterDrawer 一致），
+                     否则点击时 TagChip 抢占事件并触发快捷搜索跳页，联想词进不了关键词队列 -->
+                <TagChip :tag="sug" :disable-quick-search="true" />
                 <span v-if="sug.count" class="tag-count-badge"
                   >🔥 {{ sug.count.toLocaleString() }}</span
                 >

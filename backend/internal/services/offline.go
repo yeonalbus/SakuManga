@@ -443,18 +443,28 @@ func BuildUpdateDownloadParams(db *gorm.DB, manager *DownloadManager, comic *mod
 		return CreateDownloadParams{}, errors.New("该漫画缺少新版 gid/token，无法下载更新")
 	}
 
-	// 选择更新下载方案：请求覆盖 > 自动更新方案 > 归档
+	// 选择更新下载方案：请求覆盖 > 自动更新方案 > 归档。
+	// 方案已从两值（gallery | archive）扩展为四值（与 defaultDownloadScheme 枚举一致）：
+	//   gallery / galleryOriginal → 画廊逐图；archiveResample → 归档压缩；archiveOriginal → 归档原图。
+	// 兼容存量旧值：'gallery' 原义不变；'archive' 旧实义 = 归档类型跟随默认下载配置（决策：跟随默认配置映射）。
 	setting := manager.GetSettings()
 	mode := modeOverride
 	if mode == "" {
 		mode = setting.AutoUpdateScheme
 	}
-	if mode != string(models.DownloadModeGallery) && mode != string(models.DownloadModeArchive) {
-		mode = string(models.DownloadModeArchive)
-	}
-
 	archiveType := ""
-	if mode == string(models.DownloadModeArchive) {
+	switch mode {
+	case string(models.DownloadModeGallery), string(models.DefaultSchemeGalleryOriginal):
+		mode = string(models.DownloadModeGallery)
+	case string(models.DefaultSchemeArchiveResample):
+		mode = string(models.DownloadModeArchive)
+		archiveType = string(models.ArchiveTypeResample)
+	case string(models.DefaultSchemeArchiveOriginal):
+		mode = string(models.DownloadModeArchive)
+		archiveType = string(models.ArchiveTypeOriginal)
+	default:
+		// 旧值 'archive'（或未知值）：归档 + 归档类型跟随默认下载配置（保留旧行为）
+		mode = string(models.DownloadModeArchive)
 		if setting.DefaultDownloadScheme == models.DefaultSchemeArchiveResample {
 			archiveType = string(models.ArchiveTypeResample)
 		} else {

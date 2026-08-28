@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+// 每漫画覆盖下拉复用「默认下载配置」四值选项（画廊下载/画廊原图/归档压缩/归档原图）
+import { DEFAULT_DOWNLOAD_SCHEME_OPTIONS } from '@/stores/downloadSettings'
 
 const router = useRouter()
 const { toast } = useUI()
@@ -43,7 +45,7 @@ const total = ref(0)
 const isLoading = ref(false)
 const isChecking = ref(false)
 const downloadingId = ref('')
-// 每个漫画的下载方案覆盖：''(按设置) | archive | gallery
+// 每个漫画的下载方案覆盖：''(按设置) | gallery | galleryOriginal | archiveResample | archiveOriginal
 const modeFor = ref<Record<string, string>>({})
 
 // ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
@@ -364,8 +366,13 @@ onUnmounted(stopPolling)
               :disabled="isDownloading"
             >
               <option value="">按设置（默认）</option>
-              <option value="archive">🗜️ 归档（H@H）</option>
-              <option value="gallery">📁 画廊（逐图）</option>
+              <option
+                v-for="opt in DEFAULT_DOWNLOAD_SCHEME_OPTIONS"
+                :key="opt.value"
+                :value="opt.value"
+              >
+                {{ opt.label }}
+              </option>
             </select>
             <button class="download-btn" :disabled="isDownloading" @click="startDownload(comic)">
               {{ downloadingId === comic.id ? '⏳ 加入中...' : '⬇️ 下载新版' }}

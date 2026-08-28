@@ -101,7 +101,7 @@ type DownloadSetting struct {
 
 	// ── 自动更新画廊（步骤 7 会同步扩展前端，后端字段一并预留）──
 	AutoUpdateGallery           bool   `json:"autoUpdateGallery"`           // 是否自动更新画廊
-	AutoUpdateScheme            string `json:"autoUpdateScheme"`            // 更新下载方案 gallery | archive
+	AutoUpdateScheme            string `json:"autoUpdateScheme"`            // 更新下载方案 gallery | galleryOriginal | archiveResample | archiveOriginal
 	AutoUpdateFallbackToGallery bool   `json:"autoUpdateFallbackToGallery"` // 无 H@H 时自动降级为画廊下载
 	AutoUpdateDeleteOriginal    bool   `json:"autoUpdateDeleteOriginal"`    // 下载新版本后是否删除旧版本文件夹
 

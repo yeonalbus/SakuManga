@@ -57,7 +57,7 @@ export interface DownloadSettings {
 
   // ── 自动更新画廊 ──
   autoUpdateGallery: boolean // 是否自动更新画廊
-  autoUpdateScheme: 'gallery' | 'archive' // 更新下载方案
+  autoUpdateScheme: DownloadDefaultScheme // 更新下载方案（四选一，与默认下载配置一致：画廊下载/画廊原图/归档压缩/归档原图）
   autoUpdateFallbackToGallery: boolean // 无 H@H 时自动降级为画廊下载
   autoUpdateDeleteOriginal: boolean // 下载新版本后是否删除旧版本文件夹
 }
@@ -87,7 +87,8 @@ const defaultSettings: DownloadSettings = {
   autoResumeTasks: true,
 
   autoUpdateGallery: false,
-  autoUpdateScheme: 'archive',
+  // 旧默认值 'archive' 的实义为「归档原图」（归档类型跟随默认配置，默认配置为 archiveOriginal）
+  autoUpdateScheme: 'archiveOriginal',
   // 与后端 defaultDownloadSetting 保持一致（后端未显式配置该字段 → 零值 false）
   autoUpdateFallbackToGallery: false,
   autoUpdateDeleteOriginal: true,
@@ -145,6 +146,26 @@ if (
     : 'archiveResample'
 }
 
+/**
+ * 旧版 autoUpdateScheme 迁移：两值（gallery | archive）→ 四值。
+ * - 'archive' 旧实义 = 归档 + 归档类型跟随「默认下载配置」（archiveResample→压缩，否则→原图），
+ *   按此映射为四值，保留用户原偏好（决策：跟随默认配置映射）；
+ * - 'gallery' 本身即四值之一，无需处理。
+ * 在 localStorage 初始化与后端拉取两处调用，覆盖存量旧值。
+ * autoUpdateScheme 参数放宽为 string：存量旧值 'archive' 不在四值联合类型内，
+ * 用宽类型比较避免 TS2367（联合类型与不重叠字面量比较报错）。
+ */
+function migrateAutoUpdateScheme(s: {
+  autoUpdateScheme?: string
+  defaultDownloadScheme?: DownloadDefaultScheme
+}): void {
+  if (s.autoUpdateScheme === 'archive') {
+    s.autoUpdateScheme =
+      s.defaultDownloadScheme === 'archiveResample' ? 'archiveResample' : 'archiveOriginal'
+  }
+}
+migrateAutoUpdateScheme(storedInit)
+
 export const downloadSettings = reactive<DownloadSettings>({
   ...defaultSettings,
   ...storedInit,
@@ -188,6 +209,8 @@ export async function fetchDownloadSettings(): Promise<void> {
         : 'archiveResample'
     }
     Object.assign(downloadSettings, pickSetting(data))
+    // 后端存量旧值（archive/gallery 两值）同样迁移为四值（触发 watch 写回新值）
+    migrateAutoUpdateScheme(downloadSettings)
   } catch (err) {
     console.warn('[downloadSettings] 拉取后端设置失败，沿用本地缓存:', err)
   } finally {

@@ -255,8 +255,9 @@
         <div class="item-subtext">下载新版本时采用的方案</div>
       </div>
       <select v-model="downloadSettings.autoUpdateScheme" class="setting-select">
-        <option value="archive">归档（H@H）</option>
-        <option value="gallery">画廊（逐图）</option>
+        <option v-for="opt in DEFAULT_DOWNLOAD_SCHEME_OPTIONS" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
       </select>
     </div>
 

@@ -126,6 +126,17 @@ const handleCancel = async (t: DownloadTask) => {
 const handleRetry = (t: DownloadTask) => callAction(t.id, 'retry', '已重试任务')
 const handleUnlock = (t: DownloadTask) => callAction(t.id, 'unlock', '已解锁任务')
 
+// 归档限流(429)错误前端固化提示：兼容后端旧版本——后端可能只返回裸「分块 N 返回状态码
+// 429（未获 206）」，统一映射为可读的降级指引；新后端返回的「归档下载被限流(HTTP 429)…」
+// 已含明确文案，此处命中后同样拼上前缀提示不重复。
+const displayTaskError = (t: DownloadTask): string => {
+  const raw = t.error || ''
+  if (t.mode === 'archive' && /429|限流/.test(raw) && !raw.includes('并发数太多')) {
+    return `⚠️ 并发数太多：H@H 节点限流，请降低归档下载线程数或减少同时下载的归档任务数后重试（${raw}）`
+  }
+  return raw
+}
+
 // ── 优先级内联修改（数字越大越优先，0-99；completed/cancelled 不可改） ──
 const PRIORITY_MIN = 0
 const PRIORITY_MAX = 99
@@ -295,7 +306,7 @@ onUnmounted(() => {
             <span v-if="task.updateForComicId" class="meta-tag update">🔄 离线更新</span>
             <span v-if="userStore.isAdmin && task.username" class="meta-tag user">发起者：{{ task.username }}</span>
             <span v-if="task.error" class="meta-tag error" :title="task.error">{{
-              task.error
+              displayTaskError(task)
             }}</span>
           </div>
 

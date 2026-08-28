@@ -378,6 +378,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	// BUG2：OriginalTitleJpn 同 OriginalTitle 策略（老数据无此列时用当前 TitleJpn 回填基准）；
 	// 同时保护用户修改的主标题——TitleJpn 与首次入库基准不同 = 用户改过，
 	// 扫描不覆盖，避免重新扫描/离线更新丢失用户自定义主标题。
+	// 画质升级：DownloadScheme 由下载任务回填，重新扫描不得覆盖（存量零值保留为空）。
 	var existingFull models.OfflineComic
 	if err := database.DB.Where("local_path = ?", localPath).First(&existingFull).Error; err == nil {
 		if existingFull.OriginalTitle != "" {
@@ -440,6 +441,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		Token:             meta.Token,
 		ParentGID:         meta.ParentGID,
 		SourceMode:        sourceMode,
+		DownloadScheme:    existingFull.DownloadScheme, // 画质升级：下载任务回填的方案，扫描不覆盖（存量零值保留）
 	}
 
 	// 问题3修复：捕获入库错误，避免「扫描发现 N 本」与实际落库数量不一致的静默失败

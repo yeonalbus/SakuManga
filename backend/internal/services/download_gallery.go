@@ -224,6 +224,8 @@ func (g *galleryDownloader) downloadAll(urls []string, detail *GalleryDetailResu
 	} else {
 		log.Printf("%s [gallery-engine] 任务 %s 下载目录扫描入库失败: %v", dlWarnTag, g.task.ID, err)
 	}
+	// 画质升级：回填下载方案（画廊逐图统一记 gallery；galleryOriginal 为等价方案名，落库无差异）
+	markDownloadScheme(g.m.db, g.destDir, string(models.DefaultSchemeGallery))
 
 	g.mu.Lock()
 	g.task.Status = models.DownloadCompleted

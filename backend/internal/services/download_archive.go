@@ -191,7 +191,13 @@ func (g *archiveDownloader) run() {
 	g.startedAt = time.Now()
 
 	// 2. 路径：archive - gid - 本子名
+	// 画质升级任务（ForceDeleteOriginal）：落地目录追加 " - original" 后缀，
+	// 与旧版（同 gid 同标题，可能同为归档压缩）的目录隔离，避免同目录互覆盖、
+	// 增量扫描跳过入库、finalizeUpdate 误删新版等问题。
 	dirName := fmt.Sprintf("archive - %s - %s", g.task.GID, cleanFolderName(g.task.Title))
+	if g.task.ForceDeleteOriginal {
+		dirName += " - original"
+	}
 	g.zipPath = filepath.Join(g.task.ArchivePath, dirName+".zip")
 	g.partPath = g.zipPath + ".part"
 	g.extractDir = filepath.Join(g.task.ExtractPath, dirName)
@@ -317,6 +323,12 @@ func (g *archiveDownloader) extractAndFinish() {
 	} else {
 		log.Printf("%s [archive-engine] 任务 %s 解压目录扫描入库失败: %v", dlWarnTag, g.task.ID, err)
 	}
+	// 画质升级：回填下载方案（归档按任务归档类型记 archiveResample / archiveOriginal）
+	scheme := string(models.DefaultSchemeArchiveOriginal)
+	if g.task.ArchiveType == models.ArchiveTypeResample {
+		scheme = string(models.DefaultSchemeArchiveResample)
+	}
+	markDownloadScheme(g.m.db, g.extractDir, scheme)
 
 	if g.stopped() {
 		log.Printf("%s [archive-engine] 任务 %s 已被取消/暂停，跳过完成收尾", dlWarnTag, g.task.ID)

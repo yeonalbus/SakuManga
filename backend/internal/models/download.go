@@ -65,6 +65,9 @@ type DownloadTask struct {
 	AutoUnlockCount   int    `json:"autoUnlockCount"`       // 自动 GP 解锁已重试次数（归档遇锁自动解锁，上限 3 次；手动解锁/重试后清零）
 	// 更新关联：本任务是「离线更新」下载时记录被更新漫画的 ID，完成后用于清理旧版
 	UpdateForComicID string    `json:"updateForComicId,omitempty"`
+	// ForceDeleteOriginal 升级任务标记：画质升级（重下为归档原图）完成后无条件删除旧版，
+	// 不跟随 autoUpdateDeleteOriginal 设置（升级=用户已确认的替换语义）。
+	ForceDeleteOriginal bool `json:"forceDeleteOriginal,omitempty"`
 	// Username 发起者用户名（仅展示用，非数据库字段；管理员管理多用户任务时标识发起者）
 	Username string `gorm:"-" json:"username,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`

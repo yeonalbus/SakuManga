@@ -62,6 +62,12 @@ type OfflineComic struct {
 	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token
 	UpdateNote string `json:"updateNote,omitempty"`              // 更新提示文案
 
+	// ── 画质升级（Round：图片质量升级功能）──
+	// 下载方案四值（gallery | galleryOriginal | archiveResample | archiveOriginal），
+	// 下载完成入库时由下载任务回填；空 = 存量数据（本字段上线前下载，无法区分压缩/原图，视为「版本未知」）。
+	// 升级检测范围：ScanPathID 空（SakuHentai 下载导入）+ GID/Token 非空 + 方案 ≠ archiveOriginal（含未知）。
+	DownloadScheme string `json:"downloadScheme,omitempty"`
+
 	// ── Aged 老化状态（Round4 任务四：365 天老化规则）──
 	// E 站规则：发布超 365 天的画廊无法再通过 Gallery Manager Update 生成子画廊，
 	// 此类画廊只扫描一次；若无可更新新版（或最新版也超 365 天），标记本状态位并排除后续扫描。

@@ -57,6 +57,7 @@ type CreateDownloadParams struct {
 	Priority         int                 `json:"priority"`
 	Group            string              `json:"group"`
 	UpdateForComicID string              `json:"updateForComicId,omitempty"` // 离线更新下载：被更新漫画 ID
+	ForceDeleteOriginal bool             `json:"forceDeleteOriginal,omitempty"` // 画质升级：完成后无条件删除旧版（不跟随 autoUpdateDeleteOriginal）
 	UserID           uint                `json:"userId"`                      // 任务发起者（决定执行时使用谁的 E 站凭证）
 }
 
@@ -308,11 +309,17 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 	}
 
 	setting := m.GetSettings()
-	if setting.AutoUpdateDeleteOriginal && old.LocalPath != "" {
+	// 画质升级任务（ForceDeleteOriginal）：用户已确认「升级=替换」，无论
+	// autoUpdateDeleteOriginal 设置如何都删除旧版（新版已落地独立目录，安全）。
+	if (setting.AutoUpdateDeleteOriginal || task.ForceDeleteOriginal) && old.LocalPath != "" {
 		if err := os.RemoveAll(old.LocalPath); err != nil {
 			log.Printf("%s [update] 任务 %s 删除旧版文件夹失败 %q: %v", dlErrTag, task.ID, old.LocalPath, err)
 		} else {
-			log.Printf("%s [update] 任务 %s 已删除旧版文件夹 %q（autoUpdateDeleteOriginal=true）", dlLogTag, task.ID, old.LocalPath)
+			reason := "autoUpdateDeleteOriginal=true"
+			if task.ForceDeleteOriginal {
+				reason = "画质升级（forceDeleteOriginal）"
+			}
+			log.Printf("%s [update] 任务 %s 已删除旧版文件夹 %q（%s）", dlLogTag, task.ID, old.LocalPath, reason)
 		}
 		if err := m.db.Delete(&old).Error; err != nil {
 			log.Printf("%s [update] 任务 %s 删除旧版记录失败: %v", dlErrTag, task.ID, err)
@@ -354,6 +361,13 @@ func (m *DownloadManager) fallbackUpdateToGallery(task *models.DownloadTask) {
 	}
 	if task.Mode != models.DownloadModeArchive {
 		return // 只有归档任务需要降级；画廊失败不再二次降级（避免循环）
+	}
+	// 画质升级任务不降级：降级为画廊逐图将违背「升级为归档原图」的意图
+	// （且画廊落地目录与旧版可能同名，会造成覆盖/误删），失败就保持 error 由用户重试。
+	if task.ForceDeleteOriginal {
+		log.Printf("%s [update] 任务 %s 为画质升级任务，归档失败不降级为画廊（保持 error 供重试）",
+			dlWarnTag, task.ID)
+		return
 	}
 	if !m.GetSettings().AutoUpdateFallbackToGallery {
 		log.Printf("%s [update] 任务 %s 归档下载失败，但 autoUpdateFallbackToGallery=false，不降级为画廊",
@@ -482,6 +496,7 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 		ArchivePath:      setting.ArchivePath,
 		ExtractPath:      setting.ExtractPath,
 		UpdateForComicID: p.UpdateForComicID,
+		ForceDeleteOriginal: p.ForceDeleteOriginal,
 		UserID:           p.UserID, // 任务发起者（执行时加载其 E 站凭证）
 	}
 

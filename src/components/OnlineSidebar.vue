@@ -1,3 +1,9 @@
+<script setup lang="ts">
+// 画质升级入口：仅管理员可见（升级会发起下载消耗 GP，与更新/维护权限一致）
+import { useUserStore } from '@/stores/userStore'
+const { isAdmin } = useUserStore()
+</script>
+
 <template>
   <div class="nav-group">
     <span class="group-title">🌐 在线模式</span>
@@ -14,5 +20,6 @@
     <span class="group-title">🎲 工具</span>
     <router-link to="/random">手气不错</router-link>
     <router-link to="/reading-list">阅读清单</router-link>
+    <router-link v-if="isAdmin" to="/offline/upgrade">⬆️ 画质升级</router-link>
   </div>
 </template>

@@ -38,11 +38,12 @@ var tagMaintainLoc = time.Local
 // ─── 在线搜索 f_search 自动修正开关（默认开启） ───
 // EHService 为无状态空结构体（不持 DB），因此用包级原子缓存承载该全局开关，
 // 由 Load/SaveTagMaintainSetting 在读写时同步，FetchGalleryList 内部仅读取。
-var fSearchAutoCorrect = func() atomic.Bool {
-	var b atomic.Bool
-	b.Store(true)
-	return b
-}()
+// 用指针承载：atomic.Bool 含 noCopy 标记，值拷贝会触发 go vet「copies lock value」告警。
+var fSearchAutoCorrect = new(atomic.Bool)
+
+func init() {
+	fSearchAutoCorrect.Store(true) // 默认开启（未初始化/首次启动）
+}
 
 // SetFSearchAutoCorrect 更新 f_search 自动修正开关缓存
 func SetFSearchAutoCorrect(v bool) { fSearchAutoCorrect.Store(v) }

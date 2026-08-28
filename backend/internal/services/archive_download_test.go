@@ -1670,3 +1670,60 @@ func TestArchiveChunkDownloadNoSingleByteRange(t *testing.T) {
 		t.Fatalf("修复后分块布局不应产生单字节 Range（bytes=N-N）请求，实际 %d 次", singleByte)
 	}
 }
+
+// TestChunkDownload429RateLimitedReduceThreads 验证分块下载遇 HTTP 429（H@H 并发限流）：
+//   - ① downloadChunk 识别为限流哨兵 errArchiveRateLimited（429 响应体为空/非文本时，
+//     lockMessage 关键词分类未命中的真实场景），且不置位 lockFailed（429 是临时并发限流，
+//     不是「配额耗尽/会话失效」类锁定，不应进入 error_lock 等待手动解锁）；
+//   - ② runChunkDownload 自动降低线程数后断点续传重试（复用 autoReduceThreadsOnEOF 开关），
+//     降至 1 线程仍 429 → 返回含「429 / 1 线程」的明确提示。
+func TestChunkDownload429RateLimitedReduceThreads(t *testing.T) {
+	const total = int64(8 * 1024 * 1024) // 8 MiB
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 模拟 H@H 节点限流：仅状态码 429、空 body（lockMessage 关键词分类未命中的真实场景）
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	mgr := newTestDownloadManager(t)
+	g := newTestArchiveDownloader(t, mgr, srv.URL, t.TempDir())
+
+	// ① downloadChunk 单块：429 → 限流哨兵，且不置锁定标记
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &archiveChunkDownloader{
+		g:        g,
+		url:      srv.URL + "/file.zip",
+		total:    total,
+		chunk:    total,
+		count:    1,
+		part:     g.partPath,
+		client:   &http.Client{},
+		ctx:      ctx,
+		cancel:   cancel,
+		doneBits: make([]uint64, 1),
+	}
+	err := d.downloadChunk(0)
+	if err == nil {
+		t.Fatal("429 响应应被识别为限流并报错")
+	}
+	if !errors.Is(err, errArchiveRateLimited) {
+		t.Fatalf("错误应包装限流哨兵 errArchiveRateLimited，实际: %v", err)
+	}
+	if d.g.lockFailed {
+		t.Fatal("429 不应置位 lockFailed（临时并发限流 ≠ 配额/会话锁）")
+	}
+
+	// ② runChunkDownload：多线程持续 429 → 自动降线程重试 → 降至 1 线程仍失败 → 明确提示
+	err = g.runChunkDownload(srv.URL+"/file.zip", total, 4)
+	if err == nil {
+		t.Fatal("持续 429 应最终报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "429") {
+		t.Fatalf("最终错误应含 429 提示，实际: %v", err)
+	}
+	if !strings.Contains(msg, "1 线程") {
+		t.Fatalf("最终错误应说明已自动降至 1 线程，实际: %v", err)
+	}
+}

@@ -75,6 +75,7 @@ func (h *UpgradeHandler) UpgradeDownload(c *gin.Context) {
 	}
 
 	// 升级资格校验（与 ListUpgradeCandidates 判定一致，防御性重复校验）
+	taskScheme := services.BuildTaskSchemeIndex(h.db)
 	switch {
 	case comic.GID == "" || comic.Token == "":
 		c.JSON(http.StatusBadRequest, gin.H{"error": "该漫画缺少 E 站元数据（gid/token），无法升级下载"})
@@ -82,8 +83,9 @@ func (h *UpgradeHandler) UpgradeDownload(c *gin.Context) {
 	case comic.RemovedStatus:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "该画廊已被删除/移除，无法升级下载"})
 		return
-	case services.ResolveEffectiveDownloadScheme(&comic) == string(models.DefaultSchemeArchiveOriginal):
-		// 新数据直接判方案；存量（方案空）按形态推断：archive=归档原图（已达标），gallery=画廊下载（可升级）
+	case services.ResolveEffectiveDownloadScheme(&comic, taskScheme) == string(models.DefaultSchemeArchiveOriginal):
+		// 有效方案判定链：download_scheme → 最近完成任务方案 → 落地目录名推断
+		//（archive - 前缀 = 归档下载视为归档原图；普通目录 = 画廊下载）
 		c.JSON(http.StatusBadRequest, gin.H{"error": "该漫画已是归档原图（archiveOriginal），无需升级"})
 		return
 	}

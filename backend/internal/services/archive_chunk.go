@@ -62,6 +62,12 @@ const minChunkSize = int64(1024 * 1024) // 1 MiB
 // 依据「自动降低线程数规避 EOF」开关决定自动降级重试或直接报错提示手动调低线程数。
 var errArchiveEOF = errors.New("归档下载连接被中断(EOF)")
 
+// errArchiveRateLimited 归档分块下载被 H@H 节点限流（HTTP 429）的哨兵错误。
+// 429 响应体常为空/非文本，lockMessage 的关键词分类常未命中，故按状态码显式识别；
+// 语义为「并发连接过多被临时限流」，上层 runChunkDownload 与 EOF 同机制：
+// 自动降低线程数后断点续传重试（复用 autoReduceThreadsOnEOF 开关），直至降到 1 线程。
+var errArchiveRateLimited = errors.New("归档下载被限流(HTTP 429)")
+
 // isEOFNetworkError 判断底层网络错误是否为连接被提前关闭（EOF / unexpected EOF）。
 func isEOFNetworkError(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
@@ -447,6 +453,13 @@ func (d *archiveChunkDownloader) downloadChunk(idx int64) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusPartialContent {
+		// 429：H@H 节点并发限流（多任务并行 × 每任务 N 线程 → 连接过多）。
+		// 优先于 lockMessage 返回限流哨兵（不置 lockFailed、不污染 error_lock 语义），
+		// 由上层 runChunkDownload 自动降低线程数后断点续传重试；429 是临时并发限流，
+		// 而非「配额耗尽/会话失效」类锁定，进入 error_lock 等待手动解锁并不合适。
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("下载分块 %d 被限流(HTTP 429): %w", idx, errArchiveRateLimited)
+		}
 		// 配额/限流锁定检测
 		if msg, locked := d.lockMessage(resp); locked {
 			return fmt.Errorf("%s", msg)

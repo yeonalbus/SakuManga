@@ -933,6 +933,10 @@ func (g *archiveDownloader) downloadZip(downloadURL string) error {
 			g.mu.Unlock()
 			return errors.New(archiveLockErrorMessage(resp.StatusCode, reason))
 		}
+		// 429：H@H 节点并发限流（单线程路径无线程可降，直接给出明确提示）
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("归档下载被限流（HTTP 429）：H@H 节点并发连接过多，请减少同时下载的归档任务数后重试")
+		}
 		return fmt.Errorf("HTTP %d（下载 H@H zip 失败）", resp.StatusCode)
 	}
 
@@ -1138,24 +1142,38 @@ func (g *archiveDownloader) runChunkDownload(downloadURL string, total int64, th
 		if errors.Is(err, errTaskStopped) || g.stopped() {
 			return err
 		}
-		// 非 EOF 错误 → 不降级，直接返回
-		if !errors.Is(err, errArchiveEOF) {
+		// 非 EOF / 非限流(429) 错误 → 不降级，直接返回
+		rateLimited := errors.Is(err, errArchiveRateLimited)
+		if !errors.Is(err, errArchiveEOF) && !rateLimited {
 			return err
 		}
 
-		// EOF 连接中断：按开关决定自动降级或直接报错
+		// EOF 连接中断 / H@H 限流(429)：按开关决定自动降级或直接报错。
+		// 429 与 EOF 语义相近（并发连接过多/被服务器中断），复用 autoReduceThreadsOnEOF 开关，
+		// 开关关闭时同样报错提示手动调低线程数。
 		if !autoReduce {
+			if rateLimited {
+				return fmt.Errorf("归档下载被限流（HTTP 429）：H@H 节点并发连接过多，请降低归档下载线程数（当前 %d）或减少同时下载的归档任务数", cur)
+			}
 			return fmt.Errorf("归档下载遇到 EOF（连接被中断）：请尝试在设置中调低归档下载线程数（当前 %d）", cur)
 		}
 		if cur <= 1 {
+			if rateLimited {
+				return fmt.Errorf("归档下载被限流（HTTP 429）：已自动降至 1 线程仍失败，请稍后重试或减少同时下载的归档任务数")
+			}
 			return fmt.Errorf("归档下载遇到 EOF（连接被中断）：已自动降至 1 线程仍失败，请稍后重试或切换 H@H 源")
 		}
 		next := cur / 2
 		if next < 1 {
 			next = 1
 		}
-		log.Printf("%s [archive-engine] 任务 %s 归档下载 EOF，自动降低线程数 %d -> %d 后断点续传重试",
-			dlWarnTag, g.task.ID, cur, next)
+		if rateLimited {
+			log.Printf("%s [archive-engine] 任务 %s 归档下载被限流(HTTP 429)，自动降低线程数 %d -> %d 后断点续传重试",
+				dlWarnTag, g.task.ID, cur, next)
+		} else {
+			log.Printf("%s [archive-engine] 任务 %s 归档下载 EOF，自动降低线程数 %d -> %d 后断点续传重试",
+				dlWarnTag, g.task.ID, cur, next)
+		}
 		cur = next
 	}
 }

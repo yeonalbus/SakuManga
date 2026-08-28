@@ -72,6 +72,11 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		public.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
 		// Round23：物理页索引直读（管理模式预览展示含隐藏页的全量页面）
 		public.GET("/comics/:id/raw-page/:index", handlers.GetComicRawPageImage)
+
+		// 前端错误日志上报：公开路由（问题8 诊断辅助）。
+		// 浏览器 fetch 无法稳定携带登录凭证（登录页/会话失效时的崩溃更需上报），
+		// 若挂在需登录分组会被 401 拦截导致 client.log 从未落盘（历史 BUG）。
+		public.POST("/client/log", handlers.ReportClientLog)
 	}
 
 	// ─── 3. 受保护路由（需登录）───
@@ -112,9 +117,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/tags/suggest", handlers.QueryTagSuggestions)
 		api.GET("/tags/dictionary", handlers.GetTagDictionary)
 
-		// 前端错误日志上报（问题8 诊断辅助：浏览器无法写文件，由后端落盘到 logs/client.log）
-		api.POST("/client/log", handlers.ReportClientLog)
-		// 日志大小查询（清除为系统级写操作，仅管理员，见下方 admin 分组）
+		// 前端错误日志读取（内容查看）/ 大小查询（清除为系统级写操作，仅管理员，见下方 admin 分组）
+		api.GET("/client/log", handlers.GetClientLog)
 		api.GET("/client/log/size", handlers.GetClientLogSize)
 
 		// Round24：服务端版本与构建标识（部署后新旧核对）

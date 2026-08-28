@@ -28,6 +28,13 @@
       >
         🔍 查询
       </button>
+      <button
+        class="sub-tab"
+        :class="{ active: subTab === 'client' }"
+        @click="subTab = 'client'"
+      >
+        🐞 前端错误
+      </button>
     </div>
 
     <!-- ── 监控：实时滚动终端 ── -->
@@ -122,6 +129,62 @@
         </button>
       </div>
     </div>
+
+    <!-- ── 前端错误：浏览器上报（POST /client/log）落盘的 client.log 内容 ── -->
+    <div v-show="subTab === 'client'" class="query-panel">
+      <div class="query-bar">
+        <span class="meta-hint">浏览器崩溃/报错自动上报（logs/client.log），最新在前</span>
+        <div class="toolbar-spacer"></div>
+        <button class="query-btn" :disabled="clientLoading" @click="fetchClientLogs(0)">
+          {{ clientLoading ? '加载中…' : '刷新' }}
+        </button>
+      </div>
+
+      <div class="query-meta">
+        共 {{ clientTotal }} 条
+        <span v-if="clientEntries.length" class="meta-hint">
+          （第 {{ clientOffset + 1 }}–{{ clientOffset + clientEntries.length }} 条）
+        </span>
+      </div>
+
+      <div v-if="clientEntries.length === 0 && !clientLoading" class="query-empty">
+        暂无前端错误记录
+      </div>
+      <div v-for="(e, i) in clientEntries" :key="i" class="client-log-entry">
+        <div class="client-log-head">
+          <span class="client-log-level" :class="'lv-' + (e.level || 'info')">
+            {{ (e.level || 'info').toUpperCase() }}
+          </span>
+          <span class="client-log-ts">{{ formatTs(e.ts) }}</span>
+          <span class="client-log-msg">{{ e.message }}</span>
+        </div>
+        <div v-if="e.url || e.info" class="client-log-meta">
+          {{ e.url }}{{ e.info ? ' · ' + e.info : '' }}
+        </div>
+        <details v-if="e.stack" class="client-log-details">
+          <summary>堆栈</summary>
+          <pre class="client-log-stack">{{ e.stack }}</pre>
+        </details>
+      </div>
+
+      <div class="query-pager">
+        <button
+          class="pager-btn"
+          :disabled="clientOffset <= 0"
+          @click="fetchClientLogs(Math.max(0, clientOffset - clientLimit))"
+        >
+          上一页
+        </button>
+        <span class="pager-info">第 {{ clientPage }} / {{ clientPages }} 页</span>
+        <button
+          class="pager-btn"
+          :disabled="clientOffset + clientLimit >= clientTotal"
+          @click="fetchClientLogs(clientOffset + clientLimit)"
+        >
+          下一页
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -171,7 +234,7 @@ const formatSize = (bytes: number): string => {
 }
 
 // ── 子 Tab ──
-const subTab = ref<'monitor' | 'query'>('monitor')
+const subTab = ref<'monitor' | 'query' | 'client'>('monitor')
 
 // ── 监控 ──
 interface LogTailLine {
@@ -296,6 +359,52 @@ watch(queryCategory, () => {
   const first = availableDates.value[0] ?? ''
   queryDate.value = first
   runQuery(0)
+})
+
+// ── 前端错误（GET /client/log，倒序分页）──
+interface ClientLogEntry {
+  ts: string
+  level: string
+  message: string
+  stack?: string
+  url?: string
+  info?: string
+}
+
+const clientEntries = ref<ClientLogEntry[]>([])
+const clientTotal = ref(0)
+const clientOffset = ref(0)
+const clientLimit = 50
+const clientLoading = ref(false)
+
+const clientPage = computed(() => Math.floor(clientOffset.value / clientLimit) + 1)
+const clientPages = computed(() => Math.max(1, Math.ceil(clientTotal.value / clientLimit)))
+
+const fetchClientLogs = async (offset: number) => {
+  clientLoading.value = true
+  try {
+    const data = await http<{ total: number; entries: ClientLogEntry[] }>('/client/log', {
+      params: { offset, limit: clientLimit },
+    })
+    clientTotal.value = data.total ?? 0
+    clientEntries.value = data.entries ?? []
+    clientOffset.value = offset
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '获取前端错误日志失败')
+  } finally {
+    clientLoading.value = false
+  }
+}
+
+/** ISO 时间戳 → 本地可读（解析失败原样返回） */
+const formatTs = (iso: string): string => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
+watch(subTab, (tab) => {
+  if (tab === 'client') void fetchClientLogs(0)
 })
 
 onMounted(async () => {
@@ -567,5 +676,88 @@ onBeforeUnmount(stopPolling)
 .pager-info {
   font-size: 13px;
   color: var(--app-text-2);
+}
+
+/* ── 前端错误（client.log 条目）── */
+.client-log-entry {
+  background: #0d1117;
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.client-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.client-log-level {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--app-surface-2);
+  color: var(--app-text-2);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.client-log-level.lv-error {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
+.client-log-level.lv-warn {
+  background: rgba(227, 179, 65, 0.15);
+  color: #e3b341;
+}
+
+.client-log-ts {
+  font-size: 12px;
+  color: var(--app-text-3);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.client-log-msg {
+  color: var(--app-text-strong);
+  word-break: break-all;
+  flex: 1;
+}
+
+.client-log-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--app-text-3);
+  word-break: break-all;
+}
+
+.client-log-details {
+  margin-top: 4px;
+}
+
+.client-log-details summary {
+  font-size: 12px;
+  color: var(--app-text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.client-log-stack {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #a5d6ff;
 }
 </style>

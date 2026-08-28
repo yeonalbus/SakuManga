@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +81,66 @@ func GetClientLogSize(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"size": info.Size()})
+}
+
+// GetClientLog 读取前端错误日志内容（供设置页「前端错误」Tab 展示）。
+// 分页返回：倒序（最新在前），limit 默认 50（上限 200），offset 用于翻页。
+func GetClientLog(c *gin.Context) {
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	entries, err := readClientLogEntries()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"total": 0, "entries": []clientLogEntry{}})
+		return
+	}
+	total := len(entries)
+	if offset >= total {
+		c.JSON(http.StatusOK, gin.H{"total": total, "entries": []clientLogEntry{}})
+		return
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	c.JSON(http.StatusOK, gin.H{"total": total, "entries": entries[offset:end]})
+}
+
+// readClientLogEntries 按行解析 client.log 为结构化条目（ts 升序）。
+// 文件异常膨胀时仅解析尾部 512KB，避免读入内存过大；非 JSON 行降级为 message 展示。
+func readClientLogEntries() ([]clientLogEntry, error) {
+	data, err := os.ReadFile(clientLogPath)
+	if err != nil {
+		return nil, err
+	}
+	const maxTail = 512 * 1024
+	if len(data) > maxTail {
+		data = data[len(data)-maxTail:]
+	}
+	entries := make([]clientLogEntry, 0, 64)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e clientLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			entries = append(entries, clientLogEntry{Level: "info", Message: line})
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 // ClearClientLog 清除前端错误日志文件。

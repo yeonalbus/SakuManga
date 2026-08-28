@@ -60,7 +60,6 @@ const totalPages = ref(0)
 const showControls = ref(true) // 悬浮控制条显隐
 const isFullscreen = ref(false) // 全屏状态
 const showSettings = ref(false) // 显示设置面板
-const showThumbnailsPanel = ref(false) // 缩略图面板显隐
 const isZoomed = ref(false) // 双击放大状态
 const isLoading = ref(false) // 加载中
 // Round20-Bug2/Bug4：页列表加载失败的错误层（显示重试/返回，替代裸 toast）
@@ -234,8 +233,6 @@ const loadComicPages = async () => {
     }
     currentPage.value = startPage
     if (isWebtoon.value) scrollToPage(startPage)
-    // 缩略图进度条默认隐藏（按需通过底部区域 / 顶栏 ▦ 按钮唤起）
-    showThumbnailsPanel.value = false
     // 初始就近补全当前页附近（在线模式空页懒加载）
     preloadNearby(startPage - 1)
   } catch (err) {
@@ -898,49 +895,11 @@ const onWebtoonScroll = () => {
   }
 }
 
-// 缩略图跳页（跳转后保持进度条打开，便于连续导航）
+// 跳页（页码输入框等入口共用）
 const jumpToPage = (page: number) => {
   currentPage.value = page
   if (isWebtoon.value) {
     scrollToPage(page)
-  }
-}
-
-// --------------------------------------------------
-// ▦ 缩略图进度条：底部横条，窗口化渲染当前页附近 ±15 页
-// --------------------------------------------------
-const THUMB_RADIUS = 15
-const thumbStrip = ref<HTMLElement | null>(null)
-/** 窗口内待渲染的页码列表（随当前页滑动） */
-const thumbPages = computed(() => {
-  const list: number[] = []
-  const start = Math.max(1, currentPage.value - THUMB_RADIUS)
-  const end = Math.min(totalPages.value, currentPage.value + THUMB_RADIUS)
-  for (let p = start; p <= end; p++) list.push(p)
-  return list
-})
-/** 各缩略图的 DOM 引用（用于当前页滚动居中） */
-const thumbStripItemRefs = ref<Record<number, HTMLElement | null>>({})
-const setThumbRef = (page: number, el: unknown) => {
-  thumbStripItemRefs.value[page] = (el as HTMLElement) || null
-}
-/** 当前页缩略图滚动居中 */
-const scrollThumbIntoView = () => {
-  nextTick(() => {
-    if (!showThumbnailsPanel.value) return
-    const el = thumbStripItemRefs.value[currentPage.value]
-    if (el && thumbStrip.value) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
-    }
-  })
-}
-
-// 缩略图进度条显隐（点击底部区域切换；缩略图功能常驻可用）
-const toggleThumbStrip = () => {
-  if (didDrag) return
-  showThumbnailsPanel.value = !showThumbnailsPanel.value
-  if (showThumbnailsPanel.value) {
-    scrollThumbIntoView()
   }
 }
 
@@ -1179,8 +1138,6 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 沉浸模式：进入阅读器时隐藏顶部/底部控制条
   showControls.value = !readerSettings.immersiveMode
-  // 缩略图进度条默认隐藏（按需通过底部区域 / 顶栏 ▦ 按钮唤起）
-  showThumbnailsPanel.value = false
   // 滑动翻页：非 passive 监听 touchmove 以允许 preventDefault
   const stage = canvasStage.value
   if (stage) {
@@ -1240,8 +1197,6 @@ watch(currentPage, (newPg) => {
     }
     // 在线模式：就近补全当前页附近，保证翻页即时可用
     preloadNearby(newPg - 1)
-    // 缩略图进度条跟随当前页滚动居中
-    scrollThumbIntoView()
   })
 })
 
@@ -1398,11 +1353,6 @@ watch(
           class="click-zone next-zone"
           @click.stop="handleRightClick"
           :title="effectiveRTL ? '上一页' : '下一页'"
-        ></div>
-        <div
-          class="click-zone bottom-zone"
-          @click.stop="toggleThumbStrip"
-          title="显示/隐藏缩略图"
         ></div>
 
         <div
@@ -1588,31 +1538,6 @@ watch(
           <button class="full-settings-btn" @click="router.push('/settings')">
             📋 前往完整阅读设置
           </button>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- ▦ 缩略图进度条（底部横条，当前页附近窗口化展示，点击跳页） -->
-    <Transition name="fade-bottom">
-      <div v-if="showThumbnailsPanel" class="thumb-strip" @click.stop>
-        <div class="thumb-strip-track" ref="thumbStrip">
-          <div
-            v-for="p in thumbPages"
-            :key="p"
-            :ref="(el) => setThumbRef(p, el)"
-            class="thumb-strip-item"
-            :class="{ active: p === currentPage }"
-            @click="jumpToPage(p)"
-          >
-            <img v-if="pageUrls[p - 1]" :src="pageUrls[p - 1]" :alt="`P${p}`" loading="lazy" />
-            <div v-else class="thumb-strip-placeholder"></div>
-            <span class="thumb-strip-num">{{ p }}</span>
-          </div>
-        </div>
-        <div class="thumb-strip-progress">
-          <span>P{{ currentPage }}</span>
-          <span>/</span>
-          <span>{{ totalPages }}</span>
         </div>
       </div>
     </Transition>
@@ -1815,15 +1740,9 @@ watch(
   position: absolute;
   z-index: 3005;
 }
-/* 顶部 / 底部：唤起阅读设置边栏 */
+/* 顶部：唤起阅读设置边栏 */
 .top-zone {
   top: 0;
-  left: 0;
-  right: 0;
-  height: 72px;
-}
-.bottom-zone {
-  bottom: 0;
   left: 0;
   right: 0;
   height: 72px;
@@ -2151,101 +2070,6 @@ watch(
   border-color: var(--app-accent);
 }
 
-/* ▦ 缩略图进度条（底部横条） */
-.thumb-strip {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 128px;
-  background: var(--reader-thumb-bg);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--app-border-2);
-  z-index: 3012;
-  padding-top: 10px;
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.5);
-  cursor: default;
-}
-
-.thumb-strip-track {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  overflow-x: auto;
-  overflow-y: hidden;
-  height: 96px;
-  padding: 2px 12px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--app-border-3) transparent;
-}
-
-.thumb-strip-track::-webkit-scrollbar {
-  height: 6px;
-}
-
-.thumb-strip-track::-webkit-scrollbar-thumb {
-  background: var(--app-border-3);
-  border-radius: 3px;
-}
-
-.thumb-strip-item {
-  position: relative;
-  flex: 0 0 auto;
-  width: 62px;
-  height: 86px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 2px solid transparent;
-  cursor: pointer;
-  background: var(--app-bg-alt);
-  transition:
-    border-color 0.15s,
-    transform 0.15s;
-}
-
-.thumb-strip-item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.thumb-strip-item.active {
-  border-color: var(--app-accent);
-  transform: translateY(-2px);
-}
-
-.thumb-strip-placeholder {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(180deg, var(--app-surface), var(--app-bg-deep));
-}
-
-.thumb-strip-num {
-  position: absolute;
-  bottom: 2px;
-  right: 2px;
-  background: rgba(0, 0, 0, 0.8);
-  padding: 0 4px;
-  font-size: 0.62rem;
-  border-radius: 2px;
-  color: #eee;
-}
-
-.thumb-strip-progress {
-  position: absolute;
-  top: 8px;
-  right: 14px;
-  display: flex;
-  gap: 4px;
-  font-size: 0.72rem;
-  color: #aaa; /* 角标压在缩略图上：深色半透明底恒定，文字保持浅色 */
-  background: rgba(0, 0, 0, 0.55);
-  padding: 2px 8px;
-  border-radius: 10px;
-  pointer-events: none;
-}
-
 /* 底部状态信息行 */
 .status-row {
   display: flex;
@@ -2358,9 +2182,8 @@ watch(
   .status-widgets {
     gap: 6px;
   }
-  /* 点击热区上下各 72px 太占屏，收窄到 56px */
-  .top-zone,
-  .bottom-zone {
+  /* 点击热区顶部 72px 太占屏，收窄到 56px */
+  .top-zone {
     height: 56px;
   }
   .prev-zone,
@@ -2375,10 +2198,7 @@ watch(
     max-width: 100vw;
     padding: 20px 16px calc(20px + var(--safe-bottom));
   }
-  /* 缩略图进度条与 Webtoon 滚动容器适配底部安全区 */
-  .thumb-strip {
-    padding-bottom: var(--safe-bottom);
-  }
+  /* Webtoon 滚动容器适配底部安全区 */
   .webtoon-container {
     padding-bottom: var(--safe-bottom);
   }

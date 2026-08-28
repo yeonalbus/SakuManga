@@ -144,7 +144,7 @@ src/
     └── offline/
         ├── OfflineHome.vue         # 离线首页（翻页回顶 + 日期跳页）
         ├── OfflineBookshelf.vue    # 离线书架
-        ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片）
+        ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片 + Round26-2 疑似重复簇对比：左右标签卡独立切换）
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
         ├── OfflineMaintain.vue     # 离线书目维护（查重/移除 + 双列对比入口）
@@ -194,7 +194,7 @@ backend/
 │   └── main.go                     # cmd_debug 目录调试入口
 │   # 另有 archivedebug / archivercheck / archivespeed / dbcheck / dmscheck /
 │   #      metadump / readerdebug / relationscheck / reproissue / schemadump /
-│   #      statusdebug / updatelogic / ziprangecheck 等 13 个按场景拆分的调试小工具
+│   #      statusdebug / updatelogic / ziprangecheck / e2eseed（Round26 临时库数据注入，仅限隔离库）等 14 个按场景拆分的调试小工具
 │
 ├── data/                           # 标签词典/计数缓存（运行时下载生成，跟随 exe 位置，勿入库）
 │   ├── db.raw.json + .etag         # 标签词典原始数据 + 校验
@@ -212,6 +212,7 @@ backend/
     │   ├── favorite.go             # 收藏状态模型
     │   ├── comic_rating.go         # 个人评分模型
     │   ├── reading_list.go         # 阅读清单模型
+    │   ├── ignore.go               # Round26 O2：忽略标记模型（title/gid 两型）
     │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
@@ -275,6 +276,9 @@ backend/
         ├── offline.go              # 离线更新/查重/老化判定/删除持久化
         ├── offline_task.go         # 离线维护任务结果缓存（stale 失效机制）
         ├── offline_removed.go      # 画廊被删/版权移除状态持久化与过滤
+        ├── ignore.go               # Round26 O2：忽略标记（title/gid 两型 CRUD + 查重索引）
+        ├── dedup_title.go          # Round26 O3：名称级疑似重复（清洗/判定/决策 + 簇输出）
+        ├── eh_ratelimit.go         # Round26 性能：E 站请求自适应限流（成功提速/失败退避）
         ├── comic_refs.go           # 漫画删除/替换后的引用清理与迁移（历史/书架/阅读清单，Round20）
         ├── tagfilter.go            # E-Hentai f_search tag 解析器（$ 精确/无 $ 前缀，Round20）
         ├── maintain_auto.go        # 维护自动比对（下载后 Reconcile）
@@ -286,7 +290,7 @@ backend/
         └── tag_scheduler.go        # Tag 维护定时调度
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
 
 ---
 
@@ -348,6 +352,9 @@ backend/
 | 改下载并发/优先级调度      | `services/download_scheduler.go`、`archive_thread_pool.go`、`models/download.go`                      |
 | 改更新扫描（周扫描/老化）  | `backend/internal/handlers/update_scan.go`、`services/update_scheduler.go`、`offline.go`（AgedStatus） |
 | 改离线更新/维护/删除标记   | `backend/internal/handlers/offline.go`、`services/offline.go`、`offline_task.go`、`offline_removed.go` |
+| 改维护查重/忽略标记（O2） | `backend/internal/handlers/offline.go`（ignore 三接口）、`services/ignore.go`、`models/ignore.go`、`src/views/offline/OfflineMaintain.vue` |
+| 改疑似重复聚类（O3）      | `services/dedup_title.go`（清洗/判定/决策 + 簇）、`dedup_title_test.go`、`offline_dedup_e2e_test.go`、`src/views/offline/OfflineMaintain.vue` |
+| 改 E 站请求限流           | `backend/internal/services/eh_ratelimit.go`（自适应：成功提速/失败退避）                              |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |
 | 改历史 gid 合并/漫画引用清理 | `backend/internal/handlers/library.go`、`services/comic_refs.go`                                    |

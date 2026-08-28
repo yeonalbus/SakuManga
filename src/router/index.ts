@@ -87,13 +87,11 @@ const routes: RouteRecordRaw[] = [
     // Round3-任务2：仅管理员可访问
     meta: { requiresAdmin: true },
   },
-  // 🎲 工具：画质升级（跨模式全局功能，仅管理员；与 random/reading-list 同属工具组）
+  // 🎲 工具：画质升级（跨模式全局功能，与 random/reading-list 同属工具组，所有登录用户可用）
   {
     path: '/upgrade',
     name: 'Upgrade',
     component: () => import('@/views/UpgradeView.vue'),
-    // 画质升级：仅管理员可访问（升级会发起下载消耗 GP，与更新/维护权限一致）
-    meta: { requiresAdmin: true },
   },
   {
     path: '/offline/compare',

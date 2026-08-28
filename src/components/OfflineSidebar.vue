@@ -249,8 +249,8 @@ const onLinkClick = (e: MouseEvent) => {
     <span class="group-title">🎲 工具</span>
     <router-link to="/random">手气不错</router-link>
     <router-link to="/reading-list">阅读清单</router-link>
-    <!-- 画质升级：仅管理员可见（升级会发起下载消耗 GP，与更新/维护权限一致） -->
-    <router-link v-if="isAdmin" to="/upgrade">画质升级</router-link>
+    <!-- 画质升级：与工具组其他组件一致对所有登录用户显示（下载许可由后端按用户校验） -->
+    <router-link to="/upgrade">画质升级</router-link>
   </div>
 </template>
 

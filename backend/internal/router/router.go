@@ -231,6 +231,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/downloads/:id/unlock", downloadHandler.UnlockDownload)
 		api.POST("/downloads/:id/priority", downloadHandler.SetDownloadPriority)
 
+		// 画质升级（图片质量升级功能）：工具组组件，所有登录用户可用。
+		// list 登录即可查看候选；download 发起升级下载，保留下载许可校验
+		//（admin 或 allowDownload=true，见 UpgradeDownload 内 requireDownloadPermission）。
+		api.GET("/offline/upgrade/list", upgradeHandler.ListUpgradeCandidates)
+		api.POST("/offline/upgrade/download", upgradeHandler.UpgradeDownload)
+
 		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置 / 离线更新维护）───
 		// Round3-任务2：离线更新检测 + 维护查重从登录组移入仅管理员分组
 		admin := api.Group("")
@@ -289,10 +295,6 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.POST("/offline/updates/download", offlineHandler.DownloadUpdate)
 			// 需求 3(2)：画廊被删/移除项「移出更新列表」（仅清标记，保留本地文件）
 			admin.POST("/offline/updates/:id/dismiss", offlineHandler.DismissOfflineUpdate)
-
-			// 画质升级（图片质量升级功能）：候选列表 + 升级为归档原图下载
-			admin.GET("/offline/upgrade/list", upgradeHandler.ListUpgradeCandidates)
-			admin.POST("/offline/upgrade/download", upgradeHandler.UpgradeDownload)
 
 			// 每周自动更新扫描设置（Round4 任务四：周扫描 + Aged Status）
 			admin.GET("/offline/update-scan/setting", updateScanHandler.GetSetting)

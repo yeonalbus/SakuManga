@@ -78,18 +78,17 @@ func (m *ScanManager) GetProgress(pathID string) *ScanProgress {
 	if !ok {
 		return nil
 	}
-	sp := p.Snapshot()
-	return &sp
+	return p.Snapshot()
 }
 
-// GetAllProgress 返回所有路径的扫描进度快照（含已完成任务，供前端一次轮询恢复状态）
-func (m *ScanManager) GetAllProgress() []ScanProgress {
+// GetAllProgress 返回所有路径的扫描进度快照（含已完成任务，供前端一次轮询恢复状态）。
+// 返回指针切片：ScanProgress 含 sync.Mutex，值切片 append 会拷贝锁（go vet 告警）。
+func (m *ScanManager) GetAllProgress() []*ScanProgress {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	list := make([]ScanProgress, 0, len(m.running))
+	list := make([]*ScanProgress, 0, len(m.running))
 	for _, p := range m.running {
-		sp := p.Snapshot()
-		list = append(list, sp)
+		list = append(list, p.Snapshot())
 	}
 	return list
 }

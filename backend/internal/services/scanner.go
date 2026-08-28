@@ -59,14 +59,16 @@ func newScanProgress(pathID, mode string) *ScanProgress {
 	}
 }
 
-// Snapshot 返回一个安全的浅拷贝快照，供外部读取（JSON 序列化）
-func (p *ScanProgress) Snapshot() ScanProgress {
+// Snapshot 返回一个安全的浅拷贝快照指针，供外部读取（JSON 序列化）。
+// 返回指针而非值：ScanProgress 内含 sync.Mutex，值拷贝会触发 go vet
+// 「copies lock value」告警（append/return 拷贝锁）。
+func (p *ScanProgress) Snapshot() *ScanProgress {
 	if p == nil {
-		return ScanProgress{}
+		return &ScanProgress{}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return ScanProgress{
+	return &ScanProgress{
 		PathID:       p.PathID,
 		Mode:         p.Mode,
 		Phase:        p.Phase,

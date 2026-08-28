@@ -427,13 +427,33 @@ interface CommentLinkSegment {
   token?: string
 }
 
-// 匹配 http(s) URL（不含空白与闭合引号/尖括号）
-const COMMENT_URL_RE = /https?:\/\/[^\s<>"']+/g
+// 匹配 http(s) URL：仅允许 RFC 3986 合法字符（含百分号编码）。
+// 遇到中文/全角标点/空白/引号/尖括号立即截断——E 站评论中 URL 后常紧跟中文文本
+// （无空格分隔，如 "...RJ01690256做了一个..."），宽松字符集会误吞中文。
+const COMMENT_URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]+/g
 // E-Hentai/ExHentai 画廊链接：/g/<gid>/<token>/
 const COMMENT_GALLERY_RE = /^https?:\/\/(?:e-hentai\.org|exhentai\.org)\/g\/(\d+)\/([0-9a-fA-F]+)\/?/i
 
 // 修剪 URL 尾部的标点（半角 + 全角），标点部分归还为纯文本
 const trimUrlPunct = (s: string): string => s.replace(/[.,;:!?)\]}>"'」』】。，；：！？、]+$/, '')
+
+// 相邻无分隔的多个 URL（如 "https://a.comhttps://b.com"）按内部协议头切分：
+// 从第二个 http(s):// 起重新开始一条链接。
+const splitEmbeddedUrls = (raw: string): string[] => {
+  const parts: string[] = []
+  let rest = raw
+  while (rest.length > 0) {
+    const rel = rest.slice(1).search(/https?:\/\//) // 跳过开头自身的协议头
+    if (rel < 0) {
+      parts.push(rest)
+      break
+    }
+    const cut = rel + 1
+    parts.push(rest.slice(0, cut))
+    rest = rest.slice(cut)
+  }
+  return parts
+}
 
 const splitCommentLinks = (content: string): CommentLinkSegment[] => {
   const segments: CommentLinkSegment[] = []
@@ -442,16 +462,25 @@ const splitCommentLinks = (content: string): CommentLinkSegment[] => {
     const idx = m.index ?? 0
     if (idx > last) segments.push({ type: 'text', text: content.slice(last, idx) })
     const raw = m[0]
-    const trimmed = trimUrlPunct(raw)
-    const gallery = trimmed.match(COMMENT_GALLERY_RE)
-    if (gallery) {
-      segments.push({ type: 'link', text: trimmed, url: trimmed, gid: gallery[1], token: gallery[2] })
-    } else {
-      segments.push({ type: 'link', text: trimmed, url: trimmed })
-    }
-    // URL 尾部被修剪掉的标点归为纯文本
-    if (raw.length > trimmed.length) {
-      segments.push({ type: 'text', text: raw.slice(trimmed.length) })
+    // 一段匹配可能含多个相邻 URL（无分隔），逐个切分处理
+    for (const part of splitEmbeddedUrls(raw)) {
+      const trimmed = trimUrlPunct(part)
+      const gallery = trimmed.match(COMMENT_GALLERY_RE)
+      if (gallery) {
+        segments.push({
+          type: 'link',
+          text: trimmed,
+          url: trimmed,
+          gid: gallery[1],
+          token: gallery[2],
+        })
+      } else {
+        segments.push({ type: 'link', text: trimmed, url: trimmed })
+      }
+      // URL 尾部被修剪掉的标点归为纯文本
+      if (part.length > trimmed.length) {
+        segments.push({ type: 'text', text: part.slice(trimmed.length) })
+      }
     }
     last = idx + raw.length
   }

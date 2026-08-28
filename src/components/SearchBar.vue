@@ -181,11 +181,13 @@ const triggerSearch = (queryText?: string) => {
     // 清空搜索栏本身不跳转，回归首页由这里负责）
     if (activeStoreKeyword.value !== '') clearStoreKeyword()
     const isOffline = modeStore.isOffline
-    if (isOffline) {
-      if (!route.path.startsWith('/offline/home')) router.push('/offline/home')
-    } else {
-      if (!route.path.startsWith('/online/home')) router.push('/online/home')
-    }
+    const homePath = isOffline ? '/offline/home' : '/online/home'
+    // 修复（PWA 同 tag 二次搜索失效）：此前仅判断 route.path（不含 query），
+    // URL 仍残留 ?kw= 时「回首页」不导航——Vue Router 的 route 对象停留在带 kw 的
+    // fullPath（OnlineHome 的 writeKeywordToUrl 是 history.replaceState，不通知 router），
+    // 再次搜索相同关键词时 push 目标与当前 fullPath 相同 → duplicated no-op 静默无反应。
+    // 改为按 fullPath 判断：残留 query 时强制 push 干净首页，真正清除 URL 上的 kw。
+    if (route.fullPath !== homePath) router.push(homePath)
     return
   }
 
@@ -214,7 +216,18 @@ const triggerSearch = (queryText?: string) => {
   const routeObj = { path: targetPath, query: { kw: finalQuery } }
   // Round17：PWA 下无多标签 → SPA 同标签（防逃逸）；桌面保持新标签
   if (isStandalonePWA()) {
-    router.push(routeObj)
+    // 修复（PWA 同 tag 二次搜索失效）：push 前先写 Store 关键词——keep-alive 按
+    // $route.fullPath 缓存组件实例，从缓存恢复的首页 setup 不重跑、不重读 URL kw；
+    // 提前写 Store 可保证 watch(onlineSearchConfig) 必触发 initSearch：
+    //   - 目标 URL 与当前 route 相同（重复搜索同关键词）→ push 为 duplicated no-op，
+    //     但 Store 已更新 → 当前首页 watch 触发搜索，等效刷新结果；
+    //   - URL 不同 → 正常导航，新实例 setup 写入相同值不重复触发 watch，无双重请求。
+    if (modeStore.isOffline) {
+      offlineSearchConfig.value.keyword = finalQuery
+    } else {
+      onlineSearchConfig.value.keyword = finalQuery
+    }
+    router.push(routeObj).catch(() => {})
   } else {
     const url = router.resolve(routeObj).href
     window.open(url, '_blank')

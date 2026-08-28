@@ -131,9 +131,7 @@
         </div>
       </div>
       <select v-model="downloadSettings.archiveThreads" class="setting-select">
-        <option :value="3">3</option>
-        <option :value="5">5</option>
-        <option :value="10">10</option>
+        <option v-for="n in 10" :key="n" :value="n">{{ n }}</option>
       </select>
     </div>
 

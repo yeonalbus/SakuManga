@@ -11,7 +11,7 @@ import { resolveDefaultDownloadScheme } from '@/api/download'
 import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/userStore'
-import { consumeBackState, isStandalonePWA, shouldCloseTab, openContentTab } from '@/utils/detailNav'
+import { consumeBackState, isStandalonePWA, shouldCloseTab, openContentTab, buildDetailHref } from '@/utils/detailNav'
 import { API_BASE } from '@/config/api'
 import { rememberListState } from '@/utils/scrollMemory'
 // 点击上传者 → 跳转对应搜索界面（f_search 标准语法 uploader:xxx$，与点击 tag 行为一致）
@@ -414,6 +414,58 @@ const handleUploaderClick = () => {
   } else {
     const url = router.resolve(routeObj).href
     window.open(url, '_blank')
+  }
+}
+
+// 4.6 评论区链接解析：识别文本中的 http(s) 链接；E-Hentai/ExHentai 画廊链接
+// （/g/<gid>/<token>/）点击直跳在线详情，其他链接新标签打开。
+interface CommentLinkSegment {
+  type: 'text' | 'link'
+  text: string
+  url?: string
+  gid?: string
+  token?: string
+}
+
+// 匹配 http(s) URL（不含空白与闭合引号/尖括号）
+const COMMENT_URL_RE = /https?:\/\/[^\s<>"']+/g
+// E-Hentai/ExHentai 画廊链接：/g/<gid>/<token>/
+const COMMENT_GALLERY_RE = /^https?:\/\/(?:e-hentai\.org|exhentai\.org)\/g\/(\d+)\/([0-9a-fA-F]+)\/?/i
+
+// 修剪 URL 尾部的标点（半角 + 全角），标点部分归还为纯文本
+const trimUrlPunct = (s: string): string => s.replace(/[.,;:!?)\]}>"'」』】。，；：！？、]+$/, '')
+
+const splitCommentLinks = (content: string): CommentLinkSegment[] => {
+  const segments: CommentLinkSegment[] = []
+  let last = 0
+  for (const m of content.matchAll(COMMENT_URL_RE)) {
+    const idx = m.index ?? 0
+    if (idx > last) segments.push({ type: 'text', text: content.slice(last, idx) })
+    const raw = m[0]
+    const trimmed = trimUrlPunct(raw)
+    const gallery = trimmed.match(COMMENT_GALLERY_RE)
+    if (gallery) {
+      segments.push({ type: 'link', text: trimmed, url: trimmed, gid: gallery[1], token: gallery[2] })
+    } else {
+      segments.push({ type: 'link', text: trimmed, url: trimmed })
+    }
+    // URL 尾部被修剪掉的标点归为纯文本
+    if (raw.length > trimmed.length) {
+      segments.push({ type: 'text', text: raw.slice(trimmed.length) })
+    }
+    last = idx + raw.length
+  }
+  if (last < content.length) segments.push({ type: 'text', text: content.slice(last) })
+  return segments
+}
+
+const handleCommentLinkClick = (seg: CommentLinkSegment) => {
+  if (!seg.url) return
+  if (seg.gid) {
+    // 画廊链接 → 打开在线详情（PC 新标签 / PWA 同标签）
+    openContentTab({ href: buildDetailHref({ id: seg.gid, token: seg.token }), id: seg.gid })
+  } else {
+    window.open(seg.url, '_blank', 'noopener')
   }
 }
 
@@ -968,7 +1020,18 @@ watch(
               <span class="user-name">{{ item.user }}</span>
               <span class="comment-time">{{ item.date }}</span>
             </div>
-            <p class="comment-body">{{ item.content }}</p>
+            <p class="comment-body">
+              <template v-for="(seg, i) in splitCommentLinks(item.content)" :key="i">
+                <span
+                  v-if="seg.type === 'link'"
+                  class="comment-link"
+                  :title="seg.gid ? '点击打开画廊详情' : seg.url"
+                  @click="handleCommentLinkClick(seg)"
+                  >{{ seg.text }}</span
+                >
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </p>
           </div>
         </div>
         <div v-else class="empty-box">该画廊暂无社区评论</div>
@@ -1660,6 +1723,17 @@ watch(
   font-size: 0.9rem;
   color: var(--app-text-2);
   line-height: 1.4;
+}
+
+.comment-link {
+  color: #007acc;
+  cursor: pointer;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.comment-link:hover {
+  opacity: 0.85;
 }
 
 .add-reading-btn {

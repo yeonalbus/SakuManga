@@ -38,6 +38,11 @@
         </span>
       </div>
 
+      <div class="setting-row">
+        <span class="row-label">Pass Hash</span>
+        <span class="row-value hash">{{ accountInfo.ipb_pass_hash || '未配置' }}</span>
+      </div>
+
       <div class="setting-row clickable" @click="handleOpenBindModal">
         <span class="row-label">查看 / 更新凭证 (Cookie)</span>
         <span class="arrow-icon">›</span>
@@ -89,8 +94,27 @@
         </div>
 
         <div class="modal-actions">
-          <button class="action-btn" :disabled="submitting" @click="handleCloseModal">取消</button>
-          <button class="action-btn primary" :disabled="submitting" @click="handleSaveCookies">
+          <button class="action-btn" :disabled="submitting || refreshing" @click="handleCloseModal">
+            取消
+          </button>
+          <button
+            class="action-btn refresh"
+            :disabled="
+              submitting ||
+              refreshing ||
+              !form.ipb_member_id.trim() ||
+              !form.ipb_pass_hash.trim()
+            "
+            :title="
+              form.ipb_member_id.trim() && form.ipb_pass_hash.trim()
+                ? '自动刷新 igneous（里站）与 sk（表站）凭证，无需自行上站抓取'
+                : '请先填写 ipb_member_id 与 ipb_pass_hash'
+            "
+            @click="handleRefreshCookies"
+          >
+            {{ refreshing ? '刷新中...' : '刷新凭证' }}
+          </button>
+          <button class="action-btn primary" :disabled="submitting || refreshing" @click="handleSaveCookies">
             {{ submitting ? '保存中...' : '保存并校验' }}
           </button>
         </div>
@@ -121,6 +145,7 @@ interface EAccountConfig {
 const isLoggedIn = ref(false)
 const hasExAccess = ref(false)
 const submitting = ref(false)
+const refreshing = ref(false)
 
 const accountInfo = reactive<EAccountConfig>({
   ipb_member_id: '',
@@ -146,6 +171,7 @@ const loadAccountSettings = async () => {
       isLoggedIn?: boolean
       data?: {
         ipb_member_id?: string
+        ipb_pass_hash?: string
         igneous?: string
         sk?: string
         isEx?: boolean
@@ -155,6 +181,7 @@ const loadAccountSettings = async () => {
     if (json.isLoggedIn && json.data) {
       isLoggedIn.value = true
       accountInfo.ipb_member_id = json.data.ipb_member_id || ''
+      accountInfo.ipb_pass_hash = json.data.ipb_pass_hash || ''
       accountInfo.igneous = json.data.igneous || ''
       accountInfo.sk = json.data.sk || ''
       hasExAccess.value = json.data.isEx || false
@@ -169,7 +196,8 @@ const loadAccountSettings = async () => {
 // 2. 打开编辑弹窗
 const handleOpenBindModal = () => {
   form.ipb_member_id = accountInfo.ipb_member_id
-  form.ipb_pass_hash = '' // 出于安全控制，编辑时不回显原 Hash
+  // 回显现有 Hash：手动修改 sk/igneous 时无需重填 pass_hash
+  form.ipb_pass_hash = accountInfo.ipb_pass_hash
   form.igneous = accountInfo.igneous
   form.sk = accountInfo.sk
   rawCookieInput.value = ''
@@ -237,6 +265,43 @@ const handleSaveCookies = async () => {
     console.error(err)
   } finally {
     submitting.value = false
+  }
+}
+
+// 4.5 刷新凭证：用当前表单中的 member_id/pass_hash 请求后端刷新 sk / igneous，
+// 新值回填表单（不落库），确认后再走「保存并校验」
+const handleRefreshCookies = async () => {
+  if (!form.ipb_member_id.trim() || !form.ipb_pass_hash.trim()) {
+    toast.error('请先填写 ipb_member_id 与 ipb_pass_hash 后再刷新')
+    return
+  }
+  refreshing.value = true
+  try {
+    const res = await http<{ igneous?: string; sk?: string }>('/account/refresh-cookies', {
+      method: 'POST',
+      body: JSON.stringify({
+        ipb_member_id: form.ipb_member_id.trim(),
+        ipb_pass_hash: form.ipb_pass_hash.trim(),
+      }),
+    })
+    let got = false
+    if (res.igneous) {
+      form.igneous = res.igneous
+      got = true
+    }
+    if (res.sk) {
+      form.sk = res.sk
+      got = true
+    }
+    if (got) {
+      toast.success('已获取新凭证（sk / igneous），请确认后保存')
+    } else {
+      toast.error('未获取到新凭证，请检查凭证是否有效')
+    }
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '刷新凭证失败')
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -334,6 +399,14 @@ onMounted(() => {
   gap: 8px;
 }
 
+.row-value.hash {
+  font-family: 'Courier New', Consolas, monospace;
+  font-size: 12px;
+  color: var(--app-text-2);
+  word-break: break-all;
+  text-align: right;
+}
+
 .badge {
   font-size: 11px;
   padding: 2px 6px;
@@ -385,6 +458,15 @@ onMounted(() => {
 
 .action-btn.primary:hover:not(:disabled) {
   background: #f06477;
+}
+
+.action-btn.refresh {
+  border-color: #007acc;
+  color: #5cb8ff;
+}
+
+.action-btn.refresh:hover:not(:disabled) {
+  background: rgba(0, 122, 204, 0.15);
 }
 
 .modal-mask {

@@ -236,6 +236,48 @@ func (s *EHService) TryFetchIgneous(setting *models.AccountSetting) string {
 	return ""
 }
 
+// RefreshCookies 使用当前凭证主动刷新 sk（E 站偏好 Cookie，e-hentai 独占）与
+// igneous（里站 Cookie，exhentai 独占），供「更新 Cookie 凭证」弹窗的「刷新凭证」
+// 按钮调用，无需用户自行上站抓取。不落库，返回值由调用方决定如何应用。
+// 任一获取失败不互相阻断（如仅表站可访问时 sk 可拿到、igneous 为空）。
+func (s *EHService) RefreshCookies(setting *models.AccountSetting) (igneous, sk string, err error) {
+	if setting == nil || setting.IPBMemberID == "" || setting.IPBPassHash == "" {
+		return "", "", fmt.Errorf("缺少 ipb_member_id / ipb_pass_hash，无法刷新凭证")
+	}
+
+	// 1. 请求 E-Hentai 主页，从本次响应下发的 Set-Cookie 中提取 sk
+	client, err := s.BuildClient(setting)
+	if err != nil {
+		return "", "", err
+	}
+	req, err := http.NewRequest("GET", "https://e-hentai.org/", nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("请求 E-Hentai 失败（请检查代理/网络）: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// 只认本次响应下发的 sk：凭证过期（返回登录页无 Set-Cookie）时保持空值，避免误用旧值
+	for _, sc := range resp.Header.Values("Set-Cookie") {
+		pair := strings.SplitN(sc, ";", 2)[0]
+		if strings.HasPrefix(pair, "sk=") {
+			sk = strings.TrimPrefix(pair, "sk=")
+			break
+		}
+	}
+
+	// 2. 请求 ExHentai 提取 igneous
+	igneous = s.TryFetchIgneous(setting)
+
+	return igneous, sk, nil
+}
+
 // VerifyAccount 校验凭证并在必要时自动刷新/抓取 igneous
 func (s *EHService) VerifyAccount(setting *models.AccountSetting) (isEx bool, err error) {
 	// 1. 未填 igneous 时自动尝试抓取

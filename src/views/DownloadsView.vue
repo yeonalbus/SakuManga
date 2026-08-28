@@ -244,39 +244,43 @@ onUnmounted(() => {
 
     <!-- 模式筛选 -->
     <div class="filter-row">
-      <button
-        class="filter-btn"
-        :class="{ active: modeFilter === 'all' }"
-        @click="setModeFilter('all')"
-      >
-        全部
-      </button>
-      <button
-        class="filter-btn"
-        :class="{ active: modeFilter === 'gallery' }"
-        @click="setModeFilter('gallery')"
-      >
-        🖼️ 画廊
-      </button>
-      <button
-        class="filter-btn"
-        :class="{ active: modeFilter === 'archive' }"
-        @click="setModeFilter('archive')"
-      >
-        🗜️ 归档
-      </button>
+      <div class="mode-filter-group">
+        <button
+          class="filter-btn"
+          :class="{ active: modeFilter === 'all' }"
+          @click="setModeFilter('all')"
+        >
+          全部
+        </button>
+        <button
+          class="filter-btn"
+          :class="{ active: modeFilter === 'gallery' }"
+          @click="setModeFilter('gallery')"
+        >
+          🖼️ 画廊
+        </button>
+        <button
+          class="filter-btn"
+          :class="{ active: modeFilter === 'archive' }"
+          @click="setModeFilter('archive')"
+        >
+          🗜️ 归档
+        </button>
+      </div>
 
       <span class="filter-divider"></span>
 
-      <button
-        v-for="(meta, key) in statusMeta"
-        :key="key"
-        class="filter-btn status"
-        :class="{ active: statusFilter === key }"
-        @click="setStatusFilter(statusFilter === key ? '' : key)"
-      >
-        {{ meta.label }}
-      </button>
+      <div class="status-filter-group">
+        <button
+          v-for="(meta, key) in statusMeta"
+          :key="key"
+          class="filter-btn status"
+          :class="{ active: statusFilter === key }"
+          @click="setStatusFilter(statusFilter === key ? '' : key)"
+        >
+          {{ meta.label }}
+        </button>
+      </div>
     </div>
 
     <div v-if="isLoading && !tasks.length" class="loading-box">加载中...</div>
@@ -461,6 +465,15 @@ onUnmounted(() => {
 }
 
 .filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 模式筛选 / 状态筛选两组（桌面：换行平铺；移动端：一行两列） */
+.mode-filter-group,
+.status-filter-group {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -847,6 +860,27 @@ onUnmounted(() => {
   .filter-btn {
     padding: 6px 12px;
     font-size: 0.78rem;
+  }
+
+  /* 手机/平板：筛选区一行两列 —— 左列模式（全部/画廊/归档）固定，右列状态横滑 */
+  .filter-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+  }
+  .mode-filter-group {
+    flex-wrap: nowrap;
+  }
+  .status-filter-group {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    /* 隐藏滚动条（保留可滑动），视觉更干净 */
+    scrollbar-width: none;
+  }
+  .status-filter-group::-webkit-scrollbar {
+    display: none;
   }
 
   /* 任务卡片：封面缩小、内边距收紧 */

@@ -82,7 +82,8 @@ func (h *UpgradeHandler) UpgradeDownload(c *gin.Context) {
 	case comic.RemovedStatus:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "该画廊已被删除/移除，无法升级下载"})
 		return
-	case comic.DownloadScheme == string(models.DefaultSchemeArchiveOriginal):
+	case services.ResolveEffectiveDownloadScheme(&comic) == string(models.DefaultSchemeArchiveOriginal):
+		// 新数据直接判方案；存量（方案空）按形态推断：archive=归档原图（已达标），gallery=画廊下载（可升级）
 		c.JSON(http.StatusBadRequest, gin.H{"error": "该漫画已是归档原图（archiveOriginal），无需升级"})
 		return
 	}

@@ -153,8 +153,8 @@ onMounted(fetchCandidates)
       <div>
         <h2 class="page-title">⬆️ 图片质量升级</h2>
         <p class="subtitle">
-          检测「非归档原图」版本的本子（画廊下载 / 归档压缩 / 版本未知），确认后升级为归档原图
-          （H@H 原图包）下载方案，完成后自动删除旧版本
+          检测「非归档原图」版本的本子（画廊下载 / 归档压缩），确认后升级为归档原图（H@H
+          原图包）下载方案，完成后自动删除旧版本
         </p>
       </div>
       <div class="header-actions">

@@ -250,7 +250,7 @@ const onLinkClick = (e: MouseEvent) => {
     <router-link to="/random">手气不错</router-link>
     <router-link to="/reading-list">阅读清单</router-link>
     <!-- 画质升级：仅管理员可见（升级会发起下载消耗 GP，与更新/维护权限一致） -->
-    <router-link v-if="isAdmin" to="/offline/upgrade">⬆️ 画质升级</router-link>
+    <router-link v-if="isAdmin" to="/offline/upgrade">画质升级</router-link>
   </div>
 </template>
 

@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -65,7 +66,10 @@ func CreateIgnore(db *gorm.DB, typ, titleKey, artist, gid, comicID, note string)
 	}
 
 	rec := &models.IgnoredIdentifier{
-		ID:        fmt.Sprintf("ignore-%d", time.Now().UnixNano()),
+		// 主键唯一性：UnixNano 在 Windows 上受系统时钟 tick 精度限制（约 15.6ms），
+		// 同一 tick 内连续创建不同条目会生成相同 ID 触发 UNIQUE 冲突（既有 flaky 测试根因）。
+		// 追加随机后缀保证同 tick 内多次创建也唯一（Go 1.20+ math/rand 自动随机种子）。
+		ID:        fmt.Sprintf("ignore-%d-%d", time.Now().UnixNano(), rand.Int63()),
 		Type:      typ,
 		TitleKey:  titleKey,
 		Artist:    artist,

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { openComicDetailInNewTab } from '@/utils/detailNav'
 
 const { modal, toast } = useUI()
 const router = useRouter()
@@ -25,15 +26,46 @@ interface DedupItemDTO {
   comic: OfflineComicDTO
   reason: string // 重复原因
   keep: boolean // true=建议保留，false=建议删除
+  rule?: string // Round26 O2：gid | hash | parent | signature（仅 parent 可忽略）
+}
+
+// Round26 O3：疑似重复组（名称级弱证据，只建议）
+interface ClusterMemberDTO {
+  comic: OfflineComicDTO
+  pageCount: number
+  lang?: string
+}
+interface DedupClusterDTO {
+  id: string
+  titleKey: string
+  artist?: string
+  confidence: 'high' | 'medium'
+  reason: string
+  members: ClusterMemberDTO[]
+  ignored?: boolean // 全量核对时命中忽略（增量已跳过，不会返回）
+}
+
+// Round26 O2：忽略清单条目
+interface IgnoreItemDTO {
+  id: string
+  type: 'title' | 'gid' | 'comic'
+  titleKey?: string
+  artist?: string
+  gid?: string
+  comicId?: string
+  comicTitle?: string // comic 型：被忽略漫画的标题（后端补查）
+  note?: string
+  createdAt: string
 }
 
 interface DedupResultDTO {
   items: DedupItemDTO[]
+  clusters?: DedupClusterDTO[] // Round26 O3
   finishedAt?: number // 结果生成时间戳(ms)
   stale?: boolean // 结果是否已过期（删除操作后置 true，提示重新扫描）
 }
 
-// 需求4：书库变更与查重结果的同步状态（进入维护界面时判断是否自动增量查重）
+// 需求4（⑨ 改造）：书库变更与查重结果的同步状态（进入维护界面时仅用于「过期提示」，不再自动触发增量查重）
 interface UnsyncedStatusDTO {
   lastLibraryChange: number // 书库最近一次变更时间戳(ms)
   resultFinishedAt: number // 最近一次查重结果生成时间戳(ms)
@@ -48,6 +80,14 @@ const removingId = ref('')
 const coverFailed = ref<Record<string, boolean>>({})
 // 批量删除：多选“建议删除”项后一次提交，避免反复“删除→刷新”
 const selectedIds = ref<string[]>([])
+
+// ── Round26 O2/O3：疑似重复簇 + 忽略标记 ──
+const clusters = ref<DedupClusterDTO[]>([]) // O3 疑似重复组（不含已忽略）
+const ignoredClusters = ref<DedupClusterDTO[]>([]) // 全量核对返回的已忽略簇（折叠区展示）
+const ignoreItems = ref<IgnoreItemDTO[]>([]) // O2 忽略清单
+const ignoreModalOpen = ref(false)
+const ignoreCount = computed(() => ignoreItems.value.length)
+const activeClusters = computed(() => clusters.value.filter((c) => !c.ignored))
 
 // ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
 interface OfflineTaskState {
@@ -85,10 +125,159 @@ const loadResult = async () => {
   try {
     const data = await http<DedupResultDTO>('/offline/maintain/result')
     items.value = data?.items || []
+    clusters.value = data?.clusters || []
+    ignoredClusters.value = clusters.value.filter((c) => c.ignored)
+    clusters.value = clusters.value.filter((c) => !c.ignored)
     resultStale.value = !!data?.stale
   } catch {
     // 结果暂未就绪，交给轮询下一轮
   }
+}
+
+// ── Round26 O2：忽略标记 ──
+
+// 拉取忽略清单（计数 + 弹层数据）
+const loadIgnoreList = async () => {
+  try {
+    const data = await http<{ items: IgnoreItemDTO[] }>('/offline/ignore/list')
+    ignoreItems.value = data?.items || []
+  } catch {
+    // 接口异常忽略
+  }
+}
+
+// 忽略一个疑似重复组（title 型：核心名 + 画师）——从忽略选择弹层的「忽略整组」进入
+const ignoreCluster = async (cluster: DedupClusterDTO) => {
+  const name = cluster.artist ? `${cluster.titleKey}（artist:${cluster.artist}）` : cluster.titleKey
+  const confirmed = await modal.confirm(
+    `忽略后，后续增量查重不再提示与「${name}」相关的疑似重复；全量核对仍会列出（可在忽略清单中恢复）。\n\n确定忽略整组吗？`,
+    '🕶️ 忽略本组',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'title', titleKey: cluster.titleKey, artist: cluster.artist || '' }),
+    })
+    toast.success('已忽略本组，可在「忽略清单」中恢复')
+    clusters.value = clusters.value.filter((c) => c.id !== cluster.id)
+    await loadIgnoreList()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '忽略失败')
+  }
+}
+
+// ── Round26-2：忽略选择弹层（整组忽略 / 成员级忽略）──
+const ignorePickerOpen = ref(false)
+const ignorePickerCluster = ref<DedupClusterDTO | null>(null)
+const ignoreSelectedMembers = ref<string[]>([])
+
+const openIgnorePicker = (cluster: DedupClusterDTO) => {
+  ignorePickerCluster.value = cluster
+  ignoreSelectedMembers.value = []
+  ignorePickerOpen.value = true
+}
+
+// 成员级忽略：选中的成员不再参与疑似重复聚类（误判剔除）
+const confirmIgnoreMembers = async () => {
+  const cluster = ignorePickerCluster.value
+  if (!cluster || ignoreSelectedMembers.value.length === 0) return
+  const ids = [...ignoreSelectedMembers.value]
+  try {
+    for (const m of cluster.members) {
+      if (ids.includes(m.comic.id)) {
+        await http('/offline/ignore', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'comic', comicId: m.comic.id }),
+        })
+      }
+    }
+    toast.success(`已忽略 ${ids.length} 个成员（可在「忽略清单」中恢复）`)
+    // 本地即时收缩：剩余成员 <2 则整簇移除，否则保留收缩后的簇
+    const remain = cluster.members.filter((m) => !ids.includes(m.comic.id))
+    if (remain.length < 2) {
+      clusters.value = clusters.value.filter((c) => c.id !== cluster.id)
+    } else {
+      const idx = clusters.value.findIndex((c) => c.id === cluster.id)
+      if (idx >= 0) clusters.value[idx] = { ...cluster, members: remain }
+    }
+    ignorePickerOpen.value = false
+    await loadIgnoreList()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '忽略成员失败')
+  }
+}
+
+// 进入簇对比视图（双列 + 标签卡切换，OfflineCompare type=cluster）
+const openClusterCompare = (cluster: DedupClusterDTO) => {
+  router.push({
+    path: '/offline/compare',
+    query: { type: 'cluster', titleKey: cluster.titleKey, artist: cluster.artist || '' },
+  })
+}
+
+// 忽略规则 3 父画廊更新提示（gid 型：忽略父画廊 gid）
+const ignoreParent = async (item: DedupItemDTO) => {
+  const gid = item.comic.gid
+  if (!gid) {
+    toast.warning('该漫画缺少 gid，无法忽略')
+    return
+  }
+  const confirmed = await modal.confirm(
+    `忽略后，后续增量查重不再提示「${item.comic.title}」的「旧版被取代」；全量核对仍会列出（可在忽略清单中恢复）。\n\n确定忽略此提示吗？`,
+    '🕶️ 忽略此提示',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'gid', gid }),
+    })
+    toast.success('已忽略此更新提示，可在「忽略清单」中恢复')
+    items.value = items.value.filter((i) => i.comic.id !== item.comic.id)
+    // 同步清理勾选残留（该条目已不在建议删除区，避免批量删除提交不存在的 id）
+    selectedIds.value = selectedIds.value.filter((id) => id !== item.comic.id)
+    await loadIgnoreList()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '忽略失败')
+  }
+}
+
+// 恢复忽略条目（下次查重重新参与）
+const restoreIgnore = async (ig: IgnoreItemDTO) => {
+  try {
+    await http(`/offline/ignore/${ig.id}/restore`, { method: 'POST' })
+    toast.success('已恢复，下次查重重新参与判定')
+    ignoreItems.value = ignoreItems.value.filter((i) => i.id !== ig.id)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '恢复失败')
+  }
+}
+
+// 全量结果中的已忽略簇 → 解除忽略（按 titleKey+artist 匹配忽略清单条目恢复）
+const restoreCluster = async (cluster: DedupClusterDTO) => {
+  const match = ignoreItems.value.find(
+    (ig) =>
+      ig.type === 'title' &&
+      ig.titleKey === cluster.titleKey &&
+      (ig.artist || '') === (cluster.artist || ''),
+  )
+  if (!match) {
+    toast.warning('未找到对应的忽略条目，请前往「忽略清单」管理')
+    return
+  }
+  await restoreIgnore(match)
+  ignoredClusters.value = ignoredClusters.value.filter((c) => c.id !== cluster.id)
+}
+
+// 忽略清单弹层分组
+const titleIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'title'))
+const gidIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'gid'))
+const comicIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'comic'))
+
+// 点击簇成员 → 打开该本地漫画详情
+const openClusterMember = (m: ClusterMemberDTO) => {
+  openComicDetailInNewTab({ id: m.comic.id, source: 'offline' })
 }
 
 // 轮询维护任务进度（1s 一次；结束后停止并拉取结果）
@@ -171,6 +360,9 @@ const clearRemovedAndRematch = async () => {
 
 const keepItems = computed(() => items.value.filter((i) => i.keep))
 const removeItems = computed(() => items.value.filter((i) => !i.keep))
+const activeClusterMemberCount = computed(() =>
+  activeClusters.value.reduce((sum, c) => sum + c.members.length, 0),
+)
 const isSelectAll = computed(
   () => removeItems.value.length > 0 && selectedIds.value.length === removeItems.value.length,
 )
@@ -311,19 +503,17 @@ const formatDate = (iso?: string) => {
 
 const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
 
-// 需求4：检测书库是否存在未反映到查重结果的变更（新下载 / 更新完成 / 删除记录后），
-// 是则自动触发一次增量查重并展示最新结果；无变更则直接展示已有结果（如有）。
-// 保留手动「重新扫描」与「强制全量在线核对」按钮（见模板）。
-const autoMaintainIfNeeded = async () => {
-  if (isScanning.value) return // 已有任务在跑（含后台定时器触发的），不重复启动
+// ⑨ Round26：检测书库变更 → 仅置「结果过期」提示，不再自动启动增量查重。
+// 手动「重新扫描 / 强制全量在线核对」按钮始终保留（见模板）。
+const syncStaleOnEnter = async () => {
+  if (isScanning.value) return // 已有任务在跑（含后台定时器触发的），不重复拉取
   try {
     const st = await http<UnsyncedStatusDTO>('/offline/maintain/unsynced')
+    await loadResult()
+    await loadIgnoreList()
     if (st.hasUnsynced) {
-      toast.info('检测到书库有新变更（下载/更新/删除），自动启动增量查重...')
-      await runMaintain(false)
-    } else if (!items.value.length) {
-      // 无未反映变更但本地尚未展示结果：尝试拉取最近一次结果（后端重启后缓存仍保留时）
-      await loadResult()
+      // 书库有未反映到查重结果的变更：仅标记过期提示，等待用户手动点「重新扫描」
+      resultStale.value = true
     }
   } catch {
     // 状态接口异常（如后端未启动），忽略
@@ -331,9 +521,8 @@ const autoMaintainIfNeeded = async () => {
 }
 
 // bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
-// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；已有结果则直接展示；否则保持空态。
-// 需求4：首次挂载与每次重新进入（keep-alive onActivated）都重新同步状态，
-// 并检测书库未反映变更自动触发增量查重；手动「重新扫描 / 强制全量核对」按钮始终保留。
+// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；否则拉取最近结果并同步「过期」提示。
+// Round26-⑨：不再因书库变更自动触发增量查重，只提示过期，手动扫描。
 const refreshOnEnter = async () => {
   try {
     const s = await http<OfflineTaskState>('/offline/maintain/progress')
@@ -341,10 +530,9 @@ const refreshOnEnter = async () => {
     if (s.status === 'running') {
       isScanning.value = true
       pollProgress()
-    } else if (s.status === 'success') {
-      await loadResult()
+      return // 后台任务在跑：交给轮询，不重复拉取结果
     }
-    await autoMaintainIfNeeded()
+    await syncStaleOnEnter()
   } catch {
     // 进度接口异常（如后端未启动），忽略，页面保持空态
   }
@@ -372,6 +560,14 @@ onUnmounted(stopPolling)
       </div>
 
       <div class="header-actions">
+        <!-- Round26 O2：忽略清单入口（计数常驻） -->
+        <button
+          class="scan-btn ignore"
+          title="查看全部忽略条目（疑似重复组 / 父画廊更新提示），可逐条恢复"
+          @click="ignoreModalOpen = true"
+        >
+          🕶️ 忽略清单 <span class="count-badge">{{ ignoreCount }}</span>
+        </button>
         <button
           class="scan-btn ghost"
           :disabled="isScanning || isClearingRemoved"
@@ -389,7 +585,7 @@ onUnmounted(stopPolling)
           ⚡ 强制全量在线核对
         </button>
         <button
-          class="scan-btn"
+          class="scan-btn primary"
           :disabled="isScanning || isClearingRemoved"
           @click="runMaintain(false)"
         >
@@ -403,14 +599,19 @@ onUnmounted(stopPolling)
       该路径下的漫画将不参与本查重（下载导入的漫画始终参与）。
     </div>
 
-    <!-- 幽灵文件修复：结果已过期（跨设备删除后旧缓存不可信），提示重新扫描 -->
+    <!-- ⑨ Round26：结果过期（书库变更 / 跨设备删除）→ 仅提示，不再自动扫描，引导手动「重新扫描」 -->
     <div v-if="resultStale" class="stale-banner">
       <span class="stale-icon">⚠️</span>
       <div class="stale-info">
         <p class="stale-title">查重结果已过期</p>
         <p class="stale-sub">
-          本地书库可能已在其他设备上发生变化，当前列表可能不再准确。建议点击「重新扫描」获取最新结果。
+          本地书库已发生变化（新下载 / 更新 / 删除），当前列表不再准确。已停止自动扫描，请手动点击「重新扫描」获取最新结果。
         </p>
+      </div>
+      <div class="stale-action">
+        <button class="scan-btn primary" :disabled="isScanning" @click="runMaintain(false)">
+          🔍 重新扫描
+        </button>
       </div>
     </div>
 
@@ -436,7 +637,7 @@ onUnmounted(stopPolling)
       </div>
     </div>
 
-    <div v-else-if="items.length === 0" class="empty-box">
+    <div v-else-if="items.length === 0 && activeClusters.length === 0 && ignoredClusters.length === 0" class="empty-box">
       <span class="icon">{{ resultStale ? '🔄' : '🎉' }}</span>
       <p class="empty-title">
         {{ resultStale ? '查重结果已过期，请重新扫描' : '恭喜！本地画库暂无重复或异常项' }}
@@ -445,7 +646,7 @@ onUnmounted(stopPolling)
         {{
           resultStale
             ? '本地书库可能已发生变化（如已在其他设备删除），重新扫描可获取最新一致的结果。'
-            : '若刚导入新内容，可点击「重新全盘扫描」再次核对。'
+            : '若刚导入新内容，可点击「重新扫描」再次核对。'
         }}
       </p>
     </div>
@@ -454,6 +655,14 @@ onUnmounted(stopPolling)
       <div class="summary-bar">
         <span class="summary-item warn"
           >🗑️ 建议删除 <b>{{ removeItems.length }}</b> 项</span
+        >
+        <span v-if="activeClusters.length > 0" class="summary-item suspect"
+          >🔎 疑似重复 <b>{{ activeClusters.length }}</b> 组
+          <span class="hint">（共 {{ activeClusterMemberCount }} 本，仅建议不自动处理）</span></span
+        >
+        <span v-if="ignoredClusters.length > 0" class="summary-item ignored"
+          >🕶️ 已忽略 <b>{{ ignoredClusters.length }}</b> 组
+          <span class="hint">（全量核对仍会列出）</span></span
         >
         <span class="summary-item ok"
           >✔ 建议保留 <b>{{ keepItems.length }}</b> 项</span
@@ -556,10 +765,114 @@ onUnmounted(stopPolling)
               >
                 {{ isRemoving && removingId === item.comic.id ? '⏳ 处理中...' : '删除（含文件）' }}
               </button>
+              <!-- Round26 O2：仅规则 3（父子画廊）可忽略（gid 粒度）；同 GID/hash/签名不提供忽略 -->
+              <button
+                v-if="item.rule === 'parent'"
+                class="action-btn ghost-gray"
+                :disabled="isRemoving"
+                title="忽略此更新提示（父画廊 gid），后续增量查重不再提示「旧版可删除」"
+                @click="ignoreParent(item)"
+              >
+                🕶️ 忽略此提示
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- Round26 O3：疑似重复区（名称级弱证据，只建议，不自动处理） -->
+      <div v-if="activeClusters.length > 0" class="section">
+        <h3 class="section-title suspect">🔎 疑似重复（名称级，仅建议 · 不自动处理）</h3>
+        <div class="item-list">
+          <div
+            v-for="cluster in activeClusters"
+            :key="cluster.id"
+            class="cluster-card"
+          >
+            <div class="cluster-head">
+              <span class="cluster-name">{{ cluster.titleKey }}</span>
+              <span
+                class="conf-badge"
+                :class="cluster.confidence === 'high' ? 'conf-high' : 'conf-medium'"
+              >
+                {{ cluster.confidence === 'high' ? '高置信' : '中置信' }}
+              </span>
+              <span class="cluster-reason">{{ cluster.reason }}</span>
+              <div class="cluster-actions">
+                <button
+                  class="action-btn ghost-teal"
+                  title="进入双列对比（标签卡可切换组内任意两本）"
+                  @click="openClusterCompare(cluster)"
+                >
+                  ⇄ 查看对比
+                </button>
+                <button
+                  class="action-btn ghost-gray"
+                  title="忽略本组（整组或仅选择部分成员，可在忽略清单中恢复）"
+                  @click="openIgnorePicker(cluster)"
+                >
+                  🕶️ 忽略本组
+                </button>
+              </div>
+            </div>
+            <div class="members">
+              <div
+                v-for="(m, mi) in cluster.members"
+                :key="m.comic.id"
+                class="member"
+                :title="`打开本地详情：${m.comic.title}`"
+                @click="openClusterMember(m)"
+              >
+                <div class="member-cover">
+                  <img
+                    v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
+                    :src="m.comic.coverUrl"
+                    :alt="m.comic.title"
+                    loading="lazy"
+                    @error="onCoverError(m.comic.id)"
+                  />
+                  <span v-else class="cover-fallback">{{ (cluster.titleKey || '?').slice(0, 1) }}</span>
+                </div>
+                <div class="member-title">{{ m.comic.title }}</div>
+                <div class="member-meta">
+                  <span v-if="m.lang" class="lang-chip">{{ m.lang }}</span>
+                  <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
+                  <span v-if="mi === 0 && cluster.artist" class="member-artist">artist: {{ cluster.artist }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Round26 O2：已忽略折叠区（全量核对仍列出，默认折叠，可单独解除） -->
+      <details v-if="ignoredClusters.length > 0" class="ignored-section">
+        <summary class="ignored-head">
+          <span class="arrow">▶</span>
+          <span>🕶️ 已忽略（{{ ignoredClusters.length }} 组 · 全量核对仍会列出，可单独解除）</span>
+          <span class="ignored-manage">
+            <button class="scan-btn ignore" style="padding: 4px 12px; font-size: 0.78rem" @click="ignoreModalOpen = true">
+              管理忽略清单
+            </button>
+          </span>
+        </summary>
+        <div v-for="cluster in ignoredClusters" :key="cluster.id" class="ignored-item">
+          <span class="ignored-badge">已忽略</span>
+          <div class="ignored-info">
+            <div class="ignored-name">{{ cluster.titleKey }}</div>
+            <div class="ignored-sub">
+              {{ cluster.artist ? 'artist: ' + cluster.artist + ' · ' : '' }}{{ cluster.members.length }} 个成员 · 全量核对列出
+            </div>
+          </div>
+          <button
+            class="action-btn ghost-gray"
+            title="解除忽略，下次查重重新参与判定"
+            @click="restoreCluster(cluster)"
+          >
+            解除忽略
+          </button>
+        </div>
+      </details>
 
       <!-- 建议保留区 -->
       <div v-if="keepItems.length > 0" class="section">
@@ -608,6 +921,93 @@ onUnmounted(stopPolling)
         </div>
       </div>
     </template>
+  </div>
+
+  <!-- Round26-2：忽略选择弹层（整组忽略 / 成员级忽略） -->
+  <div v-if="ignorePickerOpen" class="modal-mask" @click.self="ignorePickerOpen = false">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span class="modal-title">🕶️ 忽略选择</span>
+        <button class="modal-close" title="关闭" @click="ignorePickerOpen = false">×</button>
+      </div>
+      <p class="modal-sub">
+        组「{{ ignorePickerCluster?.titleKey }}」共 {{ ignorePickerCluster?.members.length }} 个成员。
+        可忽略整组（后续不再提示该作品的疑似重复），或仅忽略部分成员（将误判成员剔除，不再参与疑似判定）。
+      </p>
+      <div class="ignore-group-title">选择要忽略的成员</div>
+      <label
+        v-for="m in ignorePickerCluster?.members || []"
+        :key="m.comic.id"
+        class="member-check"
+      >
+        <input type="checkbox" :value="m.comic.id" v-model="ignoreSelectedMembers" />
+        <span class="member-check-title" :title="m.comic.title">{{ m.comic.title }}</span>
+        <span v-if="m.lang" class="lang-chip">{{ m.lang }}</span>
+        <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
+      </label>
+      <div class="modal-actions">
+        <button
+          class="action-btn danger-soft"
+          :disabled="ignoreSelectedMembers.length === 0"
+          title="仅忽略勾选的成员（误判剔除，可在忽略清单中恢复）"
+          @click="confirmIgnoreMembers"
+        >
+          忽略所选成员（{{ ignoreSelectedMembers.length }}）
+        </button>
+        <button
+          class="action-btn ghost-gray"
+          title="忽略整组（按核心名+画师记录，关联画廊一并忽略）"
+          @click="ignoreCluster(ignorePickerCluster!)"
+        >
+          忽略整组
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Round26 O2：忽略清单弹层（快速查看 / 恢复忽略条目） -->
+  <div v-if="ignoreModalOpen" class="modal-mask" @click.self="ignoreModalOpen = false">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span class="modal-title">🕶️ 忽略清单（{{ ignoreCount }}）</span>
+        <button class="modal-close" title="关闭" @click="ignoreModalOpen = false">×</button>
+      </div>
+      <p class="modal-sub">忽略的疑似重复组与父画廊更新提示，恢复后将于下次查重重新参与判定。</p>
+
+      <template v-if="ignoreItems.length === 0">
+        <div class="modal-empty">暂无忽略条目</div>
+      </template>
+      <template v-else>
+        <div v-if="titleIgnores.length > 0" class="ignore-group-title">作品指纹（title 型 · 核心名 + 画师）</div>
+        <div v-for="ig in titleIgnores" :key="ig.id" class="ignore-row">
+          <div class="ignore-main">
+            <div class="ignore-name">{{ ig.titleKey }}</div>
+            <div class="ignore-sub">
+              {{ ig.artist ? 'artist: ' + ig.artist + ' · ' : '' }}忽略于 {{ formatDate(ig.createdAt) }}
+            </div>
+          </div>
+          <button class="action-btn ghost-gray" title="恢复后下次查重重新参与判定" @click="restoreIgnore(ig)">恢复</button>
+        </div>
+
+        <div v-if="gidIgnores.length > 0" class="ignore-group-title">父画廊（gid 型 · 不再提示「旧版可删除」）</div>
+        <div v-for="ig in gidIgnores" :key="ig.id" class="ignore-row">
+          <div class="ignore-main">
+            <div class="ignore-name">gid {{ ig.gid }}</div>
+            <div class="ignore-sub">忽略于 {{ formatDate(ig.createdAt) }}</div>
+          </div>
+          <button class="action-btn ghost-gray" title="恢复后下次查重重新参与判定" @click="restoreIgnore(ig)">恢复</button>
+        </div>
+
+        <div v-if="comicIgnores.length > 0" class="ignore-group-title">成员（comic 型 · 不再参与疑似判定）</div>
+        <div v-for="ig in comicIgnores" :key="ig.id" class="ignore-row">
+          <div class="ignore-main">
+            <div class="ignore-name">{{ ig.comicTitle || '漫画 ' + (ig.comicId || '') }}</div>
+            <div class="ignore-sub">忽略于 {{ formatDate(ig.createdAt) }}</div>
+          </div>
+          <button class="action-btn ghost-gray" title="恢复后该漫画重新参与疑似判定" @click="restoreIgnore(ig)">恢复</button>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -703,6 +1103,14 @@ onUnmounted(stopPolling)
   margin: 4px 0 0 0;
   font-size: 0.78rem;
   line-height: 1.5;
+}
+.stale-action {
+  flex-shrink: 0;
+  align-self: center;
+}
+.stale-action .scan-btn {
+  padding: 6px 14px;
+  font-size: 0.8rem;
 }
 
 .scanning-banner {
@@ -1095,5 +1503,392 @@ onUnmounted(stopPolling)
   .kept-badge {
     text-align: center;
   }
+}
+
+/* ── Round26 O2/O3：主按钮 / 忽略清单按钮 / 统计条 / 簇卡片 / 折叠区 / 弹层 ── */
+.scan-btn.primary {
+  background: #007acc;
+  color: #fff;
+}
+.scan-btn.ignore {
+  background: transparent;
+  color: #b8b8c0;
+  border: 1px solid var(--app-border-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.count-badge {
+  background: var(--app-surface-3);
+  color: #e8e8f0;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.summary-item.suspect {
+  color: #00c2a8;
+}
+.summary-item.ignored {
+  color: #9a9aa2;
+}
+.summary-item .hint {
+  font-size: 0.72rem;
+  color: var(--app-text-muted);
+  font-weight: 400;
+}
+
+.section-title.suspect {
+  color: #00c2a8;
+}
+.section-title.ignored {
+  color: #9a9aa2;
+}
+
+.action-btn.ghost-gray {
+  background: transparent;
+  color: #b8b8c0;
+  border: 1px solid var(--app-border-3);
+  font-weight: 500;
+}
+.action-btn.ghost-teal {
+  background: transparent;
+  color: #00c2a8;
+  border: 1px solid rgba(0, 194, 168, 0.5);
+  font-weight: 500;
+}
+
+/* 疑似重复簇卡片（O3） */
+.cluster-card {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  border-left: 3px solid #00a896;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s;
+}
+.cluster-card:hover {
+  border-color: #00a896;
+}
+.cluster-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cluster-name {
+  font-size: 0.95rem;
+  color: var(--app-text-strong);
+  font-weight: 700;
+}
+.conf-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.conf-high {
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.1);
+}
+.conf-medium {
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.1);
+}
+.cluster-reason {
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+  flex: 1;
+  min-width: 200px;
+}
+.cluster-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.members {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.member {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+  border-radius: 6px;
+  padding: 10px;
+  width: 168px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.member:hover {
+  border-color: var(--app-accent);
+}
+.member-cover {
+  width: 100%;
+  height: 96px;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-surface-3);
+}
+.member-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.member-cover .cover-fallback {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.7);
+}
+.member-title {
+  font-size: 0.78rem;
+  color: var(--app-text-strong);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.1em;
+}
+.member-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.lang-chip {
+  font-size: 0.68rem;
+  color: #c9d6e0;
+  background: #14283a;
+  border: 1px solid var(--app-border-3);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.member-pages {
+  font-size: 0.7rem;
+  color: var(--app-text-3);
+}
+.member-artist {
+  font-size: 0.68rem;
+  color: var(--app-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 已忽略折叠区（O2） */
+.ignored-section {
+  border: 1px dashed var(--app-border-3);
+  border-radius: 8px;
+  background: rgba(138, 138, 146, 0.04);
+  padding: 10px 14px;
+}
+.ignored-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.88rem;
+  color: #9a9aa2;
+  font-weight: 600;
+  list-style: none;
+}
+.ignored-head::-webkit-details-marker {
+  display: none;
+}
+.ignored-head .arrow {
+  transition: transform 0.2s;
+  font-size: 0.7rem;
+}
+details[open] .ignored-head .arrow {
+  transform: rotate(90deg);
+}
+.ignored-manage {
+  margin-left: auto;
+}
+.ignored-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  border-left: 3px solid #8a8a92;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ignored-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #b0b0b8;
+  background: rgba(138, 138, 146, 0.12);
+  border: 1px solid var(--app-border-3);
+  padding: 2px 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ignored-info {
+  flex: 1;
+  min-width: 0;
+}
+.ignored-name {
+  font-size: 0.85rem;
+  color: var(--app-text-strong);
+}
+.ignored-sub {
+  font-size: 0.72rem;
+  color: var(--app-text-muted);
+}
+.ignored-item .action-btn {
+  flex-shrink: 0;
+}
+
+/* 忽略清单弹层（O2） */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal-box {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 78vh;
+  overflow: auto;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.modal-title {
+  font-size: 1.02rem;
+  color: var(--app-text-strong);
+  font-weight: 700;
+  flex: 1;
+}
+.modal-close {
+  border: none;
+  background: transparent;
+  color: var(--app-text-3);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.modal-close:hover {
+  color: var(--app-text-strong);
+  background: var(--app-surface-3);
+}
+.modal-sub {
+  font-size: 0.76rem;
+  color: var(--app-text-3);
+}
+.ignore-group-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--app-text-2);
+  margin-top: 4px;
+}
+.ignore-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ignore-row + .ignore-row {
+  margin-top: 8px;
+}
+.ignore-main {
+  flex: 1;
+  min-width: 0;
+}
+.ignore-name {
+  font-size: 0.85rem;
+  color: var(--app-text-strong);
+  word-break: break-all;
+}
+.ignore-sub {
+  font-size: 0.72rem;
+  color: var(--app-text-muted);
+  margin-top: 2px;
+}
+.ignore-row .action-btn {
+  flex-shrink: 0;
+}
+.modal-empty {
+  text-align: center;
+  color: var(--app-text-muted);
+  font-size: 0.85rem;
+  padding: 28px 0;
+}
+
+/* Round26-2：忽略选择弹层（成员多选） */
+.member-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.member-check:hover {
+  border-color: var(--app-accent);
+}
+.member-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--app-accent);
+  flex-shrink: 0;
+}
+.member-check-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-text-strong);
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
+  flex-wrap: wrap;
 }
 </style>

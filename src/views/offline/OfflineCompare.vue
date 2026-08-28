@@ -10,14 +10,15 @@ import { openComicDetailInNewTab } from '@/utils/detailNav'
 // Round4 任务一：双列对比视图
 //   type=update   → 左=本地原版（GET /comics/:id），右=线上最新版（newGID/newToken 复用 OnlineDetail embedded）
 //   type=maintain → 左=建议保留，右=建议删除（均来自 /offline/maintain/result 的成对对象 pairComic）
+//   type=cluster  → Round26-2：疑似重复组内任意两本对比（左右标签卡独立切换成员）
 // 桌面双列 grid（参照 OnlineDetailPanel 的 .online-split 布局）；移动端 / 强制移动形态上下堆叠。
 
 const route = useRoute()
 const router = useRouter()
 const { toast, modal } = useUI()
 
-const compareType = computed<'update' | 'maintain'>(() =>
-  route.query.type === 'maintain' ? 'maintain' : 'update',
+const compareType = computed<'update' | 'maintain' | 'cluster'>(() =>
+  route.query.type === 'maintain' ? 'maintain' : route.query.type === 'cluster' ? 'cluster' : 'update',
 )
 const comicId = computed(() => (route.query.id as string) || '')
 
@@ -77,6 +78,29 @@ const rightComic = ref<OfflineDetailDTO | null>(null)
 const rightTags = ref<DetailTag[]>([])
 const rightReason = ref('')
 
+// ── Round26-2：cluster 类型（疑似重复组内对比，左右标签卡独立切换）──
+interface ClusterMemberDTO {
+  comic: OfflineDetailDTO
+  pageCount: number
+  lang?: string
+}
+interface DedupClusterDTO {
+  id: string
+  titleKey: string
+  artist?: string
+  confidence: 'high' | 'medium'
+  reason: string
+  members: ClusterMemberDTO[]
+  ignored?: boolean
+}
+const clusterMembers = ref<ClusterMemberDTO[]>([])
+const clusterReason = ref('')
+const leftIdx = ref(0)
+const rightIdx = ref(1)
+const memberLabel = (i: number) => String.fromCharCode(65 + i) // A / B / C…
+const clusterLeftComic = computed(() => clusterMembers.value[leftIdx.value]?.comic || null)
+const clusterRightComic = computed(() => clusterMembers.value[rightIdx.value]?.comic || null)
+
 const downloading = ref(false)
 const removing = ref(false)
 
@@ -110,6 +134,24 @@ const load = async () => {
       onlineGid.value = d.newGID || ''
       onlineToken.value = d.newToken || ''
       updateNote.value = d.updateNote || ''
+    } else if (compareType.value === 'cluster') {
+      // Round26-2：疑似重复组对比（按 titleKey+artist 匹配当前结果缓存中的簇）
+      const titleKey = (route.query.titleKey as string) || ''
+      const artist = (route.query.artist as string) || ''
+      const data = await http<{ items: MaintainItem[]; clusters?: DedupClusterDTO[] }>(
+        '/offline/maintain/result',
+      )
+      const cluster = (data?.clusters || []).find(
+        (c) => c.titleKey === titleKey && (c.artist || '') === artist,
+      )
+      if (!cluster || cluster.members.length < 2) {
+        error.value = '未找到对应的疑似重复组（结果可能已刷新或成员被忽略）。请返回维护页重新扫描后重试。'
+        return
+      }
+      clusterMembers.value = cluster.members
+      clusterReason.value = cluster.reason
+      leftIdx.value = 0
+      rightIdx.value = Math.min(1, cluster.members.length - 1)
     } else {
       const data = await http<{ items: MaintainItem[]; stale?: boolean }>('/offline/maintain/result')
       const items = data?.items || []
@@ -148,7 +190,8 @@ const load = async () => {
 }
 
 const goBack = () => {
-  router.push(compareType.value === 'update' ? '/offline/update' : '/offline/maintain')
+  if (compareType.value === 'update') router.push('/offline/update')
+  else router.push('/offline/maintain')
 }
 
 const openFullDetail = (comic: { id: string } | null) => {
@@ -208,7 +251,7 @@ onMounted(load)
     <header class="compare-header">
       <button class="back-btn" @click="goBack">← 返回</button>
       <h2 class="compare-title">
-        {{ compareType === 'update' ? '🔄 更新对比' : '🗂️ 维护对比' }}
+        {{ compareType === 'update' ? '🔄 更新对比' : compareType === 'cluster' ? '🔎 疑似重复对比' : '🗂️ 维护对比' }}
       </h2>
       <div class="header-actions">
         <template v-if="compareType === 'update'">
@@ -261,6 +304,34 @@ onMounted(load)
             </div>
           </aside>
         </template>
+        <template v-else-if="compareType === 'cluster'">
+          <!-- Round26-2：疑似重复组对比（左）——标签卡切换组内成员 -->
+          <div class="cluster-panel">
+            <header class="compare-panel-header cluster-panel-header">
+              <span class="compare-panel-title">📚 成员对比（左）</span>
+              <div class="cluster-tabs">
+                <button
+                  v-for="(m, i) in clusterMembers"
+                  :key="m.comic.id"
+                  class="cluster-tab"
+                  :class="{ active: i === leftIdx }"
+                  :title="m.comic.title"
+                  @click="leftIdx = i"
+                >
+                  {{ memberLabel(i) }}
+                </button>
+              </div>
+            </header>
+            <OfflineDetailPanel
+              :comic="clusterLeftComic"
+              :tags="buildTags(clusterLeftComic)"
+              :badge="'成员 ' + memberLabel(leftIdx)"
+              badge-type="ok"
+              :reason="clusterReason"
+              @open-full="openFullDetail(clusterLeftComic)"
+            />
+          </div>
+        </template>
         <template v-else>
           <OfflineDetailPanel
             :comic="leftComic"
@@ -288,6 +359,34 @@ onMounted(load)
               <p>{{ updateNote || '该漫画没有可用的新版画廊信息（可能未绑定 E 站账户，或线上画廊已不可用）。' }}</p>
             </div>
           </aside>
+        </template>
+        <template v-else-if="compareType === 'cluster'">
+          <!-- Round26-2：疑似重复组对比（右）——标签卡切换组内成员 -->
+          <div class="cluster-panel">
+            <header class="compare-panel-header cluster-panel-header">
+              <span class="compare-panel-title">🖼️ 成员对比（右）</span>
+              <div class="cluster-tabs">
+                <button
+                  v-for="(m, i) in clusterMembers"
+                  :key="m.comic.id"
+                  class="cluster-tab"
+                  :class="{ active: i === rightIdx }"
+                  :title="m.comic.title"
+                  @click="rightIdx = i"
+                >
+                  {{ memberLabel(i) }}
+                </button>
+              </div>
+            </header>
+            <OfflineDetailPanel
+              :comic="clusterRightComic"
+              :tags="buildTags(clusterRightComic)"
+              :badge="'成员 ' + memberLabel(rightIdx)"
+              badge-type="info"
+              :reason="clusterReason"
+              @open-full="openFullDetail(clusterRightComic)"
+            />
+          </div>
         </template>
         <template v-else>
           <OfflineDetailPanel
@@ -510,5 +609,46 @@ onMounted(load)
 .empty-icon {
   font-size: 2.4rem;
   opacity: 0.7;
+}
+
+/* ── Round26-2：疑似重复组对比（标签卡切换） ── */
+.cluster-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.cluster-panel-header {
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cluster-tabs {
+  display: flex;
+  gap: 6px;
+}
+.cluster-tab {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-3);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.cluster-tab:hover:not(.active) {
+  color: var(--app-text-strong);
+  border-color: var(--app-accent);
+}
+.cluster-tab.active {
+  background: var(--app-accent);
+  color: #fff;
+  border-color: var(--app-accent);
 }
 </style>

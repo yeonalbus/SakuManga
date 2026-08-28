@@ -91,13 +91,14 @@ const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
 )
 
 // 选中联想项：负向项以「- namespace:key」压入队列
+// 交互优化：点击联想项后保持输入焦点（与 SearchBar 一致），联想列表随输入清空自动隐藏，
+// 可连续输入多个 tag；点击面板外失焦时由 blur 正常关闭。
 const pickSuggestion = (sug: TagSuggestion) => {
   if (!drawConfig.keywords.includes(sug.insertText)) {
     drawConfig.keywords.push(sug.insertText)
   }
   keywordInput.value = ''
   clearSuggest()
-  kwInputFocused.value = false
 }
 
 // 切换分类选中状态

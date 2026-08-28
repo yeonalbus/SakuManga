@@ -292,6 +292,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 			// S5/D4：清除全部「已被删除/移除」标记（失效画廊修复后重新参与查重）
 			admin.POST("/offline/maintain/clear-removed", offlineHandler.ClearRemovedStatus)
+			// Round26 O2：忽略标记（疑似重复组 / 父画廊更新提示）
+			admin.POST("/offline/ignore", offlineHandler.CreateIgnore)
+			admin.GET("/offline/ignore/list", offlineHandler.ListIgnores)
+			admin.POST("/offline/ignore/:id/restore", offlineHandler.RestoreIgnore)
 		}
 	}
 }

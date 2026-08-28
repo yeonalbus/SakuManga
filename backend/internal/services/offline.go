@@ -170,8 +170,9 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 				log.Printf("%s [update] 漫画 %q(gid=%s) 需要更新：%s", dlLogTag, c.Title, c.GID, c.UpdateNote)
 			}
 		}
-		// 限流退避
-		time.Sleep(1200 * time.Millisecond)
+		// 自适应限流（Round26 性能 A）：请求结果反馈 + 等待下次间隔（成功提速、失败退避）
+		ehRateLimiter.Mark(err == nil)
+		ehRateLimiter.Wait()
 	}
 
 	// ── B. 父画廊关系检测（本地，无网络）──
@@ -299,7 +300,9 @@ func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineP
 				}
 				log.Printf("%s [update] 漫画 %q(gid=%s) 已被删除/移除（%s），标记 RemovedStatus 并排除后续扫描",
 					dlLogTag, c.Title, c.GID, gu.Kind)
-				time.Sleep(1200 * time.Millisecond)
+				// 自适应限流（Round26 性能 A）：确定性错误也退避一次，后续成功恢复
+				ehRateLimiter.Mark(false)
+				ehRateLimiter.Wait()
 				continue
 			}
 			log.Printf("%s [update] 老化判定漫画 %q(gid=%s) 在线详情拉取失败（按无新版处理）: %v",
@@ -340,7 +343,9 @@ func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineP
 		if err := db.Save(c).Error; err != nil {
 			log.Printf("%s [update] 保存漫画 %s 老化状态失败: %v", dlErrTag, c.ID, err)
 		}
-		time.Sleep(1200 * time.Millisecond)
+		// 自适应限流（Round26 性能 A）
+		ehRateLimiter.Mark(err == nil)
+		ehRateLimiter.Wait()
 	}
 
 	log.Printf("%s [update] 老化判定完成：检查 %d 个，标记老化 %d 个，可更新 %d 个",
@@ -722,18 +727,22 @@ func buildUpdateNote(latestGID string, children []GalleryRelation) string {
 
 // DedupItem 查重建议项
 // Round4 任务一：新增 PairComic —— 成对对象（对比视图双列展示：同 GID 保留↔删除、父子版本 新版↔旧版）。
+// Round26 O2：新增 Rule —— 命中规则标识（gid/hash/parent/signature），前端据此展示「忽略」入口：
+//   仅 parent（父子画廊）可忽略（gid 粒度）；gid/hash/signature（同 GID/hash/内容签名）不可忽略。
 type DedupItem struct {
 	Comic     models.OfflineComic  `json:"comic"`
 	Reason    string               `json:"reason"` // 重复原因
 	Keep      bool                 `json:"keep"`   // 是否建议保留（true=保留，false=建议删除）
+	Rule      string               `json:"rule"`   // gid | hash | parent | signature（Round26 O2）
 	PairComic *models.OfflineComic `json:"pairComic,omitempty"` // 成对对象（Round4 任务一）
 }
 
 // DedupResult 查重结果
 type DedupResult struct {
-	Items      []DedupItem `json:"items"`      // 需要处理的项（含建议保留项与建议删除项）
-	FinishedAt int64       `json:"finishedAt"` // 结果生成时间戳(ms)
-	Stale      bool        `json:"stale"`      // 是否已过期（删除操作后置 true，提示前端重新扫描）
+	Items      []DedupItem    `json:"items"`                // 需要处理的项（含建议保留项与建议删除项）
+	Clusters   []DedupCluster `json:"clusters,omitempty"`   // Round26 O3：疑似重复组（名称级弱证据，只建议）
+	FinishedAt int64          `json:"finishedAt"`           // 结果生成时间戳(ms)
+	Stale      bool           `json:"stale"`                // 是否已过期（删除操作后置 true，提示前端重新扫描）
 }
 
 // ErrComicNotFound 漫画记录不存在（幽灵文件容错：记录可能已被其他设备删除）
@@ -774,8 +783,13 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	keepSet := map[string]bool{}   // 建议保留的 comic id
 	removeSet := map[string]bool{} // 建议删除的 comic id
 	reasonMap := map[string]string{}
+	ruleMap := map[string]string{} // Round26 O2：comic id → 命中规则（gid/hash/parent/signature），前端区分可忽略项
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
 	pairID := map[string]string{}        // Round4 任务一：comic id → 成对对象 comic id（对比视图双列展示）
+	// Round26 O2：忽略索引（本轮扫描一次性加载）。
+	// 规则 3（父画廊）gid 型忽略：增量扫描跳过「旧版可删除」提示；全量（forceFull）不豁免。
+	// 规则 1/2/4 与更新检测不读取忽略表。
+	ignoreIdx := LoadIgnoreIndex(db)
 
 	// ── 0. D5-B 在线回填 GID（S6）──
 	// 额外路径无 sidecar 元数据的文件夹 GID==''，规则 1/3 无法跨路径识别「新版/旧版」。
@@ -814,6 +828,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 			removeSet[group[i].ID] = true
 			reasonMap[group[i].ID] = fmt.Sprintf("同 GID(%s) 重复：建议保留文件夹形态，删除该重复项", gid)
+			ruleMap[group[i].ID] = "gid"
 			totalBytes[group[i].ID] = group[i].FileSize
 			// Round4 任务一：记录成对关系（保留项 ↔ 删除项），对比视图双列展示
 			pairID[group[i].ID] = group[keepIdx].ID
@@ -866,6 +881,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 			removeSet[c.ID] = true
 			reasonMap[c.ID] = fmt.Sprintf("归档内容完全相同（hash=%s）：删除重复项", c.FileHash)
+			ruleMap[c.ID] = "hash"
 			totalBytes[c.ID] = c.FileSize
 			// Round4 任务一：与同组首个归档互为成对对象（对比视图双列展示）
 			pairID[c.ID] = group[0].ID
@@ -898,7 +914,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				c := &comics[i]
 				// 需求1 兜底：已核对过父画廊关系的漫画（parent_checked_at>0）默认增量跳过；
 				// forceFull=true 时忽略该标记，强制全量联网重抓。
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] || (!forceFull && c.ParentCheckedAt != 0) {
+				// Round26 O2：规则 3 gid 型忽略——增量扫描时被忽略的父画廊不联网、不提示（用户故意保留旧版）。
+				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] ||
+					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
 				fetchTotal++
@@ -906,7 +924,8 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			fetchDone := 0
 			for i := range comics {
 				c := &comics[i]
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] || (!forceFull && c.ParentCheckedAt != 0) {
+				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] ||
+					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
 				fetchDone++
@@ -939,7 +958,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 						log.Printf("%s [maintain] 漫画 %q(gid=%s) 在线详情拉取失败（跳过在线发现）: %v",
 							dlWarnTag, c.Title, c.GID, err)
 					}
-					time.Sleep(1200 * time.Millisecond)
+					// 自适应限流（Round26 性能 A）
+					ehRateLimiter.Mark(false)
+					ehRateLimiter.Wait()
 					continue
 				}
 				// 回写父画廊关系
@@ -972,6 +993,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				if successor != nil {
 					removeSet[c.ID] = true
 					reasonMap[c.ID] = fmt.Sprintf("检测到更新版（父画廊关系）%q：旧版可删除", successor.Title)
+					ruleMap[c.ID] = "parent"
 					totalBytes[c.ID] = c.FileSize
 					if !removeSet[successor.ID] {
 						keepSet[successor.ID] = true
@@ -990,8 +1012,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				_ = db.Model(c).Update("parent_checked_at", now)
 				c.ParentCheckedAt = now
 
-				// 限流退避
-				time.Sleep(1200 * time.Millisecond)
+				// 自适应限流（Round26 性能 A）
+				ehRateLimiter.Mark(true)
+				ehRateLimiter.Wait()
 			}
 		}
 	}
@@ -1003,9 +1026,17 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			continue
 		}
 		if p, ok := gidToComic[c.ParentGID]; ok && p.ID != c.ID {
+			// Round26 O2：规则 3 gid 型忽略——增量扫描时被忽略的父画廊（旧版）不提示
+			// 「旧版可删除」（用户故意保留旧版）；全量核对不豁免。
+			if !forceFull && ignoreIdx.IsGIDIgnored(p.GID) {
+				log.Printf("%s [maintain] 父画廊 %q(gid=%s) 更新提示已被忽略（gid 忽略），跳过标记",
+					dlLogTag, p.Title, p.GID)
+				continue
+			}
 			// 父画廊 p 是旧版，被 c 取代
 			removeSet[p.ID] = true
 			reasonMap[p.ID] = fmt.Sprintf("已被更新版（父画廊关系）%q 取代，旧版可删除", c.Title)
+			ruleMap[p.ID] = "parent"
 			totalBytes[p.ID] = p.FileSize
 			// 旧版 p 一旦判定删除，绝不再作为“建议保留”输出
 			delete(keepSet, p.ID)
@@ -1092,6 +1123,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				}
 				removeSet[group[i].ID] = true
 				reasonMap[group[i].ID] = fmt.Sprintf("文件夹内容完全相同（%s，共 %d 份）：删除复制项", shortHash(sig), len(group))
+				ruleMap[group[i].ID] = "signature"
 				totalBytes[group[i].ID] = group[i].FileSize
 				// Round4 任务一：与同组保留项互为成对对象（对比视图双列展示）
 				pairID[group[i].ID] = group[keepIdx].ID
@@ -1101,7 +1133,18 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 		}
 	
-		// ── 组装结果 ──
+		// ── 5. 名称级疑似重复（Round26 O3，纯本地弱证据，只建议）──
+	// 候选 = 未被确定性规则标记删除的漫画（规则 1/2/4 已判删的不再参与名称聚类，
+	// 避免与强证据结果重复提示）；keepSet 的「新版本」仍参与（它也可能是语言版重复）。
+	var clusterCandidates []models.OfflineComic
+	for i := range comics {
+		if !removeSet[comics[i].ID] {
+			clusterCandidates = append(clusterCandidates, comics[i])
+		}
+	}
+	result.Clusters = detectTitleClusters(clusterCandidates, ignoreIdx, forceFull)
+
+	// ── 组装结果 ──
 		// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删，
 		// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
 	for i := range comics {
@@ -1111,7 +1154,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			pair = findComicByID(comics, pid)
 		}
 		if removeSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false, PairComic: pair})
+			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false, Rule: ruleMap[c.ID], PairComic: pair})
 			continue
 		}
 		if keepSet[c.ID] {
@@ -1183,7 +1226,9 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 			log.Printf("%s [maintain] 漫画 %q 标题搜索失败/无结果（跳过回填，增量不再尝试）: %v",
 				dlWarnTag, c.Title, err)
 			markBackfillSkipped(db, c)
-			time.Sleep(1200 * time.Millisecond)
+			// 自适应限流（Round26 性能 A）
+			ehRateLimiter.Mark(false)
+			ehRateLimiter.Wait()
 			continue
 		}
 		match := pickConfidentMatch(c.Title, res.Comics)
@@ -1191,7 +1236,9 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 			log.Printf("%s [maintain] 漫画 %q 标题搜索无高置信度命中（多结果/命名冲突），跳过回填（增量不再尝试）",
 				dlWarnTag, c.Title)
 			markBackfillSkipped(db, c)
-			time.Sleep(1200 * time.Millisecond)
+			// 自适应限流（Round26 性能 A）
+			ehRateLimiter.Mark(false)
+			ehRateLimiter.Wait()
 			continue
 		}
 		c.GID = match.ID
@@ -1199,7 +1246,9 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 		_ = db.Model(c).Updates(map[string]interface{}{"g_id": match.ID, "token": match.Token})
 		log.Printf("%s [maintain] 漫画 %q 在线回填 GID=%s（规则 1/3 将重新识别跨路径重复）",
 			dlLogTag, c.Title, match.ID)
-		time.Sleep(1200 * time.Millisecond)
+		// 自适应限流（Round26 性能 A）
+		ehRateLimiter.Mark(true)
+		ehRateLimiter.Wait()
 	}
 }
 

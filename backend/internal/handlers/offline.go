@@ -268,3 +268,56 @@ func (h *OfflineHandler) ClearRemovedStatus(c *gin.Context) {
 	services.InvalidateMaintainDedupResult(nil)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "cleared": cleared})
 }
+
+// ─────────────────────────────────────────────────────────────
+// Round26 O2：忽略标记（疑似重复组 / 父画廊更新提示）
+// ─────────────────────────────────────────────────────────────
+
+// createIgnoreReq 创建忽略条目请求体
+type createIgnoreReq struct {
+	Type     string `json:"type"`     // title | gid | comic
+	TitleKey string `json:"titleKey"` // type=title：归一化核心名
+	Artist   string `json:"artist"`   // type=title：画师
+	GID      string `json:"gid"`      // type=gid：父画廊 gid
+	ComicID  string `json:"comicId"`  // type=comic：本地漫画 id（组内成员级忽略）
+	Note     string `json:"note"`     // 备注（可选）
+}
+
+// CreateIgnore 新增忽略条目 POST /api/v1/offline/ignore
+func (h *OfflineHandler) CreateIgnore(c *gin.Context) {
+	var req createIgnoreReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+		return
+	}
+	rec, err := services.CreateIgnore(h.db, req.Type, req.TitleKey, req.Artist, req.GID, req.ComicID, req.Note)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
+}
+
+// ListIgnores 忽略清单 GET /api/v1/offline/ignore/list
+func (h *OfflineHandler) ListIgnores(c *gin.Context) {
+	list, err := services.ListIgnoresWithTitles(h.db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": list})
+}
+
+// RestoreIgnore 恢复（删除）忽略条目 POST /api/v1/offline/ignore/:id/restore
+func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
+	id := c.Param("id")
+	if err := services.RestoreIgnore(h.db, id); err != nil {
+		if errors.Is(err, services.ErrIgnoreNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}

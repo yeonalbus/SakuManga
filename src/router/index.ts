@@ -88,7 +88,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
-    path: '/offline/upgrade',
+    path: '/upgrade',
     name: 'OfflineUpgrade',
     component: () => import('@/views/offline/OfflineUpgrade.vue'),
     // 画质升级：仅管理员可访问（升级会发起下载消耗 GP，与更新/维护权限一致）

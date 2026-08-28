@@ -20,6 +20,6 @@ const { isAdmin } = useUserStore()
     <span class="group-title">🎲 工具</span>
     <router-link to="/random">手气不错</router-link>
     <router-link to="/reading-list">阅读清单</router-link>
-    <router-link v-if="isAdmin" to="/offline/upgrade">画质升级</router-link>
+    <router-link v-if="isAdmin" to="/upgrade">画质升级</router-link>
   </div>
 </template>

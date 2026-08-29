@@ -20,6 +20,14 @@ export type ReadDirection =
 /** 页面缩放方式 */
 export type PageFit = 'contain' | 'cover' | 'width'
 
+/**
+ * 图片缩放手势（Round25：由 allowDoubleTapZoom / allowSingleClickDragZoom 两开关合并）
+ * - doubleTap     仅双击放大
+ * - doubleTapDrag 双击 + 单击拖拽放大
+ * - off           关闭全部缩放手势
+ */
+export type ZoomGesture = 'doubleTap' | 'doubleTapDrag' | 'off'
+
 /** 阅读器设置项集合 */
 /**
  * Gamepad 标准映射按键索引（standard mapping）
@@ -64,14 +72,12 @@ export interface ReaderSettings {
   immersiveMode: boolean // 开启沉浸模式：进入阅读器时隐藏顶部标题栏
   showBottomBar: boolean // 显示底部栏（滚动条 + 状态信息，Round24 合并）
   enableBottomMenu: boolean // 开启底部菜单
-  headerTextWidth: 'compact' | 'loose' // 顶栏名称/章节路径截断宽度（Round24：紧凑 12/22，宽松 16/30）
 
   // ── 设备能力 ──
   keepAwake: boolean // 阅读时屏幕不自动锁定 (Wake Lock)
   customBrightness: boolean // 自定义屏幕亮度
   brightnessValue: number // 屏幕亮度 (20-100)
-  allowDoubleTapZoom: boolean // 允许双击放大图片
-  allowSingleClickDragZoom: boolean // 允许单击后拖拽放大图片
+  zoomGesture: ZoomGesture // 图片缩放手势（Round25：双击/单击拖拽两开关合并）
 
   // ── 游戏手柄 ──
   enableGamepad: boolean // 启用手柄控制
@@ -85,8 +91,7 @@ export interface ReaderSettings {
   gamepadCancelKeys: number[] // 取消按键（modal 取消，默认 [B]）
 
   // ── 性能 / 扩展 ──
-  preloadOnline: number // 预加载图片数量(在线模式)
-  preloadOffline: number // 预加载图片数量(本地模式)
+  preloadCount: number // 预加载图片数量（Round25：在线/本地两值合并为统一值）
 }
 
 const STORAGE_KEY = 'saku_reader_settings'
@@ -106,13 +111,11 @@ const defaultSettings: ReaderSettings = {
   immersiveMode: false,
   showBottomBar: true,
   enableBottomMenu: false,
-  headerTextWidth: 'compact',
 
   keepAwake: false,
   customBrightness: false,
   brightnessValue: 100,
-  allowDoubleTapZoom: true,
-  allowSingleClickDragZoom: false,
+  zoomGesture: 'doubleTap',
 
   enableGamepad: true,
   gamepadNextKeys: [GAMEPAD_BUTTONS.DPAD_RIGHT, GAMEPAD_BUTTONS.A],
@@ -123,13 +126,45 @@ const defaultSettings: ReaderSettings = {
   gamepadConfirmKeys: [GAMEPAD_BUTTONS.A],
   gamepadCancelKeys: [GAMEPAD_BUTTONS.B],
 
-  preloadOnline: 10,
-  preloadOffline: 10,
+  preloadCount: 10,
 }
 
 // Round24：清理旧版残留的失效设置项（时钟/电量组件已移除、缩略图/进度/滚动条/状态项已合并，旧键一并剔除）
-const storedSettings = loadStorage<Partial<ReaderSettings>>(STORAGE_KEY, {})
-for (const stale of ['showClock', 'showBattery', 'showThumbnails', 'showScrollbar', 'showBottomStatus', 'showProgress'] as const) {
+const storedSettings = loadStorage<Partial<ReaderSettings> & {
+  headerTextWidth?: string
+  allowDoubleTapZoom?: boolean
+  allowSingleClickDragZoom?: boolean
+  preloadOnline?: number
+  preloadOffline?: number
+}>(STORAGE_KEY, {})
+
+// Round25 迁移：字段合并（预加载在线/本地 → 统一值；双击/单击拖拽两开关 → 缩放手势枚举）
+if (storedSettings.preloadCount === undefined) {
+  storedSettings.preloadCount =
+    storedSettings.preloadOnline ?? storedSettings.preloadOffline ?? defaultSettings.preloadCount
+}
+if (storedSettings.zoomGesture === undefined) {
+  if (storedSettings.allowDoubleTapZoom) {
+    storedSettings.zoomGesture = storedSettings.allowSingleClickDragZoom ? 'doubleTapDrag' : 'doubleTap'
+  } else {
+    storedSettings.zoomGesture = 'off'
+  }
+}
+
+for (const stale of [
+  'showClock',
+  'showBattery',
+  'showThumbnails',
+  'showScrollbar',
+  'showBottomStatus',
+  'showProgress',
+  // Round25：已被新字段取代/废弃的旧键
+  'headerTextWidth',
+  'allowDoubleTapZoom',
+  'allowSingleClickDragZoom',
+  'preloadOnline',
+  'preloadOffline',
+] as const) {
   delete (storedSettings as Record<string, unknown>)[stale]
 }
 

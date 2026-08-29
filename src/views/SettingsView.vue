@@ -29,10 +29,9 @@
         </div>
 
         <div class="panel-body">
-          <!-- Profile / 我的标签：独立组件内部含返回按钮，@back 回到所在分组默认项 -->
-          <ProfileSettings v-if="activeTab === 'profile'" @back="backToGroup('profile')" />
+          <!-- Profile 由 EH 网站面板内部进入；我的标签独立组件含返回按钮，@back 回到所在分组默认项 -->
+          <AccountSettings v-if="activeTab === 'account'" />
           <MyTagsSettings v-else-if="activeTab === 'my-tags'" @back="backToGroup('my-tags')" />
-          <AccountSettings v-else-if="activeTab === 'account'" />
           <EHSettings v-else-if="activeTab === 'eh'" />
           <StyleSettings v-else-if="activeTab === 'style'" />
           <ReaderSettings v-else-if="activeTab === 'reader'" />
@@ -41,9 +40,7 @@
           <DownloadSettings v-else-if="activeTab === 'download'" />
           <TagMaintainSettings v-else-if="activeTab === 'tag-maintain'" />
           <UpdateScanSettings v-else-if="activeTab === 'update-scan'" />
-          <AdvancedSettings v-else-if="activeTab === 'advanced'" />
           <LogSettings v-else-if="activeTab === 'logs'" />
-          <SecuritySettings v-else-if="activeTab === 'security'" />
           <AboutSettings v-else-if="activeTab === 'about'" />
         </div>
       </div>
@@ -56,9 +53,8 @@ import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 
-// 导入全部设置子组件（Round5 步骤10：接入 Profile / 我的标签）
+// 导入全部设置子组件（Round25 收敛：Profile 并入 EH 网站、安全并入账户、高级并入日志）
 import AccountSettings from '@/components/settings/AccountSettings.vue'
-import ProfileSettings from '@/components/settings/ProfileSettings.vue'
 import EHSettings from '@/components/settings/EHSettings.vue'
 import StyleSettings from '@/components/settings/StyleSettings.vue'
 import ReaderSettings from '@/components/settings/ReaderSettings.vue'
@@ -68,9 +64,7 @@ import DownloadSettings from '@/components/settings/DownloadSettings.vue'
 import TagMaintainSettings from '@/components/settings/TagMaintainSettings.vue'
 import MyTagsSettings from '@/components/settings/MyTagsSettings.vue'
 import UpdateScanSettings from '@/components/settings/UpdateScanSettings.vue'
-import AdvancedSettings from '@/components/settings/AdvancedSettings.vue'
 import LogSettings from '@/components/settings/LogSettings.vue'
-import SecuritySettings from '@/components/settings/SecuritySettings.vue'
 import AboutSettings from '@/components/settings/AboutSettings.vue'
 
 const router = useRouter()
@@ -83,11 +77,11 @@ interface SettingsMenuItem {
   label: string
   icon: string
   title: string // 面板标题
-  adminOnly?: boolean // true=仅管理员可见（网络/下载/Tag维护/更新扫描/高级/日志/安全）
+  adminOnly?: boolean // true=仅管理员可见（网络/下载/更新扫描/Tag维护/日志）
   href?: string // 🔍 存在时点击跳转路由（如 /diag），而非切换 tab
 }
 
-// 按主题分组的菜单（Round5 步骤10 重组）；adminOnly 过滤逻辑沿用原实现
+// 按主题分组的菜单（Round25 收敛：安全并入账户、Profile 移入 EH 网站、高级并入日志、诊断移入关于）
 interface SettingsMenuGroup {
   title: string
   items: SettingsMenuItem[]
@@ -95,11 +89,9 @@ interface SettingsMenuGroup {
 
 const allGroups: SettingsMenuGroup[] = [
   {
-    title: '账户与安全',
+    title: '账户',
     items: [
       { id: 'account', label: '账户', icon: '👤', title: '账户设置' },
-      { id: 'profile', label: 'Profile', icon: '🪪', title: 'Profile 设置（E 站）' },
-      { id: 'security', label: '安全', icon: '🛡️', title: '安全设置', adminOnly: true },
     ],
   },
   {
@@ -118,14 +110,9 @@ const allGroups: SettingsMenuGroup[] = [
     ],
   },
   {
-    title: '下载管理',
+    title: '下载与离线',
     items: [
       { id: 'download', label: '下载', icon: '📥', title: '下载设置', adminOnly: true },
-    ],
-  },
-  {
-    title: '离线维护',
-    items: [
       { id: 'update-scan', label: '更新扫描', icon: '🔄', title: '更新扫描', adminOnly: true },
     ],
   },
@@ -137,9 +124,8 @@ const allGroups: SettingsMenuGroup[] = [
     ],
   },
   {
-    title: '高级与日志',
+    title: '日志',
     items: [
-      { id: 'advanced', label: '高级', icon: '⚙️', title: '高级设置', adminOnly: true },
       { id: 'logs', label: '日志', icon: '📜', title: '日志', adminOnly: true },
     ],
   },
@@ -147,8 +133,6 @@ const allGroups: SettingsMenuGroup[] = [
     title: '关于',
     items: [
       { id: 'about', label: '关于软件', icon: 'ℹ️', title: '关于软件' },
-      // 🔍 隐藏诊断入口：跳转 /diag（iPad PWA 底部条排查），仅管理员可见
-      { id: 'diag', label: '视口诊断', icon: '🔍', title: '视口诊断', adminOnly: true, href: '/diag' },
     ],
   },
 ]

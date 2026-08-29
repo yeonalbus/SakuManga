@@ -44,19 +44,12 @@
       <span class="arrow-icon">›</span>
     </div>
 
-    <div
-      class="setting-item clickable"
-      @mousedown="handleResetPressStart"
-      @mouseup="handleResetPressEnd"
-      @mouseleave="handleResetPressEnd"
-      @touchstart="handleResetPressStart"
-      @touchend="handleResetPressEnd"
-      @contextmenu.prevent
-    >
+    <div class="setting-item clickable" @click="handleResetDownloadPaths">
       <div class="item-info">
         <div class="item-title">重置下载路径</div>
-        <div class="item-subtext">长按以重置压缩包路径、解压路径与单张图片保存路径</div>
+        <div class="item-subtext">重置压缩包路径、解压路径与单张图片保存路径为默认值</div>
       </div>
+      <span class="arrow-icon">›</span>
     </div>
 
     <!-- ── 下载行为 ── -->
@@ -235,53 +228,7 @@
       </label>
     </div>
 
-    <!-- ── 自动更新画廊 ── -->
-    <div class="section-title">🔄 自动更新</div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">自动更新画廊</div>
-        <div class="item-subtext">检测到画廊有更新时自动下载新版本（需先运行「检测更新」）</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="downloadSettings.autoUpdateGallery" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">更新下载方案</div>
-        <div class="item-subtext">下载新版本时采用的方案</div>
-      </div>
-      <select v-model="downloadSettings.autoUpdateScheme" class="setting-select">
-        <option v-for="opt in DEFAULT_DOWNLOAD_SCHEME_OPTIONS" :key="opt.value" :value="opt.value">
-          {{ opt.label }}
-        </option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">无 H@H 时自动降级为画廊下载</div>
-        <div class="item-subtext">仅限自动更新画廊任务：归档下载失败时回退到逐图下载；手动发起的归档下载不受此开关控制</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="downloadSettings.autoUpdateFallbackToGallery" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">下载新版本后删除旧版本</div>
-        <div class="item-subtext">下载完成后自动删除旧版本文件夹与记录</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="downloadSettings.autoUpdateDeleteOriginal" />
-        <span class="slider"></span>
-      </label>
-    </div>
+    <!-- Round25：自动更新画廊相关配置已并入「更新扫描」页 -->
 
     <!-- 恢复默认设置 -->
     <div class="reset-row">
@@ -291,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue'
@@ -334,32 +281,12 @@ const handleSelectExtractPath = () =>
 const handleSelectSingleImagePath = () =>
   editPath('singleImageSavePath', '单张图片保存路径', '请输入单张图片保存路径：')
 
-// ── 重置下载路径：长按触发（参照 OnlineDetail 收藏长按模式）──
-let pressTimer: number | null = null
-
-const clearResetPressTimer = () => {
-  if (pressTimer !== null) {
-    clearTimeout(pressTimer)
-    pressTimer = null
-  }
-}
-
-const handleResetPressStart = () => {
-  clearResetPressTimer()
-  pressTimer = window.setTimeout(() => {
-    doResetDownloadPath()
-  }, 700)
-}
-
-const handleResetPressEnd = () => {
-  clearResetPressTimer()
-}
-
-const doResetDownloadPath = async () => {
-  const confirm = await modal.confirm(
+// ── 重置下载路径：普通按钮 + 确认弹窗（Round25：由长按手势改为显式按钮，提升可发现性）──
+const handleResetDownloadPaths = async () => {
+  const confirmed = await modal.confirm(
     '确定要将压缩包路径、解压路径与单张图片保存路径重置为默认值吗？',
   )
-  if (confirm) {
+  if (confirmed) {
     resetDownloadPaths()
     toast.success('已重置下载路径')
   }
@@ -399,10 +326,6 @@ watch(
 // 挂载时从后端拉取最新设置（后端为唯一事实来源）
 onMounted(() => {
   fetchDownloadSettings()
-})
-
-onUnmounted(() => {
-  clearResetPressTimer()
 })
 </script>
 

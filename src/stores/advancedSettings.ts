@@ -9,7 +9,8 @@
  * ⚠️ 1.0 收敛：仅保留真正接线生效的最小可用集。
  *   - enableLogs          门控前端 errorReporter 的本地记录与后端落盘上报（前端错误上报）。
  *   - systemLogsEnabled   门控四类操作日志（更新/维护/下载/其他）落盘（Round4 任务七，
- *     由 AdvancedSettings 与后端 /logs/settings 双向同步；本地值仅为展示与即时反馈）。
+ *     由 LogSettings 与后端 /logs/settings 双向同步；本地值仅为展示与即时反馈）。
+ *   （Round25：原「高级」设置页已并入「日志」页，本 store 与接口保留供开关读写。）
  */
 import { reactive, watch } from 'vue'
 import { loadStorage, saveStorage } from '@/utils/storage'

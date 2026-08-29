@@ -31,16 +31,34 @@
         <div class="item-subtext link-text">https://github.com/yeonalbus/SakuHentai</div>
       </div>
     </div>
+
+    <!-- Round25：视口诊断由侧边栏菜单移入关于页（仅管理员可见，iPad PWA 底部条排查用） -->
+    <div v-if="userStore.isAdmin" class="setting-item clickable" @click="goDiag">
+      <div class="item-info">
+        <div class="item-title">视口诊断</div>
+        <div class="item-subtext">查看当前视口 / 设备信息，排查 iPad PWA 底部条问题</div>
+      </div>
+      <span class="arrow-icon">›</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { version } from '../../../package.json'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/userStore'
 
 const { toast } = useUI()
+const router = useRouter()
+const userStore = useUserStore()
+
+// Round25：视口诊断（管理员专用，由侧边栏菜单移入）
+const goDiag = () => {
+  router.push('/diag')
+}
 
 // Round24：服务端构建标识（部署后新旧核对；旧版后端无该接口 → 保持 —）
 const serverBuild = ref('')
@@ -111,5 +129,11 @@ const handleOpenLink = (url: string) => {
 .link-text {
   color: #ff7588;
   word-break: break-all;
+}
+
+.arrow-icon {
+  font-size: 20px;
+  color: var(--app-text-muted);
+  margin-left: 8px;
 }
 </style>

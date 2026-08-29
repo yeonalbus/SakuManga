@@ -7,7 +7,7 @@
         <p>· 到点自动执行「<b>更新检测 + 老化判定</b>」完整扫描，逐本联网核对 E 站画廊是否有新版。</p>
         <p>· <b>Aged Status（老化）</b>：发布超过 365 天且确认无新版的漫画将被标记为「已老化」，
           之后不再参与扫描，避免重复联网。</p>
-        <p>· 开启「自动下载新版」后（下载设置中 <b>autoUpdateGallery</b>），检测到新版会自动入队下载。</p>
+        <p>· 开启下方「自动下载新版」后，检测到新版会自动入队下载。</p>
       </div>
     </div>
 
@@ -62,6 +62,54 @@
       />
     </div>
 
+    <!-- ── 自动下载新版（Round25：由下载设置并入，与更新检测同主题聚合）── -->
+    <div class="section-title">📥 自动下载新版</div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">自动下载新版</div>
+        <div class="item-subtext">检测到画廊有更新时自动下载新版本（需先运行「检测更新」）</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="downloadSettings.autoUpdateGallery" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">更新下载方案</div>
+        <div class="item-subtext">下载新版本时采用的方案</div>
+      </div>
+      <select v-model="downloadSettings.autoUpdateScheme" class="select-input">
+        <option v-for="opt in DEFAULT_DOWNLOAD_SCHEME_OPTIONS" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">无 H@H 时自动降级为画廊下载</div>
+        <div class="item-subtext">仅限自动更新画廊任务：归档下载失败时回退到逐图下载；手动发起的归档下载不受此开关控制</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="downloadSettings.autoUpdateFallbackToGallery" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">下载新版本后删除旧版本</div>
+        <div class="item-subtext">下载完成后自动删除旧版本文件夹与记录</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="downloadSettings.autoUpdateDeleteOriginal" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <!-- 手动触发 -->
     <div class="manual-row">
       <button class="action-btn refresh-btn" :disabled="busy" @click="handleManualScan">
@@ -94,6 +142,11 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
+// Round25：自动下载新版配置由下载设置并入（store 自动同步后端）
+import {
+  downloadSettings,
+  DEFAULT_DOWNLOAD_SCHEME_OPTIONS,
+} from '@/stores/downloadSettings'
 
 interface UpdateScanSetting {
   enableWeeklyScan: boolean
@@ -253,6 +306,17 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--app-text-strong);
   margin-bottom: 8px;
+}
+
+/* 分区标题（Round25：自动下载新版） */
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ff7588;
+  letter-spacing: 0.5px;
+  margin: 12px 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--app-border-2);
 }
 
 .intro-text {

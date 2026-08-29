@@ -70,29 +70,24 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 # 🖼️ 预览图
 
-## 在线界面
+## 更新界面
 
-<img width="2455" height="1288" alt="image" src="https://github.com/user-attachments/assets/5d7e5672-f52c-4a59-9c98-d793af510cf5" />
+<img width="1280" height="800" alt="updates" src="https://github.com/user-attachments/assets/195f3097-ec07-4b7a-a68f-755b534191c8" />
 
-## 本地书架
 
-<img width="2454" height="1287" alt="image" src="https://github.com/user-attachments/assets/a30e7fac-ad1a-466f-a7d6-ae1ef8cf6a24" />
+## 维护界面
 
-## 智能联网查询更新
+<img width="1280" height="800" alt="maintain" src="https://github.com/user-attachments/assets/f22acaf9-b7e1-4dd8-b479-b6990a6d4a87" />
 
-<img width="2445" height="1283" alt="image" src="https://github.com/user-attachments/assets/8f1c48f9-5c29-4dcb-a375-4d024eb4bd5c" />
+## 升级界面
 
-## 快速筛选下载
+<img width="1280" height="800" alt="upgrade" src="https://github.com/user-attachments/assets/306e04a6-b6f3-4abf-9895-b7fa5b4b84c5" />
 
-<img width="2446" height="1289" alt="image" src="https://github.com/user-attachments/assets/947772e6-1b45-433b-a875-13bafd64ade7" />
 
-## 连续阅读清单
+## 阅读界面
 
-<img width="2451" height="1282" alt="image" src="https://github.com/user-attachments/assets/3a8dcb39-0d3c-4223-9ece-3ffae1057b25" />
+<img width="1280" height="800" alt="reader-sidebar" src="https://github.com/user-attachments/assets/ed6f2e97-ac3c-4932-b29e-638634e7fa13" />
 
-## 自定义抽卡范围
-
-<img width="2423" height="1285" alt="image" src="https://github.com/user-attachments/assets/07e0d7f9-4c31-4eba-b3c1-8fb805deef3d" />
 
 # ⚙️ 设置说明
 

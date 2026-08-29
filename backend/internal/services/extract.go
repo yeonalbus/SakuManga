@@ -1,7 +1,7 @@
 package services
 
 import (
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 	"archive/zip"
 	"encoding/json"
 	"encoding/xml"

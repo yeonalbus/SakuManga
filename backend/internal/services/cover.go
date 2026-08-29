@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 func IsImage(filename string) bool {

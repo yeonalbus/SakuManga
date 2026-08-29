@@ -1,4 +1,4 @@
-# SakuHentai v1.3.0
+# SakuManga v1.3.0
 
 > 自 v1.2.0 以来，围绕阅读恢复、详情体验、维护查重与下载进行了 Round6~9 多轮打磨，v1.2.0 遗留问题基本收敛，进入稳定期。
 
@@ -51,8 +51,8 @@
 
 ## 📖 使用说明
 
-- 下载 `SakuHentai.exe` 后双击即可运行（单文件内嵌前后端 + 自定义图标），运行后最小化到系统托盘
+- 下载 `SakuManga.exe` 后双击即可运行（单文件内嵌前后端 + 自定义图标），运行后最小化到系统托盘
 - 默认监听端口 `8081`，可在「高级设置」中修改；端口被占用时自动切换空闲端口
 - 首次启动自动创建管理员账号 `admin` / `admin123`，登录后请尽快在「安全」中修改
-- NAS / 无界面环境请使用 `SakuHentai.exe --headless` 纯后端运行
-- 升级安装：直接替换 `SakuHentai.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；数据库结构由启动时自动迁移，无需手动处理
+- NAS / 无界面环境请使用 `SakuManga.exe --headless` 纯后端运行
+- 升级安装：直接替换 `SakuManga.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；数据库结构由启动时自动迁移，无需手动处理

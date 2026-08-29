@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"

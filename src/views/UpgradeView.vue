@@ -171,7 +171,7 @@ onMounted(fetchCandidates)
     </div>
 
     <div class="scope-hint">
-      💡 范围：仅检测 SakuHentai 自己下载的本子（以元数据来源标记为唯一标准，不做文件尺寸判定）。
+      💡 范围：仅检测 SakuManga 自己下载的本子（以元数据来源标记为唯一标准，不做文件尺寸判定）。
       方案识别顺序：下载记录方案 → 下载任务列表方案（归档·原图/归档·压缩/画廊）→ 落地目录形态
       （归档目录视为归档原图）。手动导入 / 其他下载器下载的本子不纳入升级范围。
     </div>
@@ -199,7 +199,7 @@ onMounted(fetchCandidates)
       <span class="icon">✅</span>
       <p class="empty-title">暂无需要升级的漫画</p>
       <p class="empty-sub">
-        所有 SakuHentai 下载的本子都已是归档原图版本，或本地暂无符合条件的漫画。
+        所有 SakuManga 下载的本子都已是归档原图版本，或本地暂无符合条件的漫画。
       </p>
     </div>
 

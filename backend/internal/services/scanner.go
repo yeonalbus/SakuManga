@@ -1,8 +1,8 @@
 package services
 
 import (
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"

@@ -2,7 +2,7 @@
 package database
 
 import (
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"

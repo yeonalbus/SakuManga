@@ -1,4 +1,4 @@
-# SakuHentai v1.5.0（Release Notes 草案 · 未发版）
+# SakuManga v1.5.0（Release Notes 草案 · 未发版）
 
 > ⚠️ **Draft**：本文件为 Round26 实施完成后的发版素材草稿，**尚未发版**。
 > 最终内容以发版时 `git log <上一tag>..HEAD` 实际提交为准（可能含 O4/O6 等其他已排期项）。
@@ -36,7 +36,7 @@
 
 ## 📖 使用说明
 
-- 下载 `SakuHentai.exe` 后双击即可运行，默认监听端口 `8081`，首次启动自动创建管理员账号 `admin` / `admin123`（请登录后修改密码）。
-- NAS / 无界面环境请使用 `SakuHentai.exe --headless`。
-- 升级安装：直接替换 `SakuHentai.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；新增 `ignored_identifiers` 表由启动时 AutoMigrate 自动创建，无需手动操作。
+- 下载 `SakuManga.exe` 后双击即可运行，默认监听端口 `8081`，首次启动自动创建管理员账号 `admin` / `admin123`（请登录后修改密码）。
+- NAS / 无界面环境请使用 `SakuManga.exe --headless`。
+- 升级安装：直接替换 `SakuManga.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；新增 `ignored_identifiers` 表由启动时 AutoMigrate 自动创建，无需手动操作。
 - 手工开发提示：修改前端后需 `npm run build` 并同步产物到 `backend/webui/dist`（`build-release.bat` 已内置该步骤）。

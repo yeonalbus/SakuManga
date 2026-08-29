@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 )
 
 type EHSettingHandler struct {

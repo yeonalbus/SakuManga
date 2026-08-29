@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // buildTestZipWithImage 构造含一张 w×h JPEG 的 ZIP/CBZ 测试包

@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

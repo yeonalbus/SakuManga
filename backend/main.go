@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/router"
-	"SakuHentai/internal/services"
-	"SakuHentai/internal/tray"
-	"SakuHentai/webui"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
+	"SakuManga/internal/router"
+	"SakuManga/internal/services"
+	"SakuManga/internal/tray"
+	"SakuManga/webui"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,7 +58,7 @@ func main() {
 
 	// 1.1 打印数据库实际路径：服务已 chdir 到可执行文件所在目录，manga.db 与 exe 同目录存放。
 	//     ⚠️ 用 `go run` 启动时 exe 在 %TEMP% 临时目录，DB 也落在那里——看到与项目内 backend/manga.db
-	//     不一致属正常现象；如需固定位置，请用打包后的 SakuHentai.exe 启动（见 build-release.bat）。
+	//     不一致属正常现象；如需固定位置，请用打包后的 SakuManga.exe 启动（见 build-release.bat）。
 	if dbPath, err := filepath.Abs("manga.db"); err == nil {
 		log.Printf("[DB] 数据库路径: %s", dbPath)
 	}
@@ -121,7 +121,7 @@ func main() {
 		port = strconv.Itoa(tcpAddr.Port)
 	}
 	url := fmt.Sprintf("http://%s", net.JoinHostPort(host, port))
-	log.Printf("SakuHentai 已启动: %s", url)
+	log.Printf("SakuManga 已启动: %s", url)
 
 	// 10. 桌面模式显示系统托盘（右键：打开界面/退出程序）；headless 模式等待退出信号
 	if *headless {

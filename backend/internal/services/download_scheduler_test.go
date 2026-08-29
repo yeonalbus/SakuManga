@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

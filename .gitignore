@@ -54,14 +54,14 @@ backend/data/*.tmp
 /data/
 
 # 单 exe 打包产物
-/SakuHentai.exe
-/SakuHentai-*.exe
+/SakuManga.exe
+/SakuManga-*.exe
 
 # 测试用漫画
 /MangaExamlpe
 /Test
 /JHentai
-Sakuhentai测试账号,网站与Ehentai账户.md
+SakuManga测试账号,网站与Ehentai账户.md
 
 # 备份文件
 /icon

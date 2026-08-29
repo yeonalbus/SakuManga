@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"strings"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // 在线随机采样页数控制（全卡池随机近似策略）

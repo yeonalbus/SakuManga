@@ -6,7 +6,7 @@ cd /d "%~dp0"
 for /f "delims=" %%v in ('node -p "require('./package.json').version"') do set "APP_VERSION=%%v"
 
 echo ============================================
-echo   SakuHentai v%APP_VERSION% 一键打包脚本
+echo   SakuManga v%APP_VERSION% 一键打包脚本
 echo ============================================
 
 echo.
@@ -53,7 +53,7 @@ if not defined GITSHA set "GITSHA=unknown"
 set "BUILD_ID=%TS%-g%GITSHA%"
 echo    构建标识: %BUILD_ID%
 
-go build -trimpath -ldflags "-s -w -X SakuHentai/internal/version.Build=%BUILD_ID%" -o "..\SakuHentai.exe" .
+go build -trimpath -ldflags "-s -w -X SakuManga/internal/version.Build=%BUILD_ID%" -o "..\SakuManga.exe" .
 if errorlevel 1 (
     popd
     echo [错误] 后端构建失败
@@ -63,8 +63,8 @@ popd
 
 echo.
 echo [4/4] 完成！
-echo    生成文件: %cd%\SakuHentai.exe
+echo    生成文件: %cd%\SakuManga.exe
 echo    双击运行后最小化到系统托盘，右键托盘图标可选择「打开界面 / 退出程序」。
-echo    若需纯后端运行（无托盘），可执行: SakuHentai.exe --headless
+echo    若需纯后端运行（无托盘），可执行: SakuManga.exe --headless
 echo.
 pause

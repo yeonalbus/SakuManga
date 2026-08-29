@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"

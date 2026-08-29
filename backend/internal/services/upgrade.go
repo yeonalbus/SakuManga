@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"gorm.io/gorm"
 )
@@ -15,7 +15,7 @@ import (
 //
 // 目标：把「低清/非最优版本」的本子升级为「归档原图（archiveOriginal）」下载方案。
 // 检测范围（元数据为唯一标准，不做文件尺寸自动判定）：
-//   - 仅 SakuHentai 自己下载导入的本子：scan_path_id 为空（下载导入）
+//   - 仅 SakuManga 自己下载导入的本子：scan_path_id 为空（下载导入）
 //     + gid/token 非空（下载时写入 metadata/ametadata/ComicInfo.xml 的 E 站元数据）；
 //   - 未被标记「画廊已被删除/移除」（removed_status = false，被删画廊无法下载）；
 //   - 有效下载方案 ≠ archiveOriginal。有效方案解析（ResolveEffectiveDownloadScheme）：
@@ -72,7 +72,7 @@ func taskSchemeValue(mode models.DownloadMode, archiveType models.ArchiveType) s
 }
 
 // isArchiveDownloadPath 判断本地落地目录是否为「归档下载解压」形态：
-// SakuHentai 归档下载目录固定命名为 "archive - <gid> - <title>"（download_archive.go），
+// SakuManga 归档下载目录固定命名为 "archive - <gid> - <title>"（download_archive.go），
 // 画廊下载目录为 "<gid> - <title>"，据此区分（仅兜底推断用）。
 func isArchiveDownloadPath(localPath string) bool {
 	return strings.Contains(localPath, `\archive - `) || strings.Contains(localPath, `/archive - `)

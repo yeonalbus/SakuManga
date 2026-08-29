@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -112,7 +112,7 @@ func TestListUpgradeCandidates(t *testing.T) {
 		{ID: "c5", Title: "任务归档压缩", GID: "400", Token: "t", LocalPath: `Z:\Comics\archive - 400 - x`, SourceMode: "gallery"},                                                 // 纳入（任务=归档压缩）
 		{ID: "c6", Title: "已知归档压缩", GID: "13", Token: "t", LocalPath: `Z:\Comics\13 - x`, SourceMode: "gallery", DownloadScheme: string(models.DefaultSchemeArchiveResample)}, // 纳入（新数据）
 		{ID: "c7", Title: "已知归档原图", GID: "14", Token: "t", LocalPath: `Z:\Comics\14 - x`, SourceMode: "gallery", DownloadScheme: string(models.DefaultSchemeArchiveOriginal)}, // 排除（新数据已达标）
-		{ID: "c8", Title: "额外路径导入", GID: "16", Token: "t", LocalPath: `Z:\X\16 - x`, SourceMode: "gallery", ScanPathID: "sp1"},                                               // 排除（非 SakuHentai 下载）
+		{ID: "c8", Title: "额外路径导入", GID: "16", Token: "t", LocalPath: `Z:\X\16 - x`, SourceMode: "gallery", ScanPathID: "sp1"},                                               // 排除（非 SakuManga 下载）
 		{ID: "c9", Title: "无 gid", Token: "t", LocalPath: `Z:\Comics\17 - x`, SourceMode: "gallery"},                                                                              // 排除（无 E 站元数据）
 		{ID: "c10", Title: "已被移除", GID: "18", Token: "t", LocalPath: `Z:\Comics\18 - x`, SourceMode: "gallery", RemovedStatus: true},                                           // 排除（被删无法下载）
 	}

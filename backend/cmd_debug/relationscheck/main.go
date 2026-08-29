@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"SakuHentai/internal/services"
+	"SakuManga/internal/services"
 )
 
 func main() {

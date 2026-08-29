@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"

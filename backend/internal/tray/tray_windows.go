@@ -22,12 +22,12 @@ func Run(url string) {
 func onReady(url string) func() {
 	return func() {
 		systray.SetIcon(iconData)
-		systray.SetTitle("SakuHentai")
-		systray.SetTooltip("SakuHentai - 漫画管理")
+		systray.SetTitle("SakuManga")
+		systray.SetTooltip("SakuManga - 漫画管理")
 
-		mOpen := systray.AddMenuItem("打开界面", "在默认浏览器中打开 SakuHentai 界面")
+		mOpen := systray.AddMenuItem("打开界面", "在默认浏览器中打开 SakuManga 界面")
 		systray.AddSeparator()
-		mQuit := systray.AddMenuItem("退出程序", "退出 SakuHentai")
+		mQuit := systray.AddMenuItem("退出程序", "退出 SakuManga")
 
 		go func() {
 			for {

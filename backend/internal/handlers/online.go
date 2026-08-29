@@ -21,9 +21,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 )
 
 type OnlineComicHandler struct {

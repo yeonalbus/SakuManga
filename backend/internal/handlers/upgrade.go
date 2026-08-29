@@ -7,16 +7,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 )
 
 // ─────────────────────────────────────────────────────────────
 // 画质升级 HTTP 层（图片质量升级功能）
 //
 // 检测 + 确认后把「低清/非最优版本」升级为「归档原图（archiveOriginal）」。
-// 范围：SakuHentai 下载导入（scan_path_id 空）+ 有 gid/token 元数据 + 非 archiveOriginal。
+// 范围：SakuManga 下载导入（scan_path_id 空）+ 有 gid/token 元数据 + 非 archiveOriginal。
 // 升级下载复用 DownloadManager.CreateTask（UpdateForComicID + ForceDeleteOriginal），
 // 完成后由 finalizeUpdate 自动删除旧版。
 // ─────────────────────────────────────────────────────────────

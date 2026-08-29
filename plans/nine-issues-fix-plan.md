@@ -1,4 +1,4 @@
-# SakuHentai 九大问题修复规划表
+# SakuManga 九大问题修复规划表
 
 > 适用范围：Go 后端（Gin/GORM）+ Vue3 前端（Pinia/TS）
 > 目标：一次规划、一条龙实现、逐项比对验收。
@@ -49,7 +49,7 @@
 - **D2（发布时间来源，优先级从高到低）**：
   1. 本地 `metadata` / `ametadata` JSON 的 `publishTime` 字段（JHentai 格式 `"2016-05-05 14:00"`，用户已确认存在）→ 需给 `EHMetadataJSON` 增加 `PublishTime` 字段并解析。
   2. ComicInfo.xml 的 `<Year><Month><Day>`（当无 JSON 时）。
-  3. SakuHentai 自身新下载：`buildFullComicInfo` 写入的 metadata JSON 增加 `publishTime`，取在线详情 `Posted:` 值（[eh_detail.go](backend/internal/services/eh_detail.go:94) 已解析到 `updatedAt`）。
+  3. SakuManga 自身新下载：`buildFullComicInfo` 写入的 metadata JSON 增加 `publishTime`，取在线详情 `Posted:` 值（[eh_detail.go](backend/internal/services/eh_detail.go:94) 已解析到 `updatedAt`）。
 
 ---
 
@@ -212,7 +212,7 @@ if (currentIndex === -1) {
 | #   | 问题 | 定夺项                   | 已定夺                                                                                                                         |
 | --- | ---- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | D1  | 1    | 排序控件 UI 样式         | ✅ 首页顶部 SegmentedControl（默认/入库/修改/发布时间）+ 升/降序图标                                                           |
-| D2  | 1    | 发布时间数据来源         | ✅ 优先本地 metadata JSON `publishTime`；次选 ComicInfo `<Year/Month/Day>`；SakuHentai 新下载写 `publishTime`（取在线 Posted） |
+| D2  | 1    | 发布时间数据来源         | ✅ 优先本地 metadata JSON `publishTime`；次选 ComicInfo `<Year/Month/Day>`；SakuManga 新下载写 `publishTime`（取在线 Posted） |
 | D3  | 2    | 标题显示方式             | ✅ 双行：主标题=日语优先（TitleJpn），副标题=原标题                                                                            |
 | D4  | 2    | 旧数据 TitleJpn 回填     | ✅ 增量扫描时"路径已存在但 TitleJpn 为空 → 补填"                                                                               |
 | D5  | 3    | 旧数据来源回填           | ✅ 下次扫描（全量/增量）按路径补标 ScanPathID                                                                                  |

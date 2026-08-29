@@ -24,11 +24,11 @@
 
     <div
       class="setting-item clickable"
-      @click="handleOpenLink('https://github.com/yeonalbus/SakuHentai')"
+      @click="handleOpenLink('https://github.com/yeonalbus/SakuManga')"
     >
       <div class="item-info">
         <div class="item-title">Github</div>
-        <div class="item-subtext link-text">https://github.com/yeonalbus/SakuHentai</div>
+        <div class="item-subtext link-text">https://github.com/yeonalbus/SakuManga</div>
       </div>
     </div>
 

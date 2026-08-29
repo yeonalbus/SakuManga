@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

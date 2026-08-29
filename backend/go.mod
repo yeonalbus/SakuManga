@@ -1,4 +1,4 @@
-module SakuHentai
+module SakuManga
 
 go 1.26.5
 

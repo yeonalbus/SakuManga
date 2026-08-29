@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 )
 
 // 下载/更新日志统一前缀（与 services 包保持一致，便于验收 grep）

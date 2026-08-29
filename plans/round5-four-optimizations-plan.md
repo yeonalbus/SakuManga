@@ -1,4 +1,4 @@
-# SakuHentai 四项优化计划书（Round 5）
+# SakuManga 四项优化计划书（Round 5）
 
 > 目标：围绕 4 项优化需求产出可落地的实施蓝图，配套 Bug 诊断见 [`round5-diagnostic-report.md`](plans/round5-diagnostic-report.md)。
 > 本文档供实现阶段（Code 模式）按「八、分阶段实施」逐步执行。
@@ -204,7 +204,7 @@ remainder = ArchiveThreads % MaxArchiveConcurrency
 
 > ⚠️ **JHentai 反证**：JHentai 用**同一套 `start=1` H@H 直链 + 多 Isolate Range 分片**成功下载（[`_getDownloadUrl`](JHentai/HathDownload/archive_download_service.dart:965) 强制 `start=1` + [`_generateDownloadTask`](JHentai/HathDownload/archive_download_service.dart:610) `isolateCount: archiveDownloadIsolateCount`），证明**「H@H 不支持 Range」不是绝对结论**。我们探测 404 更可能是探测方式/时机/头差异所致。因此修复方向是**对照 JHentai 复现并修复我们的探测与分块路径**：
 
-| 对照项 | JHentai 做法（[`JHentai/HathDownload`](JHentai/HathDownload/archive_download_service.dart:1)） | SakuHentai 现状（待修复） |
+| 对照项 | JHentai 做法（[`JHentai/HathDownload`](JHentai/HathDownload/archive_download_service.dart:1)） | SakuManga 现状（待修复） |
 |---|---|---|
 | 探测 | `JDownloadTask` 先 `fetchContentLength`（轻量探测拿总大小） | GET + `Range: bytes=0-0`（[`probeArchiveDownload`](backend/internal/services/archive_chunk.go:377)），404 即回退单线程 |
 | 分片 | 多 Isolate 对同一 URL 分段 Range 并行下载 | `useChunk=false` 时整体单线程 [`downloadZip`](backend/internal/services/download_archive.go:783) |
@@ -220,7 +220,7 @@ remainder = ArchiveThreads % MaxArchiveConcurrency
 
 ### 5.8 借鉴 JHentai 的成熟实现（4(3) / 3(2) / 4(2)）
 
-| 借鉴点 | JHentai 实现 | 落地到 SakuHentai |
+| 借鉴点 | JHentai 实现 | 落地到 SakuManga |
 |---|---|---|
 | **假死 + 空位唤醒**（方案 A 实现范式） | [`waitingIsolate`](JHentai/HathDownload/archive_download_service.dart:1012) 状态 + [`_tryWakeWaitingTasks`](JHentai/HathDownload/archive_download_service.dart:682) 统计 running 任务 activeIsolateCount（active=0 时用 isolateCount 兜底），按 insertTime 排序逐个唤醒 | 全局额度池 `acquire` 阻塞（假死）+ `wakeAll` 空位唤醒；等待任务按入队时间排序（见 5.1） |
 | **运行中并发数热更新**（4(2)「及时暂停/开启线程」） | [`_onIsolateCountChange`](JHentai/HathDownload/archive_download_service.dart:705) 对 running 任务 `changeIsolateCount` | `SaveSettings` / 优先级变更时对 running 归档调用 `adjust(taskID, target)` 实时增减线程（见 5.6） |

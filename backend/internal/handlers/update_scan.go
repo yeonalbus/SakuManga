@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/services"
+	"SakuManga/internal/services"
 )
 
 // UpdateScanHandler 每周自动更新扫描设置 HTTP 层（Round4 任务四）

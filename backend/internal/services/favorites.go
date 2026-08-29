@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/PuerkitoBio/goquery"
 	"gorm.io/gorm"

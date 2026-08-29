@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"

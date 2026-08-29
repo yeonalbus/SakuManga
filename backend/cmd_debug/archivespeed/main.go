@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"github.com/PuerkitoBio/goquery"
 )

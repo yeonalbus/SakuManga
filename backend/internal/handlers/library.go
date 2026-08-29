@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/models"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/models"
 )
 
 // LibraryHandler 书架 / 历史 / 评分 / 阅读清单（均按用户隔离，后端 DB 持久化）

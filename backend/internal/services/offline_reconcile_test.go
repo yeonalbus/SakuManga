@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"gorm.io/gorm"
 )

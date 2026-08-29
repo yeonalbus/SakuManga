@@ -5,9 +5,9 @@
 package router
 
 import (
-	"SakuHentai/internal/handlers"
-	"SakuHentai/internal/middleware"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/handlers"
+	"SakuManga/internal/middleware"
+	"SakuManga/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

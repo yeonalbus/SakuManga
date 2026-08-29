@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // Round24-P0-3：页列表内存缓存——两次读取结果一致且不报错（zip 场景）

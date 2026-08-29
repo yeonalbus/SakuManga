@@ -14,9 +14,9 @@ import (
 	"regexp"
 	"strings"
 
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"github.com/PuerkitoBio/goquery"
 )

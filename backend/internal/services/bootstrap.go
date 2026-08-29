@@ -3,7 +3,7 @@ package services
 import (
 	"fmt"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"gorm.io/gorm"
 )

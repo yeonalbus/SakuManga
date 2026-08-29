@@ -1,4 +1,4 @@
-# SakuHentai 十一项问题诊断报告（Round 6）
+# SakuManga 十一项问题诊断报告（Round 6）
 
 > 诊断依据：对前端 [`src/`](src/) 与后端 [`backend/`](backend/) 关键源码逐一核对，结合您提供的 404 日志复现路径。每项给出「现象 / 关键代码现状 / 根因」；修复方案与决策项见配套计划书 [`round6-eleven-issues-plan.md`](plans/round6-eleven-issues-plan.md)。
 

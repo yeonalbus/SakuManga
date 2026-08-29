@@ -1,4 +1,4 @@
-# SakuHentai 发布流程（Release Process）
+# SakuManga 发布流程（Release Process）
 
 > 每次发版必须按此清单执行。本文件为**固定流程**，记录从「敲定版本号」到「发布」的全部步骤，避免遗漏。
 >
@@ -49,7 +49,7 @@
 基于 git 历史生成 Release Notes 素材：
 
 ```bat
-git tag -l                                   :: 查看已有 tag（命名规范：SakuHentai-X.Y.Z）
+git tag -l                                   :: 查看已有 tag（命名规范：SakuManga-X.Y.Z）
 git log <上一tag>..HEAD --oneline --no-decorate   :: 列出本次发布涉及的全部提交
 ```
 
@@ -120,7 +120,7 @@ npm run build
 build-release.bat
 ```
 
-- [ ] 根目录生成 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标）
+- [ ] 根目录生成 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标）
 - [ ] 脚本标题显示版本号为本次目标版本
 - [ ] 双击运行 → 系统托盘出现图标 → 打开界面正常
 - [ ] 「关于」页版本号与本次目标一致
@@ -134,10 +134,10 @@ build-release.bat
 git status && git diff --stat     :: 确认改动范围
 git add -A
 git commit -m "chore(release): v1.3.0 发布准备（版本号/项目树/README/Release Notes）"
-git tag SakuHentai-1.3.0          :: tag 命名规范：SakuHentai-X.Y.Z
+git tag SakuManga-1.3.0          :: tag 命名规范：SakuManga-X.Y.Z
 ```
 
-tag 命名必须与历史一致（`SakuHentai-1.0.0`、`SakuHentai-1.1.0`、`SakuHentai-1.2.0`）。
+tag 命名必须与历史一致（`SakuManga-1.0.0`、`SakuManga-1.1.0`、`SakuManga-1.2.0`）。
 
 ---
 
@@ -145,16 +145,16 @@ tag 命名必须与历史一致（`SakuHentai-1.0.0`、`SakuHentai-1.1.0`、`Sak
 
 若通过 GitHub Release 分发：
 
-- [ ] 推送 tag：`git push origin SakuHentai-1.3.0`
+- [ ] 推送 tag：`git push origin SakuManga-1.3.0`
 - [ ] 创建 Release：标题 `v1.3.0`，正文粘贴 Release Notes
-- [ ] 附件：上传 `SakuHentai.exe`（如仓库允许）
+- [ ] 附件：上传 `SakuManga.exe`（如仓库允许）
 
 ---
 
 ## 附录 A：Release Notes 模板
 
 ```markdown
-# SakuHentai vX.Y.Z
+# SakuManga vX.Y.Z
 
 > 自 vA.B.C 以来，……（一句本期总结，含遗留问题解决情况）
 
@@ -177,11 +177,11 @@ tag 命名必须与历史一致（`SakuHentai-1.0.0`、`SakuHentai-1.1.0`、`Sak
 
 ## 📖 使用说明
 
-- 下载 `SakuHentai.exe` 后双击即可运行……
+- 下载 `SakuManga.exe` 后双击即可运行……
 - 默认监听端口 `8081`……
 - 首次启动自动创建管理员账号 `admin` / `admin123`……
-- NAS / 无界面环境请使用 `SakuHentai.exe --headless`……
-- 升级安装：直接替换 `SakuHentai.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；数据库结构由启动时自动迁移……
+- NAS / 无界面环境请使用 `SakuManga.exe --headless`……
+- 升级安装：直接替换 `SakuManga.exe` 即可，`manga.db` / `data/` / `config.json` 跟随 exe 目录自动保留；数据库结构由启动时自动迁移……
 ```
 
 ---

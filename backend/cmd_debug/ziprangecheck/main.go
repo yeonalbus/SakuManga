@@ -1,11 +1,11 @@
 // 实测工具：验证「带 start 参数的 H@H streaming 直链」在两种下载策略下的 zip 完整性
 //
-// 背景：SakuHentai 当前对 H@H 直链参与 Range 探测分块并发下载（默认 10 线程），
+// 背景：SakuManga 当前对 H@H 直链参与 Range 探测分块并发下载（默认 10 线程），
 // 用户报告"下载完成但 zip 校验失败"的任务 90% 无法通过重新下载修复。
 // 本工具对同一 H@H 直链分别实测：
 //
 //	A) 单线程顺序下载（不带 Range）  —— 候选修复路径（对齐 downloadZip 对 hathStream 的处理）
-//	B) 并发 Range 分片下载（默认 10 线程）—— 当前 SakuHentai 行为
+//	B) 并发 Range 分片下载（默认 10 线程）—— 当前 SakuManga 行为
 //
 // 分别保存 zip 并校验，确认根因后再实施代码修复。
 //
@@ -630,7 +630,7 @@ func main() {
 	}
 }
 
-// isHathStream 对齐 SakuHentai isHathStreamDownloadURL：host 含 hath.network 且 query 含 start
+// isHathStream 对齐 SakuManga isHathStreamDownloadURL：host 含 hath.network 且 query 含 start
 func isHathStream(downloadURL string) bool {
 	u, err := url.Parse(downloadURL)
 	if err != nil {

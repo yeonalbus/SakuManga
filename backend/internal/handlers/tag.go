@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"SakuHentai/internal/services"
+	"SakuManga/internal/services"
 	"net/http"
 	"strconv"
 

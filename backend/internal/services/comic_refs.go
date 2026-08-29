@@ -19,7 +19,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // refsWarnTag 引用清理日志前缀

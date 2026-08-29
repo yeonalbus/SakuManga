@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 	"encoding/json"
 	"errors"
 	"fmt"

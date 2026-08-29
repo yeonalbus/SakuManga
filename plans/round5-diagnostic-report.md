@@ -1,4 +1,4 @@
-# SakuHentai 下载并发 Bug 诊断报告
+# SakuManga 下载并发 Bug 诊断报告
 
 > 针对用户提出的「4.1 单个文件被分配单个归档」与「4.3 超过 10 线程后 404（文件未被正常阻塞）」两份问题的诊断结论。
 > 配套实施计划见 [`round5-four-optimizations-plan.md`](plans/round5-four-optimizations-plan.md)。
@@ -108,7 +108,7 @@ flowchart LR
 
 现象 A（单文件只有 1 线程）**不依赖方案 A**，而是 Range 探测失败回退单线程所致。**JHentai 参考（[`JHentai/HathDownload`](JHentai/HathDownload/archive_download_service.dart:1)）证明：同一套 `start=1` H@H 直链 + HTTP Range 分片多线程下载在 E 站是可行路径**（[`_getDownloadUrl`](JHentai/HathDownload/archive_download_service.dart:965) + [`_generateDownloadTask`](JHentai/HathDownload/archive_download_service.dart:610) `isolateCount`）。因此修复优先方向是**对照 JHentai 探测方式复现并修复我们自己的探测/分块路径**，而非认定 E 站限制：
 
-| 对照项 | JHentai 做法 | SakuHentai 现状（待修复） |
+| 对照项 | JHentai 做法 | SakuManga 现状（待修复） |
 |---|---|---|
 | 探测方式 | `JDownloadTask` 先 `fetchContentLength`（轻量探测拿总大小） | GET + `Range: bytes=0-0`（[`probeArchiveDownload`](backend/internal/services/archive_chunk.go:377)），404 即回退单线程 |
 | 分片执行 | 多 Isolate 对同一 URL 分段 Range 并行下载 | `useChunk=false` 时整体回退单线程 [`downloadZip`](backend/internal/services/download_archive.go:783) |

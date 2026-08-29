@@ -1,4 +1,4 @@
-# SakuHentai 项目目录树
+# SakuManga 项目目录树
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
@@ -7,7 +7,7 @@
 ## 一、目录总览
 
 ```
-SakuHentai/
+SakuManga/
 ├── backend/                        # Go 后端（Gin + GORM + SQLite，含内嵌前端 webui/）
 ├── src/                            # Vue 3 前端（Vite + Pinia + Vue Router）
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
@@ -24,7 +24,7 @@ SakuHentai/
 ├── eslint.config.ts / .oxlintrc.json / .prettierrc.json / .editorconfig / .gitattributes   # 代码规范配置
 ├── build-release.bat               # 一键打包单 exe（版本号自动读取 package.json）
 ├── dist/                           # 前端 Vite 构建产物（已 gitignore，打包时拷入 webui/dist）
-├── SakuHentai.exe                  # 打包产物（已 gitignore，双击运行即托盘）
+├── SakuManga.exe                  # 打包产物（已 gitignore，双击运行即托盘）
 └── PROJECT_TREE.md                 # 本文件
 ```
 
@@ -395,8 +395,8 @@ backend/
 | 后端编译       | `cd backend && go build ./...`（需先存在 `webui/dist`，见打包）    |
 | 后端测试       | `cd backend && go test ./...`                                      |
 | 后端运行       | `cd backend && go run .`（需先存在 `webui/dist`）                  |
-| 单 exe 打包    | `build-release.bat`（根目录生成 SakuHentai.exe，双击即托盘运行）   |
-| 纯后端运行     | `SakuHentai.exe --headless`（NAS/无界面环境）                      |
+| 单 exe 打包    | `build-release.bat`（根目录生成 SakuManga.exe，双击即托盘运行）   |
+| 纯后端运行     | `SakuManga.exe --headless`（NAS/无界面环境）                      |
 | Linux 交叉编译 | `cd backend && set GOOS=linux & set GOARCH=amd64 & go build ./...` |
 
 ---
@@ -413,7 +413,7 @@ backend/
 ## 六、发布注意（v2.0.0）
 
 - **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.0.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `2.0.0`）。
-- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuHentai.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuHentai.exe --headless` 纯后端运行。
+- **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuManga.exe --headless` 纯后端运行。
 - **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。

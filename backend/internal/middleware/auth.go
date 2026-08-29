@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

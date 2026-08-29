@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

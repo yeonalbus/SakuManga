@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // 🟢 新增：根据账号权限与站点偏好动态决定请求根路径 (BaseURL)

@@ -1,4 +1,4 @@
-# SakuHentai 第四轮功能计划书（9 项）
+# SakuManga 第四轮功能计划书（9 项）
 
 > 面向：更新/维护/排行榜/日志/日期跳页等 9 项需求与 BUG 修复
 > 配套文档：[`diagnostic-report.md`](plans/diagnostic-report.md)

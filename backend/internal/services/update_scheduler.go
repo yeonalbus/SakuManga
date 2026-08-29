@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

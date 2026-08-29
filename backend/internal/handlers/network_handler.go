@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"SakuHentai/internal/services" // 👈 引入 services
+	"SakuManga/internal/services" // 👈 引入 services
 
 	"github.com/gin-gonic/gin"
 )

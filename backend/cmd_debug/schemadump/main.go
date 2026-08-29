@@ -4,9 +4,9 @@ package main
 import (
 	"fmt"
 
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
-	"SakuHentai/internal/services"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 
 	"gorm.io/gorm/clause"
 )

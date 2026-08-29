@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

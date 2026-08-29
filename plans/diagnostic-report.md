@@ -1,4 +1,4 @@
-# SakuHentai 诊断报告
+# SakuManga 诊断报告
 
 > 针对用户提出的 4 处 BUG 与若干需求现状的诊断结论。
 > 配套实施计划见 [`round4-nine-features-plan.md`](plans/round4-nine-features-plan.md)。

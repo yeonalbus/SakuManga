@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"SakuHentai/internal/version"
+	"SakuManga/internal/version"
 
 	"github.com/gin-gonic/gin"
 )

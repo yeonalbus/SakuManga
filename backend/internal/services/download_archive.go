@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/PuerkitoBio/goquery"
 )

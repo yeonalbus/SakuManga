@@ -11,7 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 func main() {

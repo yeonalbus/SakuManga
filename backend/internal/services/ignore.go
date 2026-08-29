@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"gorm.io/gorm"
 )

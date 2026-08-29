@@ -117,7 +117,7 @@ contentOpensNewTab = isWideViewport() && !isStandalonePWA()
   - A（推荐）：标签入口路由匹配 + open 成功后写标记（仅当前页==入口才允许 close）；
   - B：仅 opener 判定（简单但新标签内 SPA 深链仍会误关）。
 - **D6 交付方式**（本 Bug 为 v1.4.0 发布后补丁）
-  - A（推荐）：修复后重新 build-release.bat 覆盖生成 `SakuHentai.exe`，amend 发行提交并重打 tag（本地尚未推送，历史干净）；
+  - A（推荐）：修复后重新 build-release.bat 覆盖生成 `SakuManga.exe`，amend 发行提交并重打 tag（本地尚未推送，历史干净）；
   - B：修复后新增独立 fix 提交 + 新 exe（不移动 1.4.0 tag）。
 
 ---
@@ -151,15 +151,15 @@ contentOpensNewTab = isWideViewport() && !isStandalonePWA()
 - D3=A：PC 下阅读器（立即阅读/预览/清单阅读）新标签打开；
 - D4=A：≥1025px 且非 standalone 且非强制移动形态才新标签；
 - D5=A：标签入口路由匹配 + `window.open` 成功后才写标记（open 返回 null 时降级同标签跳转）；
-- D6=A：修复后重跑 build-release.bat 覆盖 `SakuHentai.exe`，amend 发行提交并重打 `SakuHentai-1.4.0` tag。
+- D6=A：修复后重跑 build-release.bat 覆盖 `SakuManga.exe`，amend 发行提交并重打 `SakuManga-1.4.0` tag。
 
 ## 实施结果
 
 - `detailNav.ts`：新增 `contentOpensNewTab()`（≥1025px + 非 standalone + 非强制移动）、`openContentTab(href,id,force?)`（新标签记录入口路由 `saku_tab_entry_<id>`，open 被拦截/非 PC 降级同标签 `router.push`）、`shouldCloseTab(id,fullPath)`（仅 opener 存活 + 当前页==入口路由才允许 close）；移除旧 `saku_newtab_` 标记与 `isDetailNewTab`。
 - 入口分流：ItemCard（在线/离线统一 openDetailNav，PC 新标签）、OnlineDetailPanel「画廊详情↗」、OnlineDetail/OfflineDetail「立即阅读/预览」、ReadingListView「阅读」均走 openContentTab。
 - 返回统一：OnlineDetail / OfflineDetail handleBack、ComicReader `handleReaderBack`（退出阅读 + 错误层返回）共用 shouldCloseTab → consumeBackState → history.back → 首页兜底链；PWA/窄屏维持 SPA 同标签（Round15/16 不回归）。
-- 验证：type-check、`verify-round21.mjs`、round18/19/20 回归全过；`build-release.bat` 已重打 `SakuHentai.exe`（含本修复）并通过 headless 冒烟。
-- **Git 状态说明**：实施期间检测到另一会话并发活动（`a8b4845 Delete`、origin 已推送 `SakuHentai-1.4.0` tag → `4dd7a66`）。为不重写已推送历史，round21 收敛为 `origin/main` 之上的独立提交 `4c79ecd`（71 文件，round21 全部改动）；本地 tag 已对齐 origin（`4dd7a66`）。发行二进制（SakuHentai.exe，gitignored）已含修复。
+- 验证：type-check、`verify-round21.mjs`、round18/19/20 回归全过；`build-release.bat` 已重打 `SakuManga.exe`（含本修复）并通过 headless 冒烟。
+- **Git 状态说明**：实施期间检测到另一会话并发活动（`a8b4845 Delete`、origin 已推送 `SakuManga-1.4.0` tag → `4dd7a66`）。为不重写已推送历史，round21 收敛为 `origin/main` 之上的独立提交 `4c79ecd`（71 文件，round21 全部改动）；本地 tag 已对齐 origin（`4dd7a66`）。发行二进制（SakuManga.exe，gitignored）已含修复。
 
 ## 待确认后再开工
 

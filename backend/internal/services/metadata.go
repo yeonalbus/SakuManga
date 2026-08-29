@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 )
 
 // 1. ComicInfo.xml 结构体映射

@@ -1,4 +1,4 @@
-# SakuHentai 十一项问题实施计划书（Round 6）
+# SakuManga 十一项问题实施计划书（Round 6）
 
 > 配套诊断报告：[`round6-eleven-issues-diagnostic-report.md`](plans/round6-eleven-issues-diagnostic-report.md)
 > 约定：`S1-S11` 对应 11 项；`D1-D9` 为需您拍板的决策点。全部改动完成后按 `.roo/rules/code.md` 走验证 + git 提交。

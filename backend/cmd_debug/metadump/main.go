@@ -16,7 +16,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"SakuHentai/internal/services"
+	"SakuManga/internal/services"
 )
 
 func main() {

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"SakuHentai/internal/models"
+	"SakuManga/internal/models"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"

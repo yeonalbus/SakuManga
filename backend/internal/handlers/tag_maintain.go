@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"SakuHentai/internal/services"
+	"SakuManga/internal/services"
 )
 
 // TagMaintainHandler Tag 维护（双轨三态）HTTP 层

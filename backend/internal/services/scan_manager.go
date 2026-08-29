@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"SakuHentai/internal/database"
-	"SakuHentai/internal/models"
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ export interface ParsedFSearchTag {
 }
 
 export const parseFSearchTag = (raw: string): ParsedFSearchTag => {
-  let s = (raw || '').trim().replace(/^-\s*/, '').trim()
+  const s = (raw || '').trim().replace(/^-\s*/, '').trim()
   const idx = s.indexOf(':')
   if (idx <= 0) {
     return { namespace: '', key: '', anchored: false, isTag: false, canonical: '' }

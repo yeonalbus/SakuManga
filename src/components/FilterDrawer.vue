@@ -3,7 +3,6 @@ import { ref, reactive, watch } from 'vue'
 import type { SearchConfig } from '@/types/comic'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import TagChip from '@/components/TagChip.vue'
-import { useModeStore } from '@/stores/modeStore'
 // Round3-任务6：负向 chips（「- 」前缀红色/删除线区分）
 import { isNegativeItem, formatFSearchTag } from '@/utils/tagFilter'
 
@@ -16,9 +15,6 @@ const emit = defineEmits<{
   (e: 'update:visible', val: boolean): void
   (e: 'apply', filters: Partial<SearchConfig>): void
 }>()
-
-// 当前模式决定联想插入格式：在线 → E-Hentai f_search 标准语法，离线 → 裸 namespace:key
-const modeStore = useModeStore()
 
 interface CategoryConfig {
   key: string
@@ -62,7 +58,7 @@ const inputFocused = ref(false)
 
 // ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
 // Round20-Bug3：插入格式统一为 E-Hentai f_search 语法（本地匹配已按同一语义解析）
-const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
+const { suggestions, loading, clear: clearSuggest } = useTagSuggest(
   () => inputKeyword.value,
   8,
   150,

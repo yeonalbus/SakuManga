@@ -83,7 +83,7 @@ const kwInputFocused = ref(false)
 // ─── Round3-任务5：tag 联想（支持负向「- 」前缀解析，复用 /tags/suggest）───
 // Round20-Bug3：插入格式统一为 E-Hentai f_search 标准语法（本地匹配已按同一语义解析），
 // 不再区分离线裸格式——「本地遵循线上格式」，离线/在线/全库抽卡共用一套 tag 语义。
-const { suggestions, loading, refresh, clear: clearSuggest } = useTagSuggest(
+const { suggestions, loading, clear: clearSuggest } = useTagSuggest(
   () => keywordInput.value,
   8,
   150,

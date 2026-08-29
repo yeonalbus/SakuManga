@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { watch } from 'vue'
 import { useUI } from '@/composables/useUI'
 // Round14：手柄确认/取消（A=确认 B=取消，可自定义按键防与翻页键冲突）
 import { useGamepad } from '@/composables/useGamepad'
-import { readerSettings } from '@/stores/readerSettings'
 
 const { modalState, handleConfirm, handleCancel } = useUI()
 

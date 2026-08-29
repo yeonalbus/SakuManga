@@ -47,9 +47,6 @@ const emit = defineEmits<{
 // 当前物理页的标记状态
 // ---------------------------------------------------------------
 const currentIsBookmarked = computed(() => props.bookmarks.includes(props.currentPhysical))
-const chaptersOfCurrent = computed(() =>
-  props.chapters.filter((c) => c.pageIndex === props.currentPhysical),
-)
 
 // ---------------------------------------------------------------
 // 章节树（flat → 树渲染）

@@ -1025,7 +1025,7 @@ const goOnlineGallery = () => {
         <div class="info-card">
           <div class="card-header">
             <h3 class="card-title">🏷️ 本地作品标签 (Tags)</h3>
-            <button class="add-tag-btn" @click="handleAddTag">➕ 添加 Tag</button>
+            <button v-if="userStore.isAdmin" class="add-tag-btn" @click="handleAddTag">➕ 添加 Tag</button>
           </div>
 
           <!-- 🎯 TagChip 组件 + 独立删除按钮组合（Round23：原生 tag 删除置灰可恢复，本地 tag 物理删除） -->
@@ -1039,7 +1039,7 @@ const goOnlineGallery = () => {
                 dt.removed ? 'tag-removed' : '',
               ]"
               :title="dt.removed ? '已叉除，点击恢复此标签' : ''"
-              @click="dt.removed ? handleRestoreTag(dt) : undefined"
+              @click="dt.removed && userStore.isAdmin ? handleRestoreTag(dt) : undefined"
             >
               <TagChip :tag="dt.raw" :disable-quick-search="dt.removed" />
               <span v-if="dt.source === 'local'" class="local-badge" title="本地新增标签">
@@ -1049,7 +1049,7 @@ const goOnlineGallery = () => {
                 被叉除
               </span>
               <span
-                v-if="dt.source === 'local' || !dt.removed"
+                v-if="userStore.isAdmin && (dt.source === 'local' || !dt.removed)"
                 class="remove-tag"
                 :title="dt.source === 'local' ? '删除此标签' : '叉除此标签（可点击恢复）'"
                 @click.stop="handleRemoveTag(dt)"

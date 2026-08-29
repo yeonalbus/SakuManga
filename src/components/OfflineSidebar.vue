@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import {
   bookshelves,
   pinnedBookshelves,
   PIN_LIMIT,
   addBookshelf,
-  removeBookshelf,
-  renameBookshelf,
   moveShelfToPosition,
-  moveShelfToTop,
   setBookshelfPinned,
 } from '@/stores/bookshelfStore'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
@@ -19,7 +16,6 @@ import SortRowMenu from '@/components/SortRowMenu.vue'
 import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
 
-const router = useRouter()
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id
 const { modal, toast } = useUI()
 
@@ -34,9 +30,6 @@ const showAllShelfPicker = ref(false)
 const openShelfPicker = () => {
   showAllShelfPicker.value = true
 }
-// 置顶书架数量上限提示（已置顶时侧栏每行显示 📌 取消置顶）
-const pinnedCount = computed(() => bookshelves.value.filter((b) => b.pinned).length)
-
 const toggleBookshelf = () => {
   isBookshelfOpen.value = !isBookshelfOpen.value
 }
@@ -47,29 +40,6 @@ const createNewBookshelf = async () => {
   if (name && name.trim()) {
     addBookshelf(name.trim())
     toast.success(`书架「${name}」创建成功！`)
-  }
-}
-
-// 重命名书架（Round10）
-const renameShelf = async (shelf: { id: string; name: string }) => {
-  const name = await modal.prompt('请输入书架新名称', shelf.name, '重命名书架')
-  if (name && name.trim() && name.trim() !== shelf.name) {
-    await renameBookshelf(shelf.id, name.trim())
-    toast.success(`书架已重命名为「${name.trim()}」`)
-  }
-}
-
-// 删除书架
-const handleDeleteShelf = async (shelfId: string, shelfName: string) => {
-  const confirmed = await modal.confirm(`确定要删除书架「${shelfName}」吗？`, '删除确认')
-  if (confirmed) {
-    removeBookshelf(shelfId)
-    toast.info(`书架「${shelfName}」已删除`)
-
-    // 2. 核心修正：只有当前正处于被删除的这个书架页面时，才跳回首页
-    if (route.query.id === shelfId) {
-      router.push('/offline/home')
-    }
   }
 }
 

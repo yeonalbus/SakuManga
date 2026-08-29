@@ -30,8 +30,6 @@ import { shouldCloseTab, consumeBackState } from '@/utils/detailNav'
 import { rememberListState } from '@/utils/scrollMemory'
 // Round7-任务1：本地进度存储统一委托公共工具（与详情页「立即阅读」恢复共用同一实现）
 import {
-  getProgressStorageKey,
-  getProgressMap as getSharedProgressMap,
   saveProgress as saveSharedProgress,
   resolveResumePage,
   isResumeFromLastPageEnabled,
@@ -326,10 +324,9 @@ const handleReaderBack = () => {
   router.replace(source.value === 'online' ? '/online/home' : '/offline/home')
 }
 
-// 按预加载数量（在线/本地分别配置）预先拉取后续图片
+// 按预加载数量预先拉取后续图片（Round25：在线/本地统一为单个配置值）
 const preloadImages = (currentIndex: number) => {
-  const depth =
-    source.value === 'online' ? readerSettings.preloadOnline : readerSettings.preloadOffline
+  const depth = readerSettings.preloadCount
   // 双页模式下当前屏幕已在看 [currentIndex] 与 [currentIndex + 1]，从 +2 开始预载
   const offset = isDoublePage.value && currentIndex > 0 ? 2 : 1
 
@@ -387,7 +384,7 @@ const ensurePageLoaded = async (idx: number) => {
 // 就近补全当前页附近若干页（EhentaiViewer 式：跳转到 P20 不会从 P1 逐页加载）
 const preloadNearby = (center: number) => {
   if (!isOnline.value) return
-  const radius = Math.max(readerSettings.preloadOnline, 4)
+  const radius = Math.max(readerSettings.preloadCount, 4)
   const start = Math.max(0, center - radius)
   const end = Math.min(pageUrls.value.length - 1, center + radius)
   for (let i = start; i <= end; i++) {
@@ -427,8 +424,6 @@ const resetImgStates = () => {
 // 统一委托 src/utils/readingProgress.ts（与详情页「立即阅读」恢复逻辑共用同一实现）
 // --------------------------------------------------
 const currentUid = (): string => String(userStore.user?.id ?? 'anonymous')
-const progressStorageKey = (): string => getProgressStorageKey(currentUid())
-const getProgressMap = (): Record<string, number> => getSharedProgressMap(currentUid())
 const saveProgress = (src: 'online' | 'offline', id: string, page: number): void =>
   saveSharedProgress(currentUid(), src, id, page)
 
@@ -587,11 +582,11 @@ const readerTitle = computed(() => {
   return comicId.value
 })
 
-// Round24：顶栏名称/章节路径按「显示宽度」截断（宽度阈值可由设置选择紧凑/宽松）
-const headerTitleLimit = computed(() => (readerSettings.headerTextWidth === 'loose' ? 16 : 12))
-const headerPathLimit = computed(() => (readerSettings.headerTextWidth === 'loose' ? 30 : 22))
+// 顶栏名称/章节路径按「显示宽度」截断（Round25：废弃「紧凑/宽松」设置，固定紧凑档 12/22）
+const headerTitleLimit = 12
+const headerPathLimit = 22
 const readerTitleDisplay = computed(() =>
-  truncateByWidth(readerTitle.value, headerTitleLimit.value),
+  truncateByWidth(readerTitle.value, headerTitleLimit),
 )
 
 // 当前物理页所属章节路径（顶栏小字，复用侧栏同款定位逻辑）
@@ -616,7 +611,7 @@ const currentChapterPath = computed<SidebarChapter[]>(() => {
 })
 const readerChapterPathText = computed(() => {
   const text = currentChapterPath.value.map((c) => c.title).join(' › ')
-  return text ? truncateByWidth(text, headerPathLimit.value) : ''
+  return text ? truncateByWidth(text, headerPathLimit) : ''
 })
 
 // Round3-任务1：翻页进度 debounce 写回后端（避免高频请求；离线/后端不可用时静默失败）
@@ -1068,14 +1063,14 @@ const onCaptureClick = (e: Event) => {
   }
 }
 
-// 6. 双击放大（受 allowDoubleTapZoom 设置控制）
+// 6. 双击放大（受 zoomGesture 设置控制：doubleTap / doubleTapDrag 均允许）
 const handleDoubleClick = () => {
-  if (!readerSettings.allowDoubleTapZoom) return
+  if (readerSettings.zoomGesture === 'off') return
   isZoomed.value = !isZoomed.value
   toast.info(isZoomed.value ? '已放大' : '已还原')
 }
 
-// 7. 单击拖拽放大（受 allowSingleClickDragZoom 设置控制，仅单页/双页模式）
+// 7. 单击拖拽放大（仅 zoomGesture === 'doubleTapDrag' 时启用，仅单页/双页模式）
 const DRAG_ZOOM_SCALE = 1.8
 const dragPos = ref({ x: 0, y: 0 })
 const dragOrigin = ref({ x: 0, y: 0 })
@@ -1092,7 +1087,7 @@ const dragZoomStyle = computed(() => {
 })
 
 const onCanvasMouseDown = (e: MouseEvent) => {
-  if (e.button !== 0 || !readerSettings.allowSingleClickDragZoom) return
+  if (e.button !== 0 || readerSettings.zoomGesture !== 'doubleTapDrag') return
   dragOrigin.value = { x: e.clientX, y: e.clientY }
   isDragZoom.value = true
   didDrag = false

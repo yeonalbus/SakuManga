@@ -7,6 +7,7 @@ import ItemCard from '@/components/ItemCard.vue'
 import TagChip from '@/components/TagChip.vue'
 // Round22：抽卡结果多选快捷加入书架（仅离线结果可加入，决策 D7）
 import { useShelfQuickAdd } from '@/composables/useShelfQuickAdd'
+import { useImeEnter } from '@/composables/useImeEnter'
 import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
@@ -125,6 +126,10 @@ const handleKeywordEnter = () => {
     clearSuggest()
   }
 }
+
+// v2.0.1：输入法选词回车一步到位（.enter 修饰符在 isComposing 时吞回车）
+const { onKeydown: onImeSafeKeydown, onCompositionEnd: onImeSafeCompositionEnd } =
+  useImeEnter(handleKeywordEnter)
 
 const removeKeyword = (index: number) => {
   drawConfig.keywords.splice(index, 1)
@@ -420,7 +425,8 @@ onBeforeUnmount(() => {
               placeholder="输入关键词后按 Enter 压入队列，前缀「- 」表示排除..."
               @focus="kwInputFocused = true"
               @blur="kwInputFocused = false"
-              @keydown.enter.prevent="handleKeywordEnter"
+              @keydown="onImeSafeKeydown"
+              @compositionend="onImeSafeCompositionEnd"
             />
 
             <!-- ─── Round3-任务5：tag 联想（正向 / 负向「- 」前缀）─── -->

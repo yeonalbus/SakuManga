@@ -5,6 +5,8 @@ import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import TagChip from '@/components/TagChip.vue'
 // Round3-任务6：负向 chips（「- 」前缀红色/删除线区分）
 import { isNegativeItem, formatFSearchTag } from '@/utils/tagFilter'
+// v2.0.1：输入法选词回车一步到位（Vue .enter 修饰符吞掉 IME 组合态回车）
+import { useImeEnter } from '@/composables/useImeEnter'
 
 const props = defineProps<{
   visible: boolean
@@ -129,6 +131,10 @@ const handleKeydownEnter = () => {
   }
 }
 
+// v2.0.1：输入法选词回车一步到位（.enter 修饰符在 isComposing 时吞回车，需手动处理）
+const { onKeydown: onImeSafeKeydown, onCompositionEnd: onImeSafeCompositionEnd } =
+  useImeEnter(handleKeydownEnter)
+
 // 🟢 5. 移除单个关键词
 const removeKeyword = (index: number) => {
   filterState.keywords.splice(index, 1)
@@ -244,7 +250,8 @@ const handleApply = () => {
               placeholder="输入关键词后按 Enter 压入队列，前缀「- 」表示排除..."
               @focus="inputFocused = true"
               @blur="inputFocused = false"
-              @keydown.enter.prevent="handleKeydownEnter"
+              @keydown="onImeSafeKeydown"
+              @compositionend="onImeSafeCompositionEnd"
             />
 
             <!-- ─── Round3-任务5：tag 联想（正向 / 负向「- 」前缀）─── -->

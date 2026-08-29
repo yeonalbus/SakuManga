@@ -17,6 +17,8 @@ import { safeSetItem } from '@/utils/storage'
 // 🎯 多 tag 联想：extractSuggestQuery 提取输入串的「最后一个 token」作为联想词
 import { formatFSearchTag, extractSuggestQuery } from '@/utils/tagFilter'
 import { isStandalonePWA, recordBackStateForDetail } from '@/utils/detailNav'
+// v2.0.1：输入法选词回车一步到位（keyup.enter 在 IME 组合态同样被吞）
+import { useImeEnter } from '@/composables/useImeEnter'
 
 const router = useRouter()
 const route = useRoute()
@@ -171,6 +173,10 @@ const resolveEHDetailLink = (text: string): { id: string; token: string } | null
   if (bare) return { id: bare[1], token: bare[2] }
   return null
 }
+
+// v2.0.1：输入法选词回车一步到位（覆盖 keyup.enter 在 IME 组合态被吞的问题）
+const { onKeydown: onImeSafeKeydown, onCompositionEnd: onImeSafeCompositionEnd } =
+  useImeEnter(() => triggerSearch())
 
 // 触发搜索
 const triggerSearch = (queryText?: string) => {
@@ -400,7 +406,8 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
         :placeholder="searchPlaceholder"
         @focus="handleInputFocus"
         @blur="handleInputBlur"
-        @keyup.enter="triggerSearch()"
+        @keydown="onImeSafeKeydown"
+        @compositionend="onImeSafeCompositionEnd"
       />
       <!-- 🎛️ 筛选入口（原 TopBar 齿轮按钮移入搜索框内，激活态显示红点） -->
       <button class="filter-trigger-btn" title="筛选" @click="isFilterOpen = true">

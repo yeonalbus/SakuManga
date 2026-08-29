@@ -15,6 +15,7 @@ withDefaults(
     showDetail?: boolean // 是否显示「详情页面」栏目（在线列表小详情页）
     showToplist?: boolean // 是否显示「排行榜选择」栏目（替换日期跳转）
     toplistCurrent?: string // 当前排行榜类型 tl
+    showBookmark?: boolean // Round27：是否显示「存为书签」栏目（仅在线首页传 true）
   }>(),
   {
     showSort: false,
@@ -22,6 +23,7 @@ withDefaults(
     showDetail: false,
     showToplist: false,
     toplistCurrent: '15',
+    showBookmark: false,
   },
 )
 
@@ -31,6 +33,7 @@ const emit = defineEmits<{
   (e: 'toggle-sort'): void // 🟢 触发排序切换事件
   (e: 'detail-toggle'): void // 🟢 触发小详情页展开/收起切换
   (e: 'toplist-select', tl: string): void // 🟢 触发排行榜类型切换
+  (e: 'bookmark-create'): void // Round27：触发「存为书签」弹窗
 }>()
 
 const isOpen = ref(false)
@@ -90,6 +93,12 @@ const handleDetailToggle = () => {
   isOpen.value = false
 }
 
+// Round27：触发「存为书签」弹窗（由页面挂载 BookmarkCreateModal）
+const handleBookmarkCreate = () => {
+  emit('bookmark-create')
+  isOpen.value = false
+}
+
 // 🖥️ 偏好设置：控制「回到顶部」按钮的显隐
 const showScrollTop = ref(preferenceSettings.hideScrollToTopBtn !== 'always')
 
@@ -140,6 +149,17 @@ onUnmounted(() => {
         <button class="menu-item" title="刷新页面" @click="handleRefresh">
           <span class="icon">🔄</span>
           <span class="label">刷新列表</span>
+        </button>
+
+        <!-- Round27：搜刮书签——把当前浏览位置（搜索/筛选 + 锚定卡片）存为书签 -->
+        <button
+          v-if="showBookmark"
+          class="menu-item"
+          title="将当前浏览位置存为书签"
+          @click="handleBookmarkCreate"
+        >
+          <span class="icon">🔖</span>
+          <span class="label">存为书签</span>
         </button>
 
         <!-- 优化排行榜：排行榜选择替换日期跳转位置（显示当前类型 tl） -->

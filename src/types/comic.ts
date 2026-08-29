@@ -256,3 +256,29 @@ export interface RandomComicResponse {
   count: number
   warning?: string // 在线失败降级时的提示
 }
+
+// ==========================================
+// 7. 搜刮书签契约（Round27）
+// ==========================================
+
+/** 书签跳转类型：首页 / 搜索内容 */
+export type ScrapeBookmarkType = 'home' | 'search'
+
+/**
+ * 搜刮书签：某次在线浏览的「位置快照」。
+ * - config：创建时深拷贝的搜索/筛选状态（onlineSearchConfig 全量）
+ * - anchor：锚定的画廊卡片（gid/token/title），跳转后滚动定位 + 视觉突出；null=纯位置快照
+ */
+export interface ScrapeBookmark {
+  id: string // 唯一标识（bm_ 前缀）
+  name: string // 自定义名称
+  type: ScrapeBookmarkType
+  keyword: string // type=search 时的搜索词（冗余于 config.keyword，便于侧栏展示）
+  config: SearchConfig // 创建时深拷贝快照
+  anchor: {
+    gid: string
+    token?: string
+    title?: string
+  } | null
+  createdAt: number
+}

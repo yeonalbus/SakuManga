@@ -34,6 +34,8 @@ const props = withDefaults(
     hideSubtitle?: boolean
     /** Round7-任务6：历史入口卡片，详情页「立即阅读」从上次位置开始 */
     fromHistory?: boolean
+    /** Round27：被搜刮书签锚定 → 常驻 🔖 角标 + 金色边框（GridContainer 按 bookmarkedGids 透传） */
+    bookmarked?: boolean
   }>(),
   {
     size: 'normal',
@@ -43,6 +45,7 @@ const props = withDefaults(
     panelMode: false,
     hideSubtitle: false,
     fromHistory: false,
+    bookmarked: false,
   },
 )
 
@@ -363,7 +366,7 @@ const comicSourceBadge = computed(() => {
   <div
     class="item-card"
     :data-gid="comic.id"
-    :class="[currentMode, size || 'normal', { 'select-mode': selectMode, selected }]"
+    :class="[currentMode, size || 'normal', { 'select-mode': selectMode, selected, bookmarked }]"
     @click="handleCardClick"
     @pointerdown="handlePointerDown"
     @pointerup="handlePointerUp"
@@ -400,6 +403,9 @@ const comicSourceBadge = computed(() => {
         <span v-if="comic.rank" class="rank-badge" :class="{ 'top-3': comic.rank <= 3 }">
           #{{ comic.rank }}
         </span>
+
+        <!-- 🔖 Round27：搜刮书签锚定角标（缩略图右上角，与 rank 左上不冲突） -->
+        <span v-if="bookmarked" class="compact-bookmark-badge" title="搜刮书签锚定的画廊">🔖</span>
 
         <span class="tag-indicator" :class="{ active: showTags }">
           {{ showTags ? '▲ 隐' : '🏷️ Tag' }}
@@ -480,9 +486,12 @@ const comicSourceBadge = computed(() => {
         <span class="card-cat-badge" :style="{ backgroundColor: getCategoryColor(comic.category) }">
           {{ comic.category || 'Manga' }}
         </span>
+        <!-- 🔖 Round27：搜刮书签锚定角标（封面右上角；fav 星存在时右移让位） -->
+        <span v-if="bookmarked" class="card-bookmark-badge" title="搜刮书签锚定的画廊">🔖</span>
         <span
           v-if="onlineComic?.isFavorite && onlineComic.favIndex !== undefined"
           class="card-fav-badge"
+          :class="{ 'bm-shifted': bookmarked }"
           :style="{ backgroundColor: favColors[onlineComic.favIndex] || '#7f7f7f' }"
         >
           ★
@@ -1010,5 +1019,72 @@ const comicSourceBadge = computed(() => {
 .select-checkbox.checked {
   background-color: #ff7588;
   border-color: #ff7588;
+}
+
+/* ─── Round27：搜刮书签标记 ─── */
+/* 常驻金色边框：被书签锚定的卡片 */
+.item-card.bookmarked {
+  border-color: rgba(255, 193, 7, 0.55);
+}
+.item-card.bookmarked:hover {
+  border-color: #ffc107;
+  box-shadow:
+    0 0 0 2px rgba(255, 193, 7, 0.25),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+}
+/* 选择模式（粉色高亮）优先于书签金色，避免视觉歧义 */
+.item-card.bookmarked.selected {
+  border-color: #ff7588;
+  box-shadow: 0 0 0 2px rgba(255, 117, 136, 0.45);
+}
+
+/* 大卡片模式：封面右上角 🔖 角标 */
+.card-bookmark-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 6;
+  background-color: rgba(0, 0, 0, 0.8);
+  border: 1px solid #ffc107;
+  color: #ffd54f;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 1px 4px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+/* 书签角标与 fav 星同处右上：书签存在时 fav 星右移让位 */
+.card-fav-badge.bm-shifted {
+  right: 30px;
+}
+
+/* 名片模式：缩略图右上角 🔖 角标 */
+.compact-bookmark-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 6;
+  background-color: rgba(0, 0, 0, 0.8);
+  border: 1px solid #ffc107;
+  color: #ffd54f;
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 1px 3px;
+  border-radius: 3px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* 书签跳转定位脉冲：页面定位到锚点卡片时临时添加（3 次呼吸） */
+.item-card.bookmark-pulse {
+  animation: bookmark-pulse 0.9s ease-in-out 3;
+}
+@keyframes bookmark-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(255, 193, 7, 0.12);
+  }
 }
 </style>

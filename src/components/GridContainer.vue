@@ -19,6 +19,8 @@ const props = defineProps<{
   panelOpen?: boolean
   /** Round7-任务6：历史入口卡片，详情页「立即阅读」从上次位置开始 */
   fromHistory?: boolean
+  /** Round27：被搜刮书签锚定的 gid 集合（命中卡片常驻 🔖 角标 + 金色边框） */
+  bookmarkedGids?: Set<string>
 }>()
 
 const emit = defineEmits<{
@@ -93,6 +95,7 @@ const gridStyle = computed<Record<string, string>>(() => {
         :selected="selectedIds?.includes(item.id) ?? false"
         :panel-mode="panelMode"
         :from-history="fromHistory"
+        :bookmarked="bookmarkedGids?.has(item.id) ?? false"
         @longpress="(c) => emit('longpress', c)"
         @select="(c) => emit('select', c)"
         @open="(c) => emit('open', c)"

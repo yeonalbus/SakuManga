@@ -65,3 +65,15 @@ Sakuhentai测试账号,网站与Ehentai账户.md
 
 # 备份文件
 /icon
+
+# DSH 工作目录（工具生成，勿入库）
+.dsh/
+
+# 服务器部署实例（运行时数据与可执行文件，勿提交）
+/Server/
+
+# 后端运行时封面缓存
+backend/cover_cache/
+
+# 调试工具输出目录
+backend/ziprangecheck_out/

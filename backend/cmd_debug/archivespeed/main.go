@@ -18,6 +18,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -45,12 +46,16 @@ func main() {
 	gid := flag.String("gid", "4100369", "画廊 gid")
 	token := flag.String("token", "93df5bebde", "画廊 token")
 	proxy := flag.String("proxy", "", "代理地址（空=从 config.json 读取）")
-	member := flag.String("member", "3762315", "ipb_member_id")
-	passHash := flag.String("pass", "REDACTED_EH_PASS_HASH", "ipb_pass_hash")
-	igneous := flag.String("igneous", "REDACTED_EH_IGNEOUS", "igneous")
-	sk := flag.String("sk", "REDACTED_EH_SK", "sk")
+	member := flag.String("member", os.Getenv("E_IPB_MEMBER_ID"), "ipb_member_id（或环境变量 E_IPB_MEMBER_ID）")
+	passHash := flag.String("pass", os.Getenv("E_IPB_PASS_HASH"), "ipb_pass_hash（或环境变量 E_IPB_PASS_HASH）")
+	igneous := flag.String("igneous", os.Getenv("E_IGNEOUS"), "igneous（或环境变量 E_IGNEOUS）")
+	sk := flag.String("sk", os.Getenv("E_SK"), "sk（或环境变量 E_SK）")
 	refresh := flag.Bool("refresh", false, "先取消旧归档 Session 再重新解锁（消耗 GP）")
 	flag.Parse()
+
+	if *member == "" || *passHash == "" || *igneous == "" || *sk == "" {
+		log.Fatalf("缺少 E 站凭据：请通过命令行参数（-member/-pass/-igneous/-sk）或环境变量（E_IPB_MEMBER_ID/E_IPB_PASS_HASH/E_IGNEOUS/E_SK）提供")
+	}
 
 	if *proxy != "" {
 		if err := services.SetProxyURL(*proxy); err != nil {

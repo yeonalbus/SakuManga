@@ -34,7 +34,7 @@
 
 ### S2 toplist 展示对齐（列表差异，需真实样本）
 
-- **抓取真实样本（测试账号）**：`igneous=REDACTED_EH_IGNEOUS; ipb_member_id=3762315; ipb_pass_hash=REDACTED_EH_PASS_HASH; sk=REDACTED_EH_SK`。抓 `toplist.php?tl=11&p=1`（另取 p=2、tl=12/13/15 各一页）HTML 存档至 [`testdata_eh/eh_toplist_*.html`](testdata_eh/)（后端可用现有带 Cookie 的 HTTP 客户端导出，或临时调试端点落盘），新增解析单测。
+- **抓取真实样本（测试账号）**：`igneous=<E_IGNEOUS>; ipb_member_id=<E_IPB_MEMBER_ID>; ipb_pass_hash=<E_IPB_PASS_HASH>; sk=<E_SK>`（凭据经环境变量注入，勿写死）。抓 `toplist.php?tl=11&p=1`（另取 p=2、tl=12/13/15 各一页）HTML 存档至 [`testdata_eh/eh_toplist_*.html`](testdata_eh/)（后端可用现有带 Cookie 的 HTTP 客户端导出，或临时调试端点落盘），新增解析单测。
 - **对照清单（针对「列表本身差异」）**：① 行选择器是否捕获全部条目（真实结构 `table.itg.gltc > tr.gtr0/gtr1`）；② 每页条数与分页参数递进是否与 E 站一致；③ 与 E 站页面逐条比对出现/缺失/错位的条目；④ 再处理次生评分问题（真实「Average: X.XX」→ 5 星映射，连带修正 [`ItemCard.vue`](src/components/ItemCard.vue:511) 恒显示 5.0）。
 - 重写 [`fetchToplistPage`](backend/internal/services/toplist.go:129)：按样本修正行选择器/列提取与分页；评分解析真实数值；**移除** `.ir` 假设与 `100000 - rank*1250` 模拟分；补 pageCount / uploader / fileSize。
 - 验证：`go test ./...` 断言「条目集合 + 顺序 + 评分」与样本逐条一致；前端卡片字段完整。

@@ -33,12 +33,12 @@ import (
 
 const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-// 测试账号 cookie（Ehentai测试用账号.md）
+// 测试账号 cookie：从环境变量读取（E_IPB_MEMBER_ID/E_IPB_PASS_HASH/E_IGNEOUS/E_SK），勿在源码硬编码真实凭据
 var accountCookies = map[string]string{
-	"igneous":       "REDACTED_EH_IGNEOUS",
-	"ipb_member_id": "3762315",
-	"ipb_pass_hash": "REDACTED_EH_PASS_HASH",
-	"sk":            "REDACTED_EH_SK",
+	"igneous":       os.Getenv("E_IGNEOUS"),
+	"ipb_member_id": os.Getenv("E_IPB_MEMBER_ID"),
+	"ipb_pass_hash": os.Getenv("E_IPB_PASS_HASH"),
+	"sk":            os.Getenv("E_SK"),
 }
 
 // proxyURL 代理（与 backend/config.json 保持一致）
@@ -565,6 +565,11 @@ func main() {
 	site := flag.String("site", "e-hentai", "站点: e-hentai / exhentai（决定 referer 与 archiver.php 基础 URL）")
 	base := flag.String("base", "", "archiver.php 基础 URL（默认跟随 -site）")
 	flag.Parse()
+
+	if os.Getenv("E_IPB_MEMBER_ID") == "" || os.Getenv("E_IPB_PASS_HASH") == "" ||
+		os.Getenv("E_IGNEOUS") == "" || os.Getenv("E_SK") == "" {
+		log.Fatalf("缺少 E 站凭据：请设置环境变量 E_IPB_MEMBER_ID/E_IPB_PASS_HASH/E_IGNEOUS/E_SK 后运行")
+	}
 
 	// 依据 -site 设置 siteReferer / siteBase（复现用户 exhentai 环境差异）
 	switch *site {

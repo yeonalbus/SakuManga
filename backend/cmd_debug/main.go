@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -18,8 +19,11 @@ func main() {
 	database.InitDB()
 	services.InitProxyConfig()
 
-	// 用户浏览器提供的 sk
-	userSK := "REDACTED_EH_SK"
+	// 用户浏览器提供的 sk（环境变量注入，勿硬编码）
+	userSK := os.Getenv("E_SK")
+	if userSK == "" {
+		log.Fatalf("缺少 sk：请设置环境变量 E_SK 后运行")
+	}
 
 	// 1. 持久化 sk 到 DB（账号 ID=1）
 	var account models.AccountSetting

@@ -1,12 +1,32 @@
 <template>
   <div class="network-settings">
-    <!-- 🟢 代理服务器配置项（真实生效：后端 config.json） -->
+    <!-- 🟢 代理服务器配置项（真实生效：后端 config.json + 系统代理自动兜底） -->
     <div class="setting-item clickable" @click="handleProxySetting">
       <div class="item-info">
         <div class="item-title">代理服务器地址</div>
-        <div class="item-subtext">{{ proxyAddress || '未设置 (直连模式)' }}</div>
+        <div class="item-subtext">
+          {{ effectiveLabel }}
+        </div>
       </div>
       <span class="arrow-icon">›</span>
+    </div>
+
+    <!-- 当前生效代理来源说明 -->
+    <div v-if="effectiveSource === 'system'" class="setting-item hint">
+      <div class="item-info">
+        <div class="item-title">🖥️ 正在自动使用系统代理</div>
+        <div class="item-subtext">
+          检测到系统代理 {{ effectiveProxy }}（Clash / v2rayN 等）。如需固定代理地址，点击上方配置。
+        </div>
+      </div>
+    </div>
+    <div v-else-if="effectiveSource === 'none'" class="setting-item hint">
+      <div class="item-info">
+        <div class="item-title">📡 当前为直连模式</div>
+        <div class="item-subtext">
+          未检测到系统代理。若浏览器能访问 E 站但程序连不上，请在上方填写代理地址（如 http://127.0.0.1:7897）。
+        </div>
+      </div>
     </div>
 
     <!-- 请求超时时间（接线 request.ts：fetch AbortSignal） -->
@@ -35,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { networkSettings, resetNetworkSettings } from '@/stores/networkSettings'
@@ -44,12 +64,32 @@ const { toast, modal } = useUI()
 
 // 代理地址来自后端 API（/network/proxy），不存入本地 store
 const proxyAddress = ref('')
+// 实际生效代理（手动优先，未配置时自动采用系统代理）与其来源：manual / system / none
+const effectiveProxy = ref('')
+const effectiveSource = ref<'manual' | 'system' | 'none'>('none')
+
+// 设置项副标题文案
+const effectiveLabel = computed(() => {
+  if (effectiveSource.value === 'manual') {
+    return `手动配置: ${effectiveProxy.value || proxyAddress.value || '（空）'}`
+  }
+  if (effectiveSource.value === 'system') {
+    return `自动跟随系统代理: ${effectiveProxy.value}`
+  }
+  return '未设置 (直连模式)'
+})
 
 // 获取后端当前设置的代理
 const fetchProxyConfig = async () => {
   try {
-    const data = await http<{ proxy: string }>('/network/proxy')
+    const data = await http<{
+      proxy: string
+      effective: string
+      source: 'manual' | 'system' | 'none'
+    }>('/network/proxy')
     proxyAddress.value = data.proxy || ''
+    effectiveProxy.value = data.effective || ''
+    effectiveSource.value = data.source || 'none'
   } catch (err) {
     console.error('获取代理配置失败:', err)
   }
@@ -58,8 +98,8 @@ const fetchProxyConfig = async () => {
 // 弹出输入框配置代理地址
 const handleProxySetting = async () => {
   const input = await modal.prompt(
-    '请输入 HTTP / SOCKS5 代理地址（如 http://127.0.0.1:7897，留空表示直连）：',
-    proxyAddress.value || 'http://127.0.0.1:7897',
+    '请输入 HTTP / SOCKS5 代理地址（如 http://127.0.0.1:7897，留空表示自动跟随系统代理）：',
+    proxyAddress.value || effectiveProxy.value || 'http://127.0.0.1:7897',
     '配置代理服务器',
   )
 
@@ -74,7 +114,9 @@ const handleProxySetting = async () => {
 
       // 能走到这一步，说明后端响应了 200 OK（设置成功）
       proxyAddress.value = newProxy
-      toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为直连模式')
+      effectiveProxy.value = newProxy
+      effectiveSource.value = newProxy ? 'manual' : 'system'
+      toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为自动跟随系统代理')
     } catch (err: unknown) {
       // 🔴 无论是网络连不上，还是后端返回了 400 错误（如“无效的代理格式”），
       // http 都会自动把后端的报错文字放入 err.message 中
@@ -136,6 +178,16 @@ onMounted(() => {
   font-size: 13px;
   color: var(--app-text-3);
   line-height: 1.4;
+}
+
+/* 系统代理自动兜底 / 直连提示卡片 */
+.setting-item.hint {
+  background-color: var(--app-surface-2);
+  border-color: rgba(255, 117, 136, 0.25);
+}
+
+.setting-item.hint .item-title {
+  color: #ff7588;
 }
 
 .arrow-icon {

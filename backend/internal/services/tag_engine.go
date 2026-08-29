@@ -105,11 +105,11 @@ func GetGlobalProxy() string {
 }
 
 func getHTTPClient() *http.Client {
-	// 优先使用标签引擎专用代理；未设置时回退到全局网络代理（proxy.go config.json），
+	// 优先使用标签引擎专用代理；未设置时回退到全局网络代理（手动配置 → 系统代理兜底），
 	// 保证标签数据（GitHub）下载同样走用户配置的代理。
 	proxyStr := GetGlobalProxy()
 	if proxyStr == "" {
-		proxyStr = GetProxyURL()
+		proxyStr = GetEffectiveProxy()
 	}
 	client := &http.Client{Timeout: 30 * time.Minute}
 

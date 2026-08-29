@@ -45,7 +45,8 @@ func buildTransport() *http.Transport {
 		IdleConnTimeout:     90 * time.Second,
 	}
 
-	proxyStr := GetProxyURL()
+	// 手动配置优先，未配置时自动采用系统代理（Clash 等「系统代理」模式零配置直连）
+	proxyStr := GetEffectiveProxy()
 	if proxyStr != "" {
 		if proxyURL, err := url.Parse(proxyStr); err == nil {
 			transport.Proxy = http.ProxyURL(proxyURL)

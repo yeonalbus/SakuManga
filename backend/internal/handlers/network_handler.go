@@ -9,9 +9,12 @@ import (
 )
 
 // GetProxyHandler GET /api/v1/network/proxy
+// 返回手动配置（proxy）、实际生效代理（effective，手动优先、系统兜底）与来源（manual/system/none）
 func GetProxyHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"proxy": services.GetProxyURL(),
+		"proxy":     services.GetProxyURL(),
+		"effective": services.GetEffectiveProxy(),
+		"source":    services.GetProxySource(),
 	})
 }
 

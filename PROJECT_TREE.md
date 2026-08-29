@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v2.0.0 · 最近更新：2026-08
+> 版本：v2.0.1 · 最近更新：2026-08
 
 ## 一、目录总览
 
@@ -161,7 +161,7 @@ src/
 
 | 分组       | 文件                         | 职责                                             | 管理员可见 |
 | ---------- | ---------------------------- | ------------------------------------------------ | :--------: |
-| 账户       | `AccountSettings.vue`        | E 站账号登录/登出、Cookie 保存、用户管理          |     —      |
+| 账户       | `AccountSettings.vue`        | E 站账号登录/登出、Cookie 保存、账号密码登录（v2.0.1）、用户管理          |     —      |
 |            | `ProfileSettings.vue`        | E 站 Profile（独立子面板，含返回按钮）           |     —      |
 | E 站连接   | `EHSettings.vue`             | E 站站点偏好（Profile/uconfig/我的标签）         |     —      |
 |            | `NetworkSettings.vue`        | 网络/代理配置                                    |     ✔      |
@@ -255,7 +255,7 @@ backend/
     │   └── network_handler.go      # 网络/代理配置
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
-        ├── eh_auth.go              # E 站登录认证
+        ├── eh_auth.go              # E 站登录认证（含账号密码模拟登录 LoginWithPassword，v2.0.1）
         ├── eh_gallery.go           # 在线画廊列表抓取
         ├── eh_detail.go            # 画廊详情抓取（含父子/更新版关系解析）
         ├── eh_parser.go            # HTML 解析（goquery）
@@ -266,7 +266,10 @@ backend/
         ├── eh_uconfig.go           # uconfig.php 服务
         ├── auth_service.go         # 登录认证服务（密码哈希/会话）
         ├── bootstrap.go            # 初始管理员创建 + 数据迁移
-        ├── proxy.go                # 代理配置加载
+        ├── proxy.go                # 代理配置加载（手动 + 系统代理自动兜底，v2.0.1）
+        ├── proxy_system_windows.go # Windows 系统代理探测（注册表 ProxyEnable/ProxyServer，v2.0.1）
+        ├── proxy_system_other.go   # 非 Windows 系统代理探测占位（环境变量探测仍生效，v2.0.1）
+        ├── proxy_test.go           # 代理探测单测（注册表格式归一化/来源判定，v2.0.1）
         ├── cover.go                # 封面生成/代理
         ├── cover_health.go         # 封面健康检查（失效封面修复）
         ├── metadata.go             # 本地漫画元数据解析（zip/xml）

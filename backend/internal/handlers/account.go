@@ -148,6 +148,53 @@ func (h *AccountHandler) RefreshCookies(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"igneous": igneous, "sk": sk})
 }
 
+// LoginWithPassword 使用 E 站账号密码内部登录（免 F12 复制 Cookie），
+// 成功后将凭证保存到当前用户，失败（验证码/风控）返回错误由前端引导手动粘贴。
+func (h *AccountHandler) LoginWithPassword(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入 E 站账号与密码"})
+		return
+	}
+
+	result, err := h.ehService.LoginWithPassword(req.Username, req.Password)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 落库到当前用户
+	user.IPBMemberID = result.IPBMemberID
+	user.IPBPassHash = result.IPBPassHash
+	user.Igneous = result.Igneous
+	user.SK = result.SK
+	user.IsEx = result.IsEx
+	user.UpdatedAt = time.Now()
+	if err := h.db.Save(user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存凭证到数据库失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "登录成功，E 站凭证已保存",
+		"isEx":    result.IsEx,
+		"data": gin.H{
+			"ipb_member_id": user.IPBMemberID,
+			"igneous":       user.Igneous,
+			"isEx":          user.IsEx,
+		},
+	})
+}
+
 // ClearAccountSettings 清除当前登录用户的 E 站凭证
 func (h *AccountHandler) ClearAccountSettings(c *gin.Context) {
 	user := middleware.CurrentUser(c)

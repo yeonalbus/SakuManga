@@ -196,7 +196,39 @@
     <div v-if="showModal" class="modal-mask" @click.self="handleCloseModal">
       <div class="modal-box">
         <h3>{{ isLoggedIn ? '更新 Cookie 凭证' : '绑定 Cookie 凭证' }}</h3>
-        <p class="modal-tip">可以粘贴完整 Cookie 字符串，或手动填写核心参数：</p>
+
+        <!-- 方式 A：账号密码内部登录（免 F12 复制） -->
+        <div class="login-form">
+          <div class="login-mode-title">🔑 方式一：使用 E 站账号密码登录</div>
+          <div class="login-mode-tip">无需打开浏览器复制 Cookie；遇验证码/风控时请改用方式二</div>
+          <input
+            v-model="loginForm.username"
+            type="text"
+            placeholder="E 站账号（用户名）"
+            class="text-input full"
+            autocomplete="username"
+          />
+          <input
+            v-model="loginForm.password"
+            type="password"
+            placeholder="E 站密码"
+            class="text-input full"
+            autocomplete="current-password"
+            @keyup.enter="handlePasswordLogin"
+          />
+          <button
+            class="action-btn primary full-btn"
+            :disabled="loggingIn || refreshing"
+            @click="handlePasswordLogin"
+          >
+            {{ loggingIn ? '登录中…' : '登录并绑定' }}
+          </button>
+        </div>
+
+        <div class="login-divider"><span>或</span></div>
+
+        <!-- 方式 B：粘贴 Cookie -->
+        <p class="modal-tip">方式二：可以粘贴完整 Cookie 字符串，或手动填写核心参数：</p>
 
         <div class="form-group">
           <label>快速粘贴整条 Cookie (可选)</label>
@@ -302,6 +334,35 @@ const form = reactive<EAccountConfig>({
   igneous: '',
   sk: '',
 })
+
+// ── 方式一：账号密码内部登录（免 F12 复制 Cookie）──
+const loggingIn = ref(false)
+const loginForm = reactive({ username: '', password: '' })
+
+const handlePasswordLogin = async () => {
+  if (!loginForm.username.trim() || !loginForm.password) {
+    toast.error('请输入 E 站账号与密码')
+    return
+  }
+  loggingIn.value = true
+  try {
+    await http('/account/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: loginForm.username.trim(),
+        password: loginForm.password,
+      }),
+    })
+    loginForm.password = ''
+    showModal.value = false
+    toast.success('登录成功，E 站凭证已保存！')
+    await loadAccountSettings()
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '登录失败（遇验证码或风控时请改用粘贴 Cookie 方式）')
+  } finally {
+    loggingIn.value = false
+  }
+}
 
 // 1. 从后端加载已有账户配置
 const loadAccountSettings = async () => {
@@ -1014,6 +1075,54 @@ onMounted(() => {
   margin: 0;
   color: var(--app-text-strong);
   font-size: 16px;
+}
+
+/* ── 方式一：账号密码登录 ── */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: rgba(0, 122, 204, 0.06);
+  border: 1px solid rgba(0, 122, 204, 0.3);
+  border-radius: 8px;
+}
+
+.login-mode-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #5cb8ff;
+}
+
+.login-mode-tip {
+  font-size: 12px;
+  color: var(--app-text-3);
+}
+
+.text-input.full {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.full-btn {
+  width: 100%;
+  padding: 8px 0;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--app-border-3);
 }
 
 .modal-tip {

@@ -269,6 +269,69 @@ const normalizedTags = computed<string[]>(() => {
   return []
 })
 
+// ─── 需求（3TAG 显示优化）：卡片只展示 parody / character / female 三类，最多 3 个 ───
+// 规则：parody、character 各取一个（缺失该类则留空），不足的槽位用 female 补齐（可多个），
+// 全部 female 也没有则不显示；最终按 parody → character → female 顺序排列。
+// 例：parody+character+female、character+female+female、parody+female+female
+// 数据源：离线卡片 tags 为纯翻译名（无 namespace），必须用 tagRaws（namespace:key）解析；
+//        在线卡片 tags 本身即 namespace:key 格式（key 为翻译名或原文）。
+const tagRawSource = computed<string[]>(() => {
+  const raws = (props.comic as OfflineComic).tagRaws
+  if (Array.isArray(raws) && raws.length > 0) return raws
+  return normalizedTags.value
+})
+
+const displayTags = computed<string[]>(() => {
+  const all = tagRawSource.value
+  const byNs: Record<string, string[]> = {}
+  for (const t of all) {
+    if (typeof t !== 'string') continue
+    const idx = t.indexOf(':')
+    if (idx <= 0) continue
+    const ns = t.slice(0, idx)
+    ;(byNs[ns] ||= []).push(t)
+  }
+  const parody = (byNs['parody'] || [])[0]
+  const character = (byNs['character'] || [])[0]
+  const females = byNs['female'] || []
+
+  const slots: string[] = []
+  // parody / character 各占一位（存在才占用，缺失不占位）
+  if (parody) slots.push(parody)
+  if (character) slots.push(character)
+  // 剩余槽位用 female 补齐（可占多个），凑满最多 3 个
+  for (const f of females) {
+    if (slots.length >= 3) break
+    slots.push(f)
+  }
+  return slots
+})
+
+// ─── 需求（来源角标替换为语言）：卡片右下角显示语言（中文/日本語/English...），从 language:xxx tag 提取 ───
+const languageLabel = computed(() => {
+  const raw = tagRawSource.value.find((t) => t.toLowerCase().startsWith('language:'))
+  if (!raw) return ''
+  const lang = (raw.split(':')[1] || '').trim().toLowerCase()
+  const map: Record<string, string> = {
+    chinese: '中文',
+    japanese: '日本語',
+    english: 'English',
+    korean: '한국어',
+    french: 'Français',
+    german: 'Deutsch',
+    spanish: 'Español',
+    italian: 'Italiano',
+    russian: 'Русский',
+    portuguese: 'Português',
+    'portuguese brazil': 'Português (BR)',
+    vietnamese: 'Tiếng Việt',
+    indonesian: 'Bahasa Indonesia',
+    thai: 'ไทย',
+    other: '其他',
+  }
+  return map[lang] || raw.split(':')[1]?.trim() || ''
+})
+
 // 封面加载失败时的默认占位图
 const defaultCover =
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%2355555a" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
@@ -531,11 +594,12 @@ const comicSourceBadge = computed(() => {
           >
         </div>
         <div class="card-tags-row">
-          <TagChip v-for="tag in normalizedTags.slice(0, 3)" :key="tag" :tag="tag" />
+          <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" />
         </div>
         <div class="card-bottom-meta">
           <span class="rating">⭐ {{ displayRating ? displayRating.toFixed(1) : '—' }}</span>
-          <span class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
+          <span v-if="languageLabel" class="lang-tag">{{ languageLabel }}</span>
+          <span v-else class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
             {{ comic.source === 'online' ? '在线' : comicSourceBadge || '本地' }}
           </span>
         </div>
@@ -959,6 +1023,18 @@ const comicSourceBadge = computed(() => {
 
 .source-tag.offline {
   color: #ff7588;
+}
+
+/* 语言角标（中文/日本語/English...）：来源角标的替代展示 */
+.lang-tag {
+  color: #4db6ac;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: rgba(77, 182, 172, 0.12);
+  border: 1px solid rgba(77, 182, 172, 0.35);
+  white-space: nowrap;
 }
 
 .source-tag.extra {

@@ -279,6 +279,114 @@ func (s *EHService) RefreshCookies(setting *models.AccountSetting) (igneous, sk 
 	return igneous, sk, nil
 }
 
+// ---------------------------------------------------------------------------
+// 内部登录：用 E 站账号密码模拟 IPB 论坛登录，免去浏览器 F12 复制 Cookie。
+// 流程：POST forums.e-hentai.org/index.php?act=Login&CODE=01 → 拿
+// ipb_member_id / ipb_pass_hash / sk Cookie → 再访问 exhentai.org 抓 igneous。
+// E 站登录存在验证码/风控可能，失败时由前端引导回退手动粘贴 Cookie。
+// ---------------------------------------------------------------------------
+
+// LoginResult 内部登录成功后的凭证结果
+type LoginResult struct {
+	IPBMemberID string
+	IPBPassHash string
+	SK          string
+	Igneous     string
+	IsEx        bool
+}
+
+// LoginWithPassword 使用 E 站账号密码模拟登录，返回可落库的凭证。
+func (s *EHService) LoginWithPassword(username, password string) (*LoginResult, error) {
+	username = strings.TrimSpace(username)
+	if username == "" || password == "" {
+		return nil, fmt.Errorf("请输入 E 站账号与密码")
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{
+		Jar:       jar,
+		Timeout:   30 * time.Second,
+		Transport: getSharedTransport(),
+	}
+
+	// 1. IPB 论坛登录（E 站账号体系）
+	form := url.Values{}
+	form.Set("act", "Login")
+	form.Set("CODE", "01")
+	form.Set("CookieDate", "1")
+	form.Set("UserName", username)
+	form.Set("PassWord", password)
+	req, err := http.NewRequest("POST", "https://forums.e-hentai.org/index.php", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://forums.e-hentai.org/index.php?act=Login")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("登录请求失败（请检查代理/网络）: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	// 2. 从登录响应提取 Cookie
+	result := &LoginResult{}
+	loginURL, _ := url.Parse("https://forums.e-hentai.org")
+	for _, c := range jar.Cookies(loginURL) {
+		switch c.Name {
+		case "ipb_member_id":
+			result.IPBMemberID = c.Value
+		case "ipb_pass_hash":
+			result.IPBPassHash = c.Value
+		case "sk":
+			result.SK = c.Value
+		}
+	}
+
+	// 3. 校验登录是否成功：IPB 登录失败会返回「Login failed」等页面且无 ipb cookie
+	if result.IPBMemberID == "" || result.IPBPassHash == "" {
+		bodyStr := string(body)
+		// 常见失败指纹：验证码 / 密码错误 / 账号风控
+		switch {
+		case strings.Contains(bodyStr, "captcha") || strings.Contains(bodyStr, "reCAPTCHA"):
+			return nil, fmt.Errorf("E 站要求验证码（人机验证），请改用浏览器登录后粘贴 Cookie")
+		case strings.Contains(bodyStr, "Login failed"):
+			return nil, fmt.Errorf("登录失败：账号或密码错误")
+		case strings.Contains(bodyStr, "banned"):
+			return nil, fmt.Errorf("登录失败：该账号已被限制，请检查 E 站状态")
+		default:
+			return nil, fmt.Errorf("登录失败：未获取到登录凭证（可能被风控拦截，请改用浏览器登录后粘贴 Cookie）")
+		}
+	}
+
+	// 4. 抓取 igneous（里站凭证）并验证里站/表站可用性
+	account := &models.AccountSetting{
+		IPBMemberID: result.IPBMemberID,
+		IPBPassHash: result.IPBPassHash,
+		SK:          result.SK,
+		Igneous:     result.Igneous,
+	}
+	if fetched := s.TryFetchIgneous(account); fetched != "" {
+		result.Igneous = fetched
+		account.Igneous = fetched
+	}
+	isEx, verifyErr := s.VerifyAccount(account)
+	if verifyErr != nil {
+		// 凭证拿到了但验证失败（网络抖动/表站不可达）：降级为已登录（表站），不阻断
+		log.Printf("[EH-LOGIN] 凭证获取成功但验证失败: %v", verifyErr)
+		result.IsEx = false
+	} else {
+		result.IsEx = isEx
+	}
+
+	return result, nil
+}
+
 // VerifyAccount 校验凭证并在必要时自动刷新/抓取 igneous
 func (s *EHService) VerifyAccount(setting *models.AccountSetting) (isEx bool, err error) {
 	// 1. 未填 igneous 时自动尝试抓取

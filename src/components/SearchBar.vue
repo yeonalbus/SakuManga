@@ -257,6 +257,17 @@ const handleTagSuggestClick = (tag: TagItem) => {
   }, 0)
 }
 
+// 点击搜索历史项：仅填入搜索框（不自动搜索、不跳转），保持焦点便于编辑后回车
+const handleHistoryClick = (item: string) => {
+  keyword.value = item
+  isFocused.value = true
+  suppressOutsideClose = true
+  searchInputRef.value?.focus()
+  setTimeout(() => {
+    suppressOutsideClose = false
+  }, 0)
+}
+
 const removeHistoryItem = (item: string, e: Event) => {
   e.stopPropagation()
   searchHistory.value = searchHistory.value.filter((h) => h !== item)
@@ -423,7 +434,8 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
             v-for="item in filteredHistory"
             :key="item"
             class="history-chip"
-            @click="triggerSearch(item)"
+            :title="`填入搜索框: ${item}`"
+            @click="handleHistoryClick(item)"
           >
             <span class="history-text">{{ item }}</span>
             <span class="delete-chip-btn" title="删除记录" @click="removeHistoryItem(item, $event)"

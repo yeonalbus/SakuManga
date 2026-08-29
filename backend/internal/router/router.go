@@ -138,6 +138,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.DELETE("/account/settings", accountHandler.ClearAccountSettings)
 		// 刷新 sk / igneous 凭证（不落库，返回新值由前端回填表单）
 		api.POST("/account/refresh-cookies", accountHandler.RefreshCookies)
+		// 内部登录：E 站账号密码模拟登录（免 F12 复制 Cookie）
+		api.POST("/account/login", accountHandler.LoginWithPassword)
 
 		// EH 专属站点偏好设置接口（按当前用户隔离）
 		api.GET("/eh/settings", ehSettingHandler.GetEHSettings)

@@ -342,8 +342,8 @@ const handleDeleteCurrent = async () => {
           拖动把手排序（长按行 300ms 亦可），拖动中列表仍可滚动（共 {{ sortIds.length }} 本）
         </span>
         <div class="sort-actions">
-          <button class="toolbar-btn" @click="exitSortMode(false)">取消</button>
-          <button class="toolbar-btn primary" @click="exitSortMode(true)">✓ 完成排序</button>
+          <button class="shelf-op-btn" @click="exitSortMode(false)">取消</button>
+          <button class="shelf-op-btn" @click="exitSortMode(true)">✓ 完成排序</button>
         </div>
       </div>
       <div class="sort-mini-list">
@@ -558,17 +558,6 @@ const handleDeleteCurrent = async () => {
 .sort-actions {
   display: flex;
   gap: 8px;
-}
-
-.toolbar-btn.primary {
-  background-color: #3d5afe;
-  color: #ffffff;
-  border-color: #3d5afe;
-}
-
-.toolbar-btn.primary:hover {
-  background-color: #2f48e0;
-  border-color: #2f48e0;
 }
 
 .sort-mini-list {

@@ -57,6 +57,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 	toplistHandler := handlers.NewToplistHandler(db, toplistService)
 	favHandler := handlers.NewFavoritesHandler(db, favService)
+	scrapeBookmarkHandler := handlers.NewScrapeBookmarkHandler(db) // Round28：搜刮书签（后端化，多端同步）
 
 	// ─── 2. 公开路由（无需登录）───
 	public := r.Group("/api/v1")
@@ -197,9 +198,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.PUT("/bookshelves/:id/order", libraryHandler.ReorderBookshelfComics)
 		// Round22：书架列表单书架 LexoRank 移动（只更新一项权值）
 		api.PUT("/bookshelves/:id/position", libraryHandler.MoveBookshelfPosition)
-	// Round13：书架置顶 / 批量加入
-	api.PUT("/bookshelves/:id/pin", libraryHandler.SetBookshelfPinned)
-	api.POST("/bookshelves/:id/comics/batch", libraryHandler.BatchAddComicsToBookshelf)
+		// Round13：书架置顶 / 批量加入
+		api.PUT("/bookshelves/:id/pin", libraryHandler.SetBookshelfPinned)
+		api.POST("/bookshelves/:id/comics/batch", libraryHandler.BatchAddComicsToBookshelf)
 		api.POST("/bookshelves/reorder", libraryHandler.ReorderBookshelves)
 
 		// 历史（按用户隔离 + 上限淘汰）
@@ -213,6 +214,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/ratings/:comicId", libraryHandler.GetComicRating)
 		api.PUT("/ratings/:comicId", libraryHandler.SetComicRating)
 		api.DELETE("/ratings/:comicId", libraryHandler.DeleteComicRating)
+
+		// 搜刮书签（Round28：后端化，按用户隔离，多端同步）
+		api.GET("/scrape-bookmarks", scrapeBookmarkHandler.List)
+		api.POST("/scrape-bookmarks", scrapeBookmarkHandler.Create)
+		api.PUT("/scrape-bookmarks/:id", scrapeBookmarkHandler.Rename)
+		api.DELETE("/scrape-bookmarks/:id", scrapeBookmarkHandler.Delete)
 
 		// 阅读清单（每用户每来源一个队列）
 		api.GET("/reading-list", libraryHandler.GetReadingList)

@@ -1,9 +1,11 @@
-//配置路由表
+// 配置路由表
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { TOKEN_KEY } from '@/config/api'
 import { getMainContent, rememberScroll, restoreScroll, scrollMainToTop } from '@/utils/scrollMemory'
 import { preferenceSettings } from '@/stores/preferenceSettings'
 import { useUserStore } from '@/stores/userStore'
+// Round28：库数据统一入口（登录守卫等待书签/历史等就绪，保证 ?bm= 恢复时序）
+import { ensureLibraryLoaded } from '@/stores/libraryInit'
 // Round20-Bug4：路由切换自动取消未决 modal（防全局弹窗跨页面粘滞）
 import { useUI } from '@/composables/useUI'
 
@@ -176,7 +178,7 @@ const router = createRouter({
 })
 
 // 全局登录守卫：未登录只能访问 /login；已登录访问 /login 时重定向到主界面
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const token = localStorage.getItem(TOKEN_KEY)
   const isLoginPage = to.path === '/login'
   if (!token && !isLoginPage) {
@@ -186,6 +188,11 @@ router.beforeEach((to) => {
   if (token && isLoginPage) {
     // 已登录访问登录页：送回「启动时默认菜单」对应的落地页（与 / 根路径一致）
     return { path: resolveDefaultLandingPath() }
+  }
+  // Round28：已登录进入受保护页前，等待库数据（书架/历史/清单/评分/搜刮书签）就绪，
+  // 保证 URL 驱动的书签跳转（/online/home?bm=xxx）在组件 setup 前数据已加载。
+  if (token) {
+    await ensureLibraryLoaded()
   }
   return true
 })

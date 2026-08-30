@@ -42,7 +42,8 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
-import { loadUserLibrary } from '@/stores/libraryInit'
+// Round28：改走统一入口（守卫/登录/会话恢复共用缓存 Promise，防并发重复加载）
+import { ensureLibraryLoaded } from '@/stores/libraryInit'
 import { resolveDefaultLandingPath } from '@/router'
 
 const router = useRouter()
@@ -63,8 +64,9 @@ async function handleLogin() {
   errorMsg.value = ''
   try {
     await userStore.login(username.value.trim(), password.value)
-    // 登录成功后加载当前用户的库数据（书架/历史/阅读清单/评分 + 旧数据迁移）
-    loadUserLibrary()
+    // 登录成功后加载当前用户的库数据（书架/历史/阅读清单/评分/搜刮书签 + 旧数据迁移）
+    // Round28：await 确保书签等数据就绪后再跳转（URL 驱动的书签恢复依赖此顺序）
+    await ensureLibraryLoaded()
     // 无 redirect 参数时按「启动时默认菜单」偏好落地（与 / 根路径、登录守卫一致）
     const redirect =
       typeof route.query.redirect === 'string' ? route.query.redirect : resolveDefaultLandingPath()

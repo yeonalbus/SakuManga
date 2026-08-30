@@ -15,6 +15,7 @@ import {
   getBookmarkById,
   snapshotOnlineSearchConfig,
   cloneSearchConfig,
+  markAnchorFailed,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
@@ -175,13 +176,15 @@ watch(
   { flush: 'post' },
 )
 
-// 兜底：列表已到尽头（hasMore=false）仍未定位到锚点 → 提示并放弃
+// 兜底：列表已到尽头（hasMore=false）仍未定位到锚点 → 明确提示 + 标记失效（Round28：BUG2 修复）
 watch(
   () => onlineStore.hasMore,
   (hasMore) => {
     if (!hasMore && pendingAnchorGid.value) {
-      toast.warning('书签锚定的卡片不在当前搜索结果中（可能已被过滤或数据变动）')
+      const gid = pendingAnchorGid.value
       pendingAnchorGid.value = null
+      markAnchorFailed(gid)
+      toast.warning('书签锚定的画廊已失效（可能被删除或更换），书签已保留，跳转仅恢复位置')
     }
   },
 )
@@ -220,14 +223,16 @@ const handlePickStart = (draft: { name: string }) => {
 }
 
 // 创建书签统一出口（拾取锚定 / 仅保存位置共用）
-const handleBookmarkSave = (payload: { name: string; anchor: ScrapeBookmark['anchor'] }) => {
-  const bm = addScrapeBookmark(
+// Round28：后端化后 addScrapeBookmark 为异步（乐观 + 失败回滚），失败返回 null 并已提示
+const handleBookmarkSave = async (payload: { name: string; anchor: ScrapeBookmark['anchor'] }) => {
+  const bm = await addScrapeBookmark(
     payload.name,
     bmType.value,
     bmKeyword.value,
     snapshotOnlineSearchConfig(),
     payload.anchor,
   )
+  if (!bm) return // 保存失败已由 store toast 提示
   bmModalOpen.value = false
   pickMode.value = false
   toast.success(

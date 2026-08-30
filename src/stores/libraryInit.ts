@@ -6,6 +6,8 @@
 import { http } from '@/utils/request'
 import type { ComicItem } from '@/types/comic'
 import { loadBookshelves, migrateLegacyBookshelves } from './bookshelfStore'
+// Round28：换用户重新加载依赖 token 对比
+import { TOKEN_KEY } from '@/config/api'
 // Round20-Bug4/D2：先加载离线漫画列表，使 loadHistory('offline') 能剔除本地库已不存在的孤儿历史
 import { fetchOfflineComics } from './comicStore'
 import {
@@ -17,6 +19,8 @@ import {
 } from './historyStore'
 import { loadReadingList, onlineReadingList, offlineReadingList } from './readingStore'
 import { loadMyRatings } from './ratingStore'
+// Round28：搜刮书签后端化（登录后加载，多端同步）
+import { loadScrapeBookmarks } from './scrapeBookmarksStore'
 
 /** 旧 localStorage 迁移是否已执行（避免重复） */
 let migrated = false
@@ -91,6 +95,7 @@ export const loadUserLibrary = async () => {
     loadReadingList('online'),
     loadReadingList('offline'),
     loadMyRatings(),
+    loadScrapeBookmarks(), // Round28：搜刮书签后端化（含旧 localStorage 迁移）
   ])
 
   if (migrated) return
@@ -101,4 +106,29 @@ export const loadUserLibrary = async () => {
   await migrateLegacyHistory('offline')
   await migrateLegacyReadingList('online')
   await migrateLegacyReadingList('offline')
+}
+
+/** 库数据加载 Promise 缓存：登录 / 会话恢复 / 路由守卫共用，避免重复并发加载 */
+let libraryReady: Promise<void> | null = null
+/** 当前缓存所属用户 token：换用户（登出再登录）时强制重新加载，避免张冠李戴 */
+let libraryLoadedForToken: string | null = null
+
+/**
+ * 确保当前登录用户的库数据（书架/历史/阅读清单/评分/搜刮书签）已加载完成。
+ * - 同一 token 复用缓存 Promise，避免重复并发加载；
+ * - 换用户（token 变化）强制重新加载（书签/历史按用户隔离）；
+ * - 加载失败允许下次重试（缓存清空）；
+ * - 供路由守卫 await：保证 URL 驱动的书签跳转（?bm=xxx）在组件 setup 前数据就绪。
+ */
+export const ensureLibraryLoaded = (): Promise<void> => {
+  const token = localStorage.getItem(TOKEN_KEY) || ''
+  if (libraryReady && libraryLoadedForToken === token) {
+    return libraryReady
+  }
+  libraryLoadedForToken = token
+  libraryReady = loadUserLibrary().catch((e) => {
+    console.error('初始化库数据失败:', e)
+    libraryReady = null
+  })
+  return libraryReady
 }

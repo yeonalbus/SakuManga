@@ -1,7 +1,12 @@
 <script setup lang="ts">
 // 🔖 搜刮书签（Round27）：侧栏快速跳转 + hover 删除
+// Round28：后端化（多端同步）+ 失效锚点 ⚠️ 标记（BUG2 修复）
 import { useRouter } from 'vue-router'
-import { scrapeBookmarks, removeScrapeBookmark } from '@/stores/scrapeBookmarksStore'
+import {
+  scrapeBookmarks,
+  removeScrapeBookmark,
+  failedAnchorGids,
+} from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
@@ -22,11 +27,15 @@ const handleBookmarkJump = (bm: ScrapeBookmark) => {
 
 const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
   const ok = await modal.confirm(`确定删除书签「${bm.name}」吗？`, '删除书签')
-  if (ok) {
-    removeScrapeBookmark(bm.id)
-    toast.success(`书签「${bm.name}」已删除`)
-  }
+  if (!ok) return
+  // Round28：后端化后为异步删除（乐观 + 失败回滚），成功才提示
+  const removed = await removeScrapeBookmark(bm.id)
+  if (removed) toast.success(`书签「${bm.name}」已删除`)
 }
+
+/** 某书签是否已在本会话内确认锚点失效（⚠️ 标记） */
+const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
+  !!bm.anchor && failedAnchorGids.value.has(bm.anchor.gid)
 </script>
 
 <template>
@@ -48,14 +57,18 @@ const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
         v-for="bm in scrapeBookmarks"
         :key="bm.id"
         class="bookmark-item"
+        :class="{ 'anchor-failed': isAnchorFailed(bm) }"
         :title="
-          bm.anchor
-            ? `锚定画廊: ${bm.anchor.title || bm.anchor.gid}（点击跳转）`
-            : '未锚定卡片（点击跳转）'
+          isAnchorFailed(bm)
+            ? `⚠️ 锚定画廊已失效（可能被删除或更换）——${bm.anchor?.title || bm.anchor?.gid}`
+            : bm.anchor
+              ? `锚定画廊: ${bm.anchor.title || bm.anchor.gid}（点击跳转）`
+              : '未锚定卡片（点击跳转）'
         "
         @click="handleBookmarkJump(bm)"
       >
         <span class="bm-icon">{{ bm.type === 'search' ? '🔍' : '🏠' }}</span>
+        <span class="bm-warn" v-if="isAnchorFailed(bm)" title="锚定画廊已失效">⚠️</span>
         <span class="bm-name">{{ bm.name }}</span>
         <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
       </button>
@@ -99,6 +112,19 @@ const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
 .bm-icon {
   font-size: 0.85rem;
   flex-shrink: 0;
+}
+
+/* ⚠️ 失效锚点标记（Round28）：与 icon 并列，弱化色 */
+.bm-warn {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* 失效书签整体弱化 + 名称斜体，提示不再可跳转定位 */
+.bookmark-item.anchor-failed .bm-name {
+  color: var(--app-text-muted);
+  text-decoration: line-through;
 }
 
 .bm-name {

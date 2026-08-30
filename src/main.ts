@@ -7,7 +7,8 @@ import App from './App.vue'
 import './styles/dragSort.css'
 import { styleSettings } from './stores/styleSettings'
 import { useUserStore } from './stores/userStore'
-import { loadUserLibrary } from './stores/libraryInit'
+// Round28：库数据统一入口（书签/历史/书架等；守卫/登录/会话恢复共用，防并发重复加载）
+import { ensureLibraryLoaded } from './stores/libraryInit'
 import { reportError } from './utils/errorReporter'
 
 const app = createApp(App)
@@ -61,9 +62,10 @@ app.use(pinia)
 
 // 恢复登录会话：本地存在 token 时向服务端校验并加载当前用户信息
 const userStore = useUserStore(pinia)
-// 会话恢复成功后，加载当前用户的书架/历史/阅读清单/评分（含旧数据迁移）
+// 会话恢复成功后，加载当前用户的书架/历史/阅读清单/评分/搜刮书签（含旧数据迁移）
+// Round28：改走 ensureLibraryLoaded（与路由守卫共用缓存 Promise，避免并发重复加载/迁移）
 userStore.fetchMe().then((ok) => {
-  if (ok) loadUserLibrary()
+  if (ok) void ensureLibraryLoaded()
 })
 
 // 全局监听 401：会话失效时清空用户状态并回到登录页

@@ -37,6 +37,7 @@ func InitDB() {
 		&models.UpdateScanSetting{},
 		&models.ComicBookmark{},
 		&models.ComicChapter{},
+		&models.ScrapeBookmark{},    // Round28：搜刮书签（后端化，多端同步）
 		&models.IgnoredIdentifier{}, // Round26 O2：忽略标记（疑似重复/父画廊）
 	)
 

@@ -22,6 +22,7 @@ import (
 	"SakuManga/internal/tray"
 	"SakuManga/webui"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -77,6 +78,11 @@ func main() {
 	// 5. 初始化 Router 并挂载中间件
 	r := gin.Default()
 	r.Use(Cors())
+	// 性能优化：全局 gzip 压缩（JSON API 响应体动辄 10~40MB，公网裸传极慢；
+	// 中间件对 image/* 等已压缩类型自动跳过，静态资源正常服务）。
+	// /tags/dictionary 排除：handler 自管预压缩字节（零压缩 CPU 开销），
+	// 中间件对"上游已压缩"的响应会删掉 ETag/Content-Encoding 头，需绕开。
+	r.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/api/v1/tags/dictionary"})))
 
 	// 6. 初始化 E-Hentai 抓取服务，并注册全部 API 路由（路由配置见 internal/router）
 	ehService := services.NewEHService()

@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bytes"
 	"compress/gzip"
+	"crypto/sha1"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -57,6 +59,15 @@ type TagItem struct {
 	Count     int    `json:"count"`
 }
 
+// TagItemBrief 精简标签项：列表/词典接口输出（不含 intro 长文本与 markdown 图片，
+// 减小序列化与公网传输体积；intro 仅详情/联想接口按需提供）。
+type TagItemBrief struct {
+	Namespace string `json:"namespace"`
+	Key       string `json:"key"`
+	Name      string `json:"name"`
+	Count     int    `json:"count"`
+}
+
 type TagEngine struct {
 	mu          sync.RWMutex
 	tags        map[string]*TagItem
@@ -66,6 +77,12 @@ type TagEngine struct {
 	EnableCN    bool
 	EnableSort  bool
 	dataDir     string
+
+	// 词典接口缓存（LoadFromDisk 重建，GetTagDictionary 直接返回零序列化开销）
+	tagListBrief  []TagItemBrief // 精简标签列表（不含 intro）
+	dictCache     []byte         // json.Marshal(tagListBrief) 的字节
+	dictCacheGzip []byte         // 预压缩 gzip 字节（静态数据逐请求压缩浪费 CPU）
+	dictETag      string         // 基于缓存内容的强 ETag（内容变化才变）
 
 	TransProgress DownloadProgress `json:"transProgress"`
 	SortProgress  DownloadProgress `json:"sortProgress"`
@@ -272,6 +289,43 @@ func (e *TagEngine) LoadFromDisk() {
 	}
 
 	log.Printf("[TagEngine] 成功装载标签库！内存总计 %d 条标签，其中包含中文翻译 %d 条\n", len(e.tags), cnLoadedCount)
+
+	// 3. 重建精简标签列表 + 词典 JSON 缓存（GetTagDictionary 直接返回，零序列化开销；
+	//    ETag 取缓存内容哈希，数据变化才失效，浏览器二次访问走 304）
+	e.tagListBrief = make([]TagItemBrief, 0, len(e.tagList))
+	for _, t := range e.tagList {
+		e.tagListBrief = append(e.tagListBrief, TagItemBrief{
+			Namespace: t.Namespace,
+			Key:       t.Key,
+			Name:      t.Name,
+			Count:     t.Count,
+		})
+	}
+	if data, err := json.Marshal(e.tagListBrief); err == nil {
+		e.dictCache = data
+		sum := sha1.Sum(data)
+		e.dictETag = fmt.Sprintf(`"sha1:%x"`, sum)
+		// 预压缩 gzip 字节（词典为静态数据，24h 才更新；逐请求压缩 11MB 需 ~300ms CPU，
+		// 预压缩后请求零压缩开销，仅传输）
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, werr := gz.Write(data); werr == nil {
+			if cerr := gz.Close(); cerr == nil {
+				e.dictCacheGzip = buf.Bytes()
+			} else {
+				e.dictCacheGzip = nil
+				log.Printf("[TagEngine] 词典 gzip 缓存封口失败: %v", cerr)
+			}
+		} else {
+			e.dictCacheGzip = nil
+			log.Printf("[TagEngine] 词典 gzip 缓存压缩失败: %v", werr)
+		}
+	} else {
+		e.dictCache = nil
+		e.dictCacheGzip = nil
+		e.dictETag = ""
+		log.Printf("[TagEngine] 词典 JSON 缓存序列化失败: %v", err)
+	}
 }
 
 func downloadFileWithProgress(destPath string, urlStr string, onProgress func(downloaded, total int64)) error {
@@ -459,6 +513,47 @@ func (e *TagEngine) TranslateTags(rawTags []string) []*TagItem {
 	return result
 }
 
+// TranslateTagsBrief 精简翻译（不含 intro 长文本），列表接口用；逻辑与 TranslateTags 一致。
+func (e *TagEngine) TranslateTagsBrief(rawTags []string) []TagItemBrief {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	result := make([]TagItemBrief, 0, len(rawTags))
+	for _, raw := range rawTags {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+
+		parts := strings.SplitN(raw, ":", 2)
+		ns := "other"
+		key := raw
+		if len(parts) == 2 {
+			ns = strings.ToLower(strings.TrimSpace(parts[0]))
+			key = strings.TrimSpace(parts[1])
+		}
+
+		keyClean := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(key)), "_", " ")
+		fullKey := ns + ":" + keyClean
+
+		if tag, exists := e.tags[fullKey]; exists && e.EnableCN {
+			result = append(result, TagItemBrief{
+				Namespace: tag.Namespace,
+				Key:       key,
+				Name:      tag.Name,
+				Count:     tag.Count,
+			})
+		} else {
+			result = append(result, TagItemBrief{
+				Namespace: ns,
+				Key:       key,
+				Name:      key,
+			})
+		}
+	}
+	return result
+}
+
 // matchLevelFor 计算 q 对 (key, name) 的匹配层级（key 已统一为小写空格形式）：
 //
 //	4 = key 完全等于 q
@@ -600,4 +695,13 @@ func (e *TagEngine) GetTagList() []*TagItem {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.tagList
+}
+
+// GetDictCache 获取序列化好的精简词典字节与强 ETag（/tags/dictionary 直接返回，
+// 零序列化开销；ETag 内容指纹变化才变，配合 If-None-Match 实现 304）。
+// 返回 (json 字节, gzip 预压缩字节, etag)；acceptGzip 由调用方按请求头决定用哪个。
+func (e *TagEngine) GetDictCache() (plain, gz []byte, etag string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.dictCache, e.dictCacheGzip, e.dictETag
 }

@@ -4,6 +4,7 @@ import (
 	"SakuManga/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,8 +47,28 @@ func QueryTagSuggestions(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
+// GetTagDictionary 获取完整翻译词典（性能优化：走 TagEngine 预序列化 + 预 gzip 压缩缓存，
+// 零序列化/压缩开销；带强 ETag，浏览器二次访问 If-None-Match 命中直接 304）。
 func GetTagDictionary(c *gin.Context) {
-	c.JSON(http.StatusOK, services.GlobalTagEngine.GetTagList())
+	plain, gz, etag := services.GlobalTagEngine.GetDictCache()
+	if plain == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "标签词典未就绪，请稍后重试"})
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	// 客户端支持 gzip 且有预压缩缓存 → 直接返回压缩字节（gin-contrib/gzip 中间件
+	// 检测到已有 Content-Encoding 会跳过，不双重压缩）
+	if gz != nil && strings.Contains(c.GetHeader("Accept-Encoding"), "gzip") {
+		c.Header("Content-Encoding", "gzip")
+		c.Data(http.StatusOK, "application/json; charset=utf-8", gz)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", plain)
 }
 
 // GetTagProgress 获取下载进度状态

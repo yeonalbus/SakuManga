@@ -19,7 +19,7 @@ import (
 type OfflineComicResponse struct {
 	models.OfflineComic
 	SourceLabel           string              `json:"sourceLabel,omitempty"` // 来源标签（问题3：额外路径 Name；空=下载导入）
-	Tags                  []*services.TagItem `json:"tags"`                  // 展示用（合并后的翻译结果）
+	Tags                  []*services.TagItem `json:"tags"`                  // 展示用（合并后的翻译结果，含 intro）
 	TagRaws               []string            `json:"tagRaws"`               // 与 Tags 一一对应的原始 tag 字符串（删除时精确匹配）
 	TagSources            []string            `json:"tagSources"`            // 与 Tags 一一对应的来源：online | local
 	OnlineTagsList        []string            `json:"onlineTagsList"`        // 原始三态（前端区分官方/本地展示）
@@ -27,6 +27,19 @@ type OfflineComicResponse struct {
 	OfflineRemoveTagsList []string            `json:"offlineRemoveTagsList"` // 本地删除的 online tag
 	HiddenPagesList       []int               `json:"hiddenPagesList"`       // 隐藏的物理页索引（Round23 自定义删除页面）
 	OriginalPageCount     int                 `json:"originalPageCount"`     // 原始物理页数（隐藏页后 pageCount 为有效页数）
+}
+
+// OfflineComicListResponse 列表接口精简响应（性能优化）：
+// - Tags 用精简结构（不含 intro 长文本；全站无 UI 消费 intro，仅详情/联想接口保留）；
+// - 移除 tagSources/onlineTagsList/offlineAddTagsList/offlineRemoveTagsList：
+//   列表接口从未赋值（恒为 null），详情页经 /comics/:id 独立接口获取有效值，零功能影响。
+type OfflineComicListResponse struct {
+	models.OfflineComic
+	SourceLabel       string                 `json:"sourceLabel,omitempty"`
+	Tags              []services.TagItemBrief `json:"tags"`
+	TagRaws           []string               `json:"tagRaws"`
+	HiddenPagesList   []int                  `json:"hiddenPagesList"`
+	OriginalPageCount int                    `json:"originalPageCount"`
 }
 
 func parseRawTags(tagsStr string) []string {
@@ -90,7 +103,7 @@ func GetOfflineComics(c *gin.Context) {
 		}
 	}
 
-	resp := make([]OfflineComicResponse, 0, len(comics))
+	resp := make([]OfflineComicListResponse, 0, len(comics))
 	for _, comic := range comics {
 		label := "下载"
 		if comic.ScanPathID != "" {
@@ -100,8 +113,8 @@ func GetOfflineComics(c *gin.Context) {
 		}
 
 		// 需求2：为列表填充翻译后的 TagItem(Tags) 与原始 tag 串(TagRaws)，前端据此做本地 tag 搜索/语言过滤。
-		// 注意：OfflineComicResponse.Tags 遮蔽了内嵌的 models.OfflineComic.Tags(string)，必须显式赋值，
-		// 否则 JSON 输出 tags=null，前端离线书库将永远无法按 tag 搜索。
+		// 性能优化：列表用精简翻译（无 intro），OfflineComicListResponse.Tags 遮蔽内嵌的
+		// models.OfflineComic.Tags(string)，必须显式赋值，否则 JSON 输出 tags=null。
 		onlineTags := services.UnmarshalTagSlice(comic.OnlineTags)
 		offlineAddTags := services.UnmarshalTagSlice(comic.OfflineAddTags)
 		offlineRemoveTags := services.UnmarshalTagSlice(comic.OfflineRemoveTags)
@@ -109,9 +122,9 @@ func GetOfflineComics(c *gin.Context) {
 		if len(merged) == 0 && comic.OnlineTags == "" {
 			merged = parseRawTags(comic.Tags)
 		}
-		translatedTags := services.GlobalTagEngine.TranslateTags(merged)
+		translatedTags := services.GlobalTagEngine.TranslateTagsBrief(merged)
 
-		resp = append(resp, OfflineComicResponse{
+		resp = append(resp, OfflineComicListResponse{
 			OfflineComic:      comic,
 			SourceLabel:       label,
 			Tags:              translatedTags,

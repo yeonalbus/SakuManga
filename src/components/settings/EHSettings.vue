@@ -94,26 +94,6 @@
       </div>
 
       <!-- 我的标签（Round25：仅保留侧边栏「标签管理 → 我的标签」入口，此处移除避免双入口） -->
-
-      <!-- 资产 -->
-      <div
-        class="setting-item clickable status-item"
-        :class="{ refreshing: statusLoading }"
-        @click="refreshStatus"
-      >
-        <div class="item-info">
-          <div class="item-title">
-            资产 <span v-if="statusLoading" class="loading-hint">刷新中…</span>
-          </div>
-          <div class="item-subtext">GP / Credits / Hath，点击刷新</div>
-        </div>
-        <div class="assets-text">
-          <span>GP: {{ status.assetGP || '--' }}</span>
-          <span>Credits: {{ status.assetCredits || '--' }}</span>
-          <span>Hath: {{ status.assetHath || '--' }}</span>
-          <span v-if="!statusLoading" class="refresh-icon" title="刷新">↻</span>
-        </div>
-      </div>
     </template>
 
     <!-- ==================== Profile 设置子视图（uconfig.php 界面） ==================== -->

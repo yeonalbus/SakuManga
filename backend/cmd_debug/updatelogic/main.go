@@ -191,10 +191,11 @@ func simulateMaintainDedup(comics []models.OfflineComic, htmlMap map[string]*ser
 	removeSet := map[string]bool{}
 	reasonMap := map[string]string{}
 
-	// 3a：在线关系发现（仅 ParentGID 为空且未标记删除的漫画）
+	// 3a：在线关系发现（仅未被标记删除的漫画；ParentGID 非空不再拦截——
+	// 修复：有父关系的旧版仍需联网核对「本地是否有它的更新版」，且父链上溯覆盖隔代祖孙）
 	for i := range work {
 		c := &work[i]
-		if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] {
+		if c.GID == "" || c.Token == "" || removeSet[c.ID] {
 			continue
 		}
 		rel := htmlMap[c.GID]
@@ -205,6 +206,22 @@ func simulateMaintainDedup(comics []models.OfflineComic, htmlMap map[string]*ser
 		if rel.ParentGID != "" && rel.ParentGID != c.GID {
 			c.ParentGID = rel.ParentGID
 			fmt.Printf("  3a %s(gid=%s) 回写父画廊 parent=%s\n", c.Title, c.GID, rel.ParentGID)
+		}
+		// 父链上溯（隔代祖孙）：沿父画廊链向上逐层，命中本地版本即旧版被取代
+		if rel.ParentGID != "" {
+			climbed := climbParentChainSim(rel.ParentGID, rel.ParentToken, htmlMap, gidToComic)
+			for _, anc := range climbed {
+				if anc.ID == c.ID || removeSet[anc.ID] {
+					continue
+				}
+				removeSet[anc.ID] = true
+				reasonMap[anc.ID] = fmt.Sprintf("已被更新版（父画廊关系）%q 取代，旧版可删除", c.Title)
+				delete(keepSet, anc.ID)
+				if !removeSet[c.ID] {
+					keepSet[c.ID] = true
+				}
+				fmt.Printf("  3a-上溯 %s(gid=%s) 命中旧版 %s(gid=%s) → 删除旧版\n", c.Title, c.GID, anc.Title, anc.GID)
+			}
 		}
 		// 本画廊被更新版/子画廊取代（本地存在新版 → 旧版建议删除）
 		var successor *models.OfflineComic
@@ -263,6 +280,35 @@ func simulateMaintainDedup(comics []models.OfflineComic, htmlMap map[string]*ser
 			fmt.Printf("    ✅ 保留 %s(gid=%s)\n", c.Title, c.GID)
 		}
 	}
+}
+
+// climbParentChainSim 复刻 services.climbParentChain（离线版）：沿父画廊链向上逐层
+// （最多 10 层），返回链上「本地存在」的漫画列表（从近到远）。HTML 目录缺失的层直接截断。
+func climbParentChainSim(startGID, startToken string, htmlMap map[string]*services.GalleryRelationSummary,
+	gidToComic map[string]*models.OfflineComic) []*models.OfflineComic {
+	var hits []*models.OfflineComic
+	if startGID == "" {
+		return hits
+	}
+	seen := map[string]bool{}
+	curGID := startGID
+	for i := 0; i < 10 && curGID != "" && !seen[curGID]; i++ {
+		seen[curGID] = true
+		// 当前层 gid 是否在本地 → 命中；本地记录已有父信息则直接用其继续上溯
+		if local, ok := gidToComic[curGID]; ok && local.ID != "" {
+			hits = append(hits, local)
+			if local.ParentGID != "" {
+				curGID = local.ParentGID
+				continue
+			}
+		}
+		rel := htmlMap[curGID]
+		if rel == nil {
+			break
+		}
+		curGID = rel.ParentGID
+	}
+	return hits
 }
 
 // buildNote 复刻 services.buildUpdateNote：A→C 更新备注（最新版 + 中间链条及 added 时间）

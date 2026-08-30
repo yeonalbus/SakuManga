@@ -912,7 +912,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	// 3a. 在线父子关系发现（磁盘元数据无 parent/child 关系，需联网核对详情页）
 	//    - 本画廊详情有父画廊 → 回写 ParentGID（供 3b 本地查重用）
 	//    - 本画廊详情有子画廊/新版（且本地存在）→ 本画廊是旧版，标记删除、保留新版
-	//    仅对 ParentGID 为空且未被标记删除的漫画抓取，避免重复请求；
+	//    - 父链上溯（隔代祖孙）：本地只保存更新链两端（中间版本缺失）时，3b 直接父检查失效，
+	//      沿父画廊链向上逐层抓取，命中本地版本即旧版被新版取代。
+	//    仅对未被标记删除的漫画抓取，避免重复请求；
 	//    账号未绑定时跳过在线发现（本地规则1/2/4 仍可用）。
 	if ehService != nil {
 		account := LoadAdminAccount(db)
@@ -925,7 +927,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				// 需求1 兜底：已核对过父画廊关系的漫画（parent_checked_at>0）默认增量跳过；
 				// forceFull=true 时忽略该标记，强制全量联网重抓。
 				// Round26 O2：规则 3 gid 型忽略——增量扫描时被忽略的父画廊不联网、不提示（用户故意保留旧版）。
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] ||
+				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -934,7 +936,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			fetchDone := 0
 			for i := range comics {
 				c := &comics[i]
-				if c.GID == "" || c.Token == "" || c.ParentGID != "" || removeSet[c.ID] ||
+				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -980,6 +982,45 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 						_ = db.Model(c).Update("parent_g_id", detail.ParentGID)
 						log.Printf("%s [maintain] 漫画 %q(gid=%s) 在线发现父画廊 gid=%s",
 							dlLogTag, c.Title, c.GID, detail.ParentGID)
+					}
+				}
+				// 3a-新：父链上溯（隔代祖孙发现）——本地可能只保存更新链的两端
+				// （中间版本缺失，如 A→B→C→D 仅本地有 A 与 D），直接父检查（3b）与
+				// children 检查都因中间节点缺失而失联。沿本画廊的父画廊链向上逐层抓取
+				// （最多 maxParentClimb 层），任一环命中本地版本 → 该版本为旧版，被
+				// 本画廊（或其子孙）取代 → 标记删除、保留最新本地版。
+				if detail.ParentGID != "" {
+					climbed := climbParentChain(func(g, t string) (*GalleryDetailResult, error) {
+						d, err := ehService.FetchGalleryDetail(account, g, t, ehSetting)
+						ehRateLimiter.Mark(err == nil && d != nil)
+						ehRateLimiter.Wait()
+						return d, err
+					}, detail.ParentGID, detail.ParentToken, gidToComic)
+					for _, anc := range climbed {
+						if anc.ID == c.ID || removeSet[anc.ID] {
+							continue
+						}
+						// Round26 O2：规则 3 gid 型忽略——增量时被忽略的旧版不提示；全量不豁免（与 3b 一致）
+						if !forceFull && ignoreIdx.IsGIDIgnored(anc.GID) {
+							continue
+						}
+						removeSet[anc.ID] = true
+						reasonMap[anc.ID] = fmt.Sprintf("已被更新版（父画廊关系）%q 取代，旧版可删除", c.Title)
+						ruleMap[anc.ID] = "parent"
+						totalBytes[anc.ID] = anc.FileSize
+						// 旧版一旦判定删除，绝不再作为“建议保留”输出
+						delete(keepSet, anc.ID)
+						// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
+						if !removeSet[c.ID] {
+							keepSet[c.ID] = true
+						}
+						// Round4 任务一：旧版 anc ↔ 新版 c 互为成对对象（对比视图双列展示）
+						pairID[anc.ID] = c.ID
+						if pairID[c.ID] == "" {
+							pairID[c.ID] = anc.ID
+						}
+						log.Printf("%s [maintain] 漫画 %q(gid=%s) 父链上溯命中旧版 %q(gid=%s)，建议删除旧版",
+							dlLogTag, c.Title, c.GID, anc.Title, anc.GID)
 					}
 				}
 				// 本画廊已被更新版/子画廊取代（本地存在新版 → 旧版建议删除）
@@ -1030,6 +1071,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	}
 
 	// 3b. 本地父画廊关系查重（含 3a 在线回写的 ParentGID）
+	// 仅覆盖「直接父在本地」的相邻版本；隔代祖孙（中间版本缺失）由 3a 父链上溯覆盖。
 	for i := range comics {
 		c := &comics[i]
 		if c.ParentGID == "" || c.ParentGID == c.GID {
@@ -1183,6 +1225,42 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	}
 	log.Printf("%s [maintain] 维护查重完成：建议保留 %d 项，建议删除 %d 项", dlLogTag, keepCount, removeCount)
 	return result, nil
+}
+
+// maxParentClimb 父链上溯最大层数（E-Hentai 更新链一般 2~6 代，10 层足够覆盖实际场景）
+const maxParentClimb = 10
+
+// parentDetailFetcher 抓取单个画廊详情的关系部分（父/新版/子画廊）——抽成函数便于单测注入 fake。
+type parentDetailFetcher func(gid, token string) (*GalleryDetailResult, error)
+
+// climbParentChain 沿父画廊链向上逐层抓取详情（最多 maxParentClimb 层），
+// 返回链上「本地存在」的漫画列表（从近到远，即从直接父开始向更早版本方向）。
+//
+// 背景（隔代祖孙）：本地可能只保存更新链的两端（中间版本缺失，如 A→B→C→D
+// 仅本地有 A 与 D），此时 3b 直接父检查（D 的父是 C，不在本地）与 children 检查
+// （A 的 children 罗列全部后代，但 3a 可能未对 A 联网）都会失联。此函数从任一
+// 版本的父链出发逐层联网上溯，命中本地版本即判定「旧版被新版取代」。
+//
+// 约束：每层抓取后走自适应限流；某层失败、无父、成环即截断（已收集命中仍有效）。
+func climbParentChain(fetch parentDetailFetcher, startGID, startToken string, gidToComic map[string]*models.OfflineComic) []*models.OfflineComic {
+	var hits []*models.OfflineComic
+	if startGID == "" {
+		return hits
+	}
+	seen := map[string]bool{}
+	curGID, curToken := startGID, startToken
+	for i := 0; i < maxParentClimb && curGID != "" && !seen[curGID]; i++ {
+		seen[curGID] = true
+		detail, err := fetch(curGID, curToken)
+		if err != nil || detail == nil {
+			break // 该层抓取失败 → 截断（已收集的命中仍有效）
+		}
+		if local, ok := gidToComic[detail.ID]; ok && local.ID != "" {
+			hits = append(hits, local)
+		}
+		curGID, curToken = detail.ParentGID, detail.ParentToken
+	}
+	return hits
 }
 
 // backfillGIDOnline D5-B：对 GID=='' 的离线漫画按标题在线搜索，回填 GID/Token。

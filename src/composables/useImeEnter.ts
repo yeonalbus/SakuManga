@@ -1,5 +1,3 @@
-import { type Ref } from 'vue'
-
 /**
  * IME 回车提交处理（v2.0.1 修复）
  *

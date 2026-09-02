@@ -201,10 +201,6 @@ const progress = ref<OfflineTaskProgress | null>(null)
 const busy = ref(false)
 const { toast } = useUI()
 
-// Round29：暂停/继续/取消（扫描与离线更新检测共用单槽位任务）
-const isTaskPaused = computed(() => progress.value?.status === 'paused')
-const isTaskRunning = computed(() => progress.value?.status === 'running')
-
 let pollTimer: number | null = null
 
 const formatTime = (ts?: number) => {

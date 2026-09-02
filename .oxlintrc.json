@@ -6,5 +6,11 @@
   },
   "categories": {
     "correctness": "error"
-  }
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "backend/webui/dist/**",
+    "scripts/**"
+  ]
 }

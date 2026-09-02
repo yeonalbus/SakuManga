@@ -10,4 +10,4 @@ package version
 var Build = "dev"
 
 // AppVersion 产品版本号（与 package.json 保持一致，发布时手动更新）
-const AppVersion = "1.4.0"
+const AppVersion = "2.0.1"

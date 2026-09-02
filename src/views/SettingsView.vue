@@ -16,6 +16,12 @@
           >
             <span class="item-icon">{{ item.icon }}</span>
             <span class="item-label">{{ item.label }}</span>
+            <!-- Round29：关于软件入口红点——GitHub 有新版 release 时提醒 -->
+            <span
+              v-if="item.id === 'about' && newVersionAvailable"
+              class="item-dot"
+              title="发现新版本"
+            ></span>
           </div>
         </template>
       </div>
@@ -49,9 +55,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
+import { useVersionCheck } from '@/composables/useVersionCheck'
 
 // 导入全部设置子组件（Round25 收敛：Profile 并入 EH 网站、安全并入账户、高级并入日志）
 import AccountSettings from '@/components/settings/AccountSettings.vue'
@@ -70,6 +77,13 @@ import AboutSettings from '@/components/settings/AboutSettings.vue'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+
+// Round29：GitHub 最新 release 检测（打开设置页时触发一次；6h 缓存，见 useVersionCheck）
+const { info, checkVersion } = useVersionCheck()
+const newVersionAvailable = computed(() => !!info.value?.ok && !!info.value?.hasUpdate)
+onMounted(() => {
+  checkVersion()
+})
 
 // 菜单项定义
 interface SettingsMenuItem {
@@ -290,6 +304,17 @@ const handleBack = () => {
   font-size: 16px;
   width: 20px;
   text-align: center;
+}
+
+/* Round29：关于软件入口「发现新版本」红点徽标 */
+.item-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.22);
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .settings-content {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"SakuManga/internal/services"
 	"SakuManga/internal/version"
 
 	"github.com/gin-gonic/gin"
@@ -16,4 +17,12 @@ func GetSystemVersion(c *gin.Context) {
 		"appVersion": version.AppVersion, // 产品版本（release 语义）
 		"build":      version.Build,      // 构建标识（时间戳 + git 短哈希）
 	})
+}
+
+// CheckUpdate 检测 GitHub 最新 release 版本 GET /api/v1/system/check-update?current=2.0.1
+// 供设置「关于软件 → 版本」红点提醒使用；current 缺省用后端 AppVersion。
+// 检测失败（网络/GitHub 不可达）返回 ok=false，前端静默处理。
+func CheckUpdate(c *gin.Context) {
+	current := c.DefaultQuery("current", version.AppVersion)
+	c.JSON(http.StatusOK, services.CheckLatestRelease(current))
 }

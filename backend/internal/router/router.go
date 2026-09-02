@@ -126,6 +126,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// Round24：服务端版本与构建标识（部署后新旧核对）
 		api.GET("/system/version", handlers.GetSystemVersion)
+		// 版本检测：GitHub 最新 release 与当前版本比较（设置 → 关于软件 → 版本红点提醒）
+		api.GET("/system/check-update", handlers.CheckUpdate)
 
 		// 四类系统日志：查询 / 实时监控 / 开关设置读取（清理与设置保存为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/logs/categories", handlers.GetLogCategories)

@@ -618,6 +618,8 @@ const comicSourceBadge = computed(() => {
   user-select: none;
   transition: all 0.2s ease;
   overflow: hidden;
+  /* Round28-视觉：统一 border-box，书签粗边框切换不撑大卡片（content-box 下 border 变宽会顶动网格） */
+  box-sizing: border-box;
 }
 
 .item-card:hover {
@@ -1097,21 +1099,33 @@ const comicSourceBadge = computed(() => {
   border-color: #ff7588;
 }
 
-/* ─── Round27：搜刮书签标记 ─── */
-/* 常驻金色边框：被书签锚定的卡片 */
+/* ─── Round27：搜刮书签标记（Round28-视觉：信息区金底「金卡信息条」，封面保持原图、文字颜色不动）─── */
+/* 书签卡片：弱金边（标识位），主体标记为下方信息区金色渐变底 */
 .item-card.bookmarked {
-  border-color: rgba(255, 193, 7, 0.55);
+  border-color: rgba(255, 193, 7, 0.75);
 }
 .item-card.bookmarked:hover {
   border-color: #ffc107;
   box-shadow:
-    0 0 0 2px rgba(255, 193, 7, 0.25),
+    0 0 0 1px rgba(255, 193, 7, 0.3),
     0 4px 12px rgba(0, 0, 0, 0.4);
 }
 /* 选择模式（粉色高亮）优先于书签金色，避免视觉歧义 */
 .item-card.bookmarked.selected {
   border-color: #ff7588;
   box-shadow: 0 0 0 2px rgba(255, 117, 136, 0.45);
+}
+
+/* 金色信息条（不碰文字颜色）：
+   深色主题默认 → 暗金渐变（浅色文字保持可读）；
+   浅色主题 → 亮金渐变（深色文字保持可读）。 */
+.item-card.bookmarked .card-info-footer,
+.item-card.bookmarked .compact-main-content {
+  background: linear-gradient(180deg, #b8860b 0%, #a67a10 55%, #8f6a0e 100%);
+}
+:root[data-theme='light'] .item-card.bookmarked .card-info-footer,
+:root[data-theme='light'] .item-card.bookmarked .compact-main-content {
+  background: linear-gradient(180deg, #ffd54f 0%, #f2c83f 55%, #e0b12f 100%);
 }
 
 /* 大卡片模式：封面右上角 🔖 角标 */

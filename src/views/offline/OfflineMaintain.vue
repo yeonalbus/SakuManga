@@ -92,7 +92,7 @@ const activeClusters = computed(() => clusters.value.filter((c) => !c.ignored))
 // ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
 interface OfflineTaskState {
   type: 'maintain' | 'update'
-  status: 'idle' | 'running' | 'success' | 'error'
+  status: 'idle' | 'running' | 'paused' | 'success' | 'error' | 'cancelled'
   phase?: string
   total: number
   done: number
@@ -111,12 +111,46 @@ const progressPercent = computed(() => {
 })
 const phaseText = computed(() => taskState.value?.phase || '')
 const currentTitle = computed(() => taskState.value?.currentTitle || '')
+// Round29：暂停/继续/取消（任务控制按钮组）
+const isTaskPaused = computed(() => taskState.value?.status === 'paused')
+const isTaskRunning = computed(() => taskState.value?.status === 'running')
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
+  }
+}
+
+// Round29：任务控制（暂停/继续/取消，作用于单槽位任务）
+const controlTask = async (action: 'pause' | 'resume') => {
+  try {
+    await http(`/offline/task/${action}`, { method: 'POST' })
+    if (taskState.value) {
+      taskState.value = { ...taskState.value, status: action === 'pause' ? 'paused' : 'running' }
+    }
+    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
+    else toast.info('▶ 已继续')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
+  }
+}
+
+const cancelTask = async () => {
+  const confirmed = await modal.confirm(
+    '取消后本次查重将立即终止，已完成的结果不会保留（下次需重新扫描）。\n\n确定取消吗？',
+    '✖ 取消本次查重',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/task/cancel', { method: 'POST' })
+    toast.info('已请求取消，正在停止…')
+    // 交由轮询接收 cancelled 终态收尾
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '取消失败，任务可能已完成')
   }
 }
 
@@ -287,11 +321,16 @@ const pollProgress = () => {
     try {
       const s = await http<OfflineTaskState>('/offline/maintain/progress')
       taskState.value = s
-      if (s.status === 'success' || s.status === 'error') {
+      if (s.status === 'success' || s.status === 'error' || s.status === 'cancelled') {
         stopPolling()
         isScanning.value = false
         if (s.status === 'error') {
           toast.error(s.error || '维护查重失败')
+          return
+        }
+        if (s.status === 'cancelled') {
+          // Round29：用户取消——不拉取结果
+          toast.info('查重已取消')
           return
         }
         await loadResult()
@@ -521,16 +560,16 @@ const syncStaleOnEnter = async () => {
 }
 
 // bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
-// 改为同步一次当前任务状态：后台任务在跑则接管轮询显示进度；否则拉取最近结果并同步「过期」提示。
+// 改为同步一次当前任务状态：后台任务在跑（含暂停中）则接管轮询显示进度/控制按钮；否则拉取最近结果并同步「过期」提示。
 // Round26-⑨：不再因书库变更自动触发增量查重，只提示过期，手动扫描。
 const refreshOnEnter = async () => {
   try {
     const s = await http<OfflineTaskState>('/offline/maintain/progress')
     taskState.value = s
-    if (s.status === 'running') {
+    if (s.status === 'running' || s.status === 'paused') {
       isScanning.value = true
       pollProgress()
-      return // 后台任务在跑：交给轮询，不重复拉取结果
+      return // 后台任务在跑（或暂停中）：交给轮询，不重复拉取结果
     }
     await syncStaleOnEnter()
   } catch {
@@ -615,11 +654,14 @@ onUnmounted(stopPolling)
       </div>
     </div>
 
-    <div v-if="isScanning" class="scanning-banner">
-      <span class="spinner"></span>
+    <!-- Round29：任务控制——扫描中可暂停；暂停后可继续/取消 -->
+    <div v-if="isScanning" class="scanning-banner" :class="{ 'is-paused': isTaskPaused }">
+      <span v-if="!isTaskPaused" class="spinner"></span>
+      <span v-else class="paused-icon">⏸</span>
       <div class="scanning-info">
         <p class="scanning-title">
-          {{ phaseText || '正在扫描本地书库查重...' }}
+          <template v-if="isTaskPaused">查重已暂停</template>
+          <template v-else>{{ phaseText || '正在扫描本地书库查重...' }}</template>
           <span v-if="taskState && taskState.total > 0" class="scanning-percent"
             >{{ progressPercent }}%</span
           >
@@ -628,12 +670,29 @@ onUnmounted(stopPolling)
           <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
         </div>
         <p class="scanning-sub">
-          <template v-if="taskState && taskState.total > 0">
+          <template v-if="isTaskPaused">
+            已暂停于 {{ taskState?.done }} / {{ taskState?.total }} · {{ phaseText }}，可继续或取消
+          </template>
+          <template v-else-if="taskState && taskState.total > 0">
             进度 {{ taskState.done }} / {{ taskState.total }} · {{ phaseText }}
           </template>
           <template v-else>正在启动维护任务...</template>
         </p>
         <p v-if="currentTitle" class="scanning-current">📖 {{ currentTitle }}</p>
+      </div>
+      <div class="banner-actions">
+        <template v-if="isTaskPaused">
+          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
+          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+        </template>
+        <button
+          v-else-if="isTaskRunning"
+          class="control-btn pause"
+          title="暂停后当前项处理完即停止，可随时继续或取消"
+          @click="controlTask('pause')"
+        >
+          ⏸ 暂停
+        </button>
       </div>
     </div>
 
@@ -1121,6 +1180,45 @@ onUnmounted(stopPolling)
   border: 1px solid #007acc;
   border-radius: 8px;
   padding: 14px 16px;
+}
+
+/* Round29：暂停态样式 + 任务控制按钮 */
+.scanning-banner.is-paused {
+  border-color: #f59e0b;
+  background-color: #2a2414;
+}
+.paused-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+.banner-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.control-btn {
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+  transition: opacity 0.2s;
+}
+.control-btn:hover {
+  opacity: 0.85;
+}
+.control-btn.pause {
+  background: #6b7280;
+}
+.control-btn.resume {
+  background: #00a896;
+}
+.control-btn.cancel {
+  background: #ff7588;
 }
 .scope-hint {
   margin: 4px 0 12px;

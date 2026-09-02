@@ -117,15 +117,36 @@
       </button>
     </div>
 
-    <!-- 进度 banner -->
-    <div v-if="progress && progress.status === 'running'" class="progress-banner running">
+    <!-- 进度 banner（Round29：扫描中可暂停；暂停后可继续/取消） -->
+    <div
+      v-if="progress && (progress.status === 'running' || progress.status === 'paused')"
+      class="progress-banner"
+      :class="progress.status"
+    >
       <div class="progress-text">
-        {{ progress.phase || '扫描中' }}<template v-if="progress.currentTitle">「{{ progress.currentTitle }}」</template>
+        <template v-if="progress.status === 'paused'">⏸ 扫描已暂停（{{ progress.done }} / {{ progress.total }}）</template>
+        <template v-else>
+          {{ progress.phase || '扫描中' }}<template v-if="progress.currentTitle">「{{ progress.currentTitle }}」</template>
+        </template>
       </div>
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: percent + '%' }"></div>
       </div>
       <div class="progress-meta">{{ progress.done }} / {{ progress.total }}</div>
+      <div class="banner-actions">
+        <template v-if="progress.status === 'paused'">
+          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
+          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+        </template>
+        <button
+          v-else
+          class="control-btn pause"
+          title="暂停后当前项处理完即停止，可随时继续或取消"
+          @click="controlTask('pause')"
+        >
+          ⏸ 暂停
+        </button>
+      </div>
     </div>
     <div
       v-else-if="progress && (progress.status === 'success' || progress.status === 'error')"
@@ -158,7 +179,7 @@ interface UpdateScanSetting {
 // 离线任务进度快照（/offline/updates/check/progress 返回结构）
 interface OfflineTaskProgress {
   type: 'maintain' | 'update'
-  status: 'idle' | 'running' | 'success' | 'error'
+  status: 'idle' | 'running' | 'paused' | 'success' | 'error' | 'cancelled'
   phase?: string
   total: number
   done: number
@@ -179,6 +200,10 @@ const setting = ref<UpdateScanSetting>({
 const progress = ref<OfflineTaskProgress | null>(null)
 const busy = ref(false)
 const { toast } = useUI()
+
+// Round29：暂停/继续/取消（扫描与离线更新检测共用单槽位任务）
+const isTaskPaused = computed(() => progress.value?.status === 'paused')
+const isTaskRunning = computed(() => progress.value?.status === 'running')
 
 let pollTimer: number | null = null
 
@@ -237,10 +262,15 @@ const startPolling = () => {
   pollTimer = window.setInterval(async () => {
     try {
       progress.value = await http<OfflineTaskProgress>('/offline/updates/check/progress')
-      if (progress.value.status === 'success' || progress.value.status === 'error') {
+      if (
+        progress.value.status === 'success' ||
+        progress.value.status === 'error' ||
+        progress.value.status === 'cancelled'
+      ) {
         stopPolling()
         busy.value = false
         if (progress.value.status === 'success') toast.success('扫描完成')
+        else if (progress.value.status === 'cancelled') toast.info('扫描已取消') // Round29
         else toast.error(progress.value.error || progress.value.message || '扫描失败')
         fetchSetting()
       }
@@ -254,6 +284,36 @@ const stopPolling = () => {
   if (pollTimer) {
     window.clearInterval(pollTimer)
     pollTimer = null
+  }
+}
+
+// Round29：任务控制（暂停/继续/取消，作用于单槽位任务）
+const controlTask = async (action: 'pause' | 'resume') => {
+  try {
+    await http(`/offline/task/${action}`, { method: 'POST' })
+    if (progress.value) {
+      progress.value = { ...progress.value, status: action === 'pause' ? 'paused' : 'running' }
+    }
+    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
+    else toast.info('▶ 已继续')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
+  }
+}
+
+const cancelTask = async () => {
+  const confirmed = window.confirm(
+    '取消后本次扫描将立即终止，已完成的结果不会保留。\n\n确定取消吗？',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/task/cancel', { method: 'POST' })
+    toast.info('已请求取消，正在停止…')
+    // 交由轮询接收 cancelled 终态收尾
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '取消失败，任务可能已完成')
   }
 }
 
@@ -273,11 +333,11 @@ const handleManualScan = async () => {
 
 onMounted(() => {
   fetchSetting()
-  // 进页面先查一次进度，防止后台正好在自动/手动扫描
+  // 进页面先查一次进度，防止后台正好在自动/手动扫描（Round29：暂停中也接管以便恢复/取消）
   http<OfflineTaskProgress>('/offline/updates/check/progress')
     .then((p) => {
       progress.value = p
-      if (p.status === 'running' && p.type === 'update') startPolling()
+      if ((p.status === 'running' || p.status === 'paused') && p.type === 'update') startPolling()
     })
     .catch(() => {})
 })
@@ -514,6 +574,42 @@ input:checked + .slider:before {
   background-color: #12182a;
   border-color: #33507a;
   color: #9fc3ff;
+}
+
+.progress-banner.paused {
+  background-color: #2a2414;
+  border-color: #5a4a1a;
+  color: #ffd54f;
+}
+
+/* Round29：任务控制按钮 */
+.banner-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.control-btn {
+  border: none;
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+  transition: opacity 0.2s;
+}
+.control-btn:hover {
+  opacity: 0.85;
+}
+.control-btn.pause {
+  background: #6b7280;
+}
+.control-btn.resume {
+  background: #00a896;
+}
+.control-btn.cancel {
+  background: #ff7588;
 }
 
 .progress-banner.success {

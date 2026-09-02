@@ -204,6 +204,43 @@ func (h *OfflineHandler) GetMaintainUnsynced(c *gin.Context) {
 	c.JSON(http.StatusOK, services.GetMaintainUnsyncedStatus())
 }
 
+// ─────────────────────────────────────────────────────────────
+// Round29：任务控制（暂停 / 继续 / 取消）
+//
+// 作用于单槽位当前任务（更新检测或维护查重，互斥），三个页面共用：
+//   离线更新检测（OfflineUpdate） / 本地书库维护（OfflineMaintain） /
+//   更新扫描设置「立即扫描」。暂停为协作式：当前漫画处理完后生效。
+// ─────────────────────────────────────────────────────────────
+
+// PauseOfflineTask 暂停当前任务 POST /api/v1/offline/task/pause
+func (h *OfflineHandler) PauseOfflineTask(c *gin.Context) {
+	if !services.PauseOfflineTask() {
+		c.JSON(http.StatusConflict, gin.H{"error": "当前没有可暂停的运行中任务"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"paused": true})
+}
+
+// ResumeOfflineTask 继续被暂停的任务 POST /api/v1/offline/task/resume
+func (h *OfflineHandler) ResumeOfflineTask(c *gin.Context) {
+	if !services.ResumeOfflineTask() {
+		c.JSON(http.StatusConflict, gin.H{"error": "当前没有处于暂停状态的任务"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"resumed": true})
+}
+
+// CancelOfflineTask 取消任务（running / paused 均可）POST /api/v1/offline/task/cancel
+// 取消为协作式：任务在当前漫画处理完后于下一检查点退出；取消结果由进度轮询
+// 呈现为 status=cancelled。
+func (h *OfflineHandler) CancelOfflineTask(c *gin.Context) {
+	if !services.CancelOfflineTask() {
+		c.JSON(http.StatusConflict, gin.H{"error": "当前没有可取消的运行中/暂停中任务"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cancelled": true})
+}
+
 // removeDedupReq 删除重复项请求体
 type removeDedupReq struct {
 	ComicID    string   `json:"comicId"`

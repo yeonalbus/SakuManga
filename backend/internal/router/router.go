@@ -314,6 +314,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/maintain/progress", offlineHandler.GetMaintainProgress)
 			admin.GET("/offline/maintain/result", offlineHandler.GetMaintainResult)
 			admin.GET("/offline/maintain/unsynced", offlineHandler.GetMaintainUnsynced)
+			// Round29：离线任务控制（更新检测/维护查重共用单槽位；暂停/继续/取消）
+			admin.POST("/offline/task/pause", offlineHandler.PauseOfflineTask)
+			admin.POST("/offline/task/resume", offlineHandler.ResumeOfflineTask)
+			admin.POST("/offline/task/cancel", offlineHandler.CancelOfflineTask)
 			admin.POST("/offline/maintain/remove", offlineHandler.RemoveDedup)
 			// S5/D4：清除全部「已被删除/移除」标记（失效画廊修复后重新参与查重）
 			admin.POST("/offline/maintain/clear-removed", offlineHandler.ClearRemovedStatus)

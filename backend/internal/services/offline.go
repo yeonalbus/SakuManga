@@ -85,6 +85,10 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 	netDone := 0
 
 	for i := range comics {
+		// Round29：任务暂停/取消检查点（逐本粒度；暂停在当前项开始前生效）
+		if err := OfflineTaskCheckpoint(); err != nil {
+			return nil, err
+		}
 		c := &comics[i]
 		if c.GID == "" {
 			continue
@@ -281,6 +285,10 @@ func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineP
 	result := &AgeCheckResult{Checked: len(comics)}
 	nowMs := time.Now().UnixMilli()
 	for i := range comics {
+		// Round29：任务暂停/取消检查点（逐本粒度；暂停在当前项开始前生效）
+		if err := OfflineTaskCheckpoint(); err != nil {
+			return nil, err
+		}
 		c := &comics[i]
 		if onProgress != nil {
 			onProgress(i+1, len(comics), c.Title, "老化判定")
@@ -806,7 +814,10 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	// 这里按标题在线搜索回填 GID/Token，成功后规则 1（同 GID）与规则 3（父画廊关系）
 	// 在本次运行中即可完成跨路径查重。需绑定 IPB 账号，回填失败/多结果写
 	// parent_checked_at 增量跳过（配合 S5 限流），避免每次维护重复搜索。
-	backfillGIDOnline(db, ehService, comics, forceFull, onProgress)
+	// Round29：支持中途暂停/取消（检查点在逐本搜索前）。
+	if err := backfillGIDOnline(db, ehService, comics, forceFull, onProgress); err != nil {
+		return nil, err
+	}
 
 	// ── 1. 同 GID 分组查重 ──
 	gidGroups := map[string][]models.OfflineComic{}
@@ -858,6 +869,10 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	}
 	hashDone := 0
 	for i := range comics {
+		// Round29：任务暂停/取消检查点（归档 hash 单本可能耗时，暂停在下一本开始前生效）
+		if err := OfflineTaskCheckpoint(); err != nil {
+			return nil, err
+		}
 		c := &comics[i]
 		if c.SourceMode != "archive" || c.LocalPath == "" {
 			continue
@@ -935,6 +950,10 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 			fetchDone := 0
 			for i := range comics {
+				// Round29：任务暂停/取消检查点（在线父子关系发现联网逐本，暂停在下一本开始前生效）
+				if err := OfflineTaskCheckpoint(); err != nil {
+					return nil, err
+				}
 				c := &comics[i]
 				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
@@ -1121,6 +1140,10 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		}
 		sigDone := 0
 		for i := range comics {
+			// Round29：任务暂停/取消检查点（文件夹签名单本可能耗时，暂停在下一本开始前生效）
+			if err := OfflineTaskCheckpoint(); err != nil {
+				return nil, err
+			}
 			c := &comics[i]
 			if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
 				continue
@@ -1275,13 +1298,13 @@ func climbParentChain(fetch parentDetailFetcher, startGID, startToken string, gi
 //   - 回填失败/无结果/多结果置信度不足 → 写 parent_checked_at 增量跳过（下次除非
 //     forceFull 否则不再搜索），配合 S5 限流退避 1.2s；
 //   - 单次维护最多回填 maxGIDBackfill 个，避免大量无 GID 文件夹拖慢任务。
-func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.OfflineComic, forceFull bool, onProgress OfflineProgressFn) {
+func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.OfflineComic, forceFull bool, onProgress OfflineProgressFn) error {
 	if db == nil || ehService == nil {
-		return
+		return nil
 	}
 	account := LoadAdminAccount(db)
 	if account == nil || account.IPBMemberID == "" {
-		return // 未绑定 IPB 账号：跳过在线回填
+		return nil // 未绑定 IPB 账号：跳过在线回填
 	}
 	ehSetting := loadEHSetting(db, LoadAdminUserID(db))
 
@@ -1300,6 +1323,10 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 	}
 
 	for idx, pos := range targets {
+		// Round29：任务暂停/取消检查点（在线回填逐本联网搜索，暂停在下一本开始前生效）
+		if err := OfflineTaskCheckpoint(); err != nil {
+			return err
+		}
 		c := &comics[pos]
 		if onProgress != nil {
 			onProgress(idx+1, len(targets), c.Title, "在线回填 GID（标题搜索）")
@@ -1338,6 +1365,7 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 		ehRateLimiter.Mark(true)
 		ehRateLimiter.Wait()
 	}
+	return nil
 }
 
 // markBackfillSkipped 回填失败/无结果时写 parent_checked_at 增量跳过标记（S6）。

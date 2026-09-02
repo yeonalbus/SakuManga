@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -16,6 +17,13 @@ import (
 //
 // 本文件提供全局任务状态（单槽位：维护/更新任务互斥，避免同时联网触发限流），
 // handler 改为「异步启动 → 前端轮询进度 → 完成后再拉取结果」。
+//
+// Round29：任务支持中途暂停 / 继续 / 取消（协作式）——
+//   - 状态机由 idle|running|success|error 扩展 paused|cancelled；
+//   - 任务 goroutine 在业务循环的检查点（OfflineTaskCheckpoint，逐本漫画粒度）
+//     挂起/退出，当前正在处理的一本完成后才真正暂停（≤2s，超大 hash 文件除外），
+//     不强行中断在途网络请求，保证数据一致；
+//   - 暂停/继续/取消通过 sync.Cond 通知任务 goroutine，等待期间不占用锁、不占 CPU。
 // ─────────────────────────────────────────────────────────────
 
 // OfflineTaskKind 离线维护任务类型
@@ -30,16 +38,22 @@ const (
 type OfflineTaskStatus string
 
 const (
-	OfflineTaskIdle    OfflineTaskStatus = "idle"
-	OfflineTaskRunning OfflineTaskStatus = "running"
-	OfflineTaskSuccess OfflineTaskStatus = "success"
-	OfflineTaskError   OfflineTaskStatus = "error"
+	OfflineTaskIdle      OfflineTaskStatus = "idle"
+	OfflineTaskRunning   OfflineTaskStatus = "running"
+	OfflineTaskPaused    OfflineTaskStatus = "paused"    // Round29：用户暂停（等待继续/取消）
+	OfflineTaskSuccess   OfflineTaskStatus = "success"
+	OfflineTaskError     OfflineTaskStatus = "error"
+	OfflineTaskCancelled OfflineTaskStatus = "cancelled" // Round29：用户取消（任务已终止）
 )
+
+// ErrOfflineTaskCancelled 用户取消任务的哨兵错误：
+// 任务循环检查点收到后向上返回，由 FinishOfflineTask 收尾为 cancelled 状态。
+var ErrOfflineTaskCancelled = errors.New("任务已被用户取消")
 
 // OfflineTaskState 离线维护任务进度快照（返回给前端轮询）
 type OfflineTaskState struct {
 	Type         OfflineTaskKind   `json:"type"`                  // 任务类型 maintain | update
-	Status       OfflineTaskStatus `json:"status"`                // idle | running | success | error
+	Status       OfflineTaskStatus `json:"status"`                // idle | running | paused | success | error | cancelled
 	Phase        string            `json:"phase,omitempty"`       // 当前阶段说明（如「在线父子关系发现」「归档 Hash 计算」）
 	Total        int               `json:"total"`                 // 当前阶段总数
 	Done         int               `json:"done"`                  // 当前阶段已完成数
@@ -57,18 +71,21 @@ type OfflineProgressFn func(done, total int, title, phase string)
 var (
 	offlineTaskMu      sync.Mutex
 	offlineTaskState   = OfflineTaskState{Status: OfflineTaskIdle}
-	offlineMaintainRes *DedupResult       // 最近一次维护查重结果缓存
-	offlineUpdateRes   *UpdateCheckResult // 最近一次更新检测结果缓存
+	offlineTaskCond    = sync.NewCond(&offlineTaskMu) // Round29：暂停/恢复/取消唤醒
+	offlineTaskCancel  bool                           // Round29：取消请求标志（任务级，结束后复位）
+	offlineMaintainRes *DedupResult                   // 最近一次维护查重结果缓存
+	offlineUpdateRes   *UpdateCheckResult             // 最近一次更新检测结果缓存
 )
 
 // StartOfflineTask 尝试启动一个离线维护任务（单槽位互斥）。
-// 已有任务在运行/未结束时返回 false，调用方应返回 409。
+// 已有任务在运行/暂停挂起（paused 的任务 goroutine 仍存活）时返回 false，调用方应返回 409。
 func StartOfflineTask(kind OfflineTaskKind) bool {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
-	if offlineTaskState.Status == OfflineTaskRunning {
+	if offlineTaskState.Status == OfflineTaskRunning || offlineTaskState.Status == OfflineTaskPaused {
 		return false
 	}
+	offlineTaskCancel = false
 	offlineTaskState = OfflineTaskState{
 		Type:      kind,
 		Status:    OfflineTaskRunning,
@@ -83,11 +100,76 @@ func StartOfflineTask(kind OfflineTaskKind) bool {
 	return true
 }
 
+// PauseOfflineTask 请求暂停当前任务（Round29）。
+// 仅 running 可暂停；暂停为协作式：任务 goroutine 在当前漫画处理完后于下一检查点挂起。
+// 返回是否接受请求（无任务/任务已结束返回 false）。
+func PauseOfflineTask() bool {
+	offlineTaskMu.Lock()
+	defer offlineTaskMu.Unlock()
+	if offlineTaskState.Status != OfflineTaskRunning {
+		return false
+	}
+	offlineTaskState.Status = OfflineTaskPaused
+	offlineTaskState.Message = "已请求暂停，当前项处理完后生效"
+	return true
+}
+
+// ResumeOfflineTask 继续被暂停的任务（Round29）。仅 paused 可继续。
+func ResumeOfflineTask() bool {
+	offlineTaskMu.Lock()
+	defer offlineTaskMu.Unlock()
+	if offlineTaskState.Status != OfflineTaskPaused {
+		return false
+	}
+	offlineTaskState.Status = OfflineTaskRunning
+	offlineTaskState.Message = ""
+	offlineTaskCond.Broadcast() // 唤醒挂起中的任务 goroutine
+	return true
+}
+
+// CancelOfflineTask 取消任务（Round29）。running / paused 均可取消：
+// running 状态下任务会在下一检查点（当前项处理完后）退出；
+// paused 状态下立即唤醒挂起 goroutine 退出。
+// 返回是否接受请求；任务真正收尾为 cancelled 由 FinishOfflineTask 完成。
+func CancelOfflineTask() bool {
+	offlineTaskMu.Lock()
+	defer offlineTaskMu.Unlock()
+	switch offlineTaskState.Status {
+	case OfflineTaskRunning, OfflineTaskPaused:
+		offlineTaskCancel = true
+		offlineTaskState.Message = "已请求取消，正在停止…"
+		if offlineTaskState.Status == OfflineTaskPaused {
+			offlineTaskState.Status = OfflineTaskRunning
+			offlineTaskCond.Broadcast() // 唤醒等待继续的 goroutine → 检测取消 → 退出
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// OfflineTaskCheckpoint 任务循环检查点（Round29）：
+//   1. 任务被暂停时挂起当前 goroutine（不占锁/CPU），等待继续或取消；
+//   2. 已请求取消时返回 ErrOfflineTaskCancelled，调用方应终止任务并向
+//      FinishOfflineTask 传递该错误（收尾为 cancelled 状态）。
+// 应放在业务循环每本处理前调用（粒度：逐本漫画）。
+func OfflineTaskCheckpoint() error {
+	offlineTaskMu.Lock()
+	defer offlineTaskMu.Unlock()
+	for offlineTaskState.Status == OfflineTaskPaused && !offlineTaskCancel {
+		offlineTaskCond.Wait()
+	}
+	if offlineTaskCancel {
+		return ErrOfflineTaskCancelled
+	}
+	return nil
+}
+
 // UpdateOfflineTaskProgress 更新当前任务进度（由 WithProgress 变体内部调用）
 func UpdateOfflineTaskProgress(done, total int, title, phase string) {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
-	if offlineTaskState.Status != OfflineTaskRunning {
+	if offlineTaskState.Status != OfflineTaskRunning && offlineTaskState.Status != OfflineTaskPaused {
 		return
 	}
 	if total > 0 {
@@ -111,7 +193,7 @@ func SetOfflineTaskMessage(msg string) {
 	offlineTaskState.Message = msg
 }
 
-// FinishOfflineTask 结束任务（成功传 nil；失败传 error）。
+// FinishOfflineTask 结束任务（成功传 nil；失败传 error；取消传 ErrOfflineTaskCancelled）。
 // 调用方须在设置结果缓存后再调用本函数。
 func FinishOfflineTask(err error) {
 	offlineTaskMu.Lock()
@@ -119,11 +201,20 @@ func FinishOfflineTask(err error) {
 	offlineTaskState.FinishedAt = time.Now().UnixMilli()
 	offlineTaskState.CurrentTitle = ""
 	if err != nil {
-		offlineTaskState.Status = OfflineTaskError
-		offlineTaskState.Error = err.Error()
+		if errors.Is(err, ErrOfflineTaskCancelled) {
+			// Round29：用户取消 → cancelled 状态（不污染 error 字段，前端展示独立文案）
+			offlineTaskState.Status = OfflineTaskCancelled
+			offlineTaskState.Message = "任务已取消"
+			offlineTaskState.Error = ""
+		} else {
+			offlineTaskState.Status = OfflineTaskError
+			offlineTaskState.Error = err.Error()
+		}
 	} else {
 		offlineTaskState.Status = OfflineTaskSuccess
+		offlineTaskState.Message = ""
 	}
+	offlineTaskCancel = false // 取消标志随任务生命周期复位
 }
 
 // StoreMaintainDedupResult 缓存维护查重结果（记录生成时间并清除过期标记，

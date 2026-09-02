@@ -7,7 +7,7 @@ import { http } from '@/utils/request'
 import { DEFAULT_DOWNLOAD_SCHEME_OPTIONS } from '@/stores/downloadSettings'
 
 const router = useRouter()
-const { toast } = useUI()
+const { modal, toast } = useUI()
 
 // 后端 GET /offline/updates 返回的离线漫画 DTO（含更新标记字段）
 interface OfflineComicDTO {
@@ -51,7 +51,7 @@ const modeFor = ref<Record<string, string>>({})
 // ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
 interface OfflineTaskState {
   type: 'maintain' | 'update'
-  status: 'idle' | 'running' | 'success' | 'error'
+  status: 'idle' | 'running' | 'paused' | 'success' | 'error' | 'cancelled'
   phase?: string
   total: number
   done: number
@@ -70,12 +70,47 @@ const progressPercent = computed(() => {
 })
 const phaseText = computed(() => taskState.value?.phase || '')
 const currentTitle = computed(() => taskState.value?.currentTitle || '')
+// Round29：暂停/取消状态辅助（任务控制按钮组驱动）
+const isTaskPaused = computed(() => taskState.value?.status === 'paused')
+const isTaskRunning = computed(() => taskState.value?.status === 'running')
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
+  }
+}
+
+// Round29：任务控制（暂停/继续/取消，作用于单槽位任务）
+const controlTask = async (action: 'pause' | 'resume') => {
+  try {
+    await http(`/offline/task/${action}`, { method: 'POST' })
+    // 后端同步更新任务状态，本地立即反映（轮询也会在 1s 内同步）
+    if (taskState.value) {
+      taskState.value = { ...taskState.value, status: action === 'pause' ? 'paused' : 'running' }
+    }
+    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
+    else toast.info('▶ 已继续')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
+  }
+}
+
+const cancelTask = async () => {
+  const confirmed = await modal.confirm(
+    '取消后本次检测将立即终止，已完成的结果不会保留（下次需重新开始检测）。\n\n确定取消吗？',
+    '✖ 取消本次检测',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/task/cancel', { method: 'POST' })
+    toast.info('已请求取消，正在停止…')
+    // 交由轮询接收 cancelled 终态收尾
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '取消失败，任务可能已完成')
   }
 }
 
@@ -86,11 +121,16 @@ const pollProgress = () => {
     try {
       const s = await http<OfflineTaskState>('/offline/updates/check/progress')
       taskState.value = s
-      if (s.status === 'success' || s.status === 'error') {
+      if (s.status === 'success' || s.status === 'error' || s.status === 'cancelled') {
         stopPolling()
         isChecking.value = false
         if (s.status === 'error') {
           toast.error(s.error || '更新检测失败（可能未绑定 E 站账户或网络异常）')
+          return
+        }
+        if (s.status === 'cancelled') {
+          // Round29：用户取消——不读取结果，提示后收尾
+          toast.info('检测已取消')
           return
         }
         // 任务完成：读取结果并刷新更新列表
@@ -259,11 +299,18 @@ onUnmounted(stopPolling)
       该路径下的漫画将不参与本检测（下载导入的漫画始终参与）。
     </div>
 
-    <div v-if="isChecking" class="checking-banner">
-      <span class="spinner"></span>
+    <!-- Round29：任务控制——检测中可暂停；暂停后可继续/取消 -->
+    <div
+      v-if="isChecking"
+      class="checking-banner"
+      :class="{ 'is-paused': isTaskPaused }"
+    >
+      <span v-if="!isTaskPaused" class="spinner"></span>
+      <span v-else class="paused-icon">⏸</span>
       <div class="checking-info">
         <p class="checking-title">
-          {{ phaseText || '正在联网核对离线画廊更新' }}
+          <template v-if="isTaskPaused">检测已暂停</template>
+          <template v-else>{{ phaseText || '正在联网核对离线画廊更新' }}</template>
           <span v-if="taskState && taskState.total > 0" class="checking-percent"
             >{{ progressPercent }}%</span
           >
@@ -272,12 +319,29 @@ onUnmounted(stopPolling)
           <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
         </div>
         <p class="checking-sub">
-          <template v-if="taskState && taskState.total > 0">
+          <template v-if="isTaskPaused">
+            已暂停于 {{ taskState?.done }} / {{ taskState?.total }} · {{ phaseText }}，可继续或取消
+          </template>
+          <template v-else-if="taskState && taskState.total > 0">
             进度 {{ taskState.done }} / {{ taskState.total }} · {{ phaseText }}
           </template>
           <template v-else>正在启动检测任务...</template>
         </p>
         <p v-if="currentTitle" class="checking-current">📖 {{ currentTitle }}</p>
+      </div>
+      <div class="banner-actions">
+        <template v-if="isTaskPaused">
+          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
+          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+        </template>
+        <button
+          v-else-if="isTaskRunning"
+          class="control-btn pause"
+          title="暂停后当前项处理完即停止，可随时继续或取消"
+          @click="controlTask('pause')"
+        >
+          ⏸ 暂停
+        </button>
       </div>
     </div>
 
@@ -467,6 +531,45 @@ onUnmounted(stopPolling)
   border: 1px solid #007acc;
   border-radius: 8px;
   padding: 14px 16px;
+}
+
+/* Round29：暂停态样式 + 任务控制按钮 */
+.checking-banner.is-paused {
+  border-color: #f59e0b;
+  background-color: #2a2414;
+}
+.paused-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+.banner-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.control-btn {
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+  transition: opacity 0.2s;
+}
+.control-btn:hover {
+  opacity: 0.85;
+}
+.control-btn.pause {
+  background: #6b7280;
+}
+.control-btn.resume {
+  background: #00a896;
+}
+.control-btn.cancel {
+  background: #ff7588;
 }
 .scope-hint {
   margin: 4px 0 12px;

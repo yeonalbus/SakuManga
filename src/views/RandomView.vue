@@ -12,18 +12,61 @@ import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import { fetchRandomComicsApi } from '@/api/comic'
+// Round32 阶段二：卡池模式（纯随机 / 本地偏好推荐）与推荐参数
+import {
+  recommendSettings,
+  resetRecommendSettings,
+  RECO_DEFAULTS,
+} from '@/stores/recommendSettings'
 // Round3-任务6：负向排除（抽卡结果前端兜底过滤）
 import { isNegativeItem, matchExcludes, parseKeywordQueue, formatFSearchTag } from '@/utils/tagFilter'
 import type {
   ComicItem,
   OnlineComic,
-  OfflineComic,
   RandomComicItem,
   RandomComicParams,
+  RandomPoolMode,
   SearchConfig,
 } from '@/types/comic'
 
 const { toast } = useUI()
+
+// ======================================================
+// 0. 卡池模式（Round32 阶段二）
+//
+// 推荐本质是「带偏好的随机」——复用抽卡页全部交互（数量/筛选/结果/快捷加书架），
+// 只把本地库的采样方式从均匀随机换成偏好加权；在线部分始终为纯随机（决策 D1）。
+// ======================================================
+const poolMode = ref<RandomPoolMode>(
+  recommendSettings.rememberMode ? recommendSettings.lastMode : 'random',
+)
+const showRecoPanel = ref(false)
+
+watch(poolMode, (mode) => {
+  if (recommendSettings.rememberMode) recommendSettings.lastMode = mode
+  if (mode !== 'recommend') showRecoPanel.value = false
+})
+
+/** 推荐参数是否偏离默认（用于面板角标提示） */
+const recoDirtyCount = computed(() => {
+  let n = 0
+  if (Math.abs(recommendSettings.theta - RECO_DEFAULTS.theta) > 1e-6) n++
+  if (Math.abs(recommendSettings.explore - RECO_DEFAULTS.explore) > 1e-6) n++
+  if (Math.abs(recommendSettings.temperature - RECO_DEFAULTS.temperature) > 1e-6) n++
+  if (recommendSettings.excludeRead) n++
+  if (recommendSettings.excludeShelf) n++
+  return n
+})
+
+/** 偏好侧重文案：0 偏库藏、1 偏阅读 */
+const thetaLabel = computed(() => {
+  const t = recommendSettings.theta
+  if (t <= 0.05) return '纯库藏（搜藏广度）'
+  if (t >= 0.95) return '纯阅读（真实消耗）'
+  if (t < 0.4) return '偏库藏'
+  if (t > 0.7) return '偏阅读'
+  return '均衡'
+})
 
 // ======================================================
 // 1. 数量控制逻辑
@@ -187,10 +230,14 @@ const showOnlineOptions = computed(() => scopeType.value !== 'offline')
 // ======================================================
 const isSpinning = ref(false)
 const hasDrawn = ref(false)
-const drawnComics = ref<ComicItem[]>([])
+/** 抽卡结果项（Round32：附带推荐命中理由） */
+type DrawnComic = ComicItem & { matchedTags?: string[] }
+const drawnComics = ref<DrawnComic[]>([])
+/** 本次结果是否来自推荐模式（用于展示在线纯随机标注） */
+const drawnByRecommend = ref(false)
 
 // 后端统一 DTO → 前端卡片渲染项
-const toComicItem = (item: RandomComicItem): ComicItem => {
+const toComicItem = (item: RandomComicItem): DrawnComic => {
   if (item.source === 'online') {
     return {
       id: item.id,
@@ -224,7 +271,9 @@ const toComicItem = (item: RandomComicItem): ComicItem => {
     localPath: item.localPath ?? '',
     fileSize: item.fileSize,
     hasError: item.hasError,
-  } as OfflineComic
+    // Round32：推荐命中理由（仅离线推荐结果带）
+    matchedTags: item.matchedTags,
+  } as DrawnComic
 }
 
 /**
@@ -237,6 +286,16 @@ const buildParams = (): RandomComicParams => {
   const params: RandomComicParams = {
     count: targetCount.value,
     source: scopeType.value,
+  }
+
+  // Round32：推荐模式（仅作用于本地库；在线部分后端仍为纯随机）
+  if (poolMode.value === 'recommend') {
+    params.mode = 'recommend'
+    params.recoTheta = recommendSettings.theta
+    params.recoExplore = recommendSettings.explore
+    params.recoTemp = recommendSettings.temperature
+    params.recoExcludeRead = recommendSettings.excludeRead
+    params.recoExcludeShelf = recommendSettings.excludeShelf
   }
 
   const kw = (drawConfig.keyword || '').trim()
@@ -294,6 +353,7 @@ const handleStartDraw = async () => {
     items = filtered
 
     drawnComics.value = items
+    drawnByRecommend.value = poolMode.value === 'recommend'
     isSpinning.value = false
     hasDrawn.value = true
 
@@ -301,6 +361,10 @@ const handleStartDraw = async () => {
       toast.warning(res.warning)
     } else if (items.length === 0) {
       toast.error('当前范围内没有符合条件的作品！')
+    } else if (poolMode.value === 'recommend' && !items.some((c) => c.matchedTags?.length)) {
+      // 推荐模式下无任何命中理由：通常是权重不足后端降级，明确告知用户
+      toast.warning('本地偏好数据不足，本次已按纯随机抽取')
+      drawnByRecommend.value = false
     } else if (dropped > 0 && items.length < targetCount.value) {
       toast.warning(`负向排除后仅剩 ${items.length} 本（已排除 ${dropped} 本）`)
     } else if (items.length < targetCount.value) {
@@ -345,8 +409,107 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 2. 控制面板：数量 → 抽卡专用过滤器 → 范围 → 抽卡按钮 -->
+    <!-- 2. 控制面板：卡池模式 → 数量 → 抽卡专用过滤器 → 范围 → 抽卡按钮 -->
     <div class="control-panel">
+      <!-- ⓪ 卡池模式（Round32：纯随机 / 本地偏好推荐） -->
+      <div class="control-group mode-group">
+        <label class="group-label">卡池：</label>
+        <div class="mode-selector">
+          <button
+            class="mode-btn"
+            :class="{ active: poolMode === 'random' }"
+            title="全库均匀随机（与旧版一致）"
+            @click="poolMode = 'random'"
+          >
+            🎲 纯随机
+          </button>
+          <button
+            class="mode-btn"
+            :class="{ active: poolMode === 'recommend' }"
+            title="按本地库 XP 词云权重加权抽取（仅作用于本地库）"
+            @click="poolMode = 'recommend'"
+          >
+            ✨ 偏好推荐
+          </button>
+        </div>
+        <button
+          v-if="poolMode === 'recommend'"
+          class="reco-toggle-btn"
+          :class="{ open: showRecoPanel }"
+          @click="showRecoPanel = !showRecoPanel"
+        >
+          ⚙️ 推荐参数
+          <span v-if="recoDirtyCount > 0" class="reco-badge">{{ recoDirtyCount }}</span>
+          <span class="ft-arrow">{{ showRecoPanel ? '▲' : '▼' }}</span>
+        </button>
+      </div>
+
+      <!-- ⓪.1 推荐参数面板（决策 D2：参数暴露给用户） -->
+      <div v-if="poolMode === 'recommend' && showRecoPanel" class="reco-panel">
+        <div class="reco-slider-row">
+          <label class="reco-label">偏好侧重<span class="reco-value">{{ thetaLabel }}</span></label>
+          <input
+            v-model.number="recommendSettings.theta"
+            class="reco-slider"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+          />
+          <span class="reco-hint">左＝库藏（囤积倾向）　右＝阅读（真实消耗）</span>
+        </div>
+
+        <div class="reco-slider-row">
+          <label class="reco-label">
+            探索率<span class="reco-value">{{ Math.round(recommendSettings.explore * 100) }}%</span>
+          </label>
+          <input
+            v-model.number="recommendSettings.explore"
+            class="reco-slider"
+            type="range"
+            min="0"
+            max="0.5"
+            step="0.05"
+          />
+          <span class="reco-hint">越高越容易抽到偏好之外的本子（防止口味固化）</span>
+        </div>
+
+        <div class="reco-slider-row">
+          <label class="reco-label">
+            采样温度<span class="reco-value">{{ recommendSettings.temperature.toFixed(2) }}</span>
+          </label>
+          <input
+            v-model.number="recommendSettings.temperature"
+            class="reco-slider"
+            type="range"
+            min="0.2"
+            max="2"
+            step="0.1"
+          />
+          <span class="reco-hint">越低越集中在高分本子，越高越接近随机</span>
+        </div>
+
+        <div class="reco-checks">
+          <label class="reco-check">
+            <input v-model="recommendSettings.excludeRead" type="checkbox" />
+            排除读过的
+          </label>
+          <label class="reco-check">
+            <input v-model="recommendSettings.excludeShelf" type="checkbox" />
+            排除书架已有的
+          </label>
+          <label class="reco-check">
+            <input v-model="recommendSettings.rememberMode" type="checkbox" />
+            记住卡池模式
+          </label>
+          <button class="reco-reset-btn" @click="resetRecommendSettings">恢复默认</button>
+        </div>
+
+        <p class="reco-note">
+          ✈️ 推荐只作用于本地库；在线部分始终为纯随机（不在本地库的画廊无法统计偏好）。
+        </p>
+      </div>
+
       <!-- ① 数量指定 -->
       <div class="control-group">
         <label class="group-label">数量：</label>
@@ -585,6 +748,10 @@ onBeforeUnmount(() => {
           <option value="online">🌐 仅在线图库</option>
           <option value="offline">📚 仅本地画库</option>
         </select>
+        <!-- Round32：推荐模式下范围含在线时，明确标注在线部分为纯随机（决策 D1） -->
+        <span v-if="poolMode === 'recommend' && scopeType !== 'offline'" class="scope-note">
+          ✈️ 在线部分为纯随机
+        </span>
       </div>
 
       <!-- ④ 开始抽卡大按钮 -->
@@ -620,6 +787,9 @@ onBeforeUnmount(() => {
         />
 
         <!-- 真实抽出的卡片网格 -->
+        <div v-if="drawnByRecommend" class="reco-result-note">
+          ✨ 本地结果按 XP 偏好加权抽取（命中理由见每张卡片下方）
+        </div>
         <div class="results-grid">
           <div v-for="(comic, index) in drawnComics" :key="comic.id" class="drawn-item-card">
             <div class="card-badge">NO.{{ index + 1 }}</div>
@@ -632,6 +802,11 @@ onBeforeUnmount(() => {
               @longpress="quickAdd.handleLongPress"
               @select="quickAdd.handleSelect"
             />
+            <!-- Round32：推荐命中理由（后端返回贡献最高的前 3 个 tag） -->
+            <div v-if="comic.matchedTags && comic.matchedTags.length" class="match-tags">
+              <span class="match-label">命中</span>
+              <span v-for="tag in comic.matchedTags" :key="tag" class="match-tag">{{ tag }}</span>
+            </div>
           </div>
         </div>
       </template>
@@ -701,6 +876,182 @@ onBeforeUnmount(() => {
 .group-label {
   color: var(--app-text-2);
   flex-shrink: 0;
+}
+
+/* ─── Round32 阶段二：卡池模式切换与推荐参数 ─── */
+.mode-selector {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-1, transparent);
+}
+
+.mode-btn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mode-btn:hover {
+  color: var(--app-text-strong);
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, #7c4dff, #f06292);
+  color: #fff;
+  font-weight: 600;
+}
+
+.reco-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-3);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.reco-toggle-btn:hover,
+.reco-toggle-btn.open {
+  color: var(--app-text-strong);
+  border-color: var(--app-accent, #4d9cff);
+}
+
+.reco-badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--app-accent, #4d9cff);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+}
+
+.reco-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--app-border-3);
+  background: var(--app-surface-1, rgba(255, 255, 255, 0.02));
+}
+
+.reco-slider-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.reco-label {
+  font-size: 0.82rem;
+  color: var(--app-text-2);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.reco-value {
+  font-size: 0.78rem;
+  color: var(--app-text-strong);
+  font-weight: 600;
+}
+
+.reco-slider {
+  width: 100%;
+  accent-color: #7c4dff;
+}
+
+.reco-hint {
+  grid-column: 2;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+}
+
+.reco-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: var(--app-text-2);
+}
+
+.reco-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.reco-reset-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-3);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.reco-reset-btn:hover {
+  color: var(--app-text-strong);
+}
+
+.reco-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+  line-height: 1.5;
+}
+
+.scope-note {
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+}
+
+.reco-result-note {
+  margin-bottom: 10px;
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+}
+
+.match-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+.match-label {
+  font-size: 0.7rem;
+  color: var(--app-text-3);
+}
+
+.match-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(124, 77, 255, 0.18);
+  border: 1px solid rgba(124, 77, 255, 0.35);
+  color: #b39ddb;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .count-selector {

@@ -223,6 +223,10 @@ export interface RandomComicItem {
   localPath?: string
   fileSize?: number
   hasError?: boolean
+
+  // ─── Round32 阶段二：偏好推荐（仅推荐模式的离线结果填充）───
+  matchedTags?: string[] // 命中理由（贡献最高的前 3 个 tag）
+  score?: number // 推荐得分（说明用）
 }
 
 /** 随机抽卡入参 */
@@ -248,13 +252,26 @@ export interface RandomComicParams {
   // ─── Round3-任务6：负向排除（离线过滤 + 在线本地丢弃）───
   excludeTags?: string[]
   excludeKeywords?: string[]
+
+  // ─── Round32 阶段二：卡池模式与推荐参数 ───
+  mode?: RandomPoolMode // random=纯随机（默认，与旧版一致）｜recommend=本地偏好推荐
+  recoTheta?: number // 偏好侧重：0=纯库藏，1=纯阅读（默认 0.6）
+  recoExplore?: number // 探索率 ε：防 XP 固化（默认 0.15）
+  recoTemp?: number // 采样温度 T：越大越平缓（默认 0.5）
+  recoExcludeRead?: boolean // 排除读过的（read_count > 0）
+  recoExcludeShelf?: boolean // 排除已在书架的本子
 }
+
+/** 卡池模式：纯随机 / 本地偏好推荐（推荐只作用于本地库，在线部分保持纯随机） */
+export type RandomPoolMode = 'random' | 'recommend'
 
 /** 随机抽卡响应 */
 export interface RandomComicResponse {
   comics: RandomComicItem[]
   count: number
   warning?: string // 在线失败降级时的提示
+  mode?: RandomPoolMode // 后端回声的卡池模式
+  onlineRandom?: boolean // true = 在线部分为纯随机（推荐模式下的既有语义标注）
 }
 
 // ==========================================

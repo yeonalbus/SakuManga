@@ -92,6 +92,16 @@ export const fetchRandomComicsApi = async (
   if (params.disableUploaderFilter) query.append('disableUploaderFilter', '1')
   if (params.disableTagFilter) query.append('disableTagFilter', '1')
 
+  // 2.1 Round32：卡池模式与推荐参数（仅 recommend 时下发；缺省即后端默认，保持旧行为）
+  if (params.mode === 'recommend') {
+    query.append('mode', 'recommend')
+    if (params.recoTheta !== undefined) query.append('recoTheta', String(params.recoTheta))
+    if (params.recoExplore !== undefined) query.append('recoExplore', String(params.recoExplore))
+    if (params.recoTemp !== undefined) query.append('recoTemp', String(params.recoTemp))
+    if (params.recoExcludeRead) query.append('recoExcludeRead', 'true')
+    if (params.recoExcludeShelf) query.append('recoExcludeShelf', 'true')
+  }
+
   // 3. 发起网络请求 (自动拼接 API_BASE + /comics/random)
   return await http<RandomComicResponse>(`/comics/random?${query.toString()}`)
 }

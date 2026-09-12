@@ -14,10 +14,17 @@ import {
   getMainContent,
 } from '@/utils/scrollMemory'
 // Round32 阶段一：XP 词云面板
-import XpWordCloud from '@/components/XpWordCloud.vue'
+import XpWordCloud, { type XpCloudStats } from '@/components/XpWordCloud.vue'
 import ArtistTopList from '@/components/ArtistTopList.vue'
 import { fetchXpCloudApi, rebuildXpCloudApi } from '@/api/xpCloud'
 import { formatFSearchTag } from '@/utils/tagFilter'
+// Round32 视觉改版：词云展示参数（持久化，用户可自行调节）
+import {
+  xpCloudSettings,
+  resetXpCloudSettings,
+  xpCloudDirtyCount,
+  XP_CLOUD_DEFAULTS,
+} from '@/stores/xpCloudSettings'
 import { offlineSearchConfig } from '@/stores/searchStore'
 import { useModeStore } from '@/stores/modeStore'
 import { useUserStore } from '@/stores/userStore'
@@ -191,6 +198,25 @@ const lastRebuildText = computed(() => {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 })
+
+// ─────────────────────────────────────────────────────────────
+// 词云展示参数（Round32 视觉改版）：词数/字号/间距/截断/译名过滤
+// 参数持久化在 stores/xpCloudSettings.ts，改动即时重排，无需重新请求
+// ─────────────────────────────────────────────────────────────
+const showCloudParams = ref(false)
+const cloudStats = ref<XpCloudStats | null>(null)
+/** 词云画布高度：桌面 520 / 移动 360 */
+const cloudHeight = computed(() => (isMobileDevice ? 360 : 520))
+const cloudParamDirty = computed(() => xpCloudDirtyCount())
+
+const handleCloudStats = (stats: XpCloudStats) => {
+  cloudStats.value = stats
+}
+
+const resetCloudParams = () => {
+  resetXpCloudSettings()
+  toast.success('词云参数已恢复默认')
+}
 </script>
 
 <template>
@@ -322,6 +348,129 @@ const lastRebuildText = computed(() => {
             其他
           </button>
         </div>
+        <!-- Round32 视觉改版：词云展示参数（词数/字号/间距/截断/译名过滤） -->
+        <button
+          class="cloud-param-btn"
+          :class="{ open: showCloudParams }"
+          @click="showCloudParams = !showCloudParams"
+        >
+          ⚙️ 词云参数
+          <span v-if="cloudParamDirty > 0" class="reco-badge">{{ cloudParamDirty }}</span>
+          <span class="ft-arrow">{{ showCloudParams ? '▲' : '▼' }}</span>
+        </button>
+      </div>
+
+      <!-- 词云参数面板：改动即时重排（无需重新请求数据） -->
+      <div v-if="showCloudParams" class="cloud-params">
+        <div class="param-row">
+          <label class="param-label">
+            词数<b>{{ xpCloudSettings.wordCount }}</b>
+          </label>
+          <input
+            v-model.number="xpCloudSettings.wordCount"
+            class="param-slider"
+            type="range"
+            min="30"
+            max="200"
+            step="10"
+          />
+          <span class="param-hint">放不下时自动少放（以留白换观感）</span>
+        </div>
+
+        <div class="param-row">
+          <label class="param-label">
+            字号<b>{{ xpCloudSettings.fontMin }}~{{ xpCloudSettings.fontMax }}</b>
+          </label>
+          <div class="param-slider-pair">
+            <input
+              v-model.number="xpCloudSettings.fontMin"
+              class="param-slider"
+              type="range"
+              min="10"
+              max="20"
+              step="1"
+            />
+            <input
+              v-model.number="xpCloudSettings.fontMax"
+              class="param-slider"
+              type="range"
+              min="28"
+              max="64"
+              step="2"
+            />
+          </div>
+          <span class="param-hint">
+            大词与尾词的字号差距（默认 {{ XP_CLOUD_DEFAULTS.fontMin }}~{{ XP_CLOUD_DEFAULTS.fontMax }}）
+          </span>
+        </div>
+
+        <div class="param-row">
+          <label class="param-label">
+            行距系数<b>{{ xpCloudSettings.lineRatio.toFixed(2) }}</b>
+          </label>
+          <input
+            v-model.number="xpCloudSettings.lineRatio"
+            class="param-slider"
+            type="range"
+            min="1.1"
+            max="1.9"
+            step="0.05"
+          />
+          <span class="param-hint">越大词间距越松（1.2 即旧版密排观感）</span>
+        </div>
+
+        <div class="param-row">
+          <label class="param-label">
+            字间距<b>{{ xpCloudSettings.padX.toFixed(2) }}</b>
+          </label>
+          <input
+            v-model.number="xpCloudSettings.padX"
+            class="param-slider"
+            type="range"
+            min="0"
+            max="0.8"
+            step="0.05"
+          />
+          <span class="param-hint">词与词之间的横向缝隙</span>
+        </div>
+
+        <div class="param-row">
+          <label class="param-label">
+            截断字数<b>{{ xpCloudSettings.truncChars }}</b>
+          </label>
+          <input
+            v-model.number="xpCloudSettings.truncChars"
+            class="param-slider"
+            type="range"
+            min="8"
+            max="24"
+            step="1"
+          />
+          <span class="param-hint">超过则截断加省略号（英文按词边界断开）</span>
+        </div>
+
+        <div class="param-row">
+          <label class="param-label">
+            超长过滤<b>{{ xpCloudSettings.maxChars }}</b>
+          </label>
+          <input
+            v-model.number="xpCloudSettings.maxChars"
+            class="param-slider"
+            type="range"
+            min="12"
+            max="40"
+            step="1"
+          />
+          <span class="param-hint">超过该字数的词条不参与词云（只影响展示，不影响统计与推荐）</span>
+        </div>
+
+        <div class="param-checks">
+          <label class="param-check">
+            <input v-model="xpCloudSettings.onlyTranslated" type="checkbox" />
+            仅显示中文译名（过滤拉丁转写长名）
+          </label>
+          <button class="param-reset" @click="resetCloudParams">恢复默认</button>
+        </div>
       </div>
 
       <div v-if="coverageHint" class="cloud-hint">💡 {{ coverageHint }}</div>
@@ -332,7 +481,25 @@ const lastRebuildText = computed(() => {
         <button class="retry-btn" @click="loadCloud(true)">重试</button>
       </div>
       <div v-else-if="cloudData" class="cloud-body">
-        <XpWordCloud :tags="cloudData.tags" :height="isMobileDevice ? 300 : 400" @select="handleTagSelect" />
+        <XpWordCloud
+          :tags="cloudData.tags"
+          :height="cloudHeight"
+          @select="handleTagSelect"
+          @stats="handleCloudStats"
+        />
+
+        <!-- 布局统计：让用户直观理解参数影响（放入 X 条 / 排除 Y 条） -->
+        <div v-if="cloudStats" class="cloud-stats">
+          <span>数据源 <b>{{ cloudStats.source }}</b> 条</span>
+          <span>· 实际放入 <b>{{ cloudStats.placed }}</b> 条</span>
+          <span v-if="cloudStats.overflow > 0">· 放不下丢弃 <b>{{ cloudStats.overflow }}</b> 条</span>
+          <span v-if="cloudStats.droppedLong > 0">
+            · 超长排除 <b>{{ cloudStats.droppedLong }}</b> 条
+          </span>
+          <span v-if="cloudStats.droppedNoTrans > 0">
+            · 无译名排除 <b>{{ cloudStats.droppedNoTrans }}</b> 条
+          </span>
+        </div>
 
         <ArtistTopList :artists="cloudData.artists" @select="handleArtistSelect" />
 
@@ -391,6 +558,133 @@ const lastRebuildText = computed(() => {
   border-color: transparent;
   color: #fff;
   font-weight: 600;
+}
+
+/* ─── 词云参数面板（Round32 视觉改版） ─── */
+.cloud-param-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-2);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cloud-param-btn:hover,
+.cloud-param-btn.open {
+  color: var(--app-text-strong);
+  border-color: var(--app-accent, #4d9cff);
+}
+
+.cloud-params {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--app-border-2);
+  background: var(--app-surface-1, rgba(255, 255, 255, 0.02));
+}
+
+.param-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.param-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--app-text-2);
+  white-space: nowrap;
+}
+
+.param-label b {
+  color: var(--app-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.param-slider {
+  width: 100%;
+  accent-color: #7c4dff;
+}
+
+.param-slider-pair {
+  display: flex;
+  gap: 10px;
+}
+
+.param-hint {
+  grid-column: 2;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+}
+
+.param-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: var(--app-text-2);
+}
+
+.param-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.param-reset {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-2);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.param-reset:hover {
+  color: var(--app-text-strong);
+}
+
+.reco-badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--app-accent, #4d9cff);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+}
+
+.ft-arrow {
+  font-size: 0.7rem;
+}
+
+/* 布局统计行 */
+.cloud-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.73rem;
+  color: var(--app-text-3);
+}
+
+.cloud-stats b {
+  color: var(--app-text-2);
 }
 
 /* ─── 词云面板 ─── */

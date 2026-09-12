@@ -2,6 +2,7 @@ package services
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Round30 阶段一：XP 词云统计服务单测
+// Round32 阶段一：XP 词云统计服务单测
 //
 // 覆盖：tag 归一/分组口径、有效 tag 合并、信号融合、差分幂等、
 // 增量 ⇄ 全量重建一致性（关键回归防线）、权重表 IDF。
@@ -489,6 +490,60 @@ func TestXpQueryGroupsAndMeta(t *testing.T) {
 	}
 	if len(reading.Tags) != 1 || reading.Tags[0].ReadWeight <= 0 {
 		t.Fatalf("阅读视图不符：%+v", reading.Tags)
+	}
+}
+
+func TestCleanTagDisplayName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// EH 翻译词典真实数据：图标 markdown + 中文名
+		{
+			`![长筒袜图标](https://raw.githubusercontent.com/wiki/EhTagTranslation/Database/database-icon/stockings.webp)长筒袜`,
+			"长筒袜",
+		},
+		{`![](https://x/y.png)Fate/Grand Order`, "Fate/Grand Order"},
+		{`![大船](https://x/y.png)`, "大船"}, // 纯图标 → 退回 alt
+		{`![alt]`, "alt"},               // 残片（无 url）→ 退回 alt
+		{`巨乳`, "巨乳"},                   // 普通文本原样
+		{``, ""},
+	}
+	for _, c := range cases {
+		if got := CleanTagDisplayName(c.in); got != c.want {
+			t.Fatalf("CleanTagDisplayName(%q) = %q，期望 %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestXpQueryCleansIconMarkdown(t *testing.T) {
+	db := newXpTestDB(t)
+	svc := NewXpCloudService(db)
+
+	user := models.User{Username: "u1"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 词条名必须不含 markdown 图标语法（否则前端词云会画出整段 URL）
+	if err := db.Create(&models.OfflineComic{
+		ID: "c1", LocalPath: "p1", OnlineTags: `["female:stockings","artist:aaa"]`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RebuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Query(user.ID, "core", "library", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tags) == 0 {
+		t.Fatal("无词条")
+	}
+	for _, tag := range result.Tags {
+		if strings.Contains(tag.Name, "![") || strings.Contains(tag.Name, "http") {
+			t.Fatalf("词条展示名未清洗：%q", tag.Name)
+		}
+		if strings.TrimSpace(tag.Name) == "" {
+			t.Fatalf("词条展示名为空：%+v", tag)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,14 +18,14 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Round30 阶段一：XP 词云统计服务
+// Round32 阶段一：XP 词云统计服务
 //
 // 职责：
 //   1. 维护 xp_tag_stats / xp_comic_stats 两张统计表（增量差分 + 全量重建）
 //   2. 对外提供词云查询（分组 / 库藏·阅读双视图 / 画师 Top）
 //   3. 向阶段二推荐输出统一权重表（w'(t) = 融合权重 × 泛化抑制）
 //
-// 口径（与 plans/round30-xp-cloud-recommend-plan.md 一致）：
+// 口径（与 plans/round32-xp-cloud-recommend-plan.md 一致）：
 //   有效 tag = MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)（三态全空回退 Tags），
 //              剔除 language / reclass，namespace 归一分组
 //   库藏侧   lib(c) = 1
@@ -793,8 +794,10 @@ func (s *XpCloudService) Query(userID uint, group, view string, limit int) (*XpC
 	for i := range rows {
 		row := &rows[i]
 		name := row.TagKey
-		if i < len(translated) && translated[i] != nil && strings.TrimSpace(translated[i].Name) != "" {
-			name = translated[i].Name
+		if i < len(translated) && translated[i] != nil {
+			if cleaned := CleanTagDisplayName(translated[i].Name); cleaned != "" {
+				name = cleaned
+			}
 		}
 		libNorm := xpNormalize(row.LibWeight, libMax)
 		readNorm := xpNormalize(row.ReadWeight, readMax)
@@ -839,8 +842,10 @@ func (s *XpCloudService) Query(userID uint, group, view string, limit int) (*XpC
 	for i := range artistRows {
 		row := &artistRows[i]
 		name := row.TagKey
-		if i < len(artistTranslated) && artistTranslated[i] != nil && strings.TrimSpace(artistTranslated[i].Name) != "" {
-			name = artistTranslated[i].Name
+		if i < len(artistTranslated) && artistTranslated[i] != nil {
+			if cleaned := CleanTagDisplayName(artistTranslated[i].Name); cleaned != "" {
+				name = cleaned
+			}
 		}
 		artists = append(artists, XpCloudArtist{
 			Namespace:  row.Namespace,
@@ -884,6 +889,39 @@ func (s *XpCloudService) meta(userID uint) (XpCloudMeta, error) {
 	out.TaggedComics = int(tagged)
 	out.ReadSignalComics = int(readSignal)
 	return out, nil
+}
+
+// ─── 标签展示名清洗 ───
+
+// EH Tag Translation 词典的 name 字段含 markdown 图标语法
+// （如 `![长筒袜图标](https://.../stockings.webp)长筒袜`），直接展示会出现整段 URL。
+var (
+	tagIconFullRe  = regexp.MustCompile(`!\[.*?\]\(.*?\)`)
+	tagIconLooseRe = regexp.MustCompile(`!\[[^\]]*\]`)
+	// alt 提取：兼容「完整图标 ![alt](url)」与「脏数据残片 ![alt]」（URL 部分可选）
+	tagIconAltRe = regexp.MustCompile(`!\[(.*?)\](?:\([^)]*\))?`)
+)
+
+// CleanTagDisplayName 清洗标签展示名：① 完整图标 `![alt](url)` 整体剥离；
+// ② 脏数据残片 `![alt]`（无 url）同样剥离；③ 纯图标（剥离后无文本）时退回取 alt 文本。
+//
+// 第 ③ 步比前端 comicStore.cleanTagName 更宽松（前端对无 url 残片会返回空串并回退 tag key），
+// 但两者对"正常含文本"的词典数据结果一致；调用方仍应对空结果回退到 key。
+func CleanTagDisplayName(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	cleaned := strings.TrimSpace(
+		tagIconLooseRe.ReplaceAllString(tagIconFullRe.ReplaceAllString(s, ""), ""),
+	)
+	if cleaned != "" {
+		return cleaned
+	}
+	if m := tagIconAltRe.FindStringSubmatch(s); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
 }
 
 // xpNormalize 归一化到 0~1（max 为 0 时返回 0）

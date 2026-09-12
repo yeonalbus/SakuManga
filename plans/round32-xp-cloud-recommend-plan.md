@@ -56,6 +56,7 @@
 | **D4** | 词云与推荐的落点 | 词云**并入本地排行榜页**（页内 Segmented 切换）；推荐**作为随机页的卡池模式**（复用全部抽卡 UI，不新增页面/路由） |
 | **D5** | 统计计算位置 | **全部后端**，权重落库缓存（新增统计表）+ 增量更新，附带全量重建兜底 |
 | **D6** | 落地节奏 | 表结构与即时聚合先行，增量差分随后逐个触发点接入（避免阶段一被基础设施拖住） |
+| **D7** | `other` 命名空间归属 | **归「其他」分组**（元信息型 tag：马赛克修正/无修正/全彩/渣翻等），核心 XP 只留 female/male/mixed（2026-09-12 实施） |
 
 ---
 
@@ -364,8 +365,26 @@ POST /api/v1/offline/xp-cloud/rebuild      // 仅管理员：手动全量重算
 
 **附带修复（既有问题）**：随机抽卡的卡片标签此前直接使用旧 `Tags` 字段，与列表/详情的双轨三态合并口径不一致（实测 3418 本中 **1424 本 / 42%** 两字段不同），会导致卡片标签与推荐命中理由对不上、负向排除漏掉「本地新增/已删除」tag → 统一改走 `offlineDisplayTags`（`MergeTags` ＋ 旧数据回退）。
 
-### 10.3 遗留与待决策
+### 10.3 `other` 命名空间归属（2026-09-12 决策并实施）
 
-- **`other` 命名空间归属**：当前按已确认方案归入「核心 XP」，但实测 `other:mosaic censorship`（629 本）等元信息型 tag 会挤进核心 XP 前列；是否改归「其他」分组待定（改动量：前后端各一行映射 ＋ `FormulaVersion` 递增触发自动重建）。
+实测发现 `other` 归入「核心 XP」时，`other:mosaic censorship`（马赛克修正，629 本）等**元信息型 tag** 会挤进核心 XP 前列。珱垣决策：**`other` 改归「其他」分组，核心 XP 只保留 female / male / mixed**。
+
+| 改动点 | 内容 |
+| --- | --- |
+| 后端分组表 | `services/xp_cloud.go`：`xpCoreNamespaces` 去掉 other；`xpGroupNamespaces["core"]` 改为 female/male/mixed；`xpMiscExcludeNamespaces` 去掉 other（它本身属「其他」） |
+| 版本号 | `XpFormulaVersion` 1 → 2 → 首次查询自动全量重建，无需手动操作 |
+| 前端映射 | `utils/tagColor.ts` 的 `GROUP_MAP`：`other: 'misc'`（与后端 `XpGroupOf` 对齐） |
+| 单测 | 分组断言更新（`other:mosaic censorship` / 裸词 → misc；core 分组不得含 other；misc 需含 other 与 location） |
+
+**实机验证**（隔离库 3418 本）：
+
+- `meta.formulaVersion = 2`（证明自动重建已发生）
+- core 分组 200 条中 **other = 0**，命名空间分布 `female:173 / male:23 / mixed:4`
+- misc 分组 44 条：`other:39`（马赛克修正 629 本、渣翻 377、变体集 400、无修正 394、系列作品 432、外部广告 236…）+ `location:5`
+- 词云 UI 复测 20 项全 PASS，布局快照命名空间分布为 `female, male, mixed`
+
+### 10.4 其他遗留
+
 - **阅读信号稀疏**：`read_count > 0` 仅 67/3418（2%），阅读视图与「偏阅读侧」推荐的效果会随使用自然增强；界面已提示覆盖率。
 - 未做项（原计划中的可选部分）：词云导出、推荐权重明细展示、在线侧偏好推荐（D1 已定不做）。
+- 测试方法备注：词条点击的实机断言已从「像素扫描定位」改为「布局快照定位」（前者在词条分布变化后会落到非词条区域，产生假阴性）。

@@ -1432,9 +1432,9 @@ watch(
           </button>
         </div>
 
+        <!-- Round29：页码已改为常驻右下角角标（见 .page-counter），此处只保留阅读方向 -->
         <div v-if="readerSettings.showBottomBar" class="status-row">
           <span>{{ directionLabel }}</span>
-          <span>{{ currentPage }} / {{ totalPages }} P</span>
         </div>
       </div>
     </Transition>
@@ -1536,6 +1536,10 @@ watch(
         </div>
       </div>
     </Transition>
+
+    <!-- Round29：常驻右下角页码角标（20/49）——控制条隐藏、沉浸式、Webtoon 模式均显示；
+         z-index 高于底栏，pointer-events: none 保证不拦截点击翻页热区 -->
+    <div v-if="totalPages > 0" class="page-counter">{{ currentPage }}/{{ totalPages }}</div>
 
     <!-- Round24：侧栏抽屉（缩略图/章节大纲/书签，仅本地） -->
     <ReaderSidebar
@@ -1692,6 +1696,25 @@ watch(
 }
 .controls-reveal:hover {
   background: var(--reader-reveal-hover);
+}
+
+/* Round29：常驻右下角页码角标（20/49） */
+.page-counter {
+  position: fixed;
+  right: calc(14px + var(--safe-right, 0px));
+  bottom: calc(12px + var(--safe-bottom, 0px));
+  z-index: 3020; /* 高于底栏(3010)与呼出按钮(3015) */
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--reader-reveal-bg);
+  color: var(--reader-reveal-color);
+  border: 1px solid var(--reader-reveal-border);
+  font-size: 0.78rem;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  pointer-events: none; /* 不挡点击翻页热区 */
+  user-select: none;
 }
 
 /* 呼出按钮淡入淡出 */

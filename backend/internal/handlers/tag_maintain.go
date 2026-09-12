@@ -123,7 +123,7 @@ func (h *TagMaintainHandler) EditComicTags(c *gin.Context) {
 		return
 	}
 
-	// Round30：单本 tag 变化改变 XP 词云的库藏贡献 → 增量重算（双轨三态合并口径）
+	// Round32：单本 tag 变化改变 XP 词云的库藏贡献 → 增量重算（双轨三态合并口径）
 	services.XpRecomposeComic(id)
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})

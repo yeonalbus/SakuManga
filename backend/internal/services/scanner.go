@@ -527,7 +527,7 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 // ScanAndSaveDirectory 兼容旧调用：全量扫描，不汇报进度；pathID 为空（下载导入，问题3）
 func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) {
 	count, err := scanDirectory(rootPath, includeSubfolders, "full", nil, "")
-	// Round30：下载入库（画廊/压缩包任务完成）会新增本地漫画 → 异步重建 XP 统计表
+	// Round32：下载入库（画廊/压缩包任务完成）会新增本地漫画 → 异步重建 XP 统计表
 	if err == nil && count > 0 {
 		XpRebuildAsync("下载入库")
 	}

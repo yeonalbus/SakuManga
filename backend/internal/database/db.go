@@ -39,9 +39,9 @@ func InitDB() {
 		&models.ComicChapter{},
 		&models.ScrapeBookmark{},    // Round28：搜刮书签（后端化，多端同步）
 		&models.IgnoredIdentifier{}, // Round26 O2：忽略标记（疑似重复/父画廊）
-		&models.XpComicStat{},       // Round30：XP 词云 — 单本贡献快照
-		&models.XpTagStat{},         // Round30：XP 词云 — tag 聚合权重
-		&models.XpMeta{},            // Round30：XP 词云 — 统计元信息
+		&models.XpComicStat{},       // Round32：XP 词云 — 单本贡献快照
+		&models.XpTagStat{},         // Round32：XP 词云 — tag 聚合权重
+		&models.XpMeta{},            // Round32：XP 词云 — 统计元信息
 	)
 
 	migrateFavoriteStateTable()

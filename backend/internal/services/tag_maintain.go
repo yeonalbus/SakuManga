@@ -264,7 +264,7 @@ func (s *TagMaintainService) RefreshAllTags() (*TagRefreshResult, error) {
 	}
 	defer s.endRun()
 	result, err := s.refreshAllTagsLocked()
-	// Round30：Tag 刷新直接改变 XP 词云的库藏贡献 → 收尾异步全量重建
+	// Round32：Tag 刷新直接改变 XP 词云的库藏贡献 → 收尾异步全量重建
 	if err == nil {
 		XpRebuildAsync("Tag 刷新")
 	}
@@ -408,7 +408,7 @@ func (s *TagMaintainService) WritebackComicInfo() (*WritebackResult, error) {
 	}
 	defer s.endRun()
 	result, err := s.writebackLocked()
-	// Round30：写回不改变库内 Tag 口径（OnlineTags − RemoveTags），但编辑/恢复可能已变动 → 一并重建
+	// Round32：写回不改变库内 Tag 口径（OnlineTags − RemoveTags），但编辑/恢复可能已变动 → 一并重建
 	if err == nil {
 		XpRebuildAsync("Tag 写回")
 	}

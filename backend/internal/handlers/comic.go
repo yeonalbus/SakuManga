@@ -448,7 +448,7 @@ func DeleteOfflineComic(c *gin.Context) {
 		return
 	}
 
-	// Round30：XP 统计贡献的清理由 services.DeleteOfflineComic 内部统一触发（覆盖维护页批量删除路径）
+	// Round32：XP 统计贡献的清理由 services.DeleteOfflineComic 内部统一触发（覆盖维护页批量删除路径）
 
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
@@ -469,7 +469,7 @@ func RecordComicClick(c *gin.Context) {
 		return
 	}
 
-	// Round30：阅读次数是阅读侧多信号之一 → 增量重算该用户对该本的 XP 贡献
+	// Round32：阅读次数是阅读侧多信号之一 → 增量重算该用户对该本的 XP 贡献
 	if user := middleware.CurrentUser(c); user != nil {
 		services.XpRecomposeComicForUser(user.ID, id)
 	}

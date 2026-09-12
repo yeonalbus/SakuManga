@@ -3,14 +3,14 @@ package models
 import "time"
 
 // ─────────────────────────────────────────────────────────────
-// Round30 阶段一：XP 词云统计（本地库 tag 偏好画像）
+// Round32 阶段一：XP 词云统计（本地库 tag 偏好画像）
 //
 // 三张表分工：
 //   XpComicStat  单本漫画的贡献快照（增量差分的基准，改一本只动这一本）
 //   XpTagStat    tag 聚合权重（按 namespace+key，词云展示与偏好推荐的数据源）
 //   XpMeta       统计元信息（公式版本 / 全量重建时间 / 脏标记）
 //
-// 口径（详见 plans/round30-xp-cloud-recommend-plan.md）：
+// 口径（详见 plans/round32-xp-cloud-recommend-plan.md）：
 //   有效 tag = MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)（三态全空回退 Tags）
 //   库藏侧   lib(c) = 1
 //   阅读侧   r(c)   = 0.60·log1p(readCount) + 0.25·exp(-Δdays/90) + 0.15·(rating-1)/9

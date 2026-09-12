@@ -59,7 +59,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	favHandler := handlers.NewFavoritesHandler(db, favService)
 	scrapeBookmarkHandler := handlers.NewScrapeBookmarkHandler(db) // Round28：搜刮书签（后端化，多端同步）
 
-	// Round30：XP 词云统计（阶段一）——服务实例同时挂到包级全局，
+	// Round32：XP 词云统计（阶段一）——服务实例同时挂到包级全局，
 	// 供各业务触发点（阅读次数/历史/评分/扫描/Tag 维护）做增量重算，handler 与其共用缓存。
 	xpCloudService := services.NewXpCloudService(db)
 	services.GlobalXpCloud = xpCloudService
@@ -254,7 +254,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.GET("/offline/upgrade/list", upgradeHandler.ListUpgradeCandidates)
 		api.POST("/offline/upgrade/download", upgradeHandler.UpgradeDownload)
 
-		// Round30 阶段一：XP 词云（本地库 tag 偏好画像）
+		// Round32 阶段一：XP 词云（本地库 tag 偏好画像）
 		// 词云为只读统计，登录即可查看；阅读侧按当前登录用户隔离，库藏侧全库共享。
 		api.GET("/offline/xp-cloud", xpCloudHandler.GetXpCloud)
 
@@ -336,7 +336,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/ignore/list", offlineHandler.ListIgnores)
 			admin.POST("/offline/ignore/:id/restore", offlineHandler.RestoreIgnore)
 
-			// Round30：XP 词云全量重算（公式调整 / 增量链路漏接后的兜底）
+			// Round32：XP 词云全量重算（公式调整 / 增量链路漏接后的兜底）
 			admin.POST("/offline/xp-cloud/rebuild", xpCloudHandler.RebuildXpCloud)
 		}
 	}

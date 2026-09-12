@@ -760,7 +760,7 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 	// 上限淘汰（每用户每来源）
 	h.trimHistory(user.ID, models.ComicSource(req.Source))
 
-	// Round30：离线历史的近期性是阅读侧信号之一 → 增量重算该用户对该本的 XP 贡献
+	// Round32：离线历史的近期性是阅读侧信号之一 → 增量重算该用户对该本的 XP 贡献
 	if req.Source == "offline" {
 		services.XpRecomposeComicForUser(user.ID, req.ComicID)
 	}
@@ -906,7 +906,7 @@ func (h *LibraryHandler) SetComicRating(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "评分清除失败"})
 			return
 		}
-		// Round30：评分是阅读侧信号之一 → 增量重算
+		// Round32：评分是阅读侧信号之一 → 增量重算
 		services.XpRecomposeComicForUser(user.ID, comicID)
 		c.JSON(http.StatusOK, gin.H{"message": "评分已清除"})
 		return
@@ -926,7 +926,7 @@ func (h *LibraryHandler) SetComicRating(c *gin.Context) {
 		return
 	}
 
-	// Round30：评分是阅读侧信号之一 → 增量重算
+	// Round32：评分是阅读侧信号之一 → 增量重算
 	services.XpRecomposeComicForUser(user.ID, comicID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "评分已保存", "score": r.Score})
@@ -945,7 +945,7 @@ func (h *LibraryHandler) DeleteComicRating(c *gin.Context) {
 		return
 	}
 
-	// Round30：评分是阅读侧信号之一 → 增量重算
+	// Round32：评分是阅读侧信号之一 → 增量重算
 	services.XpRecomposeComicForUser(user.ID, c.Param("comicId"))
 
 	c.JSON(http.StatusOK, gin.H{"message": "评分已删除"})

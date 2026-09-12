@@ -134,7 +134,7 @@ func AutoRunMaintainDedup(db *gorm.DB, ehService *EHService) bool {
 			FinishOfflineTask(err)
 			return
 		}
-		StoreMaintainDedupResult(result)
+		StoreMaintainDedupResult(result, false)
 		FinishOfflineTask(nil)
 	}()
 	return true

@@ -761,6 +761,11 @@ type DedupResult struct {
 	Clusters   []DedupCluster `json:"clusters,omitempty"`   // Round26 O3：疑似重复组（名称级弱证据，只建议）
 	FinishedAt int64          `json:"finishedAt"`           // 结果生成时间戳(ms)
 	Stale      bool           `json:"stale"`                // 是否已过期（删除操作后置 true，提示前端重新扫描）
+
+	// forceFull 本次结果是否来自「全量在线核对」（不导出、不落 JSON）：
+	// 定向同步缓存（SyncMaintainDedupClusters）据此保持与本次扫描一致的忽略语义——
+	// 全量核对时被忽略的簇仍列出并标 Ignored（前端折叠展示），增量扫描时直接不列出。
+	forceFull bool
 }
 
 // ErrComicNotFound 漫画记录不存在（幽灵文件容错：记录可能已被其他设备删除）

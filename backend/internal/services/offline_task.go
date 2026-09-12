@@ -5,6 +5,10 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"SakuManga/internal/models"
+
+	"gorm.io/gorm"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -218,13 +222,15 @@ func FinishOfflineTask(err error) {
 }
 
 // StoreMaintainDedupResult 缓存维护查重结果（记录生成时间并清除过期标记，
-// 前端据此判断结果是否可信：删除操作后结果会被标记为过期）
-func StoreMaintainDedupResult(res *DedupResult) {
+// 前端据此判断结果是否可信：删除操作后结果会被标记为过期）。
+// forceFull 记录本次扫描是否为「全量在线核对」，定向同步缓存时据以保持忽略语义一致。
+func StoreMaintainDedupResult(res *DedupResult, forceFull bool) {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
 	if res != nil {
 		res.FinishedAt = time.Now().UnixMilli()
 		res.Stale = false
+		res.forceFull = forceFull
 	}
 	offlineMaintainRes = res
 }
@@ -240,6 +246,10 @@ func GetMaintainDedupResult() *DedupResult {
 // 删除漫画后调用，将已删除的 id 从结果 items 中移除并标记 stale=true，
 // 同时清空更新检测结果缓存（被删漫画可能仍残留在更新列表中）。
 // 前端下次读取结果时会发现 stale=true，提示用户重新扫描以获取一致的最新数据。
+//
+// Round33：成对对象（PairComic）也已被删除的条目一并移除——该重复组已处理完毕，
+// 否则列表中会残留没有配对项的「建议保留」孤儿项。
+// 调用方随后应调用 SyncMaintainDedupClusters 重算疑似重复簇并清除 stale。
 func InvalidateMaintainDedupResult(removedIDs []string) {
 	offlineTaskMu.Lock()
 	defer offlineTaskMu.Unlock()
@@ -251,15 +261,108 @@ func InvalidateMaintainDedupResult(removedIDs []string) {
 			}
 			kept := offlineMaintainRes.Items[:0]
 			for _, item := range offlineMaintainRes.Items {
-				if _, hit := idSet[item.Comic.ID]; !hit {
-					kept = append(kept, item)
+				if _, hit := idSet[item.Comic.ID]; hit {
+					continue
 				}
+				if item.PairComic != nil {
+					if _, hit := idSet[item.PairComic.ID]; hit {
+						continue // 配对项已被删除 → 该组处理完毕，保留项不再展示
+					}
+				}
+				kept = append(kept, item)
+			}
+			// 清空尾部残留引用（避免已移除项被底层数组继续持有）
+			for i := len(kept); i < len(offlineMaintainRes.Items); i++ {
+				offlineMaintainRes.Items[i] = DedupItem{}
 			}
 			offlineMaintainRes.Items = kept
 		}
 		offlineMaintainRes.Stale = true
 	}
 	offlineUpdateRes = nil
+}
+
+// SyncMaintainDedupClusters 定向同步维护查重结果缓存中的「疑似重复」簇（Round33）。
+//
+// 背景：结果缓存是扫描时的内存快照，忽略 / 恢复忽略 / 删除漫画后不会自动更新，
+// 导致三个问题：①已忽略的簇重进页面又「复活」；②恢复忽略的簇不出现；
+// ③已删除的漫画仍残留在簇成员里。用户只能整份重新扫描（数千本联网核对，数十分钟）。
+//
+// 本函数只重跑纯本地、零联网、零文件 I/O 的名称级聚类（O3 规则 5）+ 忽略表过滤，
+// 毫秒级完成，使缓存与最新忽略表 / 书库保持一致；同时按增量语义移除命中「gid 型忽略」
+// 的父画廊更新提示（全量核对结果不豁免，与扫描口径一致）。
+//
+// 不保留「未同步」信号：定向同步后结果列表已与最新书库/忽略表一致，
+// 因此一并前移 FinishedAt（使 hasUnsynced=false）并清除 stale 标记，
+// 前端不会再提示「结果已过期，请重新扫描」。用户之后仍可手动全量核对。
+func SyncMaintainDedupClusters(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+
+	// 快照缓存：锁内只做内存读取，DB 查询与聚类在锁外完成
+	offlineTaskMu.Lock()
+	res := offlineMaintainRes
+	if res == nil {
+		offlineTaskMu.Unlock()
+		return // 尚无结果缓存，无需同步（首次扫描会生成完整结果）
+	}
+	removedIDs := make([]string, 0, len(res.Items))
+	for _, it := range res.Items {
+		if !it.Keep {
+			removedIDs = append(removedIDs, it.Comic.ID)
+		}
+	}
+	full := res.forceFull
+	offlineTaskMu.Unlock()
+
+	// 候选集与扫描时同口径：离线来源 + 「离线维护」开关过滤 + 排除确定性建议删除项
+	var comics []models.OfflineComic
+	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
+		log.Printf("%s [dedup-sync] 读取离线漫画失败，跳过疑似重复簇同步: %v", dlWarnTag, err)
+		return
+	}
+	comics = filterOfflineUpdateEnabled(db, comics)
+
+	removeSet := make(map[string]struct{}, len(removedIDs))
+	for _, id := range removedIDs {
+		removeSet[id] = struct{}{}
+	}
+	candidates := make([]models.OfflineComic, 0, len(comics))
+	for i := range comics {
+		if _, hit := removeSet[comics[i].ID]; !hit {
+			candidates = append(candidates, comics[i])
+		}
+	}
+
+	ignoreIdx := LoadIgnoreIndex(db)
+	clusters := detectTitleClusters(candidates, ignoreIdx, full)
+
+	offlineTaskMu.Lock()
+	if offlineMaintainRes != nil {
+		offlineMaintainRes.Clusters = clusters
+		// 增量语义下：命中「gid 型忽略」的父画廊更新提示同步移除（全量核对仍列出，与扫描口径一致）
+		if !full {
+			items := offlineMaintainRes.Items[:0]
+			for _, it := range offlineMaintainRes.Items {
+				if !it.Keep && it.Rule == "parent" && ignoreIdx.IsGIDIgnored(it.Comic.GID) {
+					continue
+				}
+				items = append(items, it)
+			}
+			for i := len(items); i < len(offlineMaintainRes.Items); i++ {
+				offlineMaintainRes.Items[i] = DedupItem{}
+			}
+			offlineMaintainRes.Items = items
+		}
+		offlineMaintainRes.Stale = false // 定向同步后缓存与最新忽略表/书库一致，无需提示重新扫描
+		// 前移结果生成时间：书库变更（如删除）已在本函数内反映到结果，清除「未同步」信号
+		offlineMaintainRes.FinishedAt = time.Now().UnixMilli()
+	}
+	offlineTaskMu.Unlock()
+
+	log.Printf("%s [dedup-sync] 疑似重复簇已定向同步：候选 %d 本，簇 %d 组（全量语义=%v）",
+		dlLogTag, len(candidates), len(clusters), full)
 }
 
 // StoreUpdateCheckResult 缓存更新检测结果

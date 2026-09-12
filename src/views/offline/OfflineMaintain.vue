@@ -194,8 +194,8 @@ const ignoreCluster = async (cluster: DedupClusterDTO) => {
       body: JSON.stringify({ type: 'title', titleKey: cluster.titleKey, artist: cluster.artist || '' }),
     })
     toast.success('已忽略本组，可在「忽略清单」中恢复')
-    clusters.value = clusters.value.filter((c) => c.id !== cluster.id)
-    await loadIgnoreList()
+    // Round33：后端已定向同步结果缓存（簇即时移除）→ 重读即最新，无需重新扫描
+    await Promise.all([loadResult(), loadIgnoreList()])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '忽略失败')
   }
@@ -227,16 +227,9 @@ const confirmIgnoreMembers = async () => {
       }
     }
     toast.success(`已忽略 ${ids.length} 个成员（可在「忽略清单」中恢复）`)
-    // 本地即时收缩：剩余成员 <2 则整簇移除，否则保留收缩后的簇
-    const remain = cluster.members.filter((m) => !ids.includes(m.comic.id))
-    if (remain.length < 2) {
-      clusters.value = clusters.value.filter((c) => c.id !== cluster.id)
-    } else {
-      const idx = clusters.value.findIndex((c) => c.id === cluster.id)
-      if (idx >= 0) clusters.value[idx] = { ...cluster, members: remain }
-    }
     ignorePickerOpen.value = false
-    await loadIgnoreList()
+    // Round33：后端已按最新忽略表重算簇（成员剔除 / 剩余 <2 整簇消失）→ 重读即最新
+    await Promise.all([loadResult(), loadIgnoreList()])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '忽略成员失败')
   }
@@ -268,21 +261,22 @@ const ignoreParent = async (item: DedupItemDTO) => {
       body: JSON.stringify({ type: 'gid', gid }),
     })
     toast.success('已忽略此更新提示，可在「忽略清单」中恢复')
-    items.value = items.value.filter((i) => i.comic.id !== item.comic.id)
     // 同步清理勾选残留（该条目已不在建议删除区，避免批量删除提交不存在的 id）
     selectedIds.value = selectedIds.value.filter((id) => id !== item.comic.id)
-    await loadIgnoreList()
+    // Round33：后端已定向同步结果缓存 → 重读即最新
+    await Promise.all([loadResult(), loadIgnoreList()])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '忽略失败')
   }
 }
 
-// 恢复忽略条目（下次查重重新参与）
+// 恢复忽略条目（即时重新纳入查重结果）
 const restoreIgnore = async (ig: IgnoreItemDTO) => {
   try {
     await http(`/offline/ignore/${ig.id}/restore`, { method: 'POST' })
-    toast.success('已恢复，下次查重重新参与判定')
-    ignoreItems.value = ignoreItems.value.filter((i) => i.id !== ig.id)
+    toast.success('已恢复，已即时回到查重列表')
+    // Round33：后端已重算结果缓存 → 恢复的簇/提示立即回归，无需重新扫描
+    await Promise.all([loadResult(), loadIgnoreList()])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '恢复失败')
   }
@@ -300,8 +294,8 @@ const restoreCluster = async (cluster: DedupClusterDTO) => {
     toast.warning('未找到对应的忽略条目，请前往「忽略清单」管理')
     return
   }
+  // restoreIgnore 内部已重读结果缓存（该簇随之回到疑似重复列表）
   await restoreIgnore(match)
-  ignoredClusters.value = ignoredClusters.value.filter((c) => c.id !== cluster.id)
 }
 
 // 忽略清单弹层分组
@@ -435,11 +429,9 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
         deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
       )
     }
-    // 本地过滤该项（保留/删除关系在结果里已固定，无需重新全盘扫描）
-    items.value = items.value.filter((i) => i.comic.id !== c.id)
+    // Round33：后端已剪除该项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
     selectedIds.value = selectedIds.value.filter((id) => id !== c.id)
-    // 本地列表已与后端一致，清除过期标记避免误报
-    resultStale.value = false
+    await loadResult()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '删除失败')
@@ -509,10 +501,8 @@ const removeSelected = async (deleteFile: boolean) => {
       )
     }
     selectedIds.value = []
-    // 本地过滤已删除项（保留/删除关系在结果里已固定，无需重新全盘扫描）
-    items.value = items.value.filter((i) => !ids.includes(i.comic.id))
-    // 本地列表已与后端一致，清除过期标记避免误报
-    resultStale.value = false
+    // Round33：后端已剪除已删项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
+    await loadResult()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '批量删除失败')

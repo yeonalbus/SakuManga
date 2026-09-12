@@ -181,7 +181,7 @@ func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
 			services.FinishOfflineTask(err)
 			return
 		}
-		services.StoreMaintainDedupResult(result)
+		services.StoreMaintainDedupResult(result, full)
 		services.FinishOfflineTask(nil)
 	}()
 
@@ -264,6 +264,8 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 		deleted, err := services.RemoveDedupComics(h.db, req.ComicIDs, req.DeleteFile)
 		// 幽灵文件修复：无论成败都使维护/更新结果缓存失效，避免残留过期数据
 		services.InvalidateMaintainDedupResult(req.ComicIDs)
+		// Round33：定向重算疑似重复簇（已删项不再残留在簇成员中），缓存即时可信
+		services.SyncMaintainDedupClusters(h.db)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "deleted": deleted})
 			return
@@ -280,6 +282,7 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 		// 返回 alreadyDeleted=true，前端据此移除本地列表项而非报错。
 		if errors.Is(err, services.ErrComicNotFound) {
 			services.InvalidateMaintainDedupResult([]string{req.ComicID})
+			services.SyncMaintainDedupClusters(h.db)
 			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1, "alreadyDeleted": true})
 			return
 		}
@@ -287,6 +290,7 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 		return
 	}
 	services.InvalidateMaintainDedupResult([]string{req.ComicID})
+	services.SyncMaintainDedupClusters(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1})
 }
 
@@ -332,6 +336,9 @@ func (h *OfflineHandler) CreateIgnore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Round33：忽略即时生效——定向重算结果缓存的疑似重复簇，
+	// 避免「忽略后重进页面簇又复活」而被迫整份重新扫描
+	services.SyncMaintainDedupClusters(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 
@@ -356,5 +363,7 @@ func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Round33：恢复即时生效——定向重算结果缓存的疑似重复簇，恢复的组立即回到列表
+	services.SyncMaintainDedupClusters(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

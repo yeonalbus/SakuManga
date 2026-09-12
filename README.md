@@ -43,7 +43,7 @@ v2.0.0 为里程碑大版本：项目正式更名为 **SakuManga**（包名 / ex
 # 🗺️ 后续计划
 
 v2.1.0 落地本地库智能分析（XP 词云 / 偏好推荐）与搜刮书签多端同步，并让维护查重的忽略与删除即时生效。  
-后续将延续稳定性与体验主线：补全「疑似重复」簇的勾选删除、完善搜刮书签的更多页面类型与离线端支持（当前仅在线首页 / 搜索）、抽卡负向排除的后端采样补位、离线端更丰富的检索与维护能力，并持续收敛下载稳定性与资源占用、完善跨设备进度同步。
+后续将延续稳定性与体验主线：补全「疑似重复」簇的勾选删除、完善搜刮书签的更多页面类型与离线端支持（当前仅在线首页 / 搜索）、抽卡负向排除的后端采样补位、离线端更丰富的检索与维护能力，并持续收敛下载稳定性与资源占用、完善跨设备进度同步、多用户协调。
 
 # 🚀 构建与运行
 
@@ -90,6 +90,14 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 ## 阅读界面
 
 <img width="1280" height="800" alt="reader-sidebar" src="https://github.com/user-attachments/assets/ed6f2e97-ac3c-4932-b29e-638634e7fa13" />
+
+## XP词云
+
+<img width="1950" height="1089" alt="image" src="https://github.com/user-attachments/assets/d9e48179-c208-468e-8374-8e401a04bad5" />
+
+## 随机抽卡
+
+<img width="1971" height="970" alt="image" src="https://github.com/user-attachments/assets/7cad2173-5628-4c06-afd3-ae9b6919be3b" />
 
 
 # ⚙️ 设置说明

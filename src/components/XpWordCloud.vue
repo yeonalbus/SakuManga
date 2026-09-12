@@ -1,29 +1,47 @@
 <script setup lang="ts">
 /**
- * XP 词云（Round32 阶段一）
+ * XP 词云（Round32 阶段一；视觉改版）
  *
- * 自研 Canvas 阿基米德螺旋布局 + 空间网格加速矩形碰撞检测（不引入第三方依赖）。
- * - 字号：按权重对数归一映射（长尾词不会被压成不可读的小字）
- * - 配色：按命名空间取色（utils/tagColor.ts，与 TagChip 同源）
- * - 交互：hover 高亮 + tooltip（权重/本数）、点击 emit select（父级做快捷搜索跳转）
- * - 自适应：ResizeObserver 重排，支持高 DPI
+ * 自研 Canvas 阿基米德螺旋（归一化椭圆）+ 空间网格加速矩形碰撞检测，无第三方依赖。
+ *
+ * 视觉要点（详见 plans/round32-xp-cloud-recommend-plan.md 第十一章）：
+ * - 碰撞盒留白：词间保留缝隙（lineRatio 1.45 / padX 0.3），解决旧版"密不透风"
+ * - 椭圆轮廓：螺旋按归一化椭圆扩散，边缘自然收拢，不再矩形锯齿
+ * - 字号分段 + 长词降档：前 N 名占高档区间形成焦点；长名降档避免占满半行
+ * - 配色景深：命名空间主色 + 按权重调制明度/饱和/透明度（大词亮、尾词淡）
+ * - 全水平排版：不做竖排/倾斜（竖排词在密集词云里会与相邻词视觉粘连）
+ * - 文本治理：过滤超长词条、可只保留有中日韩译名的词条、按词边界截断
+ *
+ * 数据侧清洗（markdown 图标 / emoji / 双语取短侧）由后端 CleanTagDisplayName 完成。
  */
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { XpCloudTag } from '@/types/comic'
-import { tagTextColor } from '@/utils/tagColor'
+import { readXpTheme, xpTagColor } from '@/utils/tagColor'
+import { xpCloudSettings } from '@/stores/xpCloudSettings'
 
 const props = withDefaults(
   defineProps<{
     tags: XpCloudTag[]
-    /** 画布高度（CSS px） */
+    /** 画布高度（CSS px）：桌面 520 / 移动 360 */
     height?: number
-    /** 最多参与排布的词条数（超出部分丢弃：长尾词本就无展示价值） */
-    maxWords?: number
   }>(),
-  { height: 380, maxWords: 140 },
+  { height: 520 },
 )
 
-const emit = defineEmits<{ (e: 'select', tag: XpCloudTag): void }>()
+const emit = defineEmits<{
+  (e: 'select', tag: XpCloudTag): void
+  (e: 'stats', stats: XpCloudStats): void
+}>()
+
+/** 布局统计（供面板展示"放入 X 条 / 排除 Y 条"，也让用户理解参数影响） */
+export interface XpCloudStats {
+  source: number // 数据源词条数
+  droppedLong: number // 超长被排除
+  droppedNoTrans: number // 无译名被排除
+  wanted: number // 取用词条数
+  placed: number // 实际放入
+  overflow: number // 放不下丢弃
+}
 
 interface Rect {
   x: number
@@ -32,74 +50,136 @@ interface Rect {
   h: number
 }
 
+interface Candidate {
+  tag: XpCloudTag
+  text: string
+  fullName: string
+  truncated: boolean
+}
+
 interface PlacedWord extends Rect {
   tag: XpCloudTag
   text: string
+  fullName: string
+  truncated: boolean
+  textW: number
   fontSize: number
   color: string
+  t: number
 }
 
 const FONT_FAMILY =
   '"Helvetica Neue", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif'
+/** 前 N 名占字号高档区间，形成视觉焦点 */
+const TOP_N = 10
+/** 中日韩字符（判断"是否有译名"） */
+const RE_CJK = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const placed = shallowRef<PlacedWord[]>([])
-const tooltip = ref<{ visible: boolean; x: number; y: number; tag: XpCloudTag | null }>({
+const tooltip = ref<{ visible: boolean; x: number; y: number; word: PlacedWord | null }>({
   visible: false,
   x: 0,
   y: 0,
-  tag: null,
+  word: null,
 })
 
 let ctx: CanvasRenderingContext2D | null = null
+/** 离屏测量上下文（量文字宽度用；与主画布无关） */
+const measureCtx =
+  typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null
 let hovered: PlacedWord | null = null
 let dpr = 1
 let widthCSS = 0
 let heightCSS = 0
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
+let themeObserver: MutationObserver | null = null
 
-/** 字体串（动画状态下加粗） */
-const fontOf = (size: number, bold = false) =>
-  `${bold ? 800 : 700} ${size}px ${FONT_FAMILY}`
+const fontOf = (size: number) => `700 ${size}px ${FONT_FAMILY}`
 
-/** 超长词截断（避免单个长词把螺旋中心占满） */
-const fitText = (text: string, size: number, maxWidth: number): string => {
-  if (!ctx) return text
-  ctx.font = fontOf(size)
-  if (ctx.measureText(text).width <= maxWidth) return text
-  let cut = text
-  while (cut.length > 2 && ctx.measureText(cut + '…').width > maxWidth) {
-    cut = cut.slice(0, -1)
+/** 短名截断：英文按词边界断开，中文直接截断，末尾加省略号 */
+const shorten = (text: string, max: number): string => {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  if (/[A-Za-z0-9]$/.test(cut) && /[A-Za-z0-9]/.test(text[max] || '')) {
+    const sp = cut.lastIndexOf(' ')
+    if (sp > max * 0.5) return `${cut.slice(0, sp)}…`
   }
-  return cut + '…'
+  return `${cut}…`
 }
 
-/**
- * 螺旋排布：从中心向外，按权重降序依次落位。
- * 命中第一个不与已有词重叠的槽位即放置；容器放不下则丢弃该词（长尾自然被裁剪）。
- */
-const computeLayout = (): PlacedWord[] => {
-  if (!ctx || widthCSS <= 0 || heightCSS <= 0) return []
-  const list = props.tags.slice(0, props.maxWords)
-  if (list.length === 0) return []
+/** 字号：前 TOP_N 名占高档区间（1.0→0.58），其余按排名压到低档（0.58→0），层次分明 */
+const fontSizeOf = (rank: number, total: number, fontMin: number, fontMax: number): number => {
+  const n = Math.min(TOP_N, total)
+  let t: number
+  if (rank < n) {
+    t = 1 - (rank / n) * 0.42
+  } else {
+    const rest = Math.max(1, total - n)
+    t = 0.58 * (1 - (rank - n) / rest)
+  }
+  return Math.round(fontMin + (fontMax - fontMin) * t)
+}
 
-  const compact = widthCSS < 560
-  const fontSizeMin = compact ? 11 : 12
-  const fontSizeMax = compact ? 22 : 34
+/** 长词降档：拉丁转写长名（无中文译名时的回退）不抢中心、不占半行 */
+const lengthFactorOf = (len: number): number => (len > 16 ? 0.55 : len > 12 ? 0.75 : len > 9 ? 0.9 : 1)
 
-  // 权重对数归一（weight 已是 0~1 归一值，再取 log 平滑分布）
-  const logs = list.map((t) => Math.log(Math.max(1e-6, t.weight)))
-  const logMax = Math.max(...logs)
-  const logSpan = Math.max(1e-6, logMax - Math.min(...logs))
+/** 数据预处理：过滤 → 截断（清洗已由后端完成） */
+const prepare = (tags: XpCloudTag[]): { list: Candidate[]; stats: XpCloudStats } => {
+  const s = xpCloudSettings
+  const list: Candidate[] = []
+  let droppedLong = 0
+  let droppedNoTrans = 0
 
-  // 空间网格加速碰撞检测
-  const CELL = 28
+  for (const tag of tags) {
+    const name = (tag.name || tag.key || '').trim()
+    if (!name) continue
+    if (s.onlyTranslated && !RE_CJK.test(name)) {
+      droppedNoTrans++
+      continue
+    }
+    if (name.length > s.maxChars) {
+      droppedLong++
+      continue
+    }
+    list.push({
+      tag,
+      text: shorten(name, s.truncChars),
+      fullName: name,
+      truncated: name.length > s.truncChars,
+    })
+  }
+
+  return {
+    list,
+    stats: {
+      source: tags.length,
+      droppedLong,
+      droppedNoTrans,
+      wanted: Math.min(s.wordCount, list.length),
+      placed: 0,
+      overflow: 0,
+    },
+  }
+}
+
+/** 布局：归一化椭圆螺旋 + 空间网格碰撞 */
+const computeLayout = (candidates: Candidate[]): { placed: PlacedWord[]; overflow: number } => {
+  const s = xpCloudSettings
+  const words: PlacedWord[] = []
+  const rects: Rect[] = []
   const grid = new Map<string, Rect[]>()
+  const CELL = 34
   const keyOf = (gx: number, gy: number) => `${gx}:${gy}`
+  let overflow = 0
 
-  const insertGrid = (r: Rect) => {
+  // 无测量上下文（SSR/极端环境）时直接返回空布局
+  const mctx = measureCtx
+  if (!mctx) return { placed: words, overflow: 0 }
+
+  const insert = (r: Rect) => {
     const x0 = Math.floor(r.x / CELL)
     const x1 = Math.floor((r.x + r.w) / CELL)
     const y0 = Math.floor(r.y / CELL)
@@ -113,7 +193,6 @@ const computeLayout = (): PlacedWord[] => {
       }
     }
   }
-
   const collides = (r: Rect): boolean => {
     const x0 = Math.floor(r.x / CELL)
     const x1 = Math.floor((r.x + r.w) / CELL)
@@ -124,98 +203,107 @@ const computeLayout = (): PlacedWord[] => {
         const bucket = grid.get(keyOf(gx, gy))
         if (!bucket) continue
         for (const o of bucket) {
-          if (r.x < o.x + o.w && r.x + r.w > o.x && r.y < o.y + o.h && r.y + r.h > o.y) {
-            return true
-          }
+          if (r.x < o.x + o.w && r.x + r.w > o.x && r.y < o.y + o.h && r.y + r.h > o.y) return true
         }
       }
     }
     return false
   }
 
-  const ASPECT = 0.62 // 纵向压扁：贴合宽扁容器，词云更紧凑
-  const findSlot = (w: number, h: number): { x: number; y: number } | null => {
-    const cx = widthCSS / 2 - w / 2
-    const cy = heightCSS / 2 - h / 2
-    const maxR = Math.max(widthCSS, heightCSS) * 0.7
-    for (let r = 0; r <= maxR; r += 2.5) {
-      const steps = Math.max(12, Math.round((2 * Math.PI * Math.max(r * ASPECT, 10)) / 7))
-      const phase = r * 0.35 // 每圈相位偏移，避免同一角度反复落空
-      for (let i = 0; i < steps; i++) {
-        const angle = (i / steps) * Math.PI * 2 + phase
-        const x = cx + r * Math.cos(angle)
-        const y = cy + r * ASPECT * Math.sin(angle)
-        if (x < 1 || y < 1 || x + w > widthCSS - 1 || y + h > heightCSS - 1) continue
-        const rect: Rect = { x, y, w, h }
-        if (!collides(rect)) return { x, y }
+  const cx = widthCSS / 2
+  const cy = heightCSS / 2
+  const total = candidates.length
+
+  for (let i = 0; i < total; i++) {
+    const c = candidates[i]
+    let fontSize = fontSizeOf(i, total, s.fontMin, s.fontMax)
+    const factor = lengthFactorOf(c.text.length)
+    if (factor < 1) fontSize = Math.max(s.fontMin, Math.round(fontSize * factor))
+
+    mctx.font = fontOf(fontSize)
+    const textW = mctx.measureText(c.text).width
+    const padX = fontSize * s.padX
+    const bw = textW + padX
+    const bh = fontSize * s.lineRatio
+
+    const aMax = Math.max(12, (widthCSS / 2) * 0.99 - bw / 2)
+    const bMax = Math.max(12, (heightCSS / 2) * 0.99 - bh / 2)
+    let slot: Rect | null = null
+
+    outer: for (let u = 0; u <= 1.0001; u += 0.012) {
+      const steps = Math.max(14, Math.round(u * 88))
+      const phase = u * 7.5
+      for (let k = 0; k < steps; k++) {
+        const ang = (k / steps) * Math.PI * 2 + phase
+        const dx = Math.cos(ang) * aMax * u
+        const dy = Math.sin(ang) * bMax * u
+        // 椭圆轮廓：盒子中心必须落在椭圆内
+        if ((dx / aMax) ** 2 + (dy / bMax) ** 2 > 1) continue
+        const rect: Rect = { x: cx + dx - bw / 2, y: cy + dy - bh / 2, w: bw, h: bh }
+        if (!collides(rect)) {
+          slot = rect
+          break outer
+        }
       }
     }
-    return null
-  }
 
-  const words: PlacedWord[] = []
-  for (let i = 0; i < list.length; i++) {
-    const tag = list[i]
-    const ratio = (logs[i] - (logMax - logSpan)) / logSpan // 0（最小）~1（最大）
-    const fontSize = Math.round(fontSizeMin + (fontSizeMax - fontSizeMin) * ratio)
-    const text = fitText(tag.name || tag.key, fontSize, widthCSS * 0.62)
-    ctx.font = fontOf(fontSize)
-    const w = ctx.measureText(text).width
-    const h = fontSize * 1.2
-    const slot = findSlot(w, h)
-    if (!slot) continue
+    if (!slot) {
+      overflow++
+      continue
+    }
+
+    const t = total > 1 ? 1 - i / (total - 1) : 1
     const word: PlacedWord = {
-      tag,
-      text,
+      tag: c.tag,
+      text: c.text,
+      fullName: c.fullName,
+      truncated: c.truncated,
+      textW,
       x: slot.x,
       y: slot.y,
-      w,
-      h,
+      w: slot.w,
+      h: slot.h,
       fontSize,
-      color: tagTextColor(tag.namespace),
+      // 配色跟随 App 主题（深色底用亮色，浅色底用深色）
+      color: xpTagColor(c.tag.namespace, t, readXpTheme()),
+      t,
     }
     words.push(word)
-    insertGrid(word)
+    rects.push(slot)
+    insert(slot)
   }
-  return words
+
+  return { placed: words, overflow }
 }
 
-/** 绘制（hover 时非命中词降透明度，突出当前词） */
 const draw = () => {
   const canvas = canvasRef.value
   if (!canvas || !ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, widthCSS, heightCSS)
-  ctx.textBaseline = 'top'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
 
   for (const word of placed.value) {
     const isHovered = hovered === word
-    ctx.font = fontOf(word.fontSize, isHovered)
+    ctx.font = fontOf(word.fontSize)
     ctx.fillStyle = word.color
-    ctx.globalAlpha = hovered && !isHovered ? 0.4 : 1
-    ctx.fillText(word.text, word.x, word.y)
-    if (isHovered) {
-      ctx.globalAlpha = 1
-      ctx.strokeStyle = word.color
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(word.x, word.y + word.h - 1)
-      ctx.lineTo(word.x + word.w, word.y + word.h - 1)
-      ctx.stroke()
-    }
+    // hover 时其余词降透明度，突出当前词
+    ctx.globalAlpha = hovered && !isHovered ? 0.35 : 1
+    // 文字在碰撞盒内水平居中（盒宽 = 文字宽 + 左右留白）
+    ctx.fillText(word.text, word.x + (word.w - word.textW) / 2, word.y + word.h / 2)
   }
   ctx.globalAlpha = 1
 
   if (placed.value.length === 0) {
     ctx.fillStyle = '#9aa4b2'
-    ctx.font = fontOf(13)
+    ctx.font = `500 13px ${FONT_FAMILY}`
     ctx.textAlign = 'center'
-    ctx.fillText('暂无可统计的标签', widthCSS / 2, heightCSS / 2 - 8)
+    ctx.fillText('没有符合当前筛选条件的标签（可放宽词云参数）', widthCSS / 2, heightCSS / 2)
     ctx.textAlign = 'left'
   }
 }
 
-/** 重排 + 重绘 */
 const relayout = () => {
   const canvas = canvasRef.value
   const container = containerRef.value
@@ -229,15 +317,26 @@ const relayout = () => {
   canvas.style.height = `${heightCSS}px`
   hovered = null
   tooltip.value.visible = false
-  placed.value = computeLayout()
+
+  const { list, stats } = prepare(props.tags)
+  const { placed: words, overflow } = computeLayout(list.slice(0, stats.wanted))
+  placed.value = words
+  stats.placed = words.length
+  stats.overflow = overflow
   draw()
   exposeLayoutDebug()
+  emit('stats', stats)
 }
 
-/**
- * 布局调试快照（只读，供实机测试与问题排查读取）。
- * 布局为纯几何计算，快照可直接断言「是否重叠 / 是否越界」，比像素分析可靠。
- */
+const scheduleRelayout = () => {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => {
+    rafId = 0
+    relayout()
+  })
+}
+
+/** 布局调试快照（只读，供实机测试与问题排查读取） */
 const exposeLayoutDebug = () => {
   if (typeof window === 'undefined') return
   ;(window as unknown as Record<string, unknown>).__xpWordCloudDebug = {
@@ -252,19 +351,11 @@ const exposeLayoutDebug = () => {
       w: w.w,
       h: w.h,
       fontSize: w.fontSize,
+      color: w.color,
     })),
   }
 }
 
-const scheduleRelayout = () => {
-  if (rafId) cancelAnimationFrame(rafId)
-  rafId = requestAnimationFrame(() => {
-    rafId = 0
-    relayout()
-  })
-}
-
-/** 命中测试：逆序遍历（后绘制的在上层） */
 const hitTest = (x: number, y: number): PlacedWord | null => {
   const list = placed.value
   for (let i = list.length - 1; i >= 0; i--) {
@@ -274,12 +365,11 @@ const hitTest = (x: number, y: number): PlacedWord | null => {
   return null
 }
 
-const localPos = (e: MouseEvent | TouchEvent) => {
+const localPos = (e: MouseEvent) => {
   const canvas = canvasRef.value
   if (!canvas) return { x: 0, y: 0 }
   const rect = canvas.getBoundingClientRect()
-  const point = 'touches' in e ? e.touches[0] : (e as MouseEvent)
-  return { x: point.clientX - rect.left, y: point.clientY - rect.top }
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
 const onMove = (e: MouseEvent) => {
@@ -290,7 +380,7 @@ const onMove = (e: MouseEvent) => {
     draw()
   }
   if (hit) {
-    tooltip.value = { visible: true, x, y, tag: hit.tag }
+    tooltip.value = { visible: true, x, y, word: hit }
   } else {
     tooltip.value.visible = false
   }
@@ -319,22 +409,30 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(() => scheduleRelayout())
     resizeObserver.observe(containerRef.value)
   }
+  // 主题切换（<html data-theme>）时重新取色重绘
+  if (typeof MutationObserver !== 'undefined') {
+    themeObserver = new MutationObserver(() => scheduleRelayout())
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    })
+  }
 })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  themeObserver?.disconnect()
+  themeObserver = null
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-watch(
-  () => props.tags,
-  () => scheduleRelayout(),
-)
-watch(
-  () => props.height,
-  () => scheduleRelayout(),
-)
+watch(() => props.tags, scheduleRelayout)
+watch(() => props.height, scheduleRelayout)
+// 参数变化（用户在面板拖动滑块）实时重排
+watch(() => ({ ...xpCloudSettings }), scheduleRelayout, { deep: true })
+
+defineExpose({ relayout })
 </script>
 
 <template>
@@ -347,16 +445,18 @@ watch(
       @click="onClick"
     />
     <div
-      v-if="tooltip.visible && tooltip.tag"
+      v-if="tooltip.visible && tooltip.word"
       class="xp-tooltip"
       :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }"
     >
       <div class="tt-title">
-        <span class="tt-ns">{{ tooltip.tag.namespace }}:</span>{{ tooltip.tag.name }}
+        <span class="tt-ns">{{ tooltip.word.tag.namespace }}:</span>{{ tooltip.word.fullName
+        }}<span v-if="tooltip.word.truncated" class="tt-cut">（已截断）</span>
       </div>
       <div class="tt-meta">
-        权重 {{ Math.round(tooltip.tag.weight * 100) }} · 库藏 {{ tooltip.tag.comicCount }} 本 · 阅读
-        {{ Math.round(tooltip.tag.readWeight * 100) }}
+        权重 {{ Math.round(tooltip.word.tag.weight * 100) }} · 库藏
+        {{ tooltip.word.tag.comicCount }} 本 · 阅读
+        {{ Math.round(tooltip.word.tag.readWeight * 100) }}
       </div>
     </div>
   </div>
@@ -377,7 +477,7 @@ watch(
   position: absolute;
   z-index: 5;
   transform: translate(12px, 12px);
-  max-width: 260px;
+  max-width: 340px;
   padding: 6px 10px;
   border-radius: 6px;
   background: var(--app-bg-2, rgba(20, 22, 28, 0.94));
@@ -392,6 +492,12 @@ watch(
 .tt-ns {
   opacity: 0.65;
   margin-right: 2px;
+}
+
+.tt-cut {
+  opacity: 0.5;
+  font-size: 0.72rem;
+  margin-left: 4px;
 }
 
 .tt-meta {

@@ -39,8 +39,9 @@ src/
 ├── env.d.ts                        # Vite 环境变量类型声明
 │
 ├── api/                            # 领域 API 封装（薄层，基于 utils/request）
-│   ├── comic.ts                    # 在线漫画列表 / 随机抽卡 API 封装
-│   └── download.ts                 # 下载任务 API 封装（创建/列表/优先级/设置）
+│   ├── comic.ts                    # 在线漫画列表 / 随机抽卡 API 封装（含 Round32 推荐模式参数）
+│   ├── download.ts                 # 下载任务 API 封装（创建/列表/优先级/设置）
+│   └── xpCloud.ts                  # XP 词云查询与统计重算 API 封装（Round32）
 │
 ├── components/                     # 通用 UI 组件
 │   ├── ItemCard.vue                # 漫画卡片（card/compact 两种模式，隐藏副标题开关）
@@ -62,6 +63,8 @@ src/
 │   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
 │   ├── BookshelfPickerOverlay.vue  # 全部书架检索/多选加入书架浮层（Round13）
 │   ├── BookmarkCreateModal.vue     # 书签抓取弹窗（Round27：导入 E 站书签）
+│   ├── XpWordCloud.vue             # XP 词云（Round32：Canvas 自研螺旋布局，库藏/阅读双视图）
+│   ├── ArtistTopList.vue           # 画师/社团 Top 列表（Round32：从词云体系剥离的独立榜单）
 │   ├── common/
 │   │   ├── ErrorBoundary.vue       # 错误边界（页面级异常兜底）
 │   │   ├── GlobalModal.vue         # 全局弹窗（alert/confirm/prompt）
@@ -105,6 +108,7 @@ src/
 │   ├── preferenceSettings.ts       # 偏好设置（localStorage 持久化）
 │   ├── networkSettings.ts          # 网络/代理设置
 │   ├── downloadSettings.ts         # 下载设置（线程/并发/归档并发/优先级/更新方案）
+│   ├── recommendSettings.ts        # 偏好推荐参数（Round32：θ/ε/T + 排除项，localStorage 持久化）
 │   └── advancedSettings.ts         # 高级设置
 │
 ├── types/                          # 数据契约类型
@@ -120,6 +124,7 @@ src/
 │   ├── errorReporter.ts            # 前端错误上报（受高级设置「开启日志」门控）
 │   ├── device.ts                   # 设备/触控检测
 │   ├── tagFilter.ts                # 负向排除引擎（excludeTags/excludeKeywords 匹配）
+│   ├── tagColor.ts                 # 命名空间配色与分组（Round32：TagChip 与 XP 词云共用色板）
 │   ├── detailNav.ts                # 详情新标签导航（记录来源状态，返回时恢复位置/页码）
 │   ├── lexoRank.ts                 # LexoRank 排序权重（书架/书架内项目自定义排序）
 │   ├── pageHideFlush.ts            # 页面隐藏时冲刷进度/持久化（防丢失）
@@ -198,7 +203,8 @@ backend/
 │   ├── main.go                     # cmd_debug 目录调试入口（sk 经环境变量 E_SK 注入，勿硬编码）
 │   │   # 另有 archivedebug / archivercheck / archivespeed / dbcheck / dmscheck /
 │   │   #      metadump / readerdebug / relationscheck / reproissue / schemadump /
-│   │   #      statusdebug / updatelogic / ziprangecheck / e2eseed（Round26 临时库数据注入，仅限隔离库）等 14 个按场景拆分的调试小工具
+│   │   #      statusdebug / updatelogic / ziprangecheck / e2eseed（Round26 临时库数据注入）、
+│   │   #      xpseed（Round32 隔离库测试用户注入，仅限库副本）等调试小工具
 │   │   # 凭据安全：archivespeed / ziprangecheck 的 E 站凭据均从环境变量读取
 │   │   # （E_IPB_MEMBER_ID / E_IPB_PASS_HASH / E_IGNEOUS / E_SK），源码不落明文
 │
@@ -220,6 +226,7 @@ backend/
     │   ├── comic_mark.go           # 漫画书签模型（Round24）
     │   ├── reading_list.go         # 阅读清单模型
     │   ├── ignore.go               # Round26 O2：忽略标记模型（title/gid 两型）
+    │   ├── xp_stat.go              # Round32：XP 词云统计模型（单本快照/tag 聚合/元信息）
     │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
@@ -252,6 +259,7 @@ backend/
     │   ├── eh_uconfig.go           # uconfig.php 代理
     │   ├── client_log.go           # 前端错误日志上报/大小查询/清除
     │   ├── log.go                  # 服务端日志（四类日志查询/监控）
+    │   ├── xp_cloud.go             # Round32：XP 词云查询 / 统计重算接口
     │   └── network_handler.go      # 网络/代理配置
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
@@ -302,7 +310,9 @@ backend/
         ├── fsearch_normalize.go    # 在线搜索 f_search 标准语法规范化（自动修正/多词完整命中）
         ├── tag_engine.go           # 标签翻译引擎（下载/进度/建议，含热度协同排序联想）
         ├── tag_maintain.go         # Tag 维护服务
-        └── tag_scheduler.go        # Tag 维护定时调度
+        ├── tag_scheduler.go        # Tag 维护定时调度
+        ├── xp_cloud.go             # Round32 阶段一：XP 词云统计（合并口径/稀释加权/差分/重建/查询）
+        └── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
 ```
 
 > services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
@@ -327,6 +337,8 @@ backend/
 | 改双列对比（更新/维护）                           | `src/views/offline/OfflineCompare.vue`、`backend/internal/services/offline.go`（pairComic）                                |
 | 改收藏夹                                          | `src/views/online/OnlineFavorites.vue`                                                                                     |
 | 改随机抽卡（在线/离线混合 + 排除项）              | `src/views/RandomView.vue`、`backend/internal/handlers/random.go`、`services/eh_random.go`                                 |
+| 改 XP 词云（统计口径/权重/差分重建）              | `backend/internal/services/xp_cloud.go`、`models/xp_stat.go`、`handlers/xp_cloud.go`、`src/components/XpWordCloud.vue`、`src/views/offline/OfflineToplist.vue` |
+| 改偏好推荐（打分/采样/多样性/参数）               | `backend/internal/services/recommend.go`、`handlers/random.go`（mode=recommend）、`src/stores/recommendSettings.ts`、`src/views/RandomView.vue` |
 | 改订阅（独立抓取/日期跳页）                       | `src/views/online/OnlineSub.vue`、`stores/subStore.ts`、`components/DateJumpModal.vue`                                     |
 | 改榜单（4 种类型）                                | `src/views/online/OnlineTop.vue`、`components/ToplistTypeModal.vue`、`backend/internal/services/toplist.go`               |
 | 改阅读清单                                        | `src/views/ReadingListView.vue`、`stores/readingStore.ts`                                                                  |

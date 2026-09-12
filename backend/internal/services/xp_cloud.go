@@ -907,35 +907,66 @@ func (s *XpCloudService) meta(userID uint) (XpCloudMeta, error) {
 
 // ─── 标签展示名清洗 ───
 
-// EH Tag Translation 词典的 name 字段含 markdown 图标语法
-// （如 `![长筒袜图标](https://.../stockings.webp)长筒袜`），直接展示会出现整段 URL。
+// EH Tag Translation 词典的 name 字段质量参差，三类噪声需要清洗：
+//  1. markdown 图标语法（`![长筒袜图标](https://.../stockings.webp)长筒袜`）→ 会画出整段 URL
+//  2. emoji / ZWJ / 变体选择符（`精灵🧝‍♀️`、`马🐴`、`时间停止⏱️`）→ 彩色 emoji 打碎词云的字形统一
+//  3. 双语复合名（`sousou no frieren | frieren beyond journeys end`）→ 拉成长横条破坏词云块状结构
 var (
 	tagIconFullRe  = regexp.MustCompile(`!\[.*?\]\(.*?\)`)
 	tagIconLooseRe = regexp.MustCompile(`!\[[^\]]*\]`)
 	// alt 提取：兼容「完整图标 ![alt](url)」与「脏数据残片 ![alt]」（URL 部分可选）
 	tagIconAltRe = regexp.MustCompile(`!\[(.*?)\](?:\([^)]*\))?`)
+	// emoji / 变体选择符 / ZWJ / 组合键 / 杂项符号与箭头
+	// （保留中日韩文字、拉丁字母、数字与常见标点；含 ❤️ 这类符号）
+	tagEmojiRe = regexp.MustCompile(
+		`[\x{1F000}-\x{1FAFF}\x{1FB00}-\x{1FBFF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}` +
+			`\x{2190}-\x{21FF}\x{2300}-\x{23FF}\x{FE0E}\x{FE0F}\x{200D}\x{20E3}]`)
+	tagSpaceRe = regexp.MustCompile(`\s+`)
 )
 
-// CleanTagDisplayName 清洗标签展示名：① 完整图标 `![alt](url)` 整体剥离；
-// ② 脏数据残片 `![alt]`（无 url）同样剥离；③ 纯图标（剥离后无文本）时退回取 alt 文本。
+// CleanTagDisplayName 清洗标签展示名：
+//  1. 剥离 markdown 图标（完整图标与无 url 残片），纯图标时退回 alt 文本；
+//  2. 剥离 emoji / ZWJ / 变体选择符；
+//  3. 双语复合名（含 `|`）取**较短一侧**——长横条是词云排版的头号破坏者；
+//  4. 压缩连续空白。
 //
-// 第 ③ 步比前端 comicStore.cleanTagName 更宽松（前端对无 url 残片会返回空串并回退 tag key），
-// 但两者对"正常含文本"的词典数据结果一致；调用方仍应对空结果回退到 key。
+// 调用方仍应对空结果回退到 tag key。
 func CleanTagDisplayName(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return ""
 	}
+
 	cleaned := strings.TrimSpace(
 		tagIconLooseRe.ReplaceAllString(tagIconFullRe.ReplaceAllString(s, ""), ""),
 	)
-	if cleaned != "" {
-		return cleaned
+	if cleaned == "" {
+		m := tagIconAltRe.FindStringSubmatch(s)
+		if len(m) <= 1 {
+			return ""
+		}
+		cleaned = strings.TrimSpace(m[1])
 	}
-	if m := tagIconAltRe.FindStringSubmatch(s); len(m) > 1 {
-		return strings.TrimSpace(m[1])
+
+	cleaned = tagEmojiRe.ReplaceAllString(cleaned, "")
+
+	if strings.Contains(cleaned, "|") {
+		best := ""
+		for _, part := range strings.Split(cleaned, "|") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if best == "" || len([]rune(part)) < len([]rune(best)) {
+				best = part
+			}
+		}
+		if best != "" {
+			cleaned = best
+		}
 	}
-	return ""
+
+	return strings.TrimSpace(tagSpaceRe.ReplaceAllString(cleaned, " "))
 }
 
 // xpNormalize 归一化到 0~1（max 为 0 时返回 0）

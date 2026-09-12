@@ -521,7 +521,18 @@ func TestCleanTagDisplayName(t *testing.T) {
 		{`![](https://x/y.png)Fate/Grand Order`, "Fate/Grand Order"},
 		{`![大船](https://x/y.png)`, "大船"}, // 纯图标 → 退回 alt
 		{`![alt]`, "alt"},                // 残片（无 url）→ 退回 alt
-		{`巨乳`, "巨乳"},                     // 普通文本原样
+
+		// emoji / ZWJ / 变体选择符剥离（EH 词典中文名真实带这些）
+		{"精灵🧝‍♀️", "精灵"},
+		{"时间停止⏱️", "时间停止"},
+		{"马🐴", "马"},
+		{"接吻❤️", "接吻"},
+
+		// 双语复合名取较短一侧（长横条是词云排版的头号破坏者）
+		{"sousou no frieren | frieren beyond journeys end", "sousou no frieren"},
+		{"pokemon | pocket monsters", "pokemon"},
+
+		{`巨乳`, "巨乳"}, // 普通文本原样
 		{``, ""},
 	}
 	for _, c := range cases {

@@ -13,6 +13,7 @@ import (
 
 	"SakuManga/internal/middleware"
 	"SakuManga/internal/models"
+	"SakuManga/internal/services"
 )
 
 // LibraryHandler 书架 / 历史 / 评分 / 阅读清单（均按用户隔离，后端 DB 持久化）
@@ -759,6 +760,11 @@ func (h *LibraryHandler) AddHistory(c *gin.Context) {
 	// 上限淘汰（每用户每来源）
 	h.trimHistory(user.ID, models.ComicSource(req.Source))
 
+	// Round30：离线历史的近期性是阅读侧信号之一 → 增量重算该用户对该本的 XP 贡献
+	if req.Source == "offline" {
+		services.XpRecomposeComicForUser(user.ID, req.ComicID)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "历史已记录", "data": rec})
 }
 
@@ -896,7 +902,12 @@ func (h *LibraryHandler) SetComicRating(c *gin.Context) {
 
 	comicID := c.Param("comicId")
 	if req.Score <= 0 {
-		h.db.Where("user_id = ? AND comic_id = ?", user.ID, comicID).Delete(&models.ComicRating{})
+		if err := h.db.Where("user_id = ? AND comic_id = ?", user.ID, comicID).Delete(&models.ComicRating{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "评分清除失败"})
+			return
+		}
+		// Round30：评分是阅读侧信号之一 → 增量重算
+		services.XpRecomposeComicForUser(user.ID, comicID)
 		c.JSON(http.StatusOK, gin.H{"message": "评分已清除"})
 		return
 	}
@@ -914,6 +925,10 @@ func (h *LibraryHandler) SetComicRating(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存评分失败"})
 		return
 	}
+
+	// Round30：评分是阅读侧信号之一 → 增量重算
+	services.XpRecomposeComicForUser(user.ID, comicID)
+
 	c.JSON(http.StatusOK, gin.H{"message": "评分已保存", "score": r.Score})
 }
 
@@ -929,6 +944,10 @@ func (h *LibraryHandler) DeleteComicRating(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除评分失败"})
 		return
 	}
+
+	// Round30：评分是阅读侧信号之一 → 增量重算
+	services.XpRecomposeComicForUser(user.ID, c.Param("comicId"))
+
 	c.JSON(http.StatusOK, gin.H{"message": "评分已删除"})
 }
 

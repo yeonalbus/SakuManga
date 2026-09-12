@@ -1529,6 +1529,8 @@ func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	CleanupComicReferences(db, comicID, replacement)
 	// 需求4：删除记录视为书库变更，记录时间戳供「队列空闲>1min」自动增量维护查重判断。
 	MarkLibraryChanged()
+	// Round30：清掉该本在 XP 统计表中的贡献（删除路径统一走此处，含维护页批量删除）
+	XpRecomposeComic(comicID)
 	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
 	return nil
 }

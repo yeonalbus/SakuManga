@@ -62,6 +62,8 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 				"comic_count":  count,
 			})
 			log.Printf("%s [scan] 路径 %q 扫描完成：发现 %d 本漫画（mode=%s）", dlLogTag, path, count, mode)
+			// Round30：扫描会成批新增/更新/删除本地漫画 → 异步全量重建 XP 统计表
+			XpRebuildAsync("扫描")
 		} else {
 			log.Printf("%s [scan] 路径 %q 扫描失败: %v", dlErrTag, path, err)
 		}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"SakuManga/internal/database"
+	"SakuManga/internal/middleware"
 	"SakuManga/internal/models"
 	"SakuManga/internal/services"
 	"encoding/json"
@@ -447,6 +448,8 @@ func DeleteOfflineComic(c *gin.Context) {
 		return
 	}
 
+	// Round30：XP 统计贡献的清理由 services.DeleteOfflineComic 内部统一触发（覆盖维护页批量删除路径）
+
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
@@ -465,6 +468,12 @@ func RecordComicClick(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该漫画记录"})
 		return
 	}
+
+	// Round30：阅读次数是阅读侧多信号之一 → 增量重算该用户对该本的 XP 贡献
+	if user := middleware.CurrentUser(c); user != nil {
+		services.XpRecomposeComicForUser(user.ID, id)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true, "readCount": res.RowsAffected})
 }
 

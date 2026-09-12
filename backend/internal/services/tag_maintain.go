@@ -263,7 +263,12 @@ func (s *TagMaintainService) RefreshAllTags() (*TagRefreshResult, error) {
 		return nil, fmt.Errorf("已有 Tag 维护任务正在执行，请稍后再试")
 	}
 	defer s.endRun()
-	return s.refreshAllTagsLocked()
+	result, err := s.refreshAllTagsLocked()
+	// Round30：Tag 刷新直接改变 XP 词云的库藏贡献 → 收尾异步全量重建
+	if err == nil {
+		XpRebuildAsync("Tag 刷新")
+	}
+	return result, err
 }
 
 // refreshAllTagsLocked 实际刷新逻辑（调用方须持有 running 锁）
@@ -402,7 +407,12 @@ func (s *TagMaintainService) WritebackComicInfo() (*WritebackResult, error) {
 		return nil, fmt.Errorf("已有 Tag 维护任务正在执行，请稍后再试")
 	}
 	defer s.endRun()
-	return s.writebackLocked()
+	result, err := s.writebackLocked()
+	// Round30：写回不改变库内 Tag 口径（OnlineTags − RemoveTags），但编辑/恢复可能已变动 → 一并重建
+	if err == nil {
+		XpRebuildAsync("Tag 写回")
+	}
+	return result, err
 }
 
 // writebackLocked 实际写回逻辑

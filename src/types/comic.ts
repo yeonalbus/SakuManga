@@ -285,3 +285,50 @@ export interface ScrapeBookmark {
   } | null
   createdAt: number
 }
+
+// ==========================================
+// 8. XP 词云契约（Round32 阶段一）
+// ==========================================
+
+/** 词云视图：library=库藏（搜集广度）｜reading=阅读（真实消耗） */
+export type XpCloudView = 'library' | 'reading'
+
+/** 词云分组：core=核心 XP｜ip=角色原作｜misc=其他｜all=全部（含画师） */
+export type XpCloudGroup = 'core' | 'ip' | 'misc' | 'all'
+
+/** 词云词条 */
+export interface XpCloudTag {
+  namespace: string
+  key: string
+  name: string // 中文翻译（词典缺失时回退 key）
+  group: 'core' | 'ip' | 'misc'
+  weight: number // 当前视图归一权重（0~1，字号依据）
+  libWeight: number // 库藏视图归一权重
+  readWeight: number // 阅读视图归一权重
+  comicCount: number // 含该 tag 的本数
+}
+
+/** 画师/社团条目（不进词云，独立 Top 列表） */
+export interface XpCloudArtist {
+  namespace: string
+  key: string
+  name: string
+  comicCount: number
+  readWeight: number
+}
+
+/** 统计元信息（覆盖率提示 / 重算入口用） */
+export interface XpCloudMeta {
+  totalComics: number // 本地库总本数
+  taggedComics: number // 参与统计（有有效 tag）的本数
+  readSignalComics: number // 阅读信号非零的本数
+  lastRebuildAt: number // 上次全量重建时间戳(ms)
+  formulaVersion: number
+}
+
+/** 词云查询响应 */
+export interface XpCloudResult {
+  tags: XpCloudTag[]
+  artists: XpCloudArtist[]
+  meta: XpCloudMeta
+}

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onActivated, nextTick } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { computed, onMounted, onActivated, nextTick, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import ItemCard from '@/components/ItemCard.vue'
 // 🟢 1. 从 comicStore 引入真实的全局离线漫画数据
 import { offlineComics } from '@/stores/comicStore'
-import type { OfflineComic } from '@/types/comic'
+import type { OfflineComic, XpCloudArtist, XpCloudGroup, XpCloudResult, XpCloudTag, XpCloudView } from '@/types/comic'
 import { detectDeviceClass } from '@/utils/device'
 // Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
 import {
@@ -13,6 +13,15 @@ import {
   setListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
+// Round32 阶段一：XP 词云面板
+import XpWordCloud from '@/components/XpWordCloud.vue'
+import ArtistTopList from '@/components/ArtistTopList.vue'
+import { fetchXpCloudApi, rebuildXpCloudApi } from '@/api/xpCloud'
+import { formatFSearchTag } from '@/utils/tagFilter'
+import { offlineSearchConfig } from '@/stores/searchStore'
+import { useModeStore } from '@/stores/modeStore'
+import { useUserStore } from '@/stores/userStore'
+import { useUI } from '@/composables/useUI'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
@@ -77,76 +86,273 @@ onBeforeRouteLeave(() => {
     page: 1,
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// Round32 阶段一：XP 词云面板
+//
+// 数据源：后端统计表（/offline/xp-cloud），阅读侧按当前用户隔离。
+// 视图（库藏/阅读）× 分组（核心XP/角色原作/其他）四组合结果按需拉取并缓存。
+// ─────────────────────────────────────────────────────────────
+
+const router = useRouter()
+const modeStore = useModeStore()
+const { isAdmin } = useUserStore()
+const { toast } = useUI()
+
+type PanelTab = 'rank' | 'cloud'
+
+const activeTab = ref<PanelTab>('rank')
+const cloudView = ref<XpCloudView>('library')
+const cloudGroup = ref<Exclude<XpCloudGroup, 'all'>>('core')
+const cloudLoading = ref(false)
+const cloudError = ref('')
+const cloudData = ref<XpCloudResult | null>(null)
+const rebuilding = ref(false)
+
+/** 组合结果缓存（key = view:group） */
+const cloudCache = new Map<string, XpCloudResult>()
+
+const loadCloud = async (force = false) => {
+  const key = `${cloudView.value}:${cloudGroup.value}`
+  if (!force && cloudCache.has(key)) {
+    cloudData.value = cloudCache.get(key) as XpCloudResult
+    return
+  }
+  cloudLoading.value = true
+  cloudError.value = ''
+  try {
+    const result = await fetchXpCloudApi({
+      group: cloudGroup.value,
+      view: cloudView.value,
+      limit: 140,
+    })
+    cloudCache.set(key, result)
+    cloudData.value = result
+  } catch (err) {
+    cloudError.value = err instanceof Error ? err.message : '词云统计加载失败'
+    cloudData.value = null
+  } finally {
+    cloudLoading.value = false
+  }
+}
+
+// 首次进入词云页时才拉取（默认标签页不产生额外请求）
+watch(activeTab, (tab) => {
+  if (tab === 'cloud' && !cloudData.value) void loadCloud()
+})
+watch([cloudView, cloudGroup], () => {
+  if (activeTab.value === 'cloud') void loadCloud()
+})
+
+/** 覆盖率提示：阅读信号过于稀疏时提醒以库藏视图为主 */
+const coverageHint = computed(() => {
+  const meta = cloudData.value?.meta
+  if (!meta || meta.totalComics === 0) return ''
+  const ratio = meta.readSignalComics / meta.totalComics
+  if (cloudView.value !== 'reading') return ''
+  if (ratio >= 0.05) return ''
+  return `阅读信号仅覆盖 ${meta.readSignalComics} / ${meta.totalComics} 本（多读几本后会更准确），当前建议以「库藏」视图为主`
+})
+
+/** 词条/画师点击：按当前模式走既有快捷搜索语义（离线带关键词跳首页，在线跳搜索页） */
+const quickSearch = (namespace: string, key: string) => {
+  const queryTag = formatFSearchTag(namespace, key, false)
+  if (modeStore.isOffline) {
+    offlineSearchConfig.value.keyword = queryTag
+    if (router.currentRoute.value.path !== '/offline/home') router.push('/offline/home')
+  } else {
+    router.push({ path: '/online/home', query: { kw: queryTag } })
+  }
+}
+
+const handleTagSelect = (tag: XpCloudTag) => quickSearch(tag.namespace, tag.key)
+const handleArtistSelect = (artist: XpCloudArtist) => quickSearch(artist.namespace, artist.key)
+
+/** 管理员：全量重算统计表（公式调整/异常兜底） */
+const handleRebuild = async () => {
+  if (rebuilding.value) return
+  rebuilding.value = true
+  try {
+    await rebuildXpCloudApi()
+    cloudCache.clear()
+    await loadCloud(true)
+    toast.success('XP 统计已重算')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '重算失败')
+  } finally {
+    rebuilding.value = false
+  }
+}
+
+const lastRebuildText = computed(() => {
+  const ts = cloudData.value?.meta.lastRebuildAt || 0
+  if (!ts) return '尚未重建'
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+})
 </script>
 
 <template>
   <div class="leaderboard-page">
-    <h2 class="page-title">📊 本地个人阅读频次榜 (TOP 25)</h2>
-
-    <div v-if="!isMobileDevice" class="podium-section">
-      <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
-        <div class="podium-crown">🥈 NO.2</div>
-        <ItemCard
-          :comic="topThree[1]"
-          :rank="2"
-          size="large"
-          mode="card"
-          :hide-subtitle="true"
-          :hide-tags="true"
-          :hide-bottom-meta="true"
-          :title-lines="2"
-        />
-        <div class="read-count">{{ getComicReadCount(topThree[1]) }} 次阅读</div>
-      </div>
-
-      <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
-        <div class="podium-crown crown-gold">👑 NO.1</div>
-        <ItemCard
-          :comic="topThree[0]"
-          :rank="1"
-          size="large"
-          mode="card"
-          :hide-subtitle="true"
-          :hide-tags="true"
-          :hide-bottom-meta="true"
-          :title-lines="2"
-        />
-        <div class="read-count gold-text">{{ getComicReadCount(topThree[0]) }} 次阅读</div>
-      </div>
-
-      <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
-        <div class="podium-crown">🥉 NO.3</div>
-        <ItemCard
-          :comic="topThree[2]"
-          :rank="3"
-          size="large"
-          mode="card"
-          :hide-subtitle="true"
-          :hide-tags="true"
-          :hide-bottom-meta="true"
-          :title-lines="2"
-        />
-        <div class="read-count">{{ getComicReadCount(topThree[2]) }} 次阅读</div>
-      </div>
+    <!-- Round32：榜单 / 词云 双视图切换 -->
+    <div class="panel-switch">
+      <button
+        class="switch-btn"
+        :class="{ active: activeTab === 'rank' }"
+        @click="activeTab = 'rank'"
+      >
+        📊 阅读榜
+      </button>
+      <button
+        class="switch-btn"
+        :class="{ active: activeTab === 'cloud' }"
+        @click="activeTab = 'cloud'"
+      >
+        ☁️ XP 词云
+      </button>
     </div>
 
-    <div v-if="restItemsForView.length > 0" class="rest-section">
-      <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
-      <div class="card-grid">
-        <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
+    <template v-if="activeTab === 'rank'">
+      <h2 class="page-title">📊 本地个人阅读频次榜 (TOP 25)</h2>
+
+      <div v-if="!isMobileDevice" class="podium-section">
+        <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
+          <div class="podium-crown">🥈 NO.2</div>
           <ItemCard
-            :comic="item"
-            :rank="item.rank"
+            :comic="topThree[1]"
+            :rank="2"
+            size="large"
             mode="card"
             :hide-subtitle="true"
             :hide-tags="true"
             :hide-bottom-meta="true"
             :title-lines="2"
           />
-          <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
+          <div class="read-count">{{ getComicReadCount(topThree[1]) }} 次阅读</div>
+        </div>
+
+        <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
+          <div class="podium-crown crown-gold">👑 NO.1</div>
+          <ItemCard
+            :comic="topThree[0]"
+            :rank="1"
+            size="large"
+            mode="card"
+            :hide-subtitle="true"
+            :hide-tags="true"
+            :hide-bottom-meta="true"
+            :title-lines="2"
+          />
+          <div class="read-count gold-text">{{ getComicReadCount(topThree[0]) }} 次阅读</div>
+        </div>
+
+        <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
+          <div class="podium-crown">🥉 NO.3</div>
+          <ItemCard
+            :comic="topThree[2]"
+            :rank="3"
+            size="large"
+            mode="card"
+            :hide-subtitle="true"
+            :hide-tags="true"
+            :hide-bottom-meta="true"
+            :title-lines="2"
+          />
+          <div class="read-count">{{ getComicReadCount(topThree[2]) }} 次阅读</div>
         </div>
       </div>
-    </div>
+
+      <div v-if="restItemsForView.length > 0" class="rest-section">
+        <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
+        <div class="card-grid">
+          <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
+            <ItemCard
+              :comic="item"
+              :rank="item.rank"
+              mode="card"
+              :hide-subtitle="true"
+              :hide-tags="true"
+              :hide-bottom-meta="true"
+              :title-lines="2"
+            />
+            <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ─── XP 词云面板 ─── -->
+    <template v-else>
+      <h2 class="page-title">☁️ XP 词云</h2>
+
+      <div class="cloud-toolbar">
+        <div class="segmented">
+          <button
+            class="seg-btn"
+            :class="{ active: cloudView === 'library' }"
+            @click="cloudView = 'library'"
+          >
+            库藏
+          </button>
+          <button
+            class="seg-btn"
+            :class="{ active: cloudView === 'reading' }"
+            @click="cloudView = 'reading'"
+          >
+            阅读
+          </button>
+        </div>
+        <div class="segmented">
+          <button
+            class="seg-btn"
+            :class="{ active: cloudGroup === 'core' }"
+            @click="cloudGroup = 'core'"
+          >
+            核心 XP
+          </button>
+          <button class="seg-btn" :class="{ active: cloudGroup === 'ip' }" @click="cloudGroup = 'ip'">
+            角色 / 原作
+          </button>
+          <button
+            class="seg-btn"
+            :class="{ active: cloudGroup === 'misc' }"
+            @click="cloudGroup = 'misc'"
+          >
+            其他
+          </button>
+        </div>
+      </div>
+
+      <div v-if="coverageHint" class="cloud-hint">💡 {{ coverageHint }}</div>
+
+      <div v-if="cloudLoading" class="cloud-state">统计加载中…</div>
+      <div v-else-if="cloudError" class="cloud-state error">
+        {{ cloudError }}
+        <button class="retry-btn" @click="loadCloud(true)">重试</button>
+      </div>
+      <div v-else-if="cloudData" class="cloud-body">
+        <XpWordCloud :tags="cloudData.tags" :height="isMobileDevice ? 300 : 400" @select="handleTagSelect" />
+
+        <ArtistTopList :artists="cloudData.artists" @select="handleArtistSelect" />
+
+        <div class="cloud-meta">
+          <span>
+            库藏 {{ cloudData.meta.taggedComics }} / {{ cloudData.meta.totalComics }} 本参与统计 ·
+            阅读信号 {{ cloudData.meta.readSignalComics }} 本
+          </span>
+          <span class="meta-right">
+            上次重算 {{ lastRebuildText }}
+            <button v-if="isAdmin" class="rebuild-btn" :disabled="rebuilding" @click="handleRebuild">
+              {{ rebuilding ? '重算中…' : '重算统计' }}
+            </button>
+          </span>
+        </div>
+        <p class="cloud-tip">
+          点击词条可直接搜索本地库；「阅读」视图按阅读次数 + 历史近期性 + 个人评分加权。
+        </p>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -157,6 +363,141 @@ onBeforeRouteLeave(() => {
   gap: 24px;
   padding: 20px;
   padding-bottom: 30px;
+}
+
+/* ─── 顶部双视图切换 ─── */
+.panel-switch {
+  display: flex;
+  gap: 8px;
+}
+
+.switch-btn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-2);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.switch-btn:hover {
+  color: var(--app-text-strong);
+}
+
+.switch-btn.active {
+  background: var(--app-accent, #4d9cff);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ─── 词云面板 ─── */
+.cloud-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-2);
+  background: var(--app-bg-2, transparent);
+}
+
+.seg-btn {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.seg-btn:hover {
+  color: var(--app-text-strong);
+}
+
+.seg-btn.active {
+  background: var(--app-accent, #4d9cff);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cloud-hint {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #ffb74d;
+  background: rgba(255, 183, 77, 0.1);
+  color: var(--app-text-2);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.cloud-state {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--app-text-3);
+  font-size: 0.85rem;
+}
+
+.cloud-state.error {
+  color: #ff8a80;
+}
+
+.retry-btn,
+.rebuild-btn {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-2);
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.retry-btn:hover,
+.rebuild-btn:hover:not(:disabled) {
+  color: var(--app-text-strong);
+}
+
+.rebuild-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cloud-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.cloud-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+}
+
+.meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-tip {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+  line-height: 1.6;
 }
 
 .page-title {
@@ -249,6 +590,25 @@ onBeforeRouteLeave(() => {
 
   .page-title {
     font-size: 1.05rem;
+  }
+
+  .switch-btn {
+    flex: 1;
+    padding: 7px 10px;
+    font-size: 0.85rem;
+  }
+
+  .cloud-toolbar {
+    gap: 8px;
+  }
+
+  .seg-btn {
+    padding: 5px 9px;
+    font-size: 0.78rem;
+  }
+
+  .cloud-meta {
+    flex-direction: column;
   }
 
   .podium-section {

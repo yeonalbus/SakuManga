@@ -7,6 +7,7 @@ import { useModeStore } from '@/stores/modeStore'
 import { offlineSearchConfig } from '@/stores/searchStore'
 // 🎯 f_search 标准语法格式化：在线按 E-Hentai 规范（namespace:"key$"），离线保持裸格式
 import { formatFSearchTag } from '@/utils/tagFilter'
+import { tagBgColor } from '@/utils/tagColor'
 import { isStandalonePWA } from '@/utils/detailNav'
 
 export interface TagData {
@@ -88,29 +89,7 @@ const displayName = computed(() => {
   return cleanKey
 })
 
-// E 站分类调色盘
-const getBgColor = (ns: string) => {
-  switch ((ns || '').toLowerCase()) {
-    case 'artist':
-      return '#c62828'
-    case 'group':
-      return '#ad1457'
-    case 'character':
-      return '#2e7d32'
-    case 'parody':
-      return '#00838f'
-    case 'female':
-      return '#ad1457'
-    case 'male':
-      return '#1565c0'
-    case 'reclass':
-      return '#4527a0'
-    case 'language':
-      return '#424242'
-    default:
-      return '#37474f'
-  }
-}
+// E 站分类调色盘：抽取到 utils/tagColor.ts，供 TagChip 与 XP 词云共用（避免两套色板漂移）
 
 // 🎯 点击 Tag 快捷搜索：根据所在域更新 Store 并回归列表页。
 // 搜索联想下拉里（disableQuickSearch=true）需禁用：
@@ -150,7 +129,7 @@ const handleClick = () => {
 <template>
   <span
     class="tag-chip"
-    :style="{ backgroundColor: getBgColor(tagData.namespace) }"
+    :style="{ backgroundColor: tagBgColor(tagData.namespace) }"
     @click="onClick"
   >
     <span v-if="tagData.namespace && tagData.namespace !== 'other'" class="tag-namespace">

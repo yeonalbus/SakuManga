@@ -99,7 +99,7 @@ func TestScrapeBookmarkNormalizeLenient(t *testing.T) {
 
 	// 宽松归一化（BUG2 教训：不因坏字段拒收/丢数据）
 	created, err := CreateScrapeBookmark(db, user, ScrapeBookmarkInput{
-		Name:    "   ",          // 空名 → 默认名
+		Name:    "   ",          // Round29：空名合法（留空 → 前端展示位置+发布时间）
 		Type:    "unknown-type", // 非法类型 → home
 		Keyword: "  kw  ",
 		Config:  json.RawMessage(`"corrupt-string"`), // 非对象 → {}
@@ -108,8 +108,8 @@ func TestScrapeBookmarkNormalizeLenient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("宽松创建失败: %v", err)
 	}
-	if created.Name != "未命名书签" {
-		t.Fatalf("空名应兜底默认名: %q", created.Name)
+	if created.Name != "" {
+		t.Fatalf("空名应保持空串（前端展示位置+时间）: %q", created.Name)
 	}
 	if created.Type != "home" {
 		t.Fatalf("非法类型应兜底 home: %q", created.Type)

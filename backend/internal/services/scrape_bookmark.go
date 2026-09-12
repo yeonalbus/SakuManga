@@ -45,10 +45,8 @@ type ScrapeBookmarkInput struct {
 
 // normalizeScrapeBookmark 宽松归一化：坏字段兜底，不拒绝（防丢数据）。
 func normalizeScrapeBookmark(in ScrapeBookmarkInput) (name, typ string, config, anchor string) {
+	// Round29：名称允许为空——留空时前端改展示「位置 + 发布时间」，不再自动生成默认名
 	name = strings.TrimSpace(in.Name)
-	if name == "" {
-		name = "未命名书签"
-	}
 	typ = in.Type
 	if typ != "search" {
 		typ = "home" // 仅 home/search 两种，其余归 home

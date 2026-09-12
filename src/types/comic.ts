@@ -267,11 +267,13 @@ export type ScrapeBookmarkType = 'home' | 'search'
 /**
  * 搜刮书签：某次在线浏览的「位置快照」。
  * - config：创建时深拷贝的搜索/筛选状态（onlineSearchConfig 全量）
- * - anchor：锚定的画廊卡片（gid/token/title），跳转后滚动定位 + 视觉突出；null=纯位置快照
+ * - anchor：锚定的画廊卡片（gid/token/title/postedAt），跳转后滚动定位 + 视觉突出
+ *   Round29：锚定改为必需（去掉「仅保存位置」），postedAt = 锚定画廊发布时间
+ *   （E 站卡片 posted 日期，取自 OnlineComic.updatedAt），供侧栏展示「位置 + 时间」
  */
 export interface ScrapeBookmark {
   id: string // 唯一标识（bm_ 前缀）
-  name: string // 自定义名称
+  name: string // 自定义名称（可为空串：留空时侧栏展示位置 + 发布时间）
   type: ScrapeBookmarkType
   keyword: string // type=search 时的搜索词（冗余于 config.keyword，便于侧栏展示）
   config: SearchConfig // 创建时深拷贝快照
@@ -279,6 +281,7 @@ export interface ScrapeBookmark {
     gid: string
     token?: string
     title?: string
+    postedAt?: string // 锚定画廊发布时间（如 "2026-09-12 01:20"）
   } | null
   createdAt: number
 }

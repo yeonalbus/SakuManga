@@ -6,6 +6,7 @@ import {
   scrapeBookmarks,
   removeScrapeBookmark,
   failedAnchorGids,
+  bookmarkLocationLabel,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
@@ -36,6 +37,32 @@ const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
 /** 某书签是否已在本会话内确认锚点失效（⚠️ 标记） */
 const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
   !!bm.anchor && failedAnchorGids.value.has(bm.anchor.gid)
+
+// ─── Round29：双行展示（行1 名称/位置，行2 发布时间 · 位置）───
+
+/** 行1 主文本：用户填了名称则显示名称，否则显示位置（首页 / 搜索: xxx） */
+const primaryText = (bm: ScrapeBookmark): string =>
+  bm.name.trim() || bookmarkLocationLabel(bm)
+
+/** 行2 发布时间（锚定画廊的 E 站 posted 日期；老书签可能没有） */
+const postedText = (bm: ScrapeBookmark): string => bm.anchor?.postedAt?.trim() || ''
+
+/** 行2 位置：仅当行1 已被名称占用时才补显示位置，避免重复 */
+const secondaryLocation = (bm: ScrapeBookmark): string =>
+  bm.name.trim() ? bookmarkLocationLabel(bm) : ''
+
+/** 悬停提示：完整信息（位置 + 时间 + 锚定画廊标题） */
+const bookmarkTooltip = (bm: ScrapeBookmark): string => {
+  if (isAnchorFailed(bm)) {
+    return `⚠️ 锚定画廊已失效（可能被删除或更换）——${bm.anchor?.title || bm.anchor?.gid}`
+  }
+  const parts: string[] = [bookmarkLocationLabel(bm)]
+  const posted = postedText(bm)
+  if (posted) parts.push(posted)
+  if (bm.anchor?.title) parts.push(bm.anchor.title)
+  else if (!bm.anchor) parts.push('未锚定卡片')
+  return parts.join(' · ') + '（点击跳转）'
+}
 </script>
 
 <template>
@@ -49,7 +76,7 @@ const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
     <router-link to="/online/history">历史记录</router-link>
   </div>
 
-  <!-- 🔖 搜刮书签（Round27）：点击跳转恢复位置，hover 显示删除 -->
+  <!-- 🔖 搜刮书签（Round27 / Round29 双行展示）：点击跳转恢复位置，hover 显示删除 -->
   <div class="nav-group">
     <span class="group-title">🔖 书签</span>
     <template v-if="scrapeBookmarks.length > 0">
@@ -58,19 +85,25 @@ const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
         :key="bm.id"
         class="bookmark-item"
         :class="{ 'anchor-failed': isAnchorFailed(bm) }"
-        :title="
-          isAnchorFailed(bm)
-            ? `⚠️ 锚定画廊已失效（可能被删除或更换）——${bm.anchor?.title || bm.anchor?.gid}`
-            : bm.anchor
-              ? `锚定画廊: ${bm.anchor.title || bm.anchor.gid}（点击跳转）`
-              : '未锚定卡片（点击跳转）'
-        "
+        :title="bookmarkTooltip(bm)"
         @click="handleBookmarkJump(bm)"
       >
-        <span class="bm-icon">{{ bm.type === 'search' ? '🔍' : '🏠' }}</span>
-        <span class="bm-warn" v-if="isAnchorFailed(bm)" title="锚定画廊已失效">⚠️</span>
-        <span class="bm-name">{{ bm.name }}</span>
-        <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
+        <!-- 行1：位置/名称 + 失效标记 + 删除 -->
+        <span class="bm-line1">
+          <span class="bm-icon">{{ bm.type === 'search' ? '🔍' : '🏠' }}</span>
+          <span v-if="isAnchorFailed(bm)" class="bm-warn" title="锚定画廊已失效">⚠️</span>
+          <span class="bm-primary">{{ primaryText(bm) }}</span>
+          <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
+        </span>
+        <!-- 行2：发布时间（老书签无时间时退化为位置） -->
+        <span v-if="postedText(bm) || secondaryLocation(bm)" class="bm-line2">
+          <span v-if="postedText(bm)" class="bm-time" :title="`锚定画廊发布时间 ${postedText(bm)}`">
+            📅 {{ postedText(bm) }}
+          </span>
+          <span v-if="secondaryLocation(bm)" class="bm-loc" :title="secondaryLocation(bm)">
+            📍 {{ secondaryLocation(bm) }}
+          </span>
+        </span>
       </button>
     </template>
     <span v-else class="bm-empty">暂无书签</span>
@@ -86,16 +119,16 @@ const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
 </template>
 
 <style scoped>
-/* 书签按钮：与 App.vue 的 .nav-menu a 视觉一致 */
+/* 书签按钮：与 App.vue 的 .nav-menu a 视觉一致；Round29 改双行布局（行1 位置/名称，行2 时间·位置） */
 .bookmark-item {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
   width: 100%;
   background: transparent;
   border: none;
   color: var(--app-text-2);
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 6px;
   font-size: 0.9rem;
   margin-bottom: 2px;
@@ -107,6 +140,15 @@ const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
 .bookmark-item:hover {
   background-color: var(--app-surface-hover);
   color: var(--app-fg);
+}
+
+/* 行1：icon + 主文本 + 删除按钮 */
+.bm-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .bm-icon {
@@ -121,15 +163,34 @@ const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
   opacity: 0.9;
 }
 
-/* 失效书签整体弱化 + 名称斜体，提示不再可跳转定位 */
-.bookmark-item.anchor-failed .bm-name {
+/* 失效书签整体弱化 + 主文本划线，提示不再可跳转定位 */
+.bookmark-item.anchor-failed .bm-primary {
   color: var(--app-text-muted);
   text-decoration: line-through;
 }
 
-.bm-name {
+.bm-primary {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 行2：发布时间 + 位置（小字次要色，缩进对齐 icon 之后的文本列） */
+.bm-line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 20px;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+.bm-time,
+.bm-loc {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

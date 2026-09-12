@@ -63,6 +63,7 @@ const restoreAnchor = (raw: unknown): ScrapeBookmark['anchor'] => {
     gid: a.gid,
     token: typeof a.token === 'string' ? a.token : undefined,
     title: typeof a.title === 'string' ? a.title : undefined,
+    postedAt: typeof a.postedAt === 'string' ? a.postedAt : undefined,
   }
 }
 
@@ -72,7 +73,8 @@ const fromRaw = (raw: unknown): ScrapeBookmark | null => {
   const r = raw as Record<string, unknown>
   return {
     id: typeof r.id === 'string' || typeof r.id === 'number' ? String(r.id) : genBookmarkId(),
-    name: typeof r.name === 'string' && r.name.trim() ? r.name : '未命名书签',
+    // Round29：名称允许空串（留空时侧栏改展示「位置 + 发布时间」）
+    name: typeof r.name === 'string' ? r.name : '',
     type: r.type === 'search' ? 'search' : 'home',
     keyword: typeof r.keyword === 'string' ? r.keyword : '',
     config: restoreConfig(r.config),
@@ -114,6 +116,17 @@ export const failedAnchorGids = ref<Set<string>>(new Set())
 export const markAnchorFailed = (gid: string): void => {
   if (!gid) return
   failedAnchorGids.value = new Set(failedAnchorGids.value).add(gid)
+}
+
+// ─── 展示辅助（Round29：位置 + 发布时间）───
+
+/**
+ * 书签位置标签：`搜索: <词>` 或 `首页`。
+ * 供侧栏/弹窗展示「上次搜刮到了哪里」（页面上下文 = 搜索词 + 筛选状态）。
+ */
+export const bookmarkLocationLabel = (bm: Pick<ScrapeBookmark, 'type' | 'keyword'>): string => {
+  const kw = (bm.keyword || '').trim()
+  return bm.type === 'search' && kw ? `搜索: ${kw}` : '首页'
 }
 
 // ─── 深拷贝与快照（不变）───
@@ -210,17 +223,10 @@ export const addScrapeBookmark = async (
   config: SearchConfig,
   anchor: ScrapeBookmark['anchor'],
 ): Promise<ScrapeBookmark | null> => {
-  const trimmed = name.trim()
   const temp: ScrapeBookmark = {
     id: genBookmarkId(),
-    name:
-      trimmed ||
-      (type === 'search'
-        ? `搜索: ${keyword.trim() || '未命名'}`
-        : `首页快照 ${new Date().toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}`),
+    // Round29：名称默认留空（不再自动生成「首页快照 HH:MM」）——留空时侧栏展示「位置 + 发布时间」
+    name: name.trim(),
     type,
     keyword,
     config: cloneSearchConfig(config),

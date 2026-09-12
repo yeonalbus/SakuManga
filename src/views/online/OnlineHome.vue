@@ -16,6 +16,7 @@ import {
   snapshotOnlineSearchConfig,
   cloneSearchConfig,
   markAnchorFailed,
+  bookmarkLocationLabel,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
@@ -189,60 +190,55 @@ watch(
   },
 )
 
-// ─── Round27：搜刮书签创建流程 ───
+// ─── Round27/Round29：搜刮书签创建流程（锚定即创建）───
 const bmModalOpen = ref(false)
 const pickMode = ref(false) // 锚定卡片拾取模式
-const pickDraft = ref<{ name: string }>({ name: '' })
+/** 已拾取待确认的锚定信息（点卡片后写入，弹窗确认时使用） */
+const pendingAnchor = ref<ScrapeBookmark['anchor']>(null)
 
-// 书签表单信息：类型 / 搜索词 / 默认名称（基于当前生效搜索配置）
+// 书签位置信息：类型 / 搜索词（基于当前生效搜索配置）
 const bmType = computed<'home' | 'search'>(() =>
   onlineSearchConfig.value.keyword?.trim() ? 'search' : 'home',
 )
 const bmKeyword = computed(() => onlineSearchConfig.value.keyword?.trim() || '')
-const bmDefaultName = computed(() => {
-  if (bmType.value === 'search') {
-    const kw = bmKeyword.value
-    return `搜索: ${kw.length > 18 ? `${kw.slice(0, 18)}…` : kw}`
-  }
-  const now = new Date()
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  return `首页快照 ${hh}:${mm}`
-})
+/** 位置标签（首页 / 搜索: xxx），与侧栏展示共用同一实现 */
+const bmLocationLabel = computed(() =>
+  bookmarkLocationLabel({ type: bmType.value, keyword: bmKeyword.value }),
+)
 
+// Round29：点「存为书签」直接进入拾取模式（弹窗推迟到选中卡片后出现）
 const handleBookmarkCreate = () => {
-  pickMode.value = false
-  bmModalOpen.value = true
-}
-
-// 进入拾取模式：弹窗收起，等待用户点击列表卡片
-const handlePickStart = (draft: { name: string }) => {
-  pickDraft.value = draft
+  pendingAnchor.value = null
   bmModalOpen.value = false
   pickMode.value = true
 }
 
-// 创建书签统一出口（拾取锚定 / 仅保存位置共用）
-// Round28：后端化后 addScrapeBookmark 为异步（乐观 + 失败回滚），失败返回 null 并已提示
-const handleBookmarkSave = async (payload: { name: string; anchor: ScrapeBookmark['anchor'] }) => {
+// 创建书签（弹窗「确认」）：Round28 后端化为异步（乐观 + 失败回滚），失败返回 null 并已提示
+const handleBookmarkSave = async (payload: { name: string }) => {
+  const anchor = pendingAnchor.value
+  if (!anchor) return // 未锚定不应走到这里（按钮已不提供纯位置保存）
   const bm = await addScrapeBookmark(
     payload.name,
     bmType.value,
     bmKeyword.value,
     snapshotOnlineSearchConfig(),
-    payload.anchor,
+    anchor,
   )
   if (!bm) return // 保存失败已由 store toast 提示
   bmModalOpen.value = false
   pickMode.value = false
-  toast.success(
-    payload.anchor
-      ? `书签「${bm.name}」已保存，已锚定该卡片`
-      : `书签「${bm.name}」已保存（未锚定卡片）`,
-  )
+  pendingAnchor.value = null
+  toast.success(`书签已保存（${bmLocationLabel.value}）`)
 }
 
-// 拾取模式点击拦截（capture 阶段：命中卡片 → 锚定创建；空白 → 取消拾取回弹窗）
+// 弹窗「取消」：回到拾取模式，可改锚定其他卡片
+const handleBookmarkCancel = () => {
+  bmModalOpen.value = false
+  pendingAnchor.value = null
+  pickMode.value = true
+}
+
+// 拾取模式点击拦截（capture 阶段：命中卡片 → 记录锚定并弹出确认窗；空白 → 退出拾取）
 const handlePickClick = (e: MouseEvent) => {
   if (!pickMode.value) return
   const target = e.target as HTMLElement
@@ -251,19 +247,22 @@ const handlePickClick = (e: MouseEvent) => {
     e.stopPropagation()
     const gid = card.dataset.gid || ''
     const comic = filteredComics.value.find((c) => c.id === gid)
-    const anchor: ScrapeBookmark['anchor'] = comic
+    // Round29：自动记录锚定画廊的发布时间（E 站 posted 日期 → OnlineComic.updatedAt）
+    pendingAnchor.value = comic
       ? {
           gid,
           token: comic.source === 'online' ? comic.token : undefined,
           title: comic.title,
+          postedAt: comic.updatedAt || undefined,
         }
       : { gid }
-    handleBookmarkSave({ name: pickDraft.value.name, anchor })
+    // 弹窗此时才出现（展示自动记录的位置 + 发布时间）
+    pickMode.value = false
+    bmModalOpen.value = true
     return
   }
-  // 点击空白：取消拾取，回弹窗（保留输入）
+  // 点击空白：退出拾取
   pickMode.value = false
-  bmModalOpen.value = true
 }
 
 // Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无限滚动，page 恒为 1）
@@ -384,14 +383,15 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Round27：搜刮书签创建弹窗 -->
+    <!-- Round27/Round29：搜刮书签确认弹窗（点卡片后出现，自动带出位置 + 发布时间） -->
     <BookmarkCreateModal
       :show="bmModalOpen"
       :type="bmType"
       :keyword="bmKeyword"
-      :default-name="bmDefaultName"
-      @close="bmModalOpen = false"
-      @pick="handlePickStart"
+      :location-label="bmLocationLabel"
+      :anchor-title="pendingAnchor?.title"
+      :posted-at="pendingAnchor?.postedAt"
+      @close="handleBookmarkCancel"
       @create="handleBookmarkSave"
     />
   </div>

@@ -36,6 +36,12 @@ const props = withDefaults(
     fromHistory?: boolean
     /** Round27：被搜刮书签锚定 → 常驻 🔖 角标 + 金色边框（GridContainer 按 bookmarkedGids 透传） */
     bookmarked?: boolean
+    /** Round29：卡片模式隐藏 TAG 行（本地排行榜：卡片只保留标题） */
+    hideTags?: boolean
+    /** Round29：卡片模式隐藏底部 meta 行（评分 / 语言标识 / 来源标识） */
+    hideBottomMeta?: boolean
+    /** Round29：标题固定占位行数（默认 1=不额外占位；传 2 则单行标题也占满两行高度） */
+    titleLines?: number
   }>(),
   {
     size: 'normal',
@@ -46,6 +52,9 @@ const props = withDefaults(
     hideSubtitle: false,
     fromHistory: false,
     bookmarked: false,
+    hideTags: false,
+    hideBottomMeta: false,
+    titleLines: 1,
   },
 )
 
@@ -582,7 +591,13 @@ const comicSourceBadge = computed(() => {
 
       <div class="card-info-footer">
         <div class="card-title-wrap">
-          <h4 class="card-title" :title="displayTitle || comic.title">{{ displayTitle }}</h4>
+          <h4
+            class="card-title"
+            :style="titleLines > 1 ? { '--title-lines': String(titleLines) } : undefined"
+            :title="displayTitle || comic.title"
+          >
+            {{ displayTitle }}
+          </h4>
           <!-- 🏆 排行榜大卡片（size=large，仅领奖台使用）：只显示主标题，隐藏副标题，
                避免「日语标题 + 中文副标题」双标题把卡片撑高撑宽（离线 NO.1 过大的 Bug）。
                Round3-任务3：hideSubtitle 用于排行榜普通卡片同样只保留单一标题 -->
@@ -593,10 +608,10 @@ const comicSourceBadge = computed(() => {
             >{{ subTitle }}</span
           >
         </div>
-        <div class="card-tags-row">
+        <div v-if="!hideTags" class="card-tags-row">
           <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" />
         </div>
-        <div class="card-bottom-meta">
+        <div v-if="!hideBottomMeta" class="card-bottom-meta">
           <span class="rating">⭐ {{ displayRating ? displayRating.toFixed(1) : '—' }}</span>
           <span v-if="languageLabel" class="lang-tag">{{ languageLabel }}</span>
           <span v-else class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
@@ -994,6 +1009,9 @@ const comicSourceBadge = computed(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.3;
+  /* Round29：--title-lines>1（如排行榜传 2）时固定占位高度——
+     单行标题也占满两行，避免卡片高度参差；最多仍截断 2 行 */
+  min-height: calc(var(--title-lines, 1) * 1.3em);
 }
 
 .card-subtitle {

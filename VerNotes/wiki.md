@@ -3,7 +3,7 @@
 > 本手册为 SakuManga 用户答疑集合，结构参考 JHenTai Wiki FAQ，内容结合本项目实际功能重写。
 > 遇到问题先翻这里；仍无法解决，欢迎提交 Issue（附版本号 + 操作步骤 + 日志/截图）。
 >
-> 阅读顺序建议：新手先读「一、快速上手」与「三、本地导入」，遇网络问题看「四、网络」，其余按需查阅。
+> 阅读顺序建议：新手先读「一、快速上手」与「三、本地导入」，遇网络问题看「四、网络」，需要用 Docker 部署看「九、Docker 部署」，其余按需查阅。
 
 ---
 
@@ -19,6 +19,7 @@
 不需要。本质是一个本地 exe，默认只在本机 `127.0.0.1:8081` 提供服务。
 - 想手机 / 局域网访问：把监听地址改为 `0.0.0.0`（「设置 → 账户 → 服务器」），同一局域网用 `http://<电脑IP>:8081` 访问。
 - 想公网 / 长期运行：部署到 NAS / 服务器，用 `SakuManga.exe --headless` 纯后端模式运行。
+- 想在 NAS / 群晖 / 威联通上以 **Docker** 方式部署：见「九、Docker 部署」。
 
 **Q: 双击 exe 后打不开界面 / 不知道访问什么？**
 确认浏览器地址栏输入的是 `http://127.0.0.1:8081`（不是 `https`、不是别的端口）。若端口被占用，程序会自动切换空闲端口，日志（或托盘菜单）会提示实际端口。
@@ -217,3 +218,97 @@ E 站按 UTC 存储时间，程序按系统时区展示，存在时区差。检�
 
 **Q: 数据存在哪里？升级会丢数据吗？**
 `manga.db`（数据库）/ `data/`（标签数据）/ `config.json`（配置）都跟随 exe 目录存放。升级安装**直接替换 exe 即可**，数据自动保留；数据库结构由启动时自动迁移，无需手动处理。
+
+---
+
+## 九、Docker 部署
+
+> ⚠️ **免责声明（务必先读）**：项目目前**没有官方 Docker 镜像**，本节的 Dockerfile 是按仓库实际结构编写、由项目作者整理的**社区方案**；作者本地没有 Docker 环境，**未实测构建**，遇到问题可能无法及时排查与解答。若你跑通了或踩到坑，欢迎在 Issue 中反馈（附 Docker 版本 + 报错日志），帮助完善本节内容。
+>
+> 官方分发方式仍是 Windows 单文件 `SakuManga.exe`（双击即用）；Docker 部署适合 NAS / 群晖 / 威联通 / Linux 服务器等长期运行场景，等价于 `SakuManga.exe --headless` 纯后端模式。
+
+**Q: 怎么用 Docker 部署？**
+
+后端是纯 Go + 内嵌前端（`backend/webui/dist` 已随仓库维护），默认监听 `0.0.0.0:8081`，非 Windows 平台托盘为无操作实现，因此可以静态编译为一个小体积镜像——**构建阶段不需要 Node**。
+
+**① 准备**：`git clone` 本仓库（或用 Release 的 Source code 包），在仓库根目录新建下面两个文件。
+
+`Dockerfile`：
+
+```dockerfile
+# ── 构建阶段：仓库已入库 backend/webui/dist（前端产物），无需 Node ──
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /SakuManga .
+
+# ── 运行阶段 ──
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/*
+ENV TZ=Asia/Shanghai
+COPY --from=build /SakuManga /opt/SakuManga/SakuManga
+COPY docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+WORKDIR /app
+EXPOSE 8081
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+`docker-entrypoint.sh`：
+
+```sh
+#!/bin/sh
+set -e
+# 程序会把 manga.db / config.json / data / logs 落在自身所在目录，
+# 因此二进制每次启动复制到数据目录 /app，数据全部留在挂载卷里。
+cp -f /opt/SakuManga/SakuManga /app/SakuManga
+chmod +x /app/SakuManga
+exec /app/SakuManga --headless
+```
+
+**② 构建与运行**：
+
+```bash
+docker build -t sakumanga:2.1.0 .
+
+# 数据目录换成你自己的（群晖一般放在 /volume1/docker/ 下）
+mkdir -p /volume1/docker/sakumanga
+
+docker run -d --name sakumanga --restart unless-stopped \
+  -p 8081:8081 \
+  -v /volume1/docker/sakumanga:/app \
+  sakumanga:2.1.0
+```
+
+访问 `http://<NAS_IP>:8081`，首次启动自动创建管理员 `admin` / `admin123`，登录后请尽快在「设置 → 账户」修改密码并绑定 E 站凭证。
+
+**③ 也可以直接写 `docker-compose.yml`**（放在仓库根目录，`docker compose up -d --build`）：
+
+```yaml
+services:
+  sakumanga:
+    build: .
+    image: sakumanga:2.1.0
+    container_name: sakumanga
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./sakumanga-data:/app
+    environment:
+      - TZ=Asia/Shanghai
+```
+
+**Q: Docker 部署要注意什么？**
+- **数据持久化**：`manga.db`（含 SQLite 的 `-wal` / `-shm` 文件）、`config.json`、`data/`（标签库缓存）、`logs/` 全部落在挂载卷 `/app` 里，删除 / 重建容器不丢数据。**不要把数据目录里的文件单独挂载**（例如只挂 `manga.db` 单文件），否则 SQLite 的 `-wal` 文件留在容器层，重建容器可能丢数据；整目录挂载最稳。
+- **升级**：重新 `docker build` 后 `docker rm -f sakumanga` 再执行一次上面的 `docker run`（数据保留），或 `docker compose up -d --build`。新版本号对应的镜像 tag 可自行调整（如 `sakumanga:2.1.0` → `2.2.0`）。
+- **代理**：容器内访问 E 站若超时，在「设置 → E 站连接 → 网络」里**显式填写宿主机代理**（如 `http://172.17.0.1:7897`；群晖 / Macvlan 场景用宿主局域网 IP）。设置页留空时程序会尝试跟随「系统代理」，而容器内探测不到宿主系统的代理设置，因此建议手动填。
+- **首次启动会联网**拉取标签库（来自 GitHub，落在 `data/` 下）：容器无网络时不影响启动，只是标签汉化 / 联想为空，可稍后手动同步。
+- **改了前端源码**：先在本地 `npm run build` 并把根目录 `dist/` 拷进 `backend/webui/dist/`，再构建镜像（或自行在 Dockerfile 里加一个 `node:22` 构建阶段）。
+- **构建上下文**：仓库含 `node_modules` 等大目录，建议加一个 `.dockerignore` 排除 `node_modules`、`dist`、`.git`、`Test`、`MangaExamlpe`、`Server`、`manga.db*`、`*.exe`；**注意不要排除 `backend/webui/dist`**，镜像构建依赖它。
+- **PWA 加到手机主屏**需要 https（局域网直接 http 访问不行），建议套一层反向代理并配证书。
+- **权限**：首次运行会向挂载目录写入数据库与缓存，确保容器对 `/app` 有写权限（Linux 下注意目录属主）。

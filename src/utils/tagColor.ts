@@ -46,7 +46,9 @@ const GROUP_MAP: Record<string, XpGroupKey> = {
   female: 'core',
   male: 'core',
   mixed: 'core',
-  other: 'core',
+  // Round32：other 归「其他」分组——它是标记/元信息命名空间（马赛克修正、无修正、全彩等），
+  // 不反映体态/属性偏好；核心 XP 只保留 female / male / mixed。
+  other: 'misc',
   character: 'ip',
   parody: 'ip',
   artist: 'artist',

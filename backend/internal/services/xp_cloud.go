@@ -39,8 +39,12 @@ import (
 const (
 	// XpSchemaVersion 统计数据结构版本（表结构变更时递增 → 触发全量重建）
 	XpSchemaVersion = 1
-	// XpFormulaVersion 权重公式版本（公式调整时递增 → 触发全量重建）
-	XpFormulaVersion = 1
+	// XpFormulaVersion 权重公式/分组口径版本（调整时递增 → 触发全量重建）
+	//
+	// v2（2026-09-12）：other 命名空间从「核心 XP」移入「其他」分组（决策更新）——
+	// 实测 other:mosaic censorship（629 本）等元信息型 tag 会挤进核心 XP 前列，
+	// 而核心 XP 应只反映体态/属性/玩法本身。
+	XpFormulaVersion = 2
 
 	// xpWeightCacheTTL 权重表内存缓存有效期（推荐抽卡高频读取，避免每次重扫统计表）
 	xpWeightCacheTTL = 60 * time.Second
@@ -56,8 +60,16 @@ const (
 )
 
 // XP 词云命名空间分组
+//
+// 分组语义：
+//
+//	core   核心 XP —— 体态/属性/玩法（female / male / mixed）
+//	ip     角色与原作（character / parody）
+//	artist 画师与社团（不进词云，独立 Top 列表）
+//	misc   其他 —— other 元信息（马赛克修正/无修正/全彩等）与 location 等未知命名空间
+//	skip   不参与统计（language / reclass）
 var (
-	xpCoreNamespaces   = map[string]bool{"female": true, "male": true, "mixed": true, "other": true}
+	xpCoreNamespaces   = map[string]bool{"female": true, "male": true, "mixed": true}
 	xpIPNamespaces     = map[string]bool{"character": true, "parody": true}
 	xpArtistNamespaces = map[string]bool{"artist": true, "group": true}
 	xpSkipNamespaces   = map[string]bool{"language": true, "reclass": true}
@@ -65,14 +77,16 @@ var (
 
 // xpGroupNamespaces 分组 → 参与统计的命名空间集合（SQL IN 过滤用）
 var xpGroupNamespaces = map[string][]string{
-	"core":   {"female", "male", "mixed", "other"},
+	"core":   {"female", "male", "mixed"},
 	"ip":     {"character", "parody"},
 	"artist": {"artist", "group"},
 }
 
 // xpMiscExcludeNamespaces 「其他」分组排除的已知命名空间（其余未知命名空间一律归入 misc）
+//
+// 注意：other 不在排除之列——它本身就属于「其他」分组。
 var xpMiscExcludeNamespaces = []string{
-	"female", "male", "mixed", "other",
+	"female", "male", "mixed",
 	"character", "parody",
 	"artist", "group",
 	"language", "reclass",

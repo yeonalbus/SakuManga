@@ -97,7 +97,8 @@ func TestSplitXpTagAndGroup(t *testing.T) {
 		{"language:chinese", "language", "chinese", "skip"},
 		{"reclass:something", "reclass", "something", "skip"},
 		{"location:outdoors", "location", "outdoors", "misc"},
-		{"裸词", "other", "裸词", "core"}, // 无冒号 → other（other 属核心 XP 组）
+		{"other:mosaic censorship", "other", "mosaic censorship", "misc"}, // 元信息型 → 其他分组
+		{"裸词", "other", "裸词", "misc"},                                     // 无冒号 → other（归「其他」分组）
 		{"", "", "", "skip"},
 		{"female:", "", "", "skip"},
 	}
@@ -430,7 +431,7 @@ func TestXpQueryGroupsAndMeta(t *testing.T) {
 	}
 	if err := db.Create(&models.OfflineComic{
 		ID: "c1", LocalPath: "p1", ReadCount: 2,
-		OnlineTags: `["female:ahegao","character:arisu tachibana","location:outdoors","artist:aaa","language:chinese"]`,
+		OnlineTags: `["female:ahegao","character:arisu tachibana","location:outdoors","artist:aaa","language:chinese","other:mosaic censorship"]`,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -448,6 +449,12 @@ func TestXpQueryGroupsAndMeta(t *testing.T) {
 	if core.Tags[0].Name == "" {
 		t.Fatal("词条缺少展示名（翻译回退失败）")
 	}
+	// 决策更新：核心 XP 只含 female/male/mixed，other 元信息型 tag 不得出现在核心 XP
+	for _, tag := range core.Tags {
+		if tag.Namespace == "other" {
+			t.Fatalf("other 命名空间不应出现在核心 XP 分组：%+v", tag)
+		}
+	}
 
 	ip, err := svc.Query(user.ID, "ip", "library", 50)
 	if err != nil {
@@ -457,12 +464,23 @@ func TestXpQueryGroupsAndMeta(t *testing.T) {
 		t.Fatalf("ip 分组词条不符：%+v", ip.Tags)
 	}
 
+	// 「其他」分组 = other 元信息 + location 等未知命名空间
 	misc, err := svc.Query(user.ID, "misc", "library", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(misc.Tags) != 1 || misc.Tags[0].Namespace != "location" {
-		t.Fatalf("misc 分组应只含未知命名空间（location），实得 %+v", misc.Tags)
+	if len(misc.Tags) != 2 {
+		t.Fatalf("misc 分组应含 other 与 location 两条，实得 %+v", misc.Tags)
+	}
+	nsSet := map[string]bool{}
+	for _, tag := range misc.Tags {
+		nsSet[tag.Namespace] = true
+		if tag.Group != "misc" {
+			t.Fatalf("misc 分组词条的 group 字段应为 misc：%+v", tag)
+		}
+	}
+	if !nsSet["other"] || !nsSet["location"] {
+		t.Fatalf("misc 分组命名空间不符：%v", nsSet)
 	}
 
 	// 画师/社团不进词云，进 artists 列表
@@ -502,8 +520,8 @@ func TestCleanTagDisplayName(t *testing.T) {
 		},
 		{`![](https://x/y.png)Fate/Grand Order`, "Fate/Grand Order"},
 		{`![大船](https://x/y.png)`, "大船"}, // 纯图标 → 退回 alt
-		{`![alt]`, "alt"},               // 残片（无 url）→ 退回 alt
-		{`巨乳`, "巨乳"},                   // 普通文本原样
+		{`![alt]`, "alt"},                // 残片（无 url）→ 退回 alt
+		{`巨乳`, "巨乳"},                     // 普通文本原样
 		{``, ""},
 	}
 	for _, c := range cases {

@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v2.0.1 · 最近更新：2026-08
+> 版本：v2.1.0 · 最近更新：2026-09
 
 ## 一、目录总览
 
@@ -13,7 +13,7 @@ SakuManga/
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / verify-round*.mjs 回归验证）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── plans/                          # 功能开发方案文档（Round1~27）
+├── plans/                          # 功能开发方案文档（Round1~33）
 ├── VerNotes/                       # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程
 ├── 计划书/                          # 项目规划文档（已弃用）
 ├── 学习笔记/                        # 学习笔记（已弃用）
@@ -62,7 +62,7 @@ src/
 │   ├── OnlineDetailPanel.vue       # 在线详情紧凑面板（宽屏右分栏/窄屏全屏）
 │   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
 │   ├── BookshelfPickerOverlay.vue  # 全部书架检索/多选加入书架浮层（Round13）
-│   ├── BookmarkCreateModal.vue     # 书签抓取弹窗（Round27：导入 E 站书签）
+│   ├── BookmarkCreateModal.vue     # 搜刮书签创建弹窗（Round27~29：拾取卡片即记录发布时间与位置）
 │   ├── XpWordCloud.vue             # XP 词云（Round32：Canvas 自研螺旋布局，库藏/阅读双视图）
 │   ├── ArtistTopList.vue           # 画师/社团 Top 列表（Round32：从词云体系剥离的独立榜单）
 │   ├── common/
@@ -93,7 +93,7 @@ src/
 │   ├── historyStore.ts             # 阅读历史（在线/离线）+ 收藏状态联动 + 进度回传
 │   ├── readingStore.ts             # 阅读清单队列（在线/离线）
 │   ├── ratingStore.ts              # 个人评分映射（1-5 星，按用户隔离）
-│   ├── scrapeBookmarksStore.ts     # E 站书签抓取（Round27）
+│   ├── scrapeBookmarksStore.ts     # 搜刮书签（Round27~28：后端多端同步 + 乐观更新 + 旧数据迁移）
 │   ├── comicStore.ts               # 离线漫画数据源 + 阅读统计 + 删除管理
 │   ├── searchStore.ts              # 在线/离线/订阅搜索筛选配置（作用域隔离）
 │   ├── onlineStore.ts              # 在线画廊主列表（游标加载）
@@ -227,6 +227,7 @@ backend/
     │   ├── reading_list.go         # 阅读清单模型
     │   ├── ignore.go               # Round26 O2：忽略标记模型（title/gid 两型）
     │   ├── xp_stat.go              # Round32：XP 词云统计模型（单本快照/tag 聚合/元信息）
+    │   ├── scrape_bookmark.go      # Round28：搜刮书签模型（按用户隔离，config/anchor 以 JSON 落库）
     │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
@@ -260,6 +261,7 @@ backend/
     │   ├── client_log.go           # 前端错误日志上报/大小查询/清除
     │   ├── log.go                  # 服务端日志（四类日志查询/监控）
     │   ├── xp_cloud.go             # Round32：XP 词云查询 / 统计重算接口
+    │   ├── scrape_bookmark.go      # Round28：搜刮书签 CRUD（列表 / 创建 / 重命名 / 删除）
     │   └── network_handler.go      # 网络/代理配置
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
@@ -294,7 +296,7 @@ backend/
         ├── archive_chunk.go        # 归档分块下载（Range 探测/断点续传/.bits）
         ├── archive_thread_pool.go  # 全局下载并发额度池（归档+画廊统一门控）
         ├── offline.go              # 离线更新/查重/老化判定/删除持久化
-        ├── offline_task.go         # 离线维护任务结果缓存（stale 失效机制）
+        ├── offline_task.go         # 离线维护任务结果缓存（stale 失效 + Round33 忽略/删除后定向同步）
         ├── offline_removed.go      # 画廊被删/版权移除状态持久化与过滤
         ├── ignore.go               # Round26 O2：忽略标记（title/gid 两型 CRUD + 查重索引）
         ├── dedup_title.go          # Round26 O3：名称级疑似重复（清洗/判定/决策 + 簇输出）
@@ -312,10 +314,11 @@ backend/
         ├── tag_maintain.go         # Tag 维护服务
         ├── tag_scheduler.go        # Tag 维护定时调度
         ├── xp_cloud.go             # Round32 阶段一：XP 词云统计（合并口径/稀释加权/差分/重建/查询）
-        └── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
+        ├── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
+        └── scrape_bookmark.go      # Round28：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD）
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
 
 ---
 
@@ -360,7 +363,7 @@ backend/
 | 改离线历史 gid 合并去重/孤儿剔除                   | `stores/historyStore.ts`、`backend/internal/handlers/library.go`、`services/comic_refs.go`                                |
 | 改书架 404 自愈/弹窗粘滞                           | `views/ComicReader.vue`、`views/offline/OfflineDetail.vue`、`stores/comicStore.ts`、`router/index.ts`                     |
 | 改画质升级（/upgrade）                             | `views/UpgradeView.vue`、`backend/internal/handlers/upgrade.go`、`services/upgrade.go`                                   |
-| 改书签抓取（Round27）                              | `components/BookmarkCreateModal.vue`、`stores/scrapeBookmarksStore.ts`、`plans/round27-scrape-bookmark-plan.md`           |
+| 改搜刮书签（Round27~29）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`plans/round27-scrape-bookmark-plan.md` |
 | 改阅读器书签/章节（Round24）                       | `views/ComicReader.vue`、`components/reader/ReaderSidebar.vue`、`services/comic_mark.go`、`models/comic_mark.go`          |
 | 改隐藏页（Round24）                                | `views/offline/OfflineDetail.vue`、`services/page_hide.go`、`handlers/comic.go`（hidden-pages）                           |
 | 改书架拖拽排序（LexoRank）                         | `components/OfflineSidebar.vue`、`components/BookshelfPickerOverlay.vue`、`utils/lexoRank.ts`、`stores/bookshelfStore.ts` |
@@ -385,6 +388,7 @@ backend/
 | 改更新扫描（周扫描/老化）  | `backend/internal/handlers/update_scan.go`、`services/update_scheduler.go`、`offline.go`（AgedStatus） |
 | 改离线更新/维护/删除标记   | `backend/internal/handlers/offline.go`、`services/offline.go`、`offline_task.go`、`offline_removed.go` |
 | 改维护查重/忽略标记（O2） | `backend/internal/handlers/offline.go`（ignore 三接口）、`services/ignore.go`、`models/ignore.go`、`src/views/offline/OfflineMaintain.vue` |
+| 改「忽略/删除后即时生效」（Round33） | `services/offline_task.go`（`SyncMaintainDedupClusters` / `InvalidateMaintainDedupResult`）、`services/maintain_auto.go`（`StoreMaintainDedupResult`）、`handlers/offline.go`（ignore/restore/remove 三入口）、`maintain_result_sync_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改疑似重复聚类（O3）      | `services/dedup_title.go`（清洗/判定/决策 + 簇）、`dedup_title_test.go`、`offline_dedup_e2e_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改 E 站请求限流           | `backend/internal/services/eh_ratelimit.go`（自适应：成功提速/失败退避）                              |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
@@ -425,9 +429,9 @@ backend/
 
 ---
 
-## 六、发布注意（v2.0.0）
+## 六、发布注意（v2.1.0）
 
-- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.0.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`（当前已对齐为 `2.0.0`）。
+- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.1.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuManga.exe --headless` 纯后端运行。
 - **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。

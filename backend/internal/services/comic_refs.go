@@ -78,6 +78,7 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 	}
 
 	// 2. 书架 comicIds（全用户扫描，数量级小）
+	//    Round38：同时同步手动指定的封面引用（cover_comic_id）——替换则迁移，删除则清空回退自动封面
 	var shelves []models.Bookshelf
 	if err := db.Find(&shelves).Error; err == nil {
 		for i := range shelves {
@@ -97,6 +98,17 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 			if changed {
 				shelves[i].ComicIDs = joinComicIDsJSON(out)
 				shelves[i].Count = len(out)
+			}
+			// 封面引用同步（Round38）
+			if shelves[i].CoverComicID != "" && shelves[i].CoverComicID == oldID {
+				if newID != "" {
+					shelves[i].CoverComicID = newID
+				} else {
+					shelves[i].CoverComicID = "" // 本子已删除 → 回退自动封面
+				}
+				changed = true
+			}
+			if changed {
 				if err := db.Save(&shelves[i]).Error; err != nil {
 					logWarn("CleanupComicReferences: 更新书架失败 shelf=%s: %v", shelves[i].ID, err)
 				}

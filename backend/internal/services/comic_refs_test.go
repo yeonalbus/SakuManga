@@ -44,7 +44,7 @@ func TestCleanupComicReferencesMigrate(t *testing.T) {
 	now := time.Now()
 	db.Create(&models.HistoryRecord{UserID: userID, ComicID: "old-md5", GID: "12345", Source: models.SourceOffline, LastReadAt: now})
 	db.Create(&models.HistoryRecord{UserID: userID, ComicID: "new-md5", GID: "12345", Source: models.SourceOffline, LastReadAt: now})
-	db.Create(&models.Bookshelf{ID: "s1", UserID: userID, Name: "A", ComicIDs: `["old-md5","other"]`, Count: 2})
+	db.Create(&models.Bookshelf{ID: "s1", UserID: userID, Name: "A", ComicIDs: `["old-md5","other"]`, Count: 2, CoverComicID: "old-md5"})
 	db.Create(&models.ReadingList{UserID: userID, Source: string(models.SourceOffline), Items: `[{"id":"old-md5","title":"x"},{"id":"other","title":"y"}]`})
 
 	CleanupComicReferences(db, "old-md5", "new-md5")
@@ -68,6 +68,10 @@ func TestCleanupComicReferencesMigrate(t *testing.T) {
 	if len(ids) != 2 || ids[0] != "new-md5" || ids[1] != "other" {
 		t.Errorf("书架 comicIds 迁移错误: %v", ids)
 	}
+	// Round38：手动指定的封面引用同步迁移
+	if shelf.CoverComicID != "new-md5" {
+		t.Errorf("书架封面应迁移为 new-md5，得到 %q", shelf.CoverComicID)
+	}
 
 	// 3. 离线阅读清单：id 字段迁移
 	var rl models.ReadingList
@@ -84,7 +88,8 @@ func TestCleanupComicReferencesDelete(t *testing.T) {
 	db.Create(&models.HistoryRecord{UserID: userID, ComicID: "gone-id", Source: models.SourceOffline, LastReadAt: time.Now()})
 	// 在线来源的历史不受影响（comic_id 即 gid，不随本地路径变化）
 	db.Create(&models.HistoryRecord{UserID: userID, ComicID: "4045732", Source: models.SourceOnline, LastReadAt: time.Now()})
-	db.Create(&models.Bookshelf{ID: "s2", UserID: userID, Name: "B", ComicIDs: `["gone-id","keep"]`, Count: 2})
+	db.Create(&models.Bookshelf{ID: "s2", UserID: userID, Name: "B", ComicIDs: `["gone-id","keep"]`, Count: 2, CoverComicID: "gone-id"})
+	db.Create(&models.Bookshelf{ID: "s3", UserID: userID, Name: "C", ComicIDs: `["gone-id","keep"]`, Count: 2, CoverComicID: "keep"})
 	db.Create(&models.ReadingList{UserID: userID, Source: string(models.SourceOffline), Items: `[{"id":"gone-id"}]`})
 
 	CleanupComicReferences(db, "gone-id", "")
@@ -100,6 +105,16 @@ func TestCleanupComicReferencesDelete(t *testing.T) {
 	ids := parseComicIDsJSON(shelf.ComicIDs)
 	if len(ids) != 1 || ids[0] != "keep" {
 		t.Errorf("书架应剔除 gone-id: %v", ids)
+	}
+	// Round38：被删除本子若正是手指定封面 → 清空回退自动封面
+	if shelf.CoverComicID != "" {
+		t.Errorf("封面指向被删除本子时应清空，得到 %q", shelf.CoverComicID)
+	}
+	// 封面指向其他本子 → 不受影响
+	var shelfOther models.Bookshelf
+	db.First(&shelfOther, "id = ?", "s3")
+	if shelfOther.CoverComicID != "keep" {
+		t.Errorf("封面指向其他本子应保持不变，得到 %q", shelfOther.CoverComicID)
 	}
 
 	var rl models.ReadingList

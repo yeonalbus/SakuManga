@@ -458,11 +458,128 @@ func TestGetBookshelvesUnreadAndCover(t *testing.T) {
 // Round38：loadBookshelfStats 空书架集合不触发查询、返回空统计
 func TestLoadBookshelfStatsEmpty(t *testing.T) {
 	db, _ := newLibraryTestDB(t)
-	stats := loadBookshelfStats(db, map[string][]string{"s1": {}})
+	stats := loadBookshelfStats(db, map[string][]string{"s1": {}}, map[string]string{})
 	if len(stats) != 1 {
 		t.Fatalf("空书架也应有一条统计: %+v", stats)
 	}
 	if st := stats["s1"]; st.unread != 0 || st.coverURL != "" {
 		t.Fatalf("空书架统计应为零值: %+v", st)
+	}
+}
+
+// Round38-R5：手动指定封面优先，指定项失效/非本架时回退自动封面
+func TestGetBookshelvesManualCover(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	comics := []models.OfflineComic{
+		{ID: "c1", Title: "第一本", LocalPath: "p1", CoverURL: "/cover/c1"},
+		{ID: "c2", Title: "第二本", LocalPath: "p2", CoverURL: "/cover/c2"},
+		{ID: "c3", Title: "非本架", LocalPath: "p3", CoverURL: "/cover/c3"},
+	}
+	if err := db.Create(&comics).Error; err != nil {
+		t.Fatalf("插入本子失败: %v", err)
+	}
+	shelf := seedShelf(t, db, 1, "A", []string{"c1", "c2"})
+	if err := db.Model(&shelf).Update("sort_keys", `{"c1":1000,"c2":2000}`).Error; err != nil {
+		t.Fatalf("更新权值失败: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/bookshelves", authAs(db, 1), h.GetBookshelves)
+	fetchCover := func() string {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/bookshelves", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("查询返回 %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Bookshelves []struct {
+				CoverURL     string `json:"coverUrl"`
+				CoverComicID string `json:"coverComicId"`
+			} `json:"bookshelves"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("解析响应失败: %v", err)
+		}
+		if len(resp.Bookshelves) != 1 {
+			t.Fatalf("应只有 1 个书架: %+v", resp.Bookshelves)
+		}
+		return resp.Bookshelves[0].CoverURL
+	}
+
+	// 未指定 → 自动取展示顺序第一本
+	if got := fetchCover(); got != "/cover/c1" {
+		t.Fatalf("未指定时应取第一本封面，得到 %q", got)
+	}
+	// 指定第二本 → 覆盖自动结果
+	if err := db.Model(&shelf).Update("cover_comic_id", "c2").Error; err != nil {
+		t.Fatalf("设置手指定封面失败: %v", err)
+	}
+	if got := fetchCover(); got != "/cover/c2" {
+		t.Fatalf("指定 c2 后封面应为 /cover/c2，得到 %q", got)
+	}
+	// 指定非本架本子 → 回退自动（不信任脏数据）
+	if err := db.Model(&shelf).Update("cover_comic_id", "c3").Error; err != nil {
+		t.Fatalf("设置非法封面失败: %v", err)
+	}
+	if got := fetchCover(); got != "/cover/c1" {
+		t.Fatalf("指定非本架本子应回退自动封面，得到 %q", got)
+	}
+	// 指定已失效 id → 回退自动
+	if err := db.Model(&shelf).Update("cover_comic_id", "ghost").Error; err != nil {
+		t.Fatalf("设置失效封面失败: %v", err)
+	}
+	if got := fetchCover(); got != "/cover/c1" {
+		t.Fatalf("指定失效 id 应回退自动封面，得到 %q", got)
+	}
+}
+
+// Round38-R5：PUT /bookshelves/:id/cover 设置/清除封面 + 归属校验 + 跨用户隔离
+func TestSetBookshelfCover(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	comics := []models.OfflineComic{
+		{ID: "c1", Title: "第一本", LocalPath: "p1", CoverURL: "/cover/c1"},
+		{ID: "c2", Title: "第二本", LocalPath: "p2", CoverURL: "/cover/c2"},
+	}
+	if err := db.Create(&comics).Error; err != nil {
+		t.Fatalf("插入本子失败: %v", err)
+	}
+	shelf := seedShelf(t, db, 1, "A", []string{"c1"})
+
+	r := gin.New()
+	r.PUT("/bookshelves/:id/cover", authAs(db, 1), h.SetBookshelfCover)
+
+	put := func(id, body string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/bookshelves/"+id+"/cover", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// 非本架本子 → 400
+	if code := put(shelf.ID, `{"comicId":"c2"}`); code != http.StatusBadRequest {
+		t.Fatalf("非本架本子应返回 400，得到 %d", code)
+	}
+	// 架内本子 → 200 且落库
+	if code := put(shelf.ID, `{"comicId":"c1"}`); code != http.StatusOK {
+		t.Fatalf("架内本子应返回 200，得到 %d", code)
+	}
+	var stored models.Bookshelf
+	db.First(&stored, "id = ?", shelf.ID)
+	if stored.CoverComicID != "c1" {
+		t.Fatalf("封面应落库为 c1: %q", stored.CoverComicID)
+	}
+	// 空串 → 恢复自动（清空）
+	if code := put(shelf.ID, `{"comicId":""}`); code != http.StatusOK {
+		t.Fatalf("清空封面应返回 200，得到 %d", code)
+	}
+	db.First(&stored, "id = ?", shelf.ID)
+	if stored.CoverComicID != "" {
+		t.Fatalf("清空后封面应为空串: %q", stored.CoverComicID)
+	}
+	// 他人书架 → 404
+	other := seedShelf(t, db, 2, "B", []string{"c1"})
+	if code := put(other.ID, `{"comicId":"c1"}`); code != http.StatusNotFound {
+		t.Fatalf("他人书架应返回 404，得到 %d", code)
 	}
 }

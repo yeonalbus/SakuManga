@@ -209,6 +209,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// Round13：书架置顶 / 批量加入
 		api.PUT("/bookshelves/:id/pin", libraryHandler.SetBookshelfPinned)
 		api.POST("/bookshelves/:id/comics/batch", libraryHandler.BatchAddComicsToBookshelf)
+		// Round38：书架封面手动指定（comicId 空串 = 恢复自动封面「架内第一本」）
+		api.PUT("/bookshelves/:id/cover", libraryHandler.SetBookshelfCover)
 		api.POST("/bookshelves/reorder", libraryHandler.ReorderBookshelves)
 
 		// 历史（按用户隔离 + 上限淘汰）

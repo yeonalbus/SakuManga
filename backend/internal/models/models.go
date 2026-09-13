@@ -133,6 +133,8 @@ type Bookshelf struct {
 	// Round22：LexoRank 浮点权值排序
 	SortKey  float64 `gorm:"default:0" json:"sortKey"`  // 书架列表权值（单书架移动只更新此项，取代全量 sort_order 重写）
 	SortKeys string  `gorm:"type:text" json:"sortKeys"` // 书架内本子权值表 JSON: {"<comicId>": <weight>}；缺失权值的项回退 comicIds 数组顺序
+	// Round38：手动指定的书架封面（存架内本子 id，空 = 自动取展示顺序第一本；AutoMigrate 自动加列）
+	CoverComicID string `gorm:"type:text" json:"coverComicId"`
 }
 
 // HistoryRecord 历史记录项（按用户隔离）

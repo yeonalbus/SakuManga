@@ -110,7 +110,14 @@ type comicStatRow struct {
 // loadBookshelfStats 汇总多个书架的未读数与封面（Round38）：
 // 一次 SELECT ... WHERE id IN ? 取回全部架内本子，再按各书架的展示顺序内存聚合。
 // 架内已失效的 comicId（本子已被删除）不计入未读、也不作为封面来源。
-func loadBookshelfStats(db *gorm.DB, orderedByShelf map[string][]string) map[string]bookshelfStat {
+//
+// coverByShelf（Round38-R5）：书架手动指定的封面本子 id；仅当该本子仍存在、属于该书架
+// 且带封面地址时优先采用，否则回退「展示顺序中第一个带封面的本子」。
+func loadBookshelfStats(
+	db *gorm.DB,
+	orderedByShelf map[string][]string,
+	coverByShelf map[string]string,
+) map[string]bookshelfStat {
 	stats := make(map[string]bookshelfStat, len(orderedByShelf))
 	idSet := make(map[string]struct{})
 	for _, ids := range orderedByShelf {
@@ -142,6 +149,12 @@ func loadBookshelfStats(db *gorm.DB, orderedByShelf map[string][]string) map[str
 
 	for shelfID, ids := range orderedByShelf {
 		st := bookshelfStat{}
+		// 手动指定封面优先
+		if cid := coverByShelf[shelfID]; cid != "" && containsComicID(ids, cid) {
+			if _, alive := readCount[cid]; alive && coverURL[cid] != "" {
+				st.coverURL = coverURL[cid]
+			}
+		}
 		for _, id := range ids {
 			rc, ok := readCount[id]
 			if !ok {
@@ -157,6 +170,16 @@ func loadBookshelfStats(db *gorm.DB, orderedByShelf map[string][]string) map[str
 		stats[shelfID] = st
 	}
 	return stats
+}
+
+// containsComicID 判断 id 是否在列表内
+func containsComicID(ids []string, id string) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
 }
 
 // historyLimit 读取每用户历史记录上限（可配置，默认 200）
@@ -203,12 +226,14 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 	// 避免前端拿到字符串后调用 .filter/.includes 抛错（comicIds.filter is not a function）
 	// Round38：先解析各书架展示顺序（权值序），供响应与未读/封面统计共用
 	ordered := make(map[string][]string, len(shelves))
+	coverByShelf := make(map[string]string, len(shelves))
 	for i := range shelves {
 		ids := parseComicIDs(shelves[i].ComicIDs)
 		ordered[shelves[i].ID] = sortedComicIDs(ids, parseSortKeys(shelves[i].SortKeys))
+		coverByShelf[shelves[i].ID] = shelves[i].CoverComicID
 	}
 	// Round38：书架墙所需的未读数与封面（一次 IN 查询聚合）
-	stats := loadBookshelfStats(h.db, ordered)
+	stats := loadBookshelfStats(h.db, ordered, coverByShelf)
 
 	resp := make([]gin.H, 0, len(shelves))
 	for _, s := range shelves {
@@ -223,9 +248,10 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 			"pinned":   s.Pinned,
 			"sortKey":  s.SortKey,
 			"sortKeys": sk,
-			// Round38：书架墙未读仪表盘（未读=架内 read_count<=0 且仍存在的本子数；封面=展示顺序第一本）
-			"unreadCount": st.unread,
-			"coverUrl":    st.coverURL,
+			// Round38：书架墙未读仪表盘（未读=架内 read_count<=0 且仍存在的本子数；封面=手指定优先，否则展示顺序第一本）
+			"unreadCount":  st.unread,
+			"coverUrl":     st.coverURL,
+			"coverComicId": s.CoverComicID,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"bookshelves": resp})
@@ -395,6 +421,42 @@ func (h *LibraryHandler) SetBookshelfPinned(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "置顶状态已更新", "data": shelf})
+}
+
+// SetBookshelfCover 设置/清除书架封面 PUT /api/v1/bookshelves/:id/cover
+// （Round38-R5：comicId 为空 = 恢复自动封面「架内展示顺序第一本」；
+//  非空须为该书架内的本子，否则 400——避免把非本架作品设为封面）
+func (h *LibraryHandler) SetBookshelfCover(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req struct {
+		ComicID string `json:"comicId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+
+	var shelf models.Bookshelf
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "书架不存在"})
+		return
+	}
+
+	if req.ComicID != "" && !containsComicID(parseComicIDs(shelf.ComicIDs), req.ComicID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "该作品不在书架中"})
+		return
+	}
+
+	if err := h.db.Model(&shelf).Update("cover_comic_id", req.ComicID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架封面失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "书架封面已更新", "coverComicId": req.ComicID})
 }
 
 // BatchAddComicsToBookshelf 批量将漫画加入书架 POST /api/v1/bookshelves/:id/comics/batch

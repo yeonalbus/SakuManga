@@ -1,0 +1,41 @@
+# 构建上下文精简（Dockerfile 只需要 backend/ 与 docker-entrypoint.sh）
+# ⚠️ 不要排除 backend/webui/dist —— 镜像构建依赖这份已入库的前端产物
+
+.git
+.github
+.gitignore
+.gitattributes
+.vscode
+.roo
+.dsh
+
+node_modules
+/dist
+*.tsbuildinfo
+.eslintcache
+
+# 运行时数据与产物
+manga.db*
+data
+logs
+Server
+*.exe
+
+# 本地素材 / 测试目录（不入库，也无需进构建上下文）
+Test
+MangaExamlpe
+JHentai
+testdata_eh
+Problems
+学习笔记
+计划书
+plans
+
+# 文档与脚本（镜像内不需要）
+VerNotes
+README.md
+PROJECT_TREE.md
+AGENTS.md
+build-release.bat
+build-docker.bat
+docker-compose.yml

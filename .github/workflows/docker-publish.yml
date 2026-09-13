@@ -1,0 +1,87 @@
+name: Docker Image (GHCR)
+
+# 触发方式（两种都开）：
+#   1) 手动：Actions 页面 → 左侧选「Docker Image (GHCR)」→ Run workflow
+#   2) 自动：推送 SakuManga-X.Y.Z tag（与 Release 流程同一套 tag）时自动构建
+#
+# 产出：ghcr.io/<owner>/sakumanga:<version> · :<minor> · :latest（linux/amd64 + linux/arm64）
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'SakuManga-*'
+
+permissions:
+  contents: read
+  packages: write # 推送 GHCR 镜像必需（GITHUB_TOKEN 自带，无需额外 Secrets）
+
+env:
+  # 镜像名必须全小写；owner 为 yeonalbus，如需改名请一并改成小写
+  IMAGE: ghcr.io/${{ github.repository_owner }}/sakumanga
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析版本号与构建标识
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/SakuManga-* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/SakuManga-}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+          echo "build_id=$(date -u +%Y%m%d%H%M)-g${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "本次构建版本：${VERSION}"
+          echo "构建标识：$(date -u +%Y%m%d%H%M)-g${GITHUB_SHA::7}"
+
+      - name: 准备 QEMU（跨架构构建）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 准备 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送镜像（amd64 + arm64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BUILD_ID=${{ steps.ver.outputs.build_id }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.minor }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 汇总
+        run: |
+          {
+            echo "## 镜像已推送 :whale:"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}"
+            echo '```'
+            echo ""
+            echo "- 版本：\`${{ steps.ver.outputs.version }}\`（另有 \`${{ steps.ver.outputs.minor }}\` 与 \`latest\` 标签）"
+            echo "- 架构：linux/amd64 · linux/arm64"
+            echo "- 构建标识：\`${{ steps.ver.outputs.build_id }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

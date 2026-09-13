@@ -2,7 +2,8 @@
 // 🔖 搜刮书签（Round27）：侧栏快速跳转 + hover 删除
 // Round28：后端化（多端同步）+ 失效锚点 ⚠️ 标记（BUG2 修复）
 // Round33：失效检测入口 + 一键清理 + 迁移来源展示
-import { computed } from 'vue'
+// Round37：拖动排序（LexoRank）+ 分段收纳（前 6 条平铺，其余原位内联展开）+ 组折叠记忆
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   scrapeBookmarks,
@@ -14,11 +15,17 @@ import {
   invalidReasonText,
   isBookmarkMigrated,
   clearInvalidBookmarks,
+  // Round37：拖动排序
+  moveBookmarkToPosition,
+  flushPendingBookmarkSort,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
 import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
+// Round37：拖动原语（与书架列表 / 全部书架浮层共用）
+import { useDragReorder } from '@/composables/useDragReorder'
+import { loadStorage, saveStorage } from '@/utils/storage'
 
 const router = useRouter()
 const { toast, modal } = useUI()
@@ -26,6 +33,8 @@ const { checking, runCheck } = useBookmarkCheck()
 
 // 点击书签跳转：PWA 同标签 / 桌面新标签（与搜索分流一致，isStandalonePWA 判定）
 const handleBookmarkJump = (bm: ScrapeBookmark) => {
+  // Round37：拖动刚结束时抑制本次点击（避免拖拽落点误触跳转）
+  if (bmConsumeClick()) return
   const routeObj = { path: '/online/home', query: { bm: bm.id } }
   if (isStandalonePWA()) {
     router.push(routeObj).catch(() => {})
@@ -115,6 +124,86 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
   }
   return parts.join(' · ') + '（点击跳转）'
 }
+
+// ─────────────────────────────────────────────────────────────
+// Round37：分段收纳 + 组折叠（状态记忆）
+//
+// 取舍（与用户对齐）：不做书架那样的浮层抽屉——书签的核心诉求是「一点回现场」，
+// 多一层浮层等于给最高频动作加点击成本。改为常驻前 N 条平铺 + 其余「原位内联展开」，
+// 书签不多时形态与旧版完全一致（零额外点击），多了也不会把下方分组顶出视口。
+// ─────────────────────────────────────────────────────────────
+
+/** 常驻区条数（前 N 条平铺，其余进收纳区） */
+const RESIDENT_LIMIT = 6
+
+const GROUP_OPEN_KEY = 'saku_bookmark_group_open'
+const OVERFLOW_OPEN_KEY = 'saku_bookmark_overflow_open'
+
+/** 书签组折叠状态（记忆；折叠后仅剩标题行） */
+const groupOpen = ref(loadStorage<boolean>(GROUP_OPEN_KEY, true))
+/** 收纳区展开状态（记忆） */
+const overflowOpen = ref(loadStorage<boolean>(OVERFLOW_OPEN_KEY, false))
+
+watch(groupOpen, (v) => saveStorage(GROUP_OPEN_KEY, v))
+watch(overflowOpen, (v) => saveStorage(OVERFLOW_OPEN_KEY, v))
+
+const hasOverflow = computed(() => scrapeBookmarks.value.length > RESIDENT_LIMIT)
+const overflowCount = computed(() => Math.max(0, scrapeBookmarks.value.length - RESIDENT_LIMIT))
+
+/**
+ * 实际渲染的书签：未展开时只渲染常驻区。
+ * 未展开时索引与完整列表前 N 位一一对应，故拖动落位可直接换算为全局位置。
+ */
+const renderedBookmarks = computed(() =>
+  overflowOpen.value ? scrapeBookmarks.value : scrapeBookmarks.value.slice(0, RESIDENT_LIMIT),
+)
+
+const toggleGroup = () => {
+  groupOpen.value = !groupOpen.value
+}
+
+const toggleOverflow = () => {
+  overflowOpen.value = !overflowOpen.value
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round37：拖动排序（把手拖动 → LexoRank 单点移动）
+// ─────────────────────────────────────────────────────────────
+
+/** 书签列表滚动容器（展开后限高滚动；拖动落位与边缘自动滚动均以它为准） */
+const bookmarkListEl = ref<HTMLElement | null>(null)
+
+const bmDrag = useDragReorder({
+  getScrollContainer: () => bookmarkListEl.value,
+  rowSelector: '.bookmark-item',
+  getGhostText: (i) => {
+    const bm = renderedBookmarks.value[i]
+    return bm ? primaryText(bm) : ''
+  },
+  // to 为「移除被拖项后数组」的插入下标 → 目标位置 = to + 1（1-based）
+  onReorder: (from, to) => {
+    const moved = renderedBookmarks.value[from]
+    if (!moved) return
+    void moveBookmarkToPosition(moved.id, to + 1)
+  },
+})
+
+// 解构 ref 供模板自动解包（模板内嵌套对象的 ref 不会自动解包）
+const {
+  dragging: bmDragging,
+  dragIndex: bmDragIndex,
+  indicatorIndex: bmIndicatorIndex,
+  ghostTop: bmGhostTop,
+  ghostLeft: bmGhostLeft,
+  ghostWidth: bmGhostWidth,
+  ghostHeight: bmGhostHeight,
+  onHandlePointerDown: bmHandleDown,
+  consumeSuppressClick: bmConsumeClick,
+  ghostText: bmGhostText,
+} = bmDrag
+
+// 离开页面时冲刷未落库的排序改动（拖动防抖 300ms）
+onBeforeUnmount(flushPendingBookmarkSort)
 </script>
 
 <template>
@@ -128,11 +217,15 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
     <router-link to="/online/history">历史记录</router-link>
   </div>
 
-  <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版；Round33 检测与清理入口）
-       行1：图标位（hover 让位给 ✕） + 主文本 + 日期；行2：搜索词 + 时间 -->
+  <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版；Round33 检测与清理入口；Round37 拖动排序 + 分段收纳）
+       行1：图标位（hover 让位给 ⠿ ✕） + 主文本 + 日期；行2：搜索词 + 时间 -->
   <div class="nav-group">
     <span class="group-title bm-group-title">
-      <span>🔖 书签</span>
+      <span class="bm-title" title="折叠 / 展开书签组" @click="toggleGroup">
+        <span class="bm-arrow" :class="{ open: groupOpen }">❯</span>
+        <span>🔖 书签</span>
+        <span v-if="!groupOpen && scrapeBookmarks.length > 0" class="bm-total">{{ scrapeBookmarks.length }}</span>
+      </span>
       <span class="bm-actions">
         <button
           class="bm-action"
@@ -153,36 +246,78 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
         </button>
       </span>
     </span>
-    <template v-if="scrapeBookmarks.length > 0">
-      <button
-        v-for="bm in scrapeBookmarks"
-        :key="bm.id"
-        class="bookmark-item"
-        :class="{ 'anchor-failed': isAnchorFailed(bm) }"
-        :title="bookmarkTooltip(bm)"
-        @click="handleBookmarkJump(bm)"
-      >
-        <!-- 行1 -->
-        <span class="bm-line1">
-          <!-- 左侧图标位：平时显示类型图标，hover 时让位给删除 ✕（避免与右侧日期抢空间） -->
-          <span class="bm-lead">
-            <span class="bm-icon">{{ typeIcon(bm) }}</span>
-            <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
-          </span>
-          <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'">⚠️</span>
-          <span class="bm-primary">{{ primaryText(bm) }}</span>
-          <span v-if="postedParts(bm).date" class="bm-date">{{ postedParts(bm).date }}</span>
-        </span>
-        <!-- 行2（日期/时间或副文本存在时才渲染） -->
-        <span v-if="subText(bm) || postedParts(bm).time" class="bm-line2">
-          <span class="bm-sub" :title="subText(bm)">{{ subText(bm) }}</span>
-          <span v-if="postedParts(bm).time" class="bm-time" :title="`锚定画廊发布时间 ${postedParts(bm).date} ${postedParts(bm).time}`">
-            {{ postedParts(bm).time }}
-          </span>
-        </span>
-      </button>
+
+    <template v-if="groupOpen">
+      <template v-if="scrapeBookmarks.length > 0">
+        <!-- 书签列表（展开收纳区时限高滚动，避免顶掉下方「🎲 工具 / 系统」分组） -->
+        <div ref="bookmarkListEl" class="bm-list" :class="{ scrollable: overflowOpen && hasOverflow }">
+          <template v-for="(bm, idx) in renderedBookmarks" :key="bm.id">
+            <button
+              class="bookmark-item"
+              :class="{ 'anchor-failed': isAnchorFailed(bm) }"
+              :title="bookmarkTooltip(bm)"
+              @click="handleBookmarkJump(bm)"
+            >
+              <!-- 行1 -->
+              <span class="bm-line1">
+                <!-- 左侧图标位：平时显示类型图标，hover 时扩宽让位给「⠿ 拖动 / ✕ 删除」（日期不受影响） -->
+                <span class="bm-lead">
+                  <span class="bm-icon">{{ typeIcon(bm) }}</span>
+                  <span
+                    class="bm-drag"
+                    title="拖动排序"
+                    @pointerdown="(e) => bmHandleDown(e as PointerEvent, idx)"
+                    @click.stop.prevent
+                  >
+                    ⠿
+                  </span>
+                  <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
+                </span>
+                <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'">⚠️</span>
+                <span class="bm-primary">{{ primaryText(bm) }}</span>
+                <span v-if="postedParts(bm).date" class="bm-date">{{ postedParts(bm).date }}</span>
+              </span>
+              <!-- 行2（日期/时间或副文本存在时才渲染） -->
+              <span v-if="subText(bm) || postedParts(bm).time" class="bm-line2">
+                <span class="bm-sub" :title="subText(bm)">{{ subText(bm) }}</span>
+                <span v-if="postedParts(bm).time" class="bm-time" :title="`锚定画廊发布时间 ${postedParts(bm).date} ${postedParts(bm).time}`">
+                  {{ postedParts(bm).time }}
+                </span>
+              </span>
+            </button>
+            <!-- Round37：拖拽落位指示线 -->
+            <div v-if="bmDragging && bmIndicatorIndex === idx" class="drop-line bm-drop-line" />
+          </template>
+          <!-- 拖到末尾的落位指示线 -->
+          <div
+            v-if="bmDragging && bmIndicatorIndex === renderedBookmarks.length"
+            class="drop-line bm-drop-line"
+          />
+        </div>
+
+        <!-- Round37：收纳区入口（原位内联展开，无浮层/无遮罩，展开后仍是原位单击直达） -->
+        <button v-if="hasOverflow" class="bm-more" @click="toggleOverflow">
+          {{ overflowOpen ? '▴ 收起' : `⋯ 其余 ${overflowCount} 条` }}
+        </button>
+      </template>
+      <span v-else class="bm-empty">暂无书签</span>
     </template>
-    <span v-else class="bm-empty">暂无书签</span>
+
+    <!-- Round37：拖拽幽灵卡（fixed 跟随指针） -->
+    <Teleport to="body">
+      <div
+        v-if="bmDragging"
+        class="drag-ghost"
+        :style="{
+          top: bmGhostTop + 'px',
+          left: bmGhostLeft + 'px',
+          width: bmGhostWidth + 'px',
+          height: bmGhostHeight + 'px',
+        }"
+      >
+        🔖 {{ bmGhostText(bmDragIndex) }}
+      </div>
+    </Teleport>
   </div>
 
   <!-- 🎲 工具：跨模式全局功能（骰子支持全库、清单有在线/离线双 tab） -->
@@ -228,28 +363,104 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
   min-width: 0;
 }
 
-/* 左侧图标位（固定 16px）：平时放类型图标，hover 时同位置换成删除 ✕ */
+/* 左侧图标位（固定 16px）：平时放类型图标；
+   Round37：hover 时扩到 34px，同位置换成「⠿ 拖动 / ✕ 删除」，右侧日期不受影响 */
 .bm-lead {
   position: relative;
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+  transition: width 0.15s ease;
+}
+
+.bookmark-item:hover .bm-lead {
+  width: 34px;
 }
 
 .bm-icon,
+.bm-drag,
 .bm-delete {
   position: absolute;
-  inset: 0;
+  top: 0;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
-  transition: opacity 0.15s ease;
+  border-radius: 4px;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .bm-icon {
+  left: 0;
+  width: 16px;
   font-size: 0.8rem;
   opacity: 1;
+}
+
+/* Round37：拖动把手（touch-action:none 保证把手上触摸拖动不触发侧栏滚动） */
+.bm-drag {
+  left: 0;
+  width: 16px;
+  font-size: 0.78rem;
+  color: var(--app-text-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  opacity: 0;
+}
+
+.bm-drag:active {
+  cursor: grabbing;
+}
+
+.bm-drag:hover {
+  color: var(--app-text-strong);
+  background-color: var(--app-surface-3);
+}
+
+/* 删除按钮：hover 时出现在把手右侧 */
+.bm-delete {
+  left: 18px;
+  width: 16px;
+  font-size: 0.75rem;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.bm-delete:hover {
+  color: #ef4444;
+  background-color: var(--app-surface-3);
+}
+
+.bookmark-item:hover .bm-icon {
+  opacity: 0;
+}
+
+.bookmark-item:hover .bm-drag,
+.bookmark-item:hover .bm-delete {
+  opacity: 1;
+}
+
+/* 📱 触摸设备（无 hover）：把手与删除常驻显示、图标位直接让位。
+   否则移动端永远无法拖动排序，也没有任何删除入口（✕ 原本只在 hover 出现）。 */
+@media (hover: none) {
+  .bm-lead {
+    width: 34px;
+  }
+
+  .bm-icon {
+    opacity: 0;
+  }
+
+  .bm-drag,
+  .bm-delete {
+    opacity: 1;
+  }
 }
 
 /* ⚠️ 失效锚点标记（Round28）：主文本前，弱化色 */
@@ -307,40 +518,94 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
   font-variant-numeric: tabular-nums;
 }
 
-/* 删除按钮：占用左侧图标位（hover 时图标淡出、✕ 淡入） */
-.bm-delete {
-  color: var(--app-text-muted);
-  font-size: 0.75rem;
-  border-radius: 4px;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.bookmark-item:hover .bm-delete {
-  opacity: 1;
-}
-
-.bookmark-item:hover .bm-icon {
-  opacity: 0;
-}
-
-.bm-delete:hover {
-  color: #ef4444;
-  background-color: var(--app-surface-3);
-}
-
 .bm-empty {
   font-size: 0.78rem;
   color: var(--app-text-muted);
   padding: 6px 12px;
 }
 
-/* ─── Round33：书签分组标题行（检测 / 清理入口）─── */
+/* ─── Round37：分段收纳 ─── */
+
+.bm-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 收纳区展开后限高滚动：书签再多也不会把下方分组顶出视口 */
+.bm-list.scrollable {
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bm-list.scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bm-list.scrollable::-webkit-scrollbar-thumb {
+  background-color: var(--app-border-3);
+  border-radius: 3px;
+}
+
+/* 收纳区入口：⋯ 其余 N 条 / ▴ 收起 */
+.bm-more {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--app-text-3);
+  font-size: 0.76rem;
+  text-align: left;
+  padding: 4px 10px;
+  margin-top: 2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bm-more:hover {
+  background-color: var(--app-surface-hover);
+  color: var(--app-text-strong);
+}
+
+/* Round37：拖拽落位指示线（行内边距） */
+.bm-drop-line {
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+/* ─── Round33：书签分组标题行（折叠 + 检测 / 清理入口）─── */
 .bm-group-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+}
+
+/* 折叠触发区（标题文字 + 箭头） */
+.bm-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.bm-arrow {
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.bm-arrow.open {
+  transform: rotate(90deg);
+}
+
+/* 折叠时展示总数，避免「组里到底有没有东西」的疑问 */
+.bm-total {
+  font-size: 0.7rem;
+  color: var(--app-text-muted);
+  background-color: var(--app-surface-3);
+  padding: 0 5px;
+  border-radius: 8px;
 }
 
 .bm-actions {

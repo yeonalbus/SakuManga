@@ -230,6 +230,11 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.DELETE("/scrape-bookmarks/:id", scrapeBookmarkHandler.Delete)
 		// Round33：批量失效检测（探测锚定画廊是否被删除 / 下架 / 被新版本取代）
 		api.POST("/scrape-bookmarks/check", scrapeBookmarkHandler.Check)
+		// Round37：侧栏拖动排序——单点 LexoRank 移动（只更新一项权值）
+		api.PUT("/scrape-bookmarks/:id/position", scrapeBookmarkHandler.MovePosition)
+		// Round37：全量重置权值（拖动前惰性赋权 / 精度用尽兜底）
+		// 注意：不能写成 PUT /scrape-bookmarks/order——会与 PUT /scrape-bookmarks/:id 在 gin 路由树里冲突 panic
+		api.POST("/scrape-bookmarks/order", scrapeBookmarkHandler.Reorder)
 
 		// 阅读清单（每用户每来源一个队列）
 		api.GET("/reading-list", libraryHandler.GetReadingList)

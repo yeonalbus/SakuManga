@@ -142,6 +142,59 @@ func (h *ScrapeBookmarkHandler) Check(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
+// MovePosition 单点移动（Round37）：按 LexoRank 权值排序，只更新该项
+// PUT /api/v1/scrape-bookmarks/:id/position  body {sortKey}
+func (h *ScrapeBookmarkHandler) MovePosition(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "书签 id 不合法"})
+		return
+	}
+	var req struct {
+		SortKey float64 `json:"sortKey"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不合法"})
+		return
+	}
+	if err := services.MoveScrapeBookmarkPosition(h.db, user.ID, uint(id), req.SortKey); err != nil {
+		if errors.Is(err, services.ErrBookmarkNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书签顺序失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// Reorder 全量重置权值（Round37）：ids 数组顺序即新顺序，赋 1000*(i+1)
+// POST /api/v1/scrape-bookmarks/order  body {ids: [...]}
+func (h *ScrapeBookmarkHandler) Reorder(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不合法"})
+		return
+	}
+	if err := services.ReorderScrapeBookmarks(h.db, user.ID, req.IDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书签顺序失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // Delete 删除书签
 func (h *ScrapeBookmarkHandler) Delete(c *gin.Context) {
 	user := middleware.CurrentUser(c)

@@ -31,6 +31,7 @@ type ScrapeBookmarkDTO struct {
 	Keyword   string          `json:"keyword"`
 	Config    json.RawMessage `json:"config"`
 	Anchor    json.RawMessage `json:"anchor"`
+	SortKey   float64         `json:"sortKey"` // Round37：LexoRank 权值（0 = 未赋权老数据）
 	CreatedAt time.Time       `json:"createdAt"`
 }
 
@@ -83,14 +84,19 @@ func toScrapeBookmarkDTO(m *models.ScrapeBookmark) ScrapeBookmarkDTO {
 		Keyword:   m.Keyword,
 		Config:    json.RawMessage(m.Config),
 		Anchor:    json.RawMessage(m.Anchor),
+		SortKey:   m.SortKey,
 		CreatedAt: m.CreatedAt,
 	}
 }
 
-// ListScrapeBookmarks 读取当前用户全部书签（按创建时间升序）
+// ListScrapeBookmarks 读取当前用户全部书签。
+//
+// Round37：改为按 LexoRank 权值升序（侧栏拖动排序），同权值（含升级前 sort_key=0
+// 的老数据）按 id 升序兜底——老数据全部为 0 时即原「id ASC」顺序，
+// 因此升级前后侧栏顺序完全一致。
 func ListScrapeBookmarks(db *gorm.DB, userID uint) ([]ScrapeBookmarkDTO, error) {
 	var marks []models.ScrapeBookmark
-	if err := db.Where("user_id = ?", userID).Order("id ASC").Find(&marks).Error; err != nil {
+	if err := db.Where("user_id = ?", userID).Order("sort_key ASC, id ASC").Find(&marks).Error; err != nil {
 		return nil, err
 	}
 	out := make([]ScrapeBookmarkDTO, 0, len(marks))
@@ -98,6 +104,24 @@ func ListScrapeBookmarks(db *gorm.DB, userID uint) ([]ScrapeBookmarkDTO, error) 
 		out = append(out, toScrapeBookmarkDTO(&marks[i]))
 	}
 	return out, nil
+}
+
+// nextBookmarkSortKey 计算下一个 LexoRank 权值（末项 +1000）。
+//
+// Round37：新建书签「追加到末尾」——既有书签全为 0（升级后从未拖动）时返回 1000，
+// 同样落在末位；取不到最大值时保守返回 0（退回按 id 兜底排序，不阻断创建）。
+func nextBookmarkSortKey(db *gorm.DB, userID uint) float64 {
+	var row struct {
+		MaxKey float64
+	}
+	err := db.Model(&models.ScrapeBookmark{}).
+		Where("user_id = ?", userID).
+		Select("COALESCE(MAX(sort_key), 0) AS max_key").
+		Scan(&row).Error
+	if err != nil {
+		return 0
+	}
+	return row.MaxKey + 1000
 }
 
 // CreateScrapeBookmark 新增书签，返回带 id 的完整结构
@@ -110,6 +134,7 @@ func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*Sc
 		Keyword:   strings.TrimSpace(in.Keyword),
 		Config:    config,
 		Anchor:    anchor,
+		SortKey:   nextBookmarkSortKey(db, userID), // Round37：追加到末尾
 		CreatedAt: time.Now(),
 	}
 	if err := db.Create(&m).Error; err != nil {
@@ -178,6 +203,43 @@ func DeleteScrapeBookmark(db *gorm.DB, userID uint, id uint) error {
 	}
 	if res.RowsAffected == 0 {
 		return ErrBookmarkNotFound
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round37：侧栏拖动排序（LexoRank，与 Round22 书架列表同构）
+// ─────────────────────────────────────────────────────────────
+
+// MoveScrapeBookmarkPosition 单点移动：只更新该书的 LexoRank 权值
+// （权值由前端 between(prev, next) 算出，取代全量重写）。
+func MoveScrapeBookmarkPosition(db *gorm.DB, userID uint, id uint, sortKey float64) error {
+	res := db.Model(&models.ScrapeBookmark{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Update("sort_key", sortKey)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrBookmarkNotFound
+	}
+	return nil
+}
+
+// ReorderScrapeBookmarks 全量重置权值：ids 数组下标即新顺序，赋 1000*(i+1)。
+//
+// 两个用途（与书架 ensureShelfWeights / 精度用尽兜底一致）：
+//  1. 惰性赋权——升级前老书签 sort_key 全为 0，首次拖动时按当前顺序一次性赋权；
+//  2. LexoRank 精度用尽（相邻两项 gap < 1e-6）时重排。
+//
+// 非本人书签 id 静默跳过（RowsAffected 不多做校验），避免跨用户写入。
+func ReorderScrapeBookmarks(db *gorm.DB, userID uint, ids []uint) error {
+	for i, id := range ids {
+		if err := db.Model(&models.ScrapeBookmark{}).
+			Where("id = ? AND user_id = ?", id, userID).
+			Update("sort_key", float64((i+1)*1000)).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -3,8 +3,10 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"SakuManga/internal/models"
 
@@ -208,5 +210,143 @@ func TestParseAnchorJSON(t *testing.T) {
 	a, err := parseAnchorJSON(`{"gid":"123","token":"abc","postedAt":"2026-09-12 01:47"}`)
 	if err != nil || a == nil || a.Token != "abc" || a.PostedAt != "2026-09-12 01:47" {
 		t.Fatalf("锚点字段解析异常: %+v %v", a, err)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round37：侧栏拖动排序（LexoRank 单点移动）
+// ─────────────────────────────────────────────────────────────
+
+// orderOf 取当前用户书签的展示顺序（服务层已按 sort_key ASC, id ASC 排序）
+func orderOf(t *testing.T, db *gorm.DB, userID uint) []uint {
+	t.Helper()
+	items, err := ListScrapeBookmarks(db, userID)
+	if err != nil {
+		t.Fatalf("读取书签失败: %v", err)
+	}
+	ids := make([]uint, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	return ids
+}
+
+// 新建书签「追加到末尾」：权值 1000*(n+1)，顺序为创建顺序
+func TestScrapeBookmarkCreateAppendsToEnd(t *testing.T) {
+	db := newScrapeBookmarkTestDB(t)
+	user := uint(1)
+
+	a, _ := CreateScrapeBookmark(db, user, validInput())
+	b, _ := CreateScrapeBookmark(db, user, validInput())
+	c, _ := CreateScrapeBookmark(db, user, validInput())
+
+	if a.SortKey != 1000 || b.SortKey != 2000 || c.SortKey != 3000 {
+		t.Fatalf("追加权值应为 1000/2000/3000，得到 %v/%v/%v", a.SortKey, b.SortKey, c.SortKey)
+	}
+	if got := orderOf(t, db, user); !reflect.DeepEqual(got, []uint{a.ID, b.ID, c.ID}) {
+		t.Fatalf("创建顺序应为 %v，得到 %v", []uint{a.ID, b.ID, c.ID}, got)
+	}
+}
+
+// 单点移动：只改被移动项的权值，顺序随之变化；越权移动报不存在
+func TestScrapeBookmarkMovePosition(t *testing.T) {
+	db := newScrapeBookmarkTestDB(t)
+	user := uint(1)
+
+	a, _ := CreateScrapeBookmark(db, user, validInput())
+	b, _ := CreateScrapeBookmark(db, user, validInput())
+	c, _ := CreateScrapeBookmark(db, user, validInput())
+
+	// 末尾 c 移到最前：权值取 a 之前（模拟前端 between(undefined, 1000)）
+	if err := MoveScrapeBookmarkPosition(db, user, c.ID, 999); err != nil {
+		t.Fatalf("单点移动失败: %v", err)
+	}
+	if got := orderOf(t, db, user); !reflect.DeepEqual(got, []uint{c.ID, a.ID, b.ID}) {
+		t.Fatalf("移动后顺序应为 [c a b]，得到 %v", got)
+	}
+	// 其余两项权值不受影响（单点移动语义）
+	items, _ := ListScrapeBookmarks(db, user)
+	for _, it := range items {
+		if it.ID == a.ID && it.SortKey != 1000 {
+			t.Fatalf("a 的权值不应被改动，得到 %v", it.SortKey)
+		}
+		if it.ID == b.ID && it.SortKey != 2000 {
+			t.Fatalf("b 的权值不应被改动，得到 %v", it.SortKey)
+		}
+	}
+
+	// 越权：他人书签不可移动
+	other, _ := CreateScrapeBookmark(db, uint(2), validInput())
+	if err := MoveScrapeBookmarkPosition(db, user, other.ID, 1); !errors.Is(err, ErrBookmarkNotFound) {
+		t.Fatalf("越权移动应报不存在: %v", err)
+	}
+}
+
+// 升级前老数据（sort_key=0）按 id 兜底排序，新建书签仍落在末尾
+func TestScrapeBookmarkLegacyZeroKeyFallback(t *testing.T) {
+	db := newScrapeBookmarkTestDB(t)
+	user := uint(1)
+
+	legacy := make([]models.ScrapeBookmark, 0, 3)
+	for i := 0; i < 3; i++ {
+		legacy = append(legacy, models.ScrapeBookmark{
+			UserID:    user,
+			Name:      "老书签",
+			Type:      "home",
+			Config:    "{}",
+			Anchor:    "null",
+			SortKey:   0, // 升级前未赋权
+			CreatedAt: time.Now(),
+		})
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("写入老数据失败: %v", err)
+	}
+
+	fresh, err := CreateScrapeBookmark(db, user, validInput())
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	if fresh.SortKey != 1000 {
+		t.Fatalf("老数据全 0 时新书签权值应为 1000，得到 %v", fresh.SortKey)
+	}
+
+	want := []uint{legacy[0].ID, legacy[1].ID, legacy[2].ID, fresh.ID}
+	if got := orderOf(t, db, user); !reflect.DeepEqual(got, want) {
+		t.Fatalf("升级后顺序应保持老数据在前、新书签在末尾（%v），得到 %v", want, got)
+	}
+}
+
+// 全量重置：ids 顺序即新顺序，权值 1000*(i+1)
+func TestScrapeBookmarkReorderWeights(t *testing.T) {
+	db := newScrapeBookmarkTestDB(t)
+	user := uint(1)
+
+	a, _ := CreateScrapeBookmark(db, user, validInput())
+	b, _ := CreateScrapeBookmark(db, user, validInput())
+	c, _ := CreateScrapeBookmark(db, user, validInput())
+
+	if err := ReorderScrapeBookmarks(db, user, []uint{c.ID, a.ID, b.ID}); err != nil {
+		t.Fatalf("全量重置失败: %v", err)
+	}
+	if got := orderOf(t, db, user); !reflect.DeepEqual(got, []uint{c.ID, a.ID, b.ID}) {
+		t.Fatalf("重置后顺序应为 [c a b]，得到 %v", got)
+	}
+	items, _ := ListScrapeBookmarks(db, user)
+	wantKeys := map[uint]float64{c.ID: 1000, a.ID: 2000, b.ID: 3000}
+	for _, it := range items {
+		if it.SortKey != wantKeys[it.ID] {
+			t.Fatalf("书签 %d 权值应为 %v，得到 %v", it.ID, wantKeys[it.ID], it.SortKey)
+		}
+	}
+
+	// 越权 id 静默跳过：他人书签权值不受影响
+	other, _ := CreateScrapeBookmark(db, uint(2), validInput())
+	if err := ReorderScrapeBookmarks(db, user, []uint{other.ID}); err != nil {
+		t.Fatalf("含越权 id 的整理不应报错: %v", err)
+	}
+	otherItems, _ := ListScrapeBookmarks(db, uint(2))
+	if len(otherItems) != 1 || otherItems[0].SortKey != other.SortKey {
+		t.Fatalf("他人书签权值被串改: %+v", otherItems)
 	}
 }

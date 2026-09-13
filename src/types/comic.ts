@@ -311,6 +311,12 @@ export interface ScrapeBookmark {
     /** Round33：保存时在列表中的位置（老书签无 postedAt 时的迁移兜底） */
     listIndex?: number
   } | null
+  /**
+   * Round37：侧栏拖动排序的 LexoRank 权值（越小越靠前）。
+   * 0 = 升级前老书签未赋权，读取顺序按 id 兜底（等价于原创建顺序）；
+   * 首次拖动时由 ensureBookmarkWeights 按当前展示顺序全量赋 1000*(i+1)。
+   */
+  sortKey?: number
   createdAt: number
 }
 

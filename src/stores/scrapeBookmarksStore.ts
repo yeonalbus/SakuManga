@@ -19,6 +19,8 @@ import type {
 } from '@/types/comic'
 import { onlineSearchConfig } from '@/stores/searchStore'
 import { isSameOnlineScope } from '@/utils/bookmarkScope'
+// Round37：侧栏拖动排序权值（与书架列表同一套 LexoRank 工具）
+import { between, needsReweight, reweightAll } from '@/utils/lexoRank'
 import { loadStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
@@ -115,12 +117,30 @@ const fromRaw = (raw: unknown): ScrapeBookmark | null => {
     keyword: typeof r.keyword === 'string' ? r.keyword : '',
     config: restoreConfig(r.config),
     anchor: restoreAnchor(r.anchor),
+    // Round37：排序权值（老数据 0 / 缺失 → 0，排序时按原列表顺序兜底）
+    sortKey: typeof r.sortKey === 'number' && Number.isFinite(r.sortKey) ? r.sortKey : 0,
     createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
   }
 }
 
 const restoreList = (raw: unknown): ScrapeBookmark[] =>
   Array.isArray(raw) ? raw.map(fromRaw).filter((b): b is ScrapeBookmark => b !== null) : []
+
+/**
+ * Round37：展示顺序比较器（sortKey 升序，同权值保持原数组顺序——sort 稳定排序）。
+ * 与后端 `ORDER BY sort_key ASC, id ASC` 语义一致。
+ */
+const compareBookmarks = (a: ScrapeBookmark, b: ScrapeBookmark): number =>
+  (a.sortKey ?? 0) - (b.sortKey ?? 0)
+
+/**
+ * Round37：本地估算下一个排序权值（末项 +1000，与后端「追加到末尾」一致）。
+ * 仅用于乐观插入的临时书签占位，后端返回真实 sortKey 后会覆盖。
+ */
+const nextLocalSortKey = (): number => {
+  const list = scrapeBookmarks.value
+  return list.length > 0 ? (list[list.length - 1].sortKey ?? 0) + 1000 : 1000
+}
 
 // ─── 派生状态（不变）───
 
@@ -301,6 +321,8 @@ export const addScrapeBookmark = async (
     keyword,
     config: cloneSearchConfig(config),
     anchor,
+    // Round37：乐观插入追加到末尾（后端返回真实权值后覆盖）
+    sortKey: nextLocalSortKey(),
     createdAt: Date.now(),
   }
   // 降级模式：拒绝写操作
@@ -343,7 +365,8 @@ export const removeScrapeBookmark = async (id: string): Promise<boolean> => {
     return true
   } catch (e) {
     scrapeBookmarks.value.push(target)
-    scrapeBookmarks.value.sort((a, b) => a.createdAt - b.createdAt)
+    // Round37：回滚排序改用 sortKey（新语义），同权值保持数组顺序（sort 稳定排序）
+    scrapeBookmarks.value.sort(compareBookmarks)
     console.error('删除书签失败:', e)
     toast.error('书签删除失败，请重试')
     return false
@@ -478,4 +501,120 @@ export const clearInvalidBookmarks = async (): Promise<number> => {
     if (await removeScrapeBookmark(id)) removed++
   }
   return removed
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round37：侧栏拖动排序（LexoRank，与 Round22 书架列表同构）
+//
+// 语义：只更新被拖动项的权值（单点移动），连续拖动经 300ms 防抖后写一次；
+// 老书签（sortKey=0，升级前未赋权）在首次拖动前按当前展示顺序惰性全量赋权。
+// ─────────────────────────────────────────────────────────────
+
+/** 全量提交顺序（新顺序即 ids 数组顺序，后端赋 1000*(i+1)）：惰性赋权 / 精度用尽兜底 */
+const persistBookmarkOrder = async (list: ScrapeBookmark[]): Promise<void> => {
+  // 临时书签（乐观插入中，id 非数字）不进后端请求
+  const numericIds = list.map((b) => Number(b.id)).filter((n) => Number.isFinite(n))
+  try {
+    await http('/scrape-bookmarks/order', {
+      method: 'POST',
+      body: JSON.stringify({ ids: numericIds }),
+    })
+  } catch (e) {
+    console.error('保存书签顺序失败:', e)
+    toast.error('书签排序保存失败，请重试')
+  }
+}
+
+// ── 排序防抖持久化（拖动连续移动只在停顿 300ms 后写一次）──
+let bookmarkFlushTimer: ReturnType<typeof setTimeout> | null = null
+const pendingBookmarkPositions = new Map<string, number>()
+
+const scheduleBookmarkPositionFlush = (id: string, weight: number) => {
+  pendingBookmarkPositions.set(id, weight)
+  if (bookmarkFlushTimer) clearTimeout(bookmarkFlushTimer)
+  bookmarkFlushTimer = setTimeout(() => {
+    void flushBookmarkPositions()
+  }, 300)
+}
+
+const flushBookmarkPositions = async () => {
+  bookmarkFlushTimer = null
+  const pending = new Map(pendingBookmarkPositions)
+  pendingBookmarkPositions.clear()
+  for (const [id, weight] of pending) {
+    try {
+      await http(`/scrape-bookmarks/${encodeURIComponent(id)}/position`, {
+        method: 'PUT',
+        body: JSON.stringify({ sortKey: weight }),
+      })
+    } catch (e) {
+      console.error('保存书签顺序失败:', e)
+    }
+  }
+}
+
+/** 立即冲刷未持久化的排序改动（离开页面 / 拖动结束时调用） */
+export const flushPendingBookmarkSort = () => {
+  if (bookmarkFlushTimer) {
+    clearTimeout(bookmarkFlushTimer)
+    void flushBookmarkPositions()
+  }
+}
+
+/**
+ * 把书签移动到第 position 位（1-based，作用于当前展示顺序）。
+ *
+ * 本地先行（同步重排，拖动落位无等待）；持久化分两条路径：
+ * - 老数据（sortKey<=0，升级前未赋权）首次拖动：按新顺序全量赋 1000*(i+1) 并整单提交
+ *   ——一次请求同时完成「惰性赋权 + 落位」；
+ * - 常规拖动：只算相邻中点权值，300ms 防抖后单点提交；精度用尽时退回全量提交。
+ */
+export const moveBookmarkToPosition = async (id: string, position: number): Promise<void> => {
+  if (rejectWhenOffline()) return
+
+  const arr = [...scrapeBookmarks.value]
+  const idx = arr.findIndex((b) => b.id === id)
+  if (idx < 0) return
+  const target = Math.max(0, Math.min(position - 1, arr.length - 1))
+  if (target === idx) return
+
+  /** 按当前数组顺序全量赋权（1000*(i+1)） */
+  const applyFullReweight = () => {
+    const { weights } = reweightAll(arr.map((b) => b.id))
+    arr.forEach((b) => {
+      b.sortKey = weights.get(b.id) ?? 0
+    })
+  }
+
+  // 升级前老书签未赋权（sortKey 恰好等于哨兵值 0；负值属正常 LexoRank 权值）：
+  // 先按当前顺序赋权，保证 between 有可用邻项
+  const legacy = arr.some((b) => (b.sortKey ?? 0) === 0)
+  if (legacy) applyFullReweight()
+
+  const [item] = arr.splice(idx, 1)
+  arr.splice(target, 0, item)
+
+  if (legacy) {
+    // 全量路径：新顺序 + 权值一次提交
+    applyFullReweight()
+    scrapeBookmarks.value = arr
+    await persistBookmarkOrder(arr)
+    return
+  }
+
+  const prevW = target > 0 ? (arr[target - 1].sortKey ?? 0) : undefined
+  const nextW = target < arr.length - 1 ? (arr[target + 1].sortKey ?? 0) : undefined
+
+  if (prevW !== undefined && nextW !== undefined && needsReweight(prevW, nextW)) {
+    // 精度用尽：按新顺序全量重置（该项天然落在目标位）
+    applyFullReweight()
+    scrapeBookmarks.value = arr
+    await persistBookmarkOrder(arr)
+    return
+  }
+
+  const w = between(prevW, nextW)
+  item.sortKey = w
+  scrapeBookmarks.value = arr
+  scheduleBookmarkPositionFlush(id, w)
 }

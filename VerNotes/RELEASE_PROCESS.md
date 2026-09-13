@@ -2,15 +2,16 @@
 
 > 每次发版必须按此清单执行。本文件为**固定流程**，记录从「敲定版本号」到「发布」的全部步骤，避免遗漏。
 >
-> 最近一次执行：v1.3.2（2026-08）
+> 最近一次执行：v2.1.1（2026-09）
 
 ---
 
 ## 0. 流程总览
 
 ```
-敲定版本号 → 更新版本号 → 整理改动清单 → 维护 PROJECT_TREE → 维护 README
-    → 生成 Release Notes → 验证（测试/构建） → 打包冒烟 → git 提交 + tag → 发布
+敲定版本号 → 更新版本号 → 整理改动清单 → 同步前端产物 → 维护 PROJECT_TREE → 维护 README
+    → 生成 Release Notes → 验证（测试/构建） → 打包冒烟（exe） → git 提交 + 推送
+    → 创建 GitHub Release（含 tag） → Docker 镜像由 tag 自动构建 → 完成
 ```
 
 ---
@@ -37,6 +38,10 @@
 | ---- | ---- | ---- |
 | `package.json` | 顶部 `version` 字段 | **唯一版本来源**，About 页 / 打包脚本自动读取 |
 | `package-lock.json` | 顶部 `version` 与 `packages[""].version` 两处 | 历史遗留可能为 `0.0.0`，发版时一并对齐 |
+| `backend/internal/version/version.go` | `AppVersion` 常量 | 后端 `/api/v1/system/version` 返回的版本号，须与 package.json 一致 |
+| `VerNotes/RELEASE_NOTES_vX.Y.Z.md` | 标题 | 与本次版本号一致 |
+
+> ⚠️ 版本号变更后**必须重新构建前端产物**（`npm run build` 并同步 `backend/webui/dist/`，或直接跑一次 `build-release.bat`）——「关于」页版本号是构建时嵌进前端的，不重建会残留旧版本号（Docker 镜像同理）。
 
 无需手动修改：
 - 前端「关于」页 [`AboutSettings.vue`](../src/components/settings/AboutSettings.vue) 自动 `import { version } from '../../../package.json'`
@@ -141,13 +146,24 @@ tag 命名必须与历史一致（`SakuManga-1.0.0`、`SakuManga-1.1.0`、`SakuM
 
 ---
 
-## 10. 发布（可选）
+## 10. 发布（GitHub Release + Docker 镜像）
 
-若通过 GitHub Release 分发：
+### ① 创建 GitHub Release（同时创建 tag）
 
-- [ ] 推送 tag：`git push origin SakuManga-1.3.0`
-- [ ] 创建 Release：标题 `v1.3.0`，正文粘贴 Release Notes
-- [ ] 附件：上传 `SakuManga.exe`（如仓库允许）
+- [ ] 推送 tag：`git push origin SakuManga-X.Y.Z`（或在 Release 页面直接填写 tag 名，发布时自动创建）
+- [ ] 创建 Release：标题 `vX.Y.Z`，正文粘贴 `VerNotes/RELEASE_NOTES_vX.Y.Z.md` 全文
+- [ ] 附件：上传根目录 `SakuManga.exe`（由第 8 步打包生成）
+
+### ② Docker 镜像（v2.1.1 起提供，由 tag 自动构建）
+
+镜像由 GitHub Actions 构建，**推送 tag 即自动触发，无需本机安装 Docker**；工作流见 `.github/workflows/docker-publish.yml`：
+
+- [ ] 确认 `package.json` 版本号与 tag 一致（镜像标签取自 tag 名 `SakuManga-X.Y.Z` → `X.Y.Z`）
+- [ ] 推送 tag 后到仓库 **Actions** 页面确认 `Docker Image (GHCR)` 工作流成功
+- [ ] 产出：`ghcr.io/yeonalbus/sakumanga:X.Y.Z` · `X.Y` · `latest`（`linux/amd64` + `linux/arm64`）
+- [ ] 需要**补发镜像而不打 tag**时：Actions → `Docker Image (GHCR)` → Run workflow（版本号取自 `package.json`）
+- [ ] 首次发布镜像后确认包可见性为 public（否则匿名用户无法 `docker pull`）
+- [ ] 本机装有 Docker 时，也可用 `build-docker.bat`（本地测试）/ `build-docker.bat push`（多架构推 GHCR）
 
 ---
 
@@ -191,6 +207,8 @@ tag 命名必须与历史一致（`SakuManga-1.0.0`、`SakuManga-1.1.0`、`SakuM
 - [ ] `git status` 仅含预期改动，无临时脚本 / 调试产物
 - [ ] 无敏感信息随发布（如 `backend/config.json` 代理地址，PROJECT_TREE 发布注意已提示）
 - [ ] Release Notes「已知问题」如实填写
-- [ ] 版本号三处一致：`package.json` / `package-lock.json` / Release Notes 标题
+- [ ] 版本号一致：`package.json` / `package-lock.json` / `backend/internal/version/version.go` / Release Notes 标题
+- [ ] **前端产物已同步** `backend/webui/dist`（版本号或前端改动后必做，否则 exe 与镜像内是旧前端）
+- [ ] Docker 工作流是否成功（打 tag 或手动触发后到 Actions 页面确认）
 - [ ] README 预览图是否需要更新（UI 大改时）
 - [ ] `cmd_debug/` 调试工具是否需从发布产物排除（不影响主程序，可选）

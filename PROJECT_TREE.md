@@ -55,7 +55,7 @@ src/
 │   ├── SearchBar.vue               # 顶栏搜索框（含标签建议）
 │   ├── TopBar.vue                  # 顶栏（搜索/筛选/阅读清单/模式切换）
 │   ├── ModeToggle.vue              # 在线/离线模式切换
-│   ├── OnlineSidebar.vue           # 在线侧边栏（导航菜单）
+│   ├── OnlineSidebar.vue           # 在线侧边栏（导航菜单 + 搜刮书签拖动排序/分段收纳，Round37）
 │   ├── OfflineSidebar.vue          # 离线侧边栏（书架管理，权限控制入口）
 │   ├── OnlineLoadBar.vue           # 在线加载条（游标加载状态）
 │   ├── Pagination.vue              # 分页组件（离线数字分页）
@@ -131,7 +131,7 @@ src/
 │   ├── tagFilter.ts                # 负向排除引擎（excludeTags/excludeKeywords 匹配）
 │   ├── tagColor.ts                 # 命名空间配色与分组（Round32：TagChip 与 XP 词云共用色板）
 │   ├── detailNav.ts                # 详情新标签导航（记录来源状态，返回时恢复位置/页码）
-│   ├── lexoRank.ts                 # LexoRank 排序权重（书架/书架内项目自定义排序）
+│   ├── lexoRank.ts                 # LexoRank 排序权重（书架/书架内项目/搜刮书签拖动排序）
 │   ├── pageHideFlush.ts            # 页面隐藏时冲刷进度/持久化（防丢失）
 │   ├── readingProgress.ts          # 阅读进度恢复决策（本地/后端取较新，偏好开关）
 │   ├── truncate.ts                 # 文本截断工具
@@ -232,7 +232,7 @@ backend/
     │   ├── reading_list.go         # 阅读清单模型
     │   ├── ignore.go               # Round26 O2：忽略标记模型（title/gid 两型）
     │   ├── xp_stat.go              # Round32：XP 词云统计模型（单本快照/tag 聚合/元信息）
-    │   ├── scrape_bookmark.go      # Round28：搜刮书签模型（按用户隔离，config/anchor 以 JSON 落库）
+    │   ├── scrape_bookmark.go      # Round28：搜刮书签模型（按用户隔离，config/anchor 以 JSON 落库；Round37 加 sort_key 权值）
     │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
@@ -266,7 +266,7 @@ backend/
     │   ├── client_log.go           # 前端错误日志上报/大小查询/清除
     │   ├── log.go                  # 服务端日志（四类日志查询/监控）
     │   ├── xp_cloud.go             # Round32：XP 词云查询 / 统计重算接口
-    │   ├── scrape_bookmark.go      # Round28：搜刮书签 CRUD（列表 / 创建 / 重命名 / 删除）
+    │   ├── scrape_bookmark.go      # Round28：搜刮书签 CRUD（列表 / 创建 / 重命名 / 删除；Round37 排序移动 / 全量重置）
     │   └── network_handler.go      # 网络/代理配置
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
@@ -320,10 +320,10 @@ backend/
         ├── tag_scheduler.go        # Tag 维护定时调度
         ├── xp_cloud.go             # Round32 阶段一：XP 词云统计（合并口径/稀释加权/差分/重建/查询）
         ├── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
-        └── scrape_bookmark.go      # Round28：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD）
+        └── scrape_bookmark.go      # Round28：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD；Round37 LexoRank 排序）
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化；Round37 排序输出 / 单点移动 / 全量重置）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`。
 
 ---
 
@@ -368,7 +368,7 @@ backend/
 | 改离线历史 gid 合并去重/孤儿剔除                   | `stores/historyStore.ts`、`backend/internal/handlers/library.go`、`services/comic_refs.go`                                |
 | 改书架 404 自愈/弹窗粘滞                           | `views/ComicReader.vue`、`views/offline/OfflineDetail.vue`、`stores/comicStore.ts`、`router/index.ts`                     |
 | 改画质升级（/upgrade）                             | `views/UpgradeView.vue`、`backend/internal/handlers/upgrade.go`、`services/upgrade.go`                                   |
-| 改搜刮书签（Round27~29）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`plans/round27-scrape-bookmark-plan.md` |
+| 改搜刮书签（Round27~37）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`plans/round27-scrape-bookmark-plan.md`、`plans/round37-bookmark-reorder-plan.md` |
 | 改阅读器书签/章节（Round24）                       | `views/ComicReader.vue`、`components/reader/ReaderSidebar.vue`、`services/comic_mark.go`、`models/comic_mark.go`          |
 | 改隐藏页（Round24）                                | `views/offline/OfflineDetail.vue`、`services/page_hide.go`、`handlers/comic.go`（hidden-pages）                           |
 | 改书架拖拽排序（LexoRank）                         | `components/OfflineSidebar.vue`、`components/BookshelfPickerOverlay.vue`、`utils/lexoRank.ts`、`stores/bookshelfStore.ts` |

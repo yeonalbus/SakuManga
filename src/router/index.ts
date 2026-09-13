@@ -82,6 +82,12 @@ const routes: RouteRecordRaw[] = [
     name: 'OfflineBookshelf',
     component: () => import('@/views/offline/OfflineBookshelf.vue'),
   },
+  // Round38：书架墙（未读仪表盘 + 抽卡台），侧栏「全部书架」入口跳此页
+  {
+    path: '/offline/bookshelves',
+    name: 'OfflineBookshelfWall',
+    component: () => import('@/views/offline/OfflineBookshelfWall.vue'),
+  },
   {
     path: '/offline/maintain',
     name: 'OfflineMaintain',

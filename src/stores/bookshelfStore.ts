@@ -20,6 +20,10 @@ interface BookshelfDTO {
   pinned?: boolean
   sortKey?: number
   sortKeys?: Record<string, number>
+  /** Round38：后端聚合的架内未读数（read_count<=0 且本子仍存在） */
+  unreadCount?: number
+  /** Round38：封面地址（展示顺序第一本） */
+  coverUrl?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -47,19 +51,24 @@ const toComicIdArray = (raw: unknown): string[] => {
   return []
 }
 
+/** 后端 DTO → 本地 Bookshelf（Round38：透传未读数与封面） */
+const mapShelfDTO = (s: BookshelfDTO): Bookshelf => ({
+  id: s.id,
+  name: s.name,
+  count: s.count || 0,
+  comicIds: toComicIdArray(s.comicIds),
+  pinned: !!s.pinned,
+  sortKey: typeof s.sortKey === 'number' ? s.sortKey : 0,
+  sortKeys: s.sortKeys && typeof s.sortKeys === 'object' ? s.sortKeys : {},
+  unreadCount: typeof s.unreadCount === 'number' ? s.unreadCount : undefined,
+  coverUrl: typeof s.coverUrl === 'string' ? s.coverUrl : undefined,
+})
+
 /** 从后端加载当前用户的书架 */
 export const loadBookshelves = async () => {
   try {
     const data = await http<{ bookshelves: BookshelfDTO[] }>('/bookshelves')
-    bookshelves.value = (data.bookshelves || []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      count: s.count || 0,
-      comicIds: toComicIdArray(s.comicIds),
-      pinned: !!s.pinned,
-      sortKey: typeof s.sortKey === 'number' ? s.sortKey : 0,
-      sortKeys: s.sortKeys && typeof s.sortKeys === 'object' ? s.sortKeys : {},
-    }))
+    bookshelves.value = (data.bookshelves || []).map(mapShelfDTO)
   } catch (e) {
     // 后端不可用时回退旧 localStorage 数据，保证离线调试可用
     bookshelves.value = loadStorage<Bookshelf[]>('app_bookshelves', []).map((s) => ({
@@ -71,6 +80,22 @@ export const loadBookshelves = async () => {
       sortKeys: {},
     }))
     console.error('加载书架失败:', e)
+  }
+}
+
+/**
+ * Round38：静默刷新书架列表（书架墙挂载 / 加入移出本子后的统计校正）。
+ * 与 loadBookshelves 的区别：请求失败时**保留现有数据**，不回退旧 localStorage，
+ * 避免一次网络抖动把已加载的书架清空。
+ */
+export const refreshBookshelves = async () => {
+  // Round38：先冲刷未持久化的排序改动，避免刷新回来的旧权值覆盖本地顺序
+  flushPendingSort()
+  try {
+    const data = await http<{ bookshelves: BookshelfDTO[] }>('/bookshelves')
+    bookshelves.value = (data.bookshelves || []).map(mapShelfDTO)
+  } catch (e) {
+    console.error('刷新书架失败:', e)
   }
 }
 
@@ -115,6 +140,9 @@ const createBookshelf = async (name: string): Promise<Bookshelf | null> => {
         name: res.data.name,
         count: 0,
         comicIds: [],
+        // Round38：新书架为空架，未读 0、无封面
+        unreadCount: 0,
+        coverUrl: '',
       }
       bookshelves.value.push(shelf)
       return shelf
@@ -159,6 +187,8 @@ export const addComicToShelf = async (shelfId: string, comicId: string) => {
   } catch (e) {
     console.error('加入书架失败:', e)
   }
+  // Round38：静默刷新未读/封面统计（新加入的本子通常未读，徽标需即时反映）
+  void refreshBookshelves()
 }
 
 /** 置顶/取消置顶书架（Round13，侧栏常驻高频；后端存标记，前端控制上限） */
@@ -208,6 +238,8 @@ export const addComicsToShelf = async (shelfId: string, comicIds: string[]): Pro
   } catch (e) {
     console.error('批量加入书架失败:', e)
   }
+  // Round38：有实际新增时刷新未读/封面统计
+  if (added > 0) void refreshBookshelves()
   return { added, skipped }
 }
 
@@ -227,6 +259,8 @@ export const removeComicFromShelf = async (shelfId: string, comicId: string) => 
   } catch (e) {
     console.error('移出书架失败:', e)
   }
+  // Round38：移出后刷新未读/封面统计（被移出的本子可能未读，封面也可能需要回退到下一本）
+  void refreshBookshelves()
 }
 
 
@@ -484,6 +518,8 @@ export const removeComicsFromShelf = async (shelfId: string, comicIds: string[])
   } catch (e) {
     console.error('批量移出书架失败:', e)
   }
+  // Round38：批量移出后刷新未读/封面统计
+  void refreshBookshelves()
 }
 
 /** 书架展示列表：数量优先使用后端实时 count，缺失时回退 comicIds 长度 */

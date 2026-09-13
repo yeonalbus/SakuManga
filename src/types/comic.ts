@@ -75,6 +75,10 @@ export interface Bookshelf {
   sortKey?: number
   /** Round22 LexoRank：书架内本子权值表 {comicId: weight}；缺失权值的项回退 comicIds 数组顺序 */
   sortKeys?: Record<string, number>
+  /** Round38 书架墙：架内未读数（readCount=0 且本子仍存在；后端聚合，失效引用不计） */
+  unreadCount?: number
+  /** Round38 书架墙：封面地址（展示顺序第一本；R5 起优先手指定封面） */
+  coverUrl?: string
 }
 
 /** 联合类型：UI 层统一处理的单项对象 */

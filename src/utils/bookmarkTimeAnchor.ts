@@ -13,6 +13,32 @@ import type { OnlineComic, ScrapeBookmark } from '@/types/comic'
 import { fetchOnlineComicsApi } from '@/api/comic'
 import { buildOnlineSearchParams } from '@/utils/onlineSearchParams'
 
+/**
+ * 取发布时间对应的 E 站 seek 日期（`YYYY-MM-DD`；无法解析返回空串）。
+ *
+ * Round34：E 站 `?seek=` 只接受日粒度（实测 `seek=2023-03-31 03:54` / Unix 时间戳均被忽略，
+ * 退化为"当前最新列表"），故书签定位与时间锚迁移都只用日期部分。
+ */
+export const seekDateOf = (postedAt?: string): string => {
+  const m = (postedAt || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : ''
+}
+
+/**
+ * 「越过」判定：列表（发布时间倒序）最旧一条已不晚于目标时间
+ * → 目标时刻附近的检索结果已全部扫过，无需继续翻页。
+ *
+ * 供两处复用：时间锚迁移的翻页终止、书签定位的自动翻页终止。
+ */
+export const hasPassedTarget = (
+  oldestPostedAt: string | undefined,
+  targetPostedAt: string,
+): boolean => {
+  const oldest = parsePostedAt(oldestPostedAt)
+  const target = parsePostedAt(targetPostedAt)
+  return oldest !== null && target !== null && oldest <= target
+}
+
 /** 时间锚候选结果 */
 export interface TimeAnchorCandidate {
   gid: string
@@ -58,8 +84,9 @@ export const findTimeAnchorCandidate = async (
 ): Promise<TimeAnchorCandidate | null> => {
   const target = parsePostedAt(postedAt)
   if (target === null) return null
-  const seekDate = (postedAt || '').trim().slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(seekDate)) return null
+  // Round34：日粒度取法抽为 seekDateOf（与书签定位共用同一条规则）
+  const seekDate = seekDateOf(postedAt)
+  if (!seekDate) return null
   const baseParams = buildOnlineSearchParams(config)
   const maxPages = Math.max(1, opts?.maxPages ?? 6)
 
@@ -88,10 +115,8 @@ export const findTimeAnchorCandidate = async (
       if (!best || diffMs < best.diffMs) best = { comic: c, diffMs }
     }
 
-    // 列表按发布时间倒序：本页最旧一条已早于目标时间 → 已越过，无需继续翻页
-    const oldest = comics[comics.length - 1]
-    const oldestT = parsePostedAt(oldest.updatedAt)
-    if (oldestT !== null && oldestT <= target) break
+    // 列表按发布时间倒序：本页最旧一条已不晚于目标时间 → 已越过，无需继续翻页
+    if (hasPassedTarget(comics[comics.length - 1]?.updatedAt, postedAt)) break
 
     next = res.next
     if (!next) break

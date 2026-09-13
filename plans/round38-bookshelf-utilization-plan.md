@@ -135,39 +135,49 @@
 - `BookshelfPickerOverlay` 浮层**保留**：多选「加入书架」场景（`mode="add"`，用于 OfflineHome / OfflineHistory / OfflineBookshelf / RandomView）不变。
 - 侧栏徽标数据来自 `/bookshelves` 的 `unreadCount`，不依赖 `offlineComics` 是否加载。
 
-## 六、R3｜抽一本未读
+## 六、R3｜整架导入本地阅读清单
 
-新增 `src/composables/useShelfPick.ts`：
+> **二轮调整（用户反馈）**：初版此处为「🎲 抽一本未读」。按用户要求改为**导入阅读清单**——
+> 不再在书架里抽卡，而是把整架作品一键追加到候读队列，免去每次进阅读清单页点「➕ 从书架导入」。
+> 初版抽卡组件 `ShelfPickOverlay.vue` 与抽取逻辑已删除，未读统计（徽标/统计条）保留。
 
-- `pickUnreadFromShelf(shelfId)`：从架内 `readCount === 0` 且仍存在的本子中随机取一本。
-- `pickUnreadFromAllShelves()`：跨全部书架取一本（用于「全库未读」引导）。
-- 数据优先用后端 `unreadCount` 判定空/非空，具体抽样用 `offlineComics`（路由守卫已保证加载）。
+新增 `src/composables/useShelfImport.ts`：
 
-交互（书架墙每卡 + 书架页头部各一个入口）：
+- `importShelfToReadingList(shelf)` → `{ added, skipped, total }`：按书架展示顺序（LexoRank 权值序）遍历，
+  增量追加到本地清单末尾，已在清单中的跳过；仅影响清单本身，不触碰书架与本地库。
+- 语义与阅读清单页现有导入**完全一致**（用户 2026-09-13 确认：追加到末尾、导入后留在书架不跳转）。
+
+入口（书架墙每卡 + 书架页头部各一个）：
 
 ```
-🎲 抽一本未读
+📋 导入清单
    ↓
-┌────────────────────────┐
-│      [封面大图]         │
-│  [系列名] 第 N 话        │
-│  书架：JK退魔部  未读 4/5 │
-│ [▶ 开始阅读] [🎲 再抽一张] │
-└────────────────────────┘
+toast：已将「夢双月」3 本导入阅读清单（跳过 0 本）
+      /「夢双月」的作品都已在阅读清单中，无新增
+      / 书架「X」暂无可导入作品
 ```
 
-- 「开始阅读」走 `/reader?id=<comicId>&source=offline`，复用现有 `openContentTab`（PC 新标签 / 窄屏同标签降级）。
-- 抽取结果**不直接跳走**，先出结果卡，否则无法「换一张」。
-- 该架全部读完 → 结果卡提示「该系列已清空」并给「抽全库未读」引导按钮。
-- 书架页（`OfflineBookshelf.vue`）头部加同一按钮，复用同一 composable。
+- 空书架按钮置灰禁用。
+- 导入后**留在书架**，便于连续导入多个系列（用户确认）。
+- 底层复用 `readingStore.addToReadingList`（store 内部 200ms 防抖合并为一次后端写入）。
 
-## 七、后续待办（本 Round 不做）
+## 七、R5｜手动指定封面（二轮补做）
 
-| 编号 | 内容 | 成本 |
+| 层 | 改动 |
+| --- | --- |
+| 后端 | `models.Bookshelf` 加 `CoverComicID`（AutoMigrate 自动加列）；`GetBookshelves` 返回 `coverComicId`，`coverUrl` 按「手指定优先」解析；新增 `PUT /bookshelves/:id/cover`（`comicId` 空串 = 恢复自动；非架内本子 → 400；他人书架 → 404）；`services/comic_refs.go` 同步封面引用（本子被替换 → 迁移；被删除 → 清空回退自动） |
+| 前端 | 新增 `components/ShelfCoverPickerOverlay.vue`（架内本子缩略图网格点选 + 「↺ 恢复自动封面」）；`stores/bookshelfStore.ts` 新增 `setBookshelfCover`；`types/comic.ts` 加 `coverComicId` |
+| 入口 | 书架墙卡片 hover 工具条 `🖼`；书架页头部 `🖼 封面` |
+
+封面优先级：**手动指定 > 架内展示顺序第一本 > 首字占位砖**。
+
+## 八、后续待办
+
+| 编号 | 内容 | 状态 |
 | --- | --- | --- |
-| R4 | 抽卡页「书架池」：`random.go` 加 `includeShelfIDs`（`id IN ?`）与 `shelfId` / `shelfOnly` 参数，前端范围下拉加「📚 仅书架」+「仅未读」（复用现有 `recoExcludeRead` 能力） | 后端小改 + 前端中改 |
-| R5 | 手动指定封面：`models.Bookshelf` 加 `CoverComicID`（AutoMigrate 自动加列，同 `sort_key` 先例）、`PUT /bookshelves/:id/cover`、`comic_refs.go` 同步迁移/清空；「设为封面」选择模式直接用 `<img src="/api/v1/comics/<id>/cover">` 拼 URL，无需额外接口 | 后端小改 + 前端中改 |
-| R6 | 系列续读（详情页/阅读器「同系列未读还有 N 本」）与漏收提示（新入库自动匹配书架名；数据支撑：夢双月 3/11、退魔ノ隷刻 9/19、JK退魔部 5/6） | 中 |
+| R4 | 抽卡页「书架池」（`random.go` 加 `includeShelfIDs` + 前端范围下拉） | **用户确认不做**（2026-09-13：没有该需求） |
+| R5 | 手动指定封面 | **已补做**（见上） |
+| R6 | 系列续读（详情页/阅读器「同系列未读还有 N 本」）与漏收提示 | **用户确认不做**（同上） |
 
 ## 八、验收清单（2026-09-13 实机跑通）
 
@@ -182,11 +192,15 @@
 - [x] 排序模式（单列拖拽）显示 22 行，落位走 LexoRank 单点持久化
 - [x] 侧栏「🔍 全部书架（22）」跳书架墙；多选「加入书架」浮层（add 模式）仍正常
 - [x] 侧栏置顶书架徽标显示 `未读/总`，未读 0 显示 `8 ✓`
-- [x] 「🎲 抽一本未读」：抽出的本子确为未读；「再抽一张」不重复同一本；「开始阅读」进阅读器（实测 `/reader?id=...&source=offline`）
+- [x] 「📋 导入清单」：整架作品增量追加到本地清单（实测 0 → 3 本）；重复导入提示「已在阅读清单中，无新增」且不产生重复项
+- [x] 书架页头部同样有「📋 导入清单」入口；空书架按钮置灰禁用
 - [x] 读书后未读数下降：模拟阅读一本后 未读 75 → 74、onigirikao `15/16` → `14/16`
-- [x] 某架抽完提示「该系列已清空」并给「抽全库未读」引导；已清空书架按钮置灰禁用
+- [x] **封面无重叠**：封面加载成功后不再渲染占位首字（23/23 张已加载、重叠数 0；封面区中心点命中的是 `img` 而非 `span`）
+- [x] **手动指定封面**：浮层候选数 = 架内有效本子数；选第 3 本后后端 `coverComicId`/`coverUrl` 与书架墙卡片封面同步
+- [x] **恢复自动封面**：`coverComicId` 清空且 `coverUrl` 回退架内第一本
+- [x] 旧库升级自动加列（副本库 `cover_comic_id` 实测 0 → 1，无需手写迁移）
 - [x] 失效引用（1 个）不影响未读统计与封面渲染
-- [x] `cd backend && go test ./...` 通过（新增 `TestGetBookshelvesUnreadAndCover` / `TestLoadBookshelfStatsEmpty`）
+- [x] `cd backend && go test ./...` 通过（新增 `TestGetBookshelvesUnreadAndCover` / `TestLoadBookshelfStatsEmpty` / `TestGetBookshelvesManualCover` / `TestSetBookshelfCover` / 封面引用迁移断言）
 - [x] `npm run type-check` 通过
 - [x] 实机无 console error / pageerror
 
@@ -222,6 +236,22 @@
 - 部署提醒：前端需 `npm run build-only` 并同步 `backend/webui/dist`；后端需重新编译打包 exe，替换 `Y:\SakuManga\SakuManga.exe` 后重启（本 Round 无数据库结构变更）。
 
 
+### 二轮（2026-09-13 用户反馈）
+
+| 项 | 内容 |
+| --- | --- |
+| ① 封面重叠 bug | **根因**：占位首字带 `opacity: 0.45`，而 `opacity < 1` 会创建**层叠上下文**，使其与 `z-index: auto` 的绝对定位封面图处于同一层，绘制顺序改由 DOM 顺序决定——img 在前、字在后，于是**字压在封面上**（实测 `elementFromPoint(封面中心)` 命中的是 `span.cover-fallback`，而 `imgLoaded=true`）。<br>**修复**：改用封面状态机 `loading / ok / fail`——加载成功即**不渲染**占位字（不再依赖层级遮挡）；同时给封面 `z-index: 1`、徽标 `z-index: 2`、卡片工具条 `z-index: 3`，保证加载中与 hover 操作不被封面盖住。书架墙卡片与排序模式行两处同结构一并修复。 |
+| ② 抽卡 → 导入清单 | 删除 `ShelfPickOverlay.vue` 与抽取逻辑（`useShelfPick.ts` → 重命名为 `useShelfStats.ts`，只保留未读统计）；新增 `useShelfImport.ts`；书架墙卡片与书架页头部按钮改为「📋 导入清单」。语义沿用阅读清单页既有导入（追加末尾、已在清单跳过），导入后留在书架不跳转（均经用户确认）。 |
+| ③ R5 补做 | 手动指定封面全链路落地（后端字段/接口/引用迁移 + 前端浮层与两处入口）。R4、R6 经用户确认**不做**。 |
+
+二轮实机回归（`Test/pw-bug/round38/verify-round38b.mjs`，隔离库副本 23 架）：
+
+- 封面：23/23 张已加载、**重叠数 0**、封面区中心命中 `img`
+- 导入：`0 → 3` 本；重复导入提示「已在阅读清单中，无新增」且不产生重复项；书架页入口存在
+- 指定封面：浮层 3 个候选 → 选第 3 本后后端 `coverComicId`/`coverUrl` 与书架墙卡片同步；「恢复自动封面」回退架内第一本
+- 旧库升级：`cover_comic_id` 列由 AutoMigrate 自动添加（0 → 1）
+- 无 console error / pageerror
+
 ## 十、风险与注意
 
 - **AutoMigrate / 部署**：本 Round 首批不新增数据库列（仅 `GetBookshelves` 响应扩展），无需迁移；R5 才加 `cover_comic_id`，加列后需重启 `Y:\SakuManga\SakuManga.exe` 生效。
@@ -229,3 +259,6 @@
 - **未读语义**：`read_count` 仅在离线阅读器内自增（在线浏览不计），故「未读」严格等于「没用本地阅读器打开过」，与讨论口径一致。
 - **性能**：`GetBookshelves` 多一次 `IN` 查询（114 id）可忽略；书架墙渲染 22 张卡片无虚拟化必要。
 - **前端兜底**：若后端 `unreadCount` 缺失（旧后端），前端回退用 `offlineComics` 本地计算，保证降级可用。
+- **层叠上下文陷阱（二轮教训）**：`opacity < 1`、`transform`、`filter` 等都会创建层叠上下文，使其与 `z-index: auto` 的定位元素**同层**，此时绘制顺序由 DOM 顺序决定，而非「定位元素必在上」。同类场景（占位/骨架与真实内容叠加）一律改为**互斥渲染**，不要依赖层级遮挡。
+- **封面缓存**：`coverUrl` 指回 `/api/v1/comics/<id>/cover`，首次访问需后端生成缓存；生成期间图片未完成加载，此时仍显示占位首字（状态机 `loading`），加载成功即自动移除，不会重叠。
+- **R5 部署**：新增 `cover_comic_id` 列由 AutoMigrate 自动添加，需重启 `Y:\SakuManga\SakuManga.exe` 生效（无手写迁移）。

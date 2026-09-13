@@ -77,8 +77,10 @@ export interface Bookshelf {
   sortKeys?: Record<string, number>
   /** Round38 书架墙：架内未读数（readCount=0 且本子仍存在；后端聚合，失效引用不计） */
   unreadCount?: number
-  /** Round38 书架墙：封面地址（展示顺序第一本；R5 起优先手指定封面） */
+  /** Round38 书架墙：封面地址（手指定优先，否则架内展示顺序第一本） */
   coverUrl?: string
+  /** Round38-R5：手动指定的封面本子 id（空 = 自动取架内第一本） */
+  coverComicId?: string
 }
 
 /** 联合类型：UI 层统一处理的单项对象 */

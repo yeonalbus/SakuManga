@@ -11,7 +11,7 @@ import {
   setBookshelfPinned,
 } from '@/stores/bookshelfStore'
 // Round38：置顶书架未读徽标（与书架墙同口径，后端聚合值优先）
-import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfPick'
+import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfStats'
 import SortRowMenu from '@/components/SortRowMenu.vue'
 // Round22：侧栏置顶书架拖拽排序（把手拖动 / 操作菜单）
 import { useDragReorder } from '@/composables/useDragReorder'

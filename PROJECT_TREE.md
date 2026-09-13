@@ -67,7 +67,7 @@ src/
 │   ├── OnlineDetailPanel.vue       # 在线详情紧凑面板（宽屏右分栏/窄屏全屏）
 │   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
 │   ├── BookshelfPickerOverlay.vue  # 全部书架检索/多选加入书架浮层（Round13；navigate 模式已被书架墙取代，保留给多选加入）
-│   ├── ShelfPickOverlay.vue        # 抽一本未读结果卡浮层（Round38：先出卡再决定阅读/换一张）
+│   ├── ShelfCoverPickerOverlay.vue # 书架封面选择浮层（Round38-R5：架内本子点选 + 恢复自动封面）
 │   ├── BookmarkCreateModal.vue     # 搜刮书签创建弹窗（Round27~29：拾取卡片即记录发布时间与位置）
 │   ├── XpWordCloud.vue             # XP 词云（Round32：Canvas 自研螺旋布局，库藏/阅读双视图）
 │   ├── ArtistTopList.vue           # 画师/社团 Top 列表（Round32：从词云体系剥离的独立榜单）
@@ -83,7 +83,8 @@ src/
 │   ├── useLayoutMode.ts            # 布局模式（响应式排版）
 │   ├── useBatchSelection.ts        # 长按多选 + 批量操作（批量下载）
 │   ├── useDetailPanel.ts           # 左右分栏详情面板开关（宽屏/窄屏自适应）
-│   ├── useShelfPick.ts             # 书架消费入口（Round38：未读统计/书架墙汇总/抽一本未读）
+│   ├── useShelfStats.ts            # 书架统计口径（Round38：未读统计/书架墙汇总，后端聚合值优先）
+│   ├── useShelfImport.ts           # 书架→本地阅读清单增量导入（Round38：书架墙/书架页一键导入）
 │   └── useTagSuggest.ts            # tag 联想补全（筛选/抽卡共用，支持 - 前缀排除候选）
 │
 ├── config/
@@ -160,8 +161,8 @@ src/
     │   └── OnlineDetail.vue        # 在线详情（预览/评论/收藏）
     └── offline/
         ├── OfflineHome.vue         # 离线首页（翻页回顶 + 日期跳页）
-        ├── OfflineBookshelf.vue    # 离线书架（Round38 加「抽一本未读」消费入口）
-        ├── OfflineBookshelfWall.vue # 书架墙（Round38：未读仪表盘 + 抽卡台 + 排序模式）
+        ├── OfflineBookshelf.vue    # 离线书架（Round38：导入清单 / 设封面入口）
+        ├── OfflineBookshelfWall.vue # 书架墙（Round38：未读仪表盘 + 导入清单 + 排序模式 + 设封面）
         ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片 + Round26-2 疑似重复簇对比：左右标签卡独立切换）
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
@@ -355,7 +356,7 @@ backend/
 | 改阅读清单                                        | `src/views/ReadingListView.vue`、`stores/readingStore.ts`                                                                  |
 | 改历史记录                                        | `stores/historyStore.ts`、`views/online/OnlineHistory.vue`、`views/offline/OfflineHistory.vue`、`views/MemberHistory.vue`  |
 | 改书架                                            | `stores/bookshelfStore.ts`、`views/offline/OfflineBookshelf.vue`、`components/OfflineSidebar.vue`                          |
-| 改书架利用率（Round38：未读仪表盘 + 抽卡台）       | `views/offline/OfflineBookshelfWall.vue`、`components/ShelfPickOverlay.vue`、`composables/useShelfPick.ts`、`stores/bookshelfStore.ts`、`components/OfflineSidebar.vue`、`backend/internal/handlers/library.go`（/bookshelves 返回 unreadCount+coverUrl）、`plans/round38-bookshelf-utilization-plan.md` |
+| 改书架利用率（Round38：未读仪表盘 + 导入清单 + 指定封面） | `views/offline/OfflineBookshelfWall.vue`、`components/ShelfCoverPickerOverlay.vue`、`composables/useShelfStats.ts`、`composables/useShelfImport.ts`、`stores/bookshelfStore.ts`、`components/OfflineSidebar.vue`、`backend/internal/handlers/library.go`（/bookshelves 返回 unreadCount+coverUrl、PUT /bookshelves/:id/cover）、`models/models.go`（CoverComicID）、`services/comic_refs.go`（封面引用迁移）、`plans/round38-bookshelf-utilization-plan.md` |
 | 改批量下载                                        | `src/composables/useBatchSelection.ts`、`components/BatchDownloadBar.vue`                                                  |
 | 改登录/会话                                       | `views/LoginView.vue`、`stores/userStore.ts`、`main.ts`（会话恢复）、`utils/request.ts`（401）                             |
 | 改请求封装/接口地址                               | `src/utils/request.ts`、`src/config/api.ts`、`src/api/comic.ts`、`src/api/download.ts`                                     |

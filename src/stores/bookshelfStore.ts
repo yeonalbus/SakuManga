@@ -22,8 +22,10 @@ interface BookshelfDTO {
   sortKeys?: Record<string, number>
   /** Round38：后端聚合的架内未读数（read_count<=0 且本子仍存在） */
   unreadCount?: number
-  /** Round38：封面地址（展示顺序第一本） */
+  /** Round38：封面地址（手指定优先，否则展示顺序第一本） */
   coverUrl?: string
+  /** Round38-R5：手动指定的封面本子 id（空 = 自动） */
+  coverComicId?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -62,6 +64,7 @@ const mapShelfDTO = (s: BookshelfDTO): Bookshelf => ({
   sortKeys: s.sortKeys && typeof s.sortKeys === 'object' ? s.sortKeys : {},
   unreadCount: typeof s.unreadCount === 'number' ? s.unreadCount : undefined,
   coverUrl: typeof s.coverUrl === 'string' ? s.coverUrl : undefined,
+  coverComicId: typeof s.coverComicId === 'string' ? s.coverComicId : '',
 })
 
 /** 从后端加载当前用户的书架 */
@@ -191,8 +194,7 @@ export const addComicToShelf = async (shelfId: string, comicId: string) => {
   void refreshBookshelves()
 }
 
-/** 置顶/取消置顶书架（Round13，侧栏常驻高频；后端存标记，前端控制上限） */
-export const setBookshelfPinned = async (id: string, pinned: boolean) => {
+/** 置顶/取消置顶书架（Round13，侧栏常驻高频；后端存标记，前端控制上限） */export const setBookshelfPinned = async (id: string, pinned: boolean) => {
   const shelf = bookshelves.value.find((b) => b.id === id)
   if (shelf) shelf.pinned = pinned
   try {
@@ -203,6 +205,24 @@ export const setBookshelfPinned = async (id: string, pinned: boolean) => {
   } catch (e) {
     console.error('更新书架置顶失败:', e)
   }
+}
+
+/**
+ * Round38-R5：设置/清除书架封面（comicId 传空串 = 恢复自动封面「架内第一本」）。
+ * coverUrl 由后端按「手指定优先」解析，故写入后刷新一次书架列表拿到新封面地址。
+ */
+export const setBookshelfCover = async (id: string, comicId: string) => {
+  const shelf = bookshelves.value.find((b) => b.id === id)
+  if (shelf) shelf.coverComicId = comicId
+  try {
+    await http(`/bookshelves/${id}/cover`, {
+      method: 'PUT',
+      body: JSON.stringify({ comicId }),
+    })
+  } catch (e) {
+    console.error('设置书架封面失败:', e)
+  }
+  await refreshBookshelves()
 }
 
 /** 侧栏置顶书架列表（Round13）：pinned 的按全局 sort_order 顺序取前 5 个 */

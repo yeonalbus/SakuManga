@@ -19,9 +19,10 @@ import {
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
 import SortRowMenu from '@/components/SortRowMenu.vue'
-// Round38：抽一本未读（书架消费入口）
-import ShelfPickOverlay from '@/components/ShelfPickOverlay.vue'
-import { shelfUnreadCount } from '@/composables/useShelfPick'
+// Round38：整架导入本地阅读清单（入口前移）
+import { importShelfToReadingList } from '@/composables/useShelfImport'
+// Round38-R5：书架封面手动指定
+import ShelfCoverPickerOverlay from '@/components/ShelfCoverPickerOverlay.vue'
 import type { Bookshelf, OfflineComic, ComicItem } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
@@ -320,12 +321,23 @@ const handleDeleteCurrent = async () => {
 }
 
 // --------------------------------------------------
-// Round38：抽一本未读（书架即「系列菜单」，进去就能直接开读）
+// Round38-R5：书架封面手动指定
 // --------------------------------------------------
-const pickOpen = ref(false)
+const coverOpen = ref(false)
 
-/** 当前书架未读数（后端聚合值优先；为 0 时按钮置灰） */
-const currentUnread = computed(() => shelfUnreadCount(currentShelf.value))
+// --------------------------------------------------
+// Round38：整架导入本地阅读清单（增量追加，已在清单中的跳过）
+// --------------------------------------------------
+const handleImportToReadingList = () => {
+  const { added, skipped, total } = importShelfToReadingList(currentShelf.value)
+  if (added > 0) {
+    toast.success(`已导入 ${added} 本到阅读清单（跳过 ${skipped} 本）`)
+  } else if (total === 0) {
+    toast.info('该书架暂无可导入作品')
+  } else {
+    toast.info('该书架的作品都已在阅读清单中，无新增')
+  }
+}
 </script>
 
 <template>
@@ -337,21 +349,22 @@ const currentUnread = computed(() => shelfUnreadCount(currentShelf.value))
         <span class="shelf-badge">{{ shelfComics.length }} 部作品</span>
         <!-- Round10-Opt3：书架页 header 操作（排序/改名/删除，仅具体书架视图） -->
         <template v-if="currentShelfId">
-          <!-- Round38：抽一本未读（消费入口，未读清零后置灰） -->
+          <!-- Round38：整架导入本地阅读清单（增量追加，替代此前进阅读清单页操作） -->
           <button
-            class="shelf-op-btn pick-accent"
-            :disabled="currentUnread === 0"
+            class="shelf-op-btn import-accent"
+            :disabled="shelfComics.length === 0"
             :title="
-              currentUnread === 0
-                ? '该系列已全部读过'
-                : `从「${currentShelf.name}」随机抽一本没读过的`
+              shelfComics.length === 0
+                ? '该书架还是空的'
+                : '把本架全部作品增量追加到本地阅读清单（已在清单中的跳过）'
             "
-            @click="pickOpen = true"
+            @click="handleImportToReadingList"
           >
-            🎲 抽一本未读
-            <span v-if="currentUnread > 0" class="unread-chip">{{ currentUnread }}</span>
+            📋 导入清单
           </button>
           <button class="shelf-op-btn" title="自定义排序" @click="enterSortMode">↕ 排序</button>
+          <!-- Round38-R5：手动指定本架封面（浮层点选架内本子） -->
+          <button class="shelf-op-btn" title="手动指定书架封面" @click="coverOpen = true">🖼 封面</button>
           <button class="shelf-op-btn" title="重命名书架" @click="handleRenameCurrent">✎ 改名</button>
           <button class="shelf-op-btn danger" title="删除书架" @click="handleDeleteCurrent">
             🗑️ 删除
@@ -484,12 +497,11 @@ const currentUnread = computed(() => shelfUnreadCount(currentShelf.value))
       @add="quickAdd.handleAddToShelf"
     />
 
-    <!-- Round38：抽一本未读（结果卡；shelfId 为空 = 全部书架） -->
-    <ShelfPickOverlay
-      :open="pickOpen"
+    <!-- Round38-R5：封面选择浮层 -->
+    <ShelfCoverPickerOverlay
+      :open="coverOpen"
       :shelf-id="currentShelfId"
-      :shelf-name="currentShelf.name"
-      @close="pickOpen = false"
+      @close="coverOpen = false"
     />
   </div>
 </template>
@@ -567,31 +579,24 @@ const currentUnread = computed(() => shelfUnreadCount(currentShelf.value))
   background-color: rgba(255, 117, 136, 0.12);
 }
 
-/* Round38：抽一本未读（书架消费入口，与普通操作按钮区分主次） */
-.shelf-op-btn.pick-accent {
-  border-color: rgba(255, 200, 80, 0.5);
-  color: #e6b800;
+/* Round38：导入阅读清单（书架消费入口，与普通操作按钮区分主次） */
+.shelf-op-btn.import-accent {
+  border-color: rgba(80, 200, 120, 0.45);
+  color: #4cc38a;
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-.shelf-op-btn.pick-accent:hover:not(:disabled) {
-  background-color: rgba(255, 200, 80, 0.15);
-  border-color: #e6b800;
-  color: #e6b800;
+.shelf-op-btn.import-accent:hover:not(:disabled) {
+  background-color: rgba(80, 200, 120, 0.15);
+  border-color: #4cc38a;
+  color: #4cc38a;
 }
 
-.shelf-op-btn.pick-accent:disabled {
+.shelf-op-btn.import-accent:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.unread-chip {
-  font-size: 0.72rem;
-  background: rgba(255, 200, 80, 0.2);
-  border-radius: 8px;
-  padding: 0 6px;
 }
 
 /* Round10：书架内项目排序视图 */

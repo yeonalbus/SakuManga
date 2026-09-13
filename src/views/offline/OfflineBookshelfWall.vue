@@ -4,7 +4,8 @@
  *
  * 背景：书架此前只有「整理」没有「消费」——22 个书架里 114 本收藏有 76 本从未打开，
  * 而侧栏只常驻置顶的 2 个，其余 20 个埋在「全部书架」浮层里且进去只能翻列表。
- * 本页把「未读债务」摆上台面，并给每个书架一个「🎲 抽一本未读」的直接消费入口。
+ * 本页把「未读债务」摆上台面，并给每个书架一个「📋 导入清单」的直接消费入口
+ * （初版为「🎲 抽一本未读」，按用户需求改为整架导入本地阅读清单）。
  *
  * 数据：未读数与封面由 GET /bookshelves 聚合返回（后端一次 IN 查询）；
  * 排序沿用 Round22 LexoRank（排序模式下拖拽，单点移动 + 防抖持久化）。
@@ -24,8 +25,9 @@ import {
   flushPendingSort,
   refreshBookshelves,
 } from '@/stores/bookshelfStore'
-import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfPick'
-import ShelfPickOverlay from '@/components/ShelfPickOverlay.vue'
+import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfStats'
+import { importShelfToReadingList } from '@/composables/useShelfImport'
+import ShelfCoverPickerOverlay from '@/components/ShelfCoverPickerOverlay.vue'
 import { useDragReorder } from '@/composables/useDragReorder'
 import { getMainContent } from '@/utils/scrollMemory'
 import type { Bookshelf } from '@/types/comic'
@@ -149,16 +151,28 @@ const togglePin = async (shelf: Bookshelf) => {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 抽一本未读（结果卡浮层）
+// 导入阅读清单（Round38：替代此前的抽卡台；入口前移，免去每次进阅读清单页操作）
 // ─────────────────────────────────────────────────────────────
-const pickOpen = ref(false)
-const pickShelfId = ref('')
-const pickShelfName = ref('')
+const handleImport = (shelf: Bookshelf) => {
+  const { added, skipped, total } = importShelfToReadingList(shelf)
+  if (added > 0) {
+    toast.success(`已将「${shelf.name}」${added} 本导入阅读清单（跳过 ${skipped} 本）`)
+  } else if (total === 0) {
+    toast.info(`书架「${shelf.name}」暂无可导入作品`)
+  } else {
+    toast.info(`「${shelf.name}」的作品都已在阅读清单中，无新增`)
+  }
+}
 
-const openPick = (shelf?: Bookshelf) => {
-  pickShelfId.value = shelf?.id || ''
-  pickShelfName.value = shelf?.name || ''
-  pickOpen.value = true
+// ─────────────────────────────────────────────────────────────
+// 封面选择（Round38-R5：手指定封面优先，空 = 自动取架内第一本）
+// ─────────────────────────────────────────────────────────────
+const coverOpen = ref(false)
+const coverShelfId = ref('')
+
+const openCoverPicker = (shelf: Bookshelf) => {
+  coverShelfId.value = shelf.id
+  coverOpen.value = true
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -212,10 +226,16 @@ const exitSortPanel = () => {
   toast.success('书架顺序已保存')
 }
 
-/** 封面缺失 / 缓存未生成时收起图片，露出占位块 */
-const onCoverError = (e: Event) => {
-  const img = e.target as HTMLImageElement | null
-  if (img) img.style.display = 'none'
+/** 封面加载状态机：loading（默认，显示占位首字）/ ok / fail */
+type CoverState = 'loading' | 'ok' | 'fail'
+const coverState = ref<Record<string, CoverState>>({})
+
+const isCoverLoaded = (id: string): boolean => coverState.value[id] === 'ok'
+const markCoverLoaded = (id: string) => {
+  coverState.value[id] = 'ok'
+}
+const markCoverFailed = (id: string) => {
+  coverState.value[id] = 'fail'
 }
 </script>
 
@@ -282,13 +302,18 @@ const onCoverError = (e: Event) => {
           <button class="card-main" :title="shelf.name" @click="enterShelf(shelf.id)">
             <div class="card-cover">
               <img
-                v-if="shelf.coverUrl"
+                v-if="shelf.coverUrl && coverState[shelf.id] !== 'fail'"
                 :src="shelf.coverUrl"
                 :alt="shelf.name"
                 loading="lazy"
-                @error="onCoverError"
+                @load="markCoverLoaded(shelf.id)"
+                @error="markCoverFailed(shelf.id)"
               />
-              <span class="cover-fallback">{{ shelf.name.slice(0, 1) }}</span>
+              <!-- 占位首字仅在「无封面」或「封面加载中 / 加载失败」时渲染：
+                   加载成功即移除，避免与封面图同层竞争（字压在图上） -->
+              <span v-if="!isCoverLoaded(shelf.id)" class="cover-fallback">
+                {{ shelf.name.slice(0, 1) }}
+              </span>
               <span v-if="shelf.pinned" class="pin-flag">📌</span>
               <span class="unread-badge" :class="{ cleared: shelfUnreadCount(shelf) === 0 }">
                 {{ unreadLabel(shelf) }}
@@ -302,20 +327,21 @@ const onCoverError = (e: Event) => {
 
           <div class="card-actions">
             <button
-              class="pick-btn"
-              :disabled="shelfUnreadCount(shelf) === 0"
+              class="import-btn"
+              :disabled="(shelf.count || 0) === 0"
               :title="
-                shelfUnreadCount(shelf) === 0
-                  ? '该系列已全部读过'
-                  : `从「${shelf.name}」随机抽一本没读过的`
+                (shelf.count || 0) === 0
+                  ? '该书架还是空的'
+                  : `把「${shelf.name}」的全部作品增量追加到本地阅读清单`
               "
-              @click="openPick(shelf)"
+              @click="handleImport(shelf)"
             >
-              🎲 抽一本未读
+              📋 导入清单
             </button>
           </div>
 
           <div class="card-tools">
+            <button class="tool-btn" title="设置封面" @click="openCoverPicker(shelf)">🖼</button>
             <button
               class="tool-btn"
               :title="shelf.pinned ? '取消置顶' : '置顶到侧栏'"
@@ -342,13 +368,16 @@ const onCoverError = (e: Event) => {
             <span class="sort-index">{{ idx + 1 }}</span>
             <div class="sort-cover">
               <img
-                v-if="shelf.coverUrl"
+                v-if="shelf.coverUrl && coverState[shelf.id] !== 'fail'"
                 :src="shelf.coverUrl"
                 :alt="shelf.name"
                 loading="lazy"
-                @error="onCoverError"
+                @load="markCoverLoaded(shelf.id)"
+                @error="markCoverFailed(shelf.id)"
               />
-              <span class="cover-fallback">{{ shelf.name.slice(0, 1) }}</span>
+              <span v-if="!isCoverLoaded(shelf.id)" class="cover-fallback">
+                {{ shelf.name.slice(0, 1) }}
+              </span>
             </div>
             <div class="sort-info">
               <span class="sort-name" :title="shelf.name">{{ shelf.name }}</span>
@@ -385,12 +414,11 @@ const onCoverError = (e: Event) => {
       </Teleport>
     </div>
 
-    <!-- 抽一本未读：结果卡（shelfId 为空 = 全部书架） -->
-    <ShelfPickOverlay
-      :open="pickOpen"
-      :shelf-id="pickShelfId"
-      :shelf-name="pickShelfName"
-      @close="pickOpen = false"
+    <!-- Round38-R5：封面选择浮层 -->
+    <ShelfCoverPickerOverlay
+      :open="coverOpen"
+      :shelf-id="coverShelfId"
+      @close="coverOpen = false"
     />
   </div>
 </template>
@@ -632,6 +660,9 @@ const onCoverError = (e: Event) => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 兜底：加载中的占位首字与封面同层时，保证封面始终绘制在上方 */
+  z-index: 1;
+  background: var(--app-surface-3);
 }
 
 .cover-fallback {
@@ -647,6 +678,7 @@ const onCoverError = (e: Event) => {
   left: 6px;
   font-size: 0.8rem;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  z-index: 2; /* 封面图 z-index:1 之上 */
 }
 
 .unread-badge {
@@ -661,6 +693,7 @@ const onCoverError = (e: Event) => {
   color: #e6b800;
   border: 1px solid rgba(255, 200, 80, 0.5);
   backdrop-filter: blur(2px);
+  z-index: 2; /* 封面图 z-index:1 之上 */
 }
 
 .unread-badge.cleared {
@@ -695,7 +728,7 @@ const onCoverError = (e: Event) => {
   padding: 6px 10px 10px;
 }
 
-.pick-btn {
+.import-btn {
   width: 100%;
   background: transparent;
   border: 1px dashed var(--app-border-3);
@@ -707,12 +740,12 @@ const onCoverError = (e: Event) => {
   transition: all 0.15s;
 }
 
-.pick-btn:hover:not(:disabled) {
+.import-btn:hover:not(:disabled) {
   border-color: #007acc;
   color: #007acc;
 }
 
-.pick-btn:disabled {
+.import-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -725,6 +758,7 @@ const onCoverError = (e: Event) => {
   gap: 4px;
   opacity: 0;
   transition: opacity 0.15s;
+  z-index: 3; /* 高于封面图与徽标，保证 hover 操作可点 */
 }
 
 .wall-card:hover .card-tools {
@@ -823,6 +857,8 @@ const onCoverError = (e: Event) => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 1;
+  background: var(--app-surface-3);
 }
 
 .sort-cover .cover-fallback {

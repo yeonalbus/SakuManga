@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import {
@@ -18,6 +18,7 @@ import SidebarGroupHeader from '@/components/SidebarGroupHeader.vue'
 // Round22：侧栏置顶书架拖拽排序（把手拖动 / 操作菜单）
 import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
+import { loadStorage, saveStorage } from '@/utils/storage'
 import type { Bookshelf } from '@/types/comic'
 
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id
@@ -26,8 +27,13 @@ const { modal, toast } = useUI()
 // Round3-任务2：更新/维护入口仅管理员可见
 const { isAdmin } = useUserStore()
 
-// 控制书架菜单的展开/折叠状态
-const isBookshelfOpen = ref(true)
+// Round39：书架菜单展开/折叠状态本地记忆（与书签组同款：localStorage + watch 落盘）
+const BOOKSHELF_GROUP_OPEN_KEY = 'saku_bookshelf_group_open'
+
+/** 书架组展开状态（记忆；默认展开与历史行为一致） */
+const isBookshelfOpen = ref(loadStorage<boolean>(BOOKSHELF_GROUP_OPEN_KEY, true))
+
+watch(isBookshelfOpen, (v) => saveStorage(BOOKSHELF_GROUP_OPEN_KEY, v))
 
 const toggleBookshelf = () => {
   isBookshelfOpen.value = !isBookshelfOpen.value

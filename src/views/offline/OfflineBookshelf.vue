@@ -19,6 +19,9 @@ import {
 import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
 import ShelfQuickAddToolbar from '@/components/ShelfQuickAddToolbar.vue'
 import SortRowMenu from '@/components/SortRowMenu.vue'
+// Round38：抽一本未读（书架消费入口）
+import ShelfPickOverlay from '@/components/ShelfPickOverlay.vue'
+import { shelfUnreadCount } from '@/composables/useShelfPick'
 import type { Bookshelf, OfflineComic, ComicItem } from '@/types/comic'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
@@ -315,6 +318,14 @@ const handleDeleteCurrent = async () => {
   toast.info(`书架「${currentShelf.value.name}」已删除`)
   router.replace('/offline/home')
 }
+
+// --------------------------------------------------
+// Round38：抽一本未读（书架即「系列菜单」，进去就能直接开读）
+// --------------------------------------------------
+const pickOpen = ref(false)
+
+/** 当前书架未读数（后端聚合值优先；为 0 时按钮置灰） */
+const currentUnread = computed(() => shelfUnreadCount(currentShelf.value))
 </script>
 
 <template>
@@ -326,6 +337,20 @@ const handleDeleteCurrent = async () => {
         <span class="shelf-badge">{{ shelfComics.length }} 部作品</span>
         <!-- Round10-Opt3：书架页 header 操作（排序/改名/删除，仅具体书架视图） -->
         <template v-if="currentShelfId">
+          <!-- Round38：抽一本未读（消费入口，未读清零后置灰） -->
+          <button
+            class="shelf-op-btn pick-accent"
+            :disabled="currentUnread === 0"
+            :title="
+              currentUnread === 0
+                ? '该系列已全部读过'
+                : `从「${currentShelf.name}」随机抽一本没读过的`
+            "
+            @click="pickOpen = true"
+          >
+            🎲 抽一本未读
+            <span v-if="currentUnread > 0" class="unread-chip">{{ currentUnread }}</span>
+          </button>
           <button class="shelf-op-btn" title="自定义排序" @click="enterSortMode">↕ 排序</button>
           <button class="shelf-op-btn" title="重命名书架" @click="handleRenameCurrent">✎ 改名</button>
           <button class="shelf-op-btn danger" title="删除书架" @click="handleDeleteCurrent">
@@ -458,6 +483,14 @@ const handleDeleteCurrent = async () => {
       @close="quickAdd.showShelfPicker.value = false"
       @add="quickAdd.handleAddToShelf"
     />
+
+    <!-- Round38：抽一本未读（结果卡；shelfId 为空 = 全部书架） -->
+    <ShelfPickOverlay
+      :open="pickOpen"
+      :shelf-id="currentShelfId"
+      :shelf-name="currentShelf.name"
+      @close="pickOpen = false"
+    />
   </div>
 </template>
 
@@ -532,6 +565,33 @@ const handleDeleteCurrent = async () => {
 
 .shelf-op-btn.danger:hover {
   background-color: rgba(255, 117, 136, 0.12);
+}
+
+/* Round38：抽一本未读（书架消费入口，与普通操作按钮区分主次） */
+.shelf-op-btn.pick-accent {
+  border-color: rgba(255, 200, 80, 0.5);
+  color: #e6b800;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.shelf-op-btn.pick-accent:hover:not(:disabled) {
+  background-color: rgba(255, 200, 80, 0.15);
+  border-color: #e6b800;
+  color: #e6b800;
+}
+
+.shelf-op-btn.pick-accent:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.unread-chip {
+  font-size: 0.72rem;
+  background: rgba(255, 200, 80, 0.2);
+  border-radius: 8px;
+  padding: 0 6px;
 }
 
 /* Round10：书架内项目排序视图 */

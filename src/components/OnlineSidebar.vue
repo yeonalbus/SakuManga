@@ -223,7 +223,7 @@ onBeforeUnmount(flushPendingBookmarkSort)
        行1：图标位（hover 让位给 ⠿ ✕） + 主文本 + 日期；行2：搜索词 + 时间
        Round39：标题行改用 SidebarGroupHeader（与书架同字体、同结构）——去掉 🔖 前缀，
        放大镜（检测）紧跟「书签」右侧，折叠箭头移至行右端 -->
-  <div class="nav-group">
+  <div class="nav-group bm-nav-group">
     <SidebarGroupHeader
       title="书签"
       :open="groupOpen"
@@ -335,6 +335,13 @@ onBeforeUnmount(flushPendingBookmarkSort)
 </template>
 
 <style scoped>
+/* Round39：书签组紧跟上方「历史记录」，不再按分组间距（App.vue .nav-group margin-bottom:20px）
+   单独隔开——负 margin 精确抵消该值，使「历史记录 → 书签」的间隔与「收藏 → 历史记录」
+   等相邻链接完全一致（盒间距 2px / 文字间距 18px）。 */
+.bm-nav-group {
+  margin-top: -20px;
+}
+
 /* 书签按钮：与 App.vue 的 .nav-menu a 视觉一致；
    Round30：邮件列表式双行排版（行1 图标+主文本+日期，行2 搜索词+时间），日期/时间右对齐 */
 .bookmark-item {

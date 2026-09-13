@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v2.1.0 · 最近更新：2026-09
+> 版本：v2.1.1 · 最近更新：2026-09
 
 ## 一、目录总览
 
@@ -23,6 +23,11 @@ SakuManga/
 ├── tsconfig*.json / env.d.ts / index.html        # TS / 前端工程配置
 ├── eslint.config.ts / .oxlintrc.json / .prettierrc.json / .editorconfig / .gitattributes   # 代码规范配置
 ├── build-release.bat               # 一键打包单 exe（版本号自动读取 package.json）
+├── build-docker.bat                # 一键构建 Docker 镜像（默认本地测试，push 参数推 GHCR）
+├── Dockerfile                      # 官方镜像构建定义（多阶段：golang 构建 → debian-slim 运行）
+├── docker-entrypoint.sh            # 容器入口：复制二进制到数据目录 /app 后以 --headless 启动
+├── .dockerignore                   # 镜像构建上下文排除规则（勿排除 backend/webui/dist）
+├── .github/workflows/              # GitHub Actions：docker-publish.yml（tag / 手动触发 → GHCR 多架构）
 ├── dist/                           # 前端 Vite 构建产物（已 gitignore，打包时拷入 webui/dist）
 ├── SakuManga.exe                  # 打包产物（已 gitignore，双击运行即托盘）
 └── PROJECT_TREE.md                 # 本文件
@@ -429,9 +434,11 @@ backend/
 
 ---
 
-## 六、发布注意（v2.1.0）
+## 六、发布注意（v2.1.1）
 
-- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.1.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
+- **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.1.1`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
+- **Docker 镜像（v2.1.1 起）**：推送 `SakuManga-X.Y.Z` tag 时由 `.github/workflows/docker-publish.yml` 自动构建 `linux/amd64` + `linux/arm64` 并推送到 `ghcr.io/yeonalbus/sakumanga`（标签 `X.Y.Z` / `X.Y` / `latest`）；也可在仓库 Actions 页面手动触发（`Docker Image (GHCR)` → Run workflow），无需任何 Secrets（用自带 `GITHUB_TOKEN` + `permissions: packages: write`）。本地构建用 `build-docker.bat`（本地测试）/ `build-docker.bat push`（多架构推 GHCR）。
+  ⚠️ 镜像构建阶段不跑 Node，用的是仓库里已提交的 `backend/webui/dist`；**前端源码改动后必须先 `npm run build` 并同步产物再打 tag**，否则镜像内是旧前端（「关于」页版本号也会是旧的）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuManga.exe --headless` 纯后端运行。
 - **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。

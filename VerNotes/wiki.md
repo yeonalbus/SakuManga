@@ -223,15 +223,75 @@ E 站按 UTC 存储时间，程序按系统时区展示，存在时区差。检�
 
 ## 九、Docker 部署
 
-> ⚠️ **免责声明（务必先读）**：项目目前**没有官方 Docker 镜像**，本节的 Dockerfile 是按仓库实际结构编写、由项目作者整理的**社区方案**；作者本地没有 Docker 环境，**未实测构建**，遇到问题可能无法及时排查与解答。若你跑通了或踩到坑，欢迎在 Issue 中反馈（附 Docker 版本 + 报错日志），帮助完善本节内容。
+> **官方镜像（自 v2.1.1 起提供）**：`ghcr.io/yeonalbus/sakumanga`，同时提供 `linux/amd64` 与 `linux/arm64`（群晖 / 威联通 / 树莓派 / Apple Silicon 都能直接跑），由 GitHub Actions 在推送 tag 或手动触发时自动构建发布，适合 NAS / Linux 服务器等长期运行场景。
 >
-> 官方分发方式仍是 Windows 单文件 `SakuManga.exe`（双击即用）；Docker 部署适合 NAS / 群晖 / 威联通 / Linux 服务器等长期运行场景，等价于 `SakuManga.exe --headless` 纯后端模式。
+> ⚠️ **诚实说明**：项目作者本地没有 Docker 环境，镜像由云端 CI 构建、**未经作者本机实测**；若在启动、挂载或架构上遇到问题，欢迎在 Issue 反馈（附 `docker logs` 输出），会尽快修复。不用 Docker 的用户，Windows 单文件 `SakuManga.exe` 仍是官方推荐方式。
 
-**Q: 怎么用 Docker 部署？**
+**Q: 用官方镜像部署（推荐，最省事）**
 
-后端是纯 Go + 内嵌前端（`backend/webui/dist` 已随仓库维护），默认监听 `0.0.0.0:8081`，非 Windows 平台托盘为无操作实现，因此可以静态编译为一个小体积镜像——**构建阶段不需要 Node**。
+```bash
+docker pull ghcr.io/yeonalbus/sakumanga:2.1.1
 
-**① 准备**：`git clone` 本仓库（或用 Release 的 Source code 包），在仓库根目录新建下面两个文件。
+docker run -d --name sakumanga --restart unless-stopped \
+  -p 8081:8081 \
+  -v /volume1/docker/sakumanga:/app \
+  ghcr.io/yeonalbus/sakumanga:2.1.1
+```
+
+访问 `http://<NAS_IP>:8081`，首次启动自动创建管理员 `admin` / `admin123`，登录后请尽快在「设置 → 账户」修改密码并绑定 E 站凭证。
+
+容器内的程序以 **`--headless`（纯后端）模式**运行——该参数已写进镜像启动命令，`docker run` 时无需自己添加。`-v` 指定的目录是数据目录（不显式挂载时数据落在匿名卷里，不易管理）：`manga.db` / `config.json` / `data/` / `logs/` 都会落在其中。
+
+**Q: 官方镜像有哪些标签？怎么升级？**
+- 标签：`2.1.1`（精确版本，**生产建议用这个**）、`2.1`（同 minor 最新）、`latest`（最新发布）
+- 升级三步（数据在挂载目录里，不受影响）：
+
+```bash
+docker pull ghcr.io/yeonalbus/sakumanga:2.1.1   # ① 拉新版本（换成新版号）
+docker rm -f sakumanga                          # ② 删掉旧容器
+# ③ 用上面同样的 docker run 命令重新启动（只改标签）
+```
+
+用 `docker-compose.yml` 更省事（升级只改一行 tag，再 `docker compose up -d`）：
+
+```yaml
+services:
+  sakumanga:
+    image: ghcr.io/yeonalbus/sakumanga:2.1.1
+    container_name: sakumanga
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./sakumanga-data:/app
+    environment:
+      - TZ=Asia/Shanghai
+```
+
+**Q: 镜像会随版本更新吗？里面是哪个版本？**
+- **推送 `SakuManga-X.Y.Z` tag 时会自动构建并推送镜像**；也可以在仓库 Actions 页面手动触发（左侧选 `Docker Image (GHCR)` → Run workflow）
+- 镜像从仓库源码构建，构建标识会注入「设置 → 关于软件」，可核对来源
+- 一次构建同时产出 `linux/amd64` 与 `linux/arm64` 两种架构
+
+**Q: 不想用官方镜像，想自己构建？**
+
+仓库已自带 `Dockerfile`、`docker-entrypoint.sh`、`.dockerignore`，两种方式任选：
+
+- **Windows 本机（已装 Docker Desktop）**：双击 `build-docker.bat` 构建并载入本地镜像供测试；`build-docker.bat push` 则构建多架构并推送到 GHCR（需先 `docker login ghcr.io`）
+- **命令行**：
+
+```bash
+# 单架构本地构建（可立刻 docker run 测试）
+docker build -t sakumanga:dev .
+
+# 多架构构建并推送（需先 docker login ghcr.io -u <你的用户名>）
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/<你的用户名>/sakumanga:dev --push .
+```
+
+镜像构建阶段**不需要 Node**——后端是纯 Go，且 `backend/webui/dist`（前端产物）已随仓库维护。若要连前端源码一起改，先在本地 `npm run build` 并把根目录 `dist/` 拷进 `backend/webui/dist/`，再构建镜像。
+
+仓库中这两个文件的实际内容如下，便于你理解或自行改造：
 
 `Dockerfile`：
 
@@ -270,45 +330,29 @@ chmod +x /app/SakuManga
 exec /app/SakuManga --headless
 ```
 
-**② 构建与运行**：
+**Q: 不想用 Docker，NAS 上还有别的办法吗？**
+
+有。在任意一台机器上交叉编译出 Linux 版二进制，拷到 NAS 直接运行，功能与镜像完全一致：
 
 ```bash
-docker build -t sakumanga:2.1.0 .
+cd backend
+# Windows cmd：
+set GOOS=linux & set GOARCH=amd64 & go build -o SakuManga-linux .
+# PowerShell：
+# $env:GOOS="linux"; $env:GOARCH="amd64"; go build -o SakuManga-linux .
 
-# 数据目录换成你自己的（群晖一般放在 /volume1/docker/ 下）
-mkdir -p /volume1/docker/sakumanga
-
-docker run -d --name sakumanga --restart unless-stopped \
-  -p 8081:8081 \
-  -v /volume1/docker/sakumanga:/app \
-  sakumanga:2.1.0
+./SakuManga-linux --headless
 ```
 
-访问 `http://<NAS_IP>:8081`，首次启动自动创建管理员 `admin` / `admin123`，登录后请尽快在「设置 → 账户」修改密码并绑定 E 站凭证。
-
-**③ 也可以直接写 `docker-compose.yml`**（放在仓库根目录，`docker compose up -d --build`）：
-
-```yaml
-services:
-  sakumanga:
-    build: .
-    image: sakumanga:2.1.0
-    container_name: sakumanga
-    restart: unless-stopped
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./sakumanga-data:/app
-    environment:
-      - TZ=Asia/Shanghai
-```
+arm64 的 NAS（群晖 ARM 机型、树莓派等）把 `GOARCH` 换成 `arm64`。这条路的代价是要自己保证 CA 证书、时区与目录权限（镜像里这些已经装好）。
 
 **Q: Docker 部署要注意什么？**
 - **数据持久化**：`manga.db`（含 SQLite 的 `-wal` / `-shm` 文件）、`config.json`、`data/`（标签库缓存）、`logs/` 全部落在挂载卷 `/app` 里，删除 / 重建容器不丢数据。**不要把数据目录里的文件单独挂载**（例如只挂 `manga.db` 单文件），否则 SQLite 的 `-wal` 文件留在容器层，重建容器可能丢数据；整目录挂载最稳。
-- **升级**：重新 `docker build` 后 `docker rm -f sakumanga` 再执行一次上面的 `docker run`（数据保留），或 `docker compose up -d --build`。新版本号对应的镜像 tag 可自行调整（如 `sakumanga:2.1.0` → `2.2.0`）。
+- **升级**：见上文「官方镜像有哪些标签？怎么升级？」——换镜像标签重建容器，或 `docker compose up -d`；数据保留。自己构建的镜像同理，`docker rm -f` 旧容器后用新镜像启动。
 - **代理**：容器内访问 E 站若超时，在「设置 → E 站连接 → 网络」里**显式填写宿主机代理**（如 `http://172.17.0.1:7897`；群晖 / Macvlan 场景用宿主局域网 IP）。设置页留空时程序会尝试跟随「系统代理」，而容器内探测不到宿主系统的代理设置，因此建议手动填。
 - **首次启动会联网**拉取标签库（来自 GitHub，落在 `data/` 下）：容器无网络时不影响启动，只是标签汉化 / 联想为空，可稍后手动同步。
-- **改了前端源码**：先在本地 `npm run build` 并把根目录 `dist/` 拷进 `backend/webui/dist/`，再构建镜像（或自行在 Dockerfile 里加一个 `node:22` 构建阶段）。
-- **构建上下文**：仓库含 `node_modules` 等大目录，建议加一个 `.dockerignore` 排除 `node_modules`、`dist`、`.git`、`Test`、`MangaExamlpe`、`Server`、`manga.db*`、`*.exe`；**注意不要排除 `backend/webui/dist`**，镜像构建依赖它。
+- **改前端源码后再构建镜像**：先在本地 `npm run build` 并把根目录 `dist/` 拷进 `backend/webui/dist/`（镜像构建阶段不含 Node）。
+- **构建上下文**：仓库自带的 `.dockerignore` 已排除 `node_modules`、`dist`、`.git`、`Test`、`MangaExamlpe`、`Server`、`manga.db*`、`*.exe` 等；**注意不要排除 `backend/webui/dist`**，镜像构建依赖它。
 - **PWA 加到手机主屏**需要 https（局域网直接 http 访问不行），建议套一层反向代理并配证书。
 - **权限**：首次运行会向挂载目录写入数据库与缓存，确保容器对 `/app` 有写权限（Linux 下注意目录属主）。
+- **端口冲突**：容器内固定监听 `8081`，宿主机端口用 `-p 8081:8081` 左侧改写（如 `-p 18081:8081`）。

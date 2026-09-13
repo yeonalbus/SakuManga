@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import {
@@ -10,11 +10,13 @@ import {
   moveShelfToPosition,
   setBookshelfPinned,
 } from '@/stores/bookshelfStore'
-import BookshelfPickerOverlay from '@/components/BookshelfPickerOverlay.vue'
+// Round38：置顶书架未读徽标（与书架墙同口径，后端聚合值优先）
+import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfPick'
 import SortRowMenu from '@/components/SortRowMenu.vue'
 // Round22：侧栏置顶书架拖拽排序（把手拖动 / 操作菜单）
 import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
+import type { Bookshelf } from '@/types/comic'
 
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id
 const { modal, toast } = useUI()
@@ -25,13 +27,22 @@ const { isAdmin } = useUserStore()
 // 控制书架菜单的展开/折叠状态
 const isBookshelfOpen = ref(true)
 
-// Round13：全部书架检索浮层
-const showAllShelfPicker = ref(false)
-const openShelfPicker = () => {
-  showAllShelfPicker.value = true
-}
 const toggleBookshelf = () => {
   isBookshelfOpen.value = !isBookshelfOpen.value
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round38：未读仪表盘入口
+// 侧栏原「全部书架」浮层入口改为跳转书架墙（浮层仍服务多选「加入书架」场景）；
+// 置顶书架徽标显示「未读/总数」，让 76 本未读债务天天在眼前。
+// ─────────────────────────────────────────────────────────────
+const unreadTotal = computed(() => shelfWallSummary.value.unread)
+
+/** 置顶书架徽标：未读 0 → 「本数 ✓」（已清空）；否则「未读/本数」 */
+const unreadBadge = (shelf: Bookshelf): string => {
+  const unread = shelfUnreadCount(shelf)
+  const total = shelf.count || 0
+  return unread === 0 ? `${total} ✓` : `${unread}/${total}`
 }
 
 // 新建书架
@@ -145,7 +156,9 @@ const onLinkClick = (e: MouseEvent) => {
             <span class="shelf-name"><span class="pin-dot">📌</span> {{ shelf.name }}</span>
 
             <div class="shelf-right-info">
-              <span class="shelf-count">{{ shelf.count || 0 }}</span>
+              <span class="shelf-count" :class="{ cleared: shelfUnreadCount(shelf) === 0 }">
+                {{ unreadBadge(shelf) }}
+              </span>
 
               <!-- Round22：拖拽把手（拖动排序；把手触摸不滚动列表） -->
               <span
@@ -202,15 +215,24 @@ const onLinkClick = (e: MouseEvent) => {
           </div>
         </Teleport>
 
-        <!-- Round13：全部书架检索浮层入口 -->
-        <button class="all-shelf-btn" @click="openShelfPicker">
+        <!-- Round38：全部书架入口改为书架墙（未读仪表盘 + 抽卡台）；浮层保留给多选「加入书架」场景 -->
+        <router-link
+          to="/offline/bookshelves"
+          class="all-shelf-btn"
+          :class="{ 'is-current': route.path === '/offline/bookshelves' }"
+        >
           🔍 全部书架（{{ bookshelves.length }}）
-        </button>
+        </router-link>
+        <router-link
+          v-if="unreadTotal > 0"
+          to="/offline/bookshelves?unread=1"
+          class="unread-entry"
+          title="打开书架墙查看待读的书架"
+        >
+          📖 未读 {{ unreadTotal }} 本
+        </router-link>
         <button class="add-shelf-btn" @click="createNewBookshelf">➕ 新建书架</button>
       </div>
-
-      <!-- Round13：全部书架检索浮层 -->
-      <BookshelfPickerOverlay :open="showAllShelfPicker" mode="navigate" @close="showAllShelfPicker = false" />
     </div>
   </div>
 
@@ -317,6 +339,11 @@ const onLinkClick = (e: MouseEvent) => {
   color: var(--app-text-2);
 }
 
+/* Round38：该架已全部读过 → 徽标转绿 */
+.shelf-count.cleared {
+  color: #4cc38a;
+}
+
 .delete-btn,
 .rename-btn {
   font-size: 0.75rem;
@@ -357,6 +384,8 @@ const onLinkClick = (e: MouseEvent) => {
 }
 
 .all-shelf-btn {
+  display: block;
+  box-sizing: border-box;
   background: transparent;
   border: 1px solid var(--app-border-3);
   color: var(--app-text-3);
@@ -366,11 +395,47 @@ const onLinkClick = (e: MouseEvent) => {
   font-size: 0.8rem;
   text-align: left;
   margin-top: 4px;
+  text-decoration: none;
   transition: all 0.2s;
 }
 .all-shelf-btn:hover {
   border-color: #007acc;
   color: #007acc;
+}
+
+/* 清空全局 router-link-active 蓝块（与 .sub-nav-item 同处理），仅保留边框高亮定位当前页 */
+.all-shelf-btn.router-link-active,
+.all-shelf-btn.router-link-exact-active {
+  background-color: transparent !important;
+  color: var(--app-text-3) !important;
+}
+.all-shelf-btn.is-current {
+  border-color: #007acc;
+  color: var(--app-text-strong) !important;
+}
+
+/* Round38：未读总入口（书架墙未读过滤视图） */
+.unread-entry {
+  display: block;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 200, 80, 0.4);
+  background: rgba(255, 200, 80, 0.08);
+  color: #e6b800;
+  font-size: 0.78rem;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.unread-entry:hover {
+  background: rgba(255, 200, 80, 0.18);
+  border-color: #e6b800;
+}
+.unread-entry.router-link-active,
+.unread-entry.router-link-exact-active {
+  background: rgba(255, 200, 80, 0.18) !important;
+  color: #e6b800 !important;
 }
 
 .unpin-btn {

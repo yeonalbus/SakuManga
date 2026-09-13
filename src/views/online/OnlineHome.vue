@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
@@ -15,15 +15,14 @@ import {
   getBookmarkById,
   snapshotOnlineSearchConfig,
   cloneSearchConfig,
-  markAnchorFailed,
   bookmarkLocationLabel,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 import { useUI } from '@/composables/useUI'
-// Round33：书签跳转失败时的单条失效探测
-import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
+// Round34：书签「按日期定位」编排（seek 到 postedAt 当天 → 自动向下翻页寻找锚定卡片）
+import { useBookmarkLocate } from '@/composables/useBookmarkLocate'
 // Round33：检索参数构造（与首页搜索共用同一实现）
 import { buildOnlineSearchParams } from '@/utils/onlineSearchParams'
 // Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
@@ -65,10 +64,29 @@ const route = useRoute()
 const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, togglePanel } =
   useDetailPanel()
 
-// ─── Round27：书签跳转待定位锚点（消费后清空；数据就绪时滚动定位 + 脉冲高亮）───
-const pendingAnchorGid = ref<string | null>(null)
-/** Round33：待定位锚点所属书签 id（定位失败时用于单条失效探测） */
-const pendingBookmarkId = ref<string | null>(null)
+// ─── Round34：书签「按日期定位」编排 ───
+// 首屏按书签发布时间 seek 到当天，再自动向下翻页（next 游标）寻找锚定卡片，
+// 命中后滚动居中 + 脉冲高亮；越过时间点/翻到尽头则交回现有失效探测兜底。
+const { locateInfo, locating, beginLocate, runLocate, abortLocate } = useBookmarkLocate()
+/** 书签跳转首屏一次性 seek 日期（initSearch 消费后清空，不污染后续搜索/刷新） */
+let pendingSeekDate = ''
+
+/**
+ * Round34：本实例是否仍是「当前显示页」。
+ * keep-alive（`:key="$route.fullPath"`）会同时保活多个 OnlineHome 实例——PWA 同标签点书签
+ * 会新建实例、旧实例仍留在缓存里。被缓存的实例不得再响应全局 store 变化：
+ * 否则它会重复 initSearch 抢跑（把新实例按 seek 加载的列表覆盖回普通列表），
+ * 也会把新实例正在进行的书签定位一并中止。
+ */
+const isActivePage = ref(true)
+
+/**
+ * 本实例绑定的路由全路径（setup 时的 $route.fullPath）。
+ * 书签参数消费用的是 history.replaceState（不通知 router），故本实例的 fullPath 恒定；
+ * 而路由一旦切走，route.fullPath 就不再等于它——据此识别「被缓存的非当前页实例」，
+ * 比依赖 onBeforeRouteLeave/onDeactivated 的时序更可靠。
+ */
+const myFullPath = route.fullPath
 
 // 🆕 URL 驱动搜索：进入 /online/home?kw=xxx（新标签页/分享链接等）时，把关键词写入搜索配置
 // Round27：?bm=<bookmarkId>（搜刮书签跳转）优先于 kw 分支——整体恢复创建时快照，
@@ -80,8 +98,8 @@ if (typeof bmFromUrl === 'string' && bmFromUrl.trim()) {
   const bm = getBookmarkById(bmFromUrl.trim())
   if (bm) {
     onlineSearchConfig.value = cloneSearchConfig(bm.config)
-    pendingAnchorGid.value = bm.anchor?.gid || null
-    pendingBookmarkId.value = bm.id // Round33：定位失败时据此做单条失效探测
+    // Round34：登记定位并取得首屏 seek 日期（书签缺发布时间时为 ''，退化为普通加载 + 自动翻页）
+    pendingSeekDate = beginLocate(bm)
     // 消费后清理 URL 上的 bm 参数（replaceState 不触发路由/keep-alive 重建）：
     // 避免残留 bm 在刷新/后续搜索时把列表重新拉回书签状态
     const url = new URL(window.location.href)
@@ -110,9 +128,16 @@ const {
   handleBatchClose,
 } = useBatchSelection(() => filteredComics.value)
 
-const initSearch = () => {
+const initSearch = async (): Promise<void> => {
+  // Round34：书签跳转的首屏请求带上 seek（一次性消费）——
+  // E 站 seek 只吃日粒度，返回「该日末尾 → 更早」的倒序结果，正是锚定卡片所在区间。
+  const seek = pendingSeekDate
+  pendingSeekDate = ''
   // Round33：参数构造抽为公共函数（书签时间锚迁移复用同一套检索条件）
-  onlineStore.fetchInitial(buildOnlineSearchParams(onlineSearchConfig.value))
+  await onlineStore.fetchInitial({
+    ...buildOnlineSearchParams(onlineSearchConfig.value),
+    ...(seek ? { seek } : {}),
+  })
 }
 
 // 🆕 把当前关键词写回 URL（history.replaceState）
@@ -137,58 +162,26 @@ const writeKeywordToUrl = () => {
 watch(
   onlineSearchConfig,
   () => {
-    initSearch()
+    // Round34：被 keep-alive 缓存的非当前页实例不响应全局 store 变化
+    // （否则会与新实例抢跑请求、覆盖列表并中止其定位）
+    if (!isActivePage.value || route.fullPath !== myFullPath) return
+    // 用户改搜索/筛选 → 中止书签定位（新列表与书签位置无关；
+    // 书签跳转自身的初始赋值发生在 watch 注册之前，不会走到这里）
+    abortLocate()
+    void initSearch()
     writeKeywordToUrl()
   },
   { deep: true },
 )
 
-// ─── Round27：书签锚点定位 ───
-// 数据就绪（含 loadMore 追加）后查找锚定卡片：滚动到卡片中部 + 脉冲高亮一次
-watch(
-  () => onlineStore.comics,
-  () => {
-    const gid = pendingAnchorGid.value
-    if (!gid) return
-    nextTick(() => {
-      const el = document.querySelector<HTMLElement>(`.item-card[data-gid="${gid}"]`)
-      if (el) {
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-        el.classList.add('bookmark-pulse')
-        window.setTimeout(() => el.classList.remove('bookmark-pulse'), 2600)
-        pendingAnchorGid.value = null
-      }
-    })
-  },
-  { flush: 'post' },
-)
+/** 手动刷新列表：同样中止定位，避免定位循环与刷新后的列表错位 */
+const handleRefresh = () => {
+  abortLocate()
+  void initSearch()
+}
 
-// 兜底：列表已到尽头（hasMore=false）仍未定位到锚点
-// Round28：明确提示 + 标记失效；Round33：改为「单条探测确认」，避免结果漂移被误判为失效
-watch(
-  () => onlineStore.hasMore,
-  async (hasMore) => {
-    if (!hasMore && pendingAnchorGid.value) {
-      const gid = pendingAnchorGid.value
-      const bmId = pendingBookmarkId.value
-      pendingAnchorGid.value = null
-      pendingBookmarkId.value = null
-      markAnchorFailed(gid)
-      if (bmId) {
-        // 主动探测：区分「真的失效」与「仅不在当前搜索结果中」
-        const { runCheck } = useBookmarkCheck()
-        const summary = await runCheck([bmId])
-        if (summary && summary.migrated > 0) {
-          toast.info('锚点已迁移到同时刻的画廊；请从侧栏重新打开该书签')
-        } else if (summary && summary.invalid === 0 && summary.errors === 0) {
-          toast.info('锚定画廊仍有效，但不在当前搜索结果中（结果可能已变化）')
-        }
-        return
-      }
-      toast.warning('书签锚定的画廊已失效（可能被删除或更换），书签已保留，跳转仅恢复位置')
-    }
-  },
-)
+// Round34：定位循环（useBookmarkLocate）已接管「滚动到锚点 / 越界判定 / 失效兜底」，
+// 原 Round27/Round28 的 comics watch 与 hasMore=true 兜底 watch 一并移除。
 
 // ─── Round27/Round29：搜刮书签创建流程（锚定即创建）───
 const bmModalOpen = ref(false)
@@ -271,7 +264,8 @@ const handlePickClick = (e: MouseEvent) => {
 // Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无限滚动，page 恒为 1）
 const restoreListState = async () => {
   const saved = takeListState('/online/home')
-  if (saved && saved.top > 0) {
+  // Round34：书签定位进行中不恢复旧滚动位置（定位结束时会滚动到锚定卡片）
+  if (saved && saved.top > 0 && !locating.value) {
     await nextTick()
     requestAnimationFrame(() => {
       const el = getMainContent()
@@ -284,19 +278,33 @@ const restoreListState = async () => {
   }))
 }
 
-onMounted(() => {
-  initSearch()
+onMounted(async () => {
+  // Round34：书签跳转时 initSearch 会把 seek 日期带上（首屏落在锚定当天）
+  await initSearch()
   restoreListState()
+  // 首屏数据就绪 → 进入自动向下翻页定位循环（命中即滚动居中 + 脉冲高亮）
+  if (locating.value) void runLocate()
 })
 
 // keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
 let activatedOnce = false
 onActivated(() => {
+  isActivePage.value = true
   if (activatedOnce) restoreListState()
   activatedOnce = true
 })
 
+// Round34：被缓存（非当前页）时不再自动翻页——避免后台持续请求 E 站
+onDeactivated(() => {
+  isActivePage.value = false
+  abortLocate()
+})
+
 onBeforeRouteLeave(() => {
+  // 路由离开即刻失效本实例（onBeforeRouteLeave 早于 keep-alive 的 deactivated，
+  // 可挡住缓存实例在切换瞬间响应 store 变化）
+  isActivePage.value = false
+  abortLocate() // Round34：离开页面即停止自动翻页，避免后台持续请求 E 站
   rememberListState('/online/home', {
     top: getMainContent()?.scrollTop || 0,
     page: 1,
@@ -304,6 +312,7 @@ onBeforeRouteLeave(() => {
 })
 
 onUnmounted(() => {
+  abortLocate()
   if (writeBackTimer) clearTimeout(writeBackTimer)
 })
 </script>
@@ -326,8 +335,18 @@ onUnmounted(() => {
           @select="handleSelect"
           @open="openDetail"
         >
-          <!-- 🟢 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
+          <!-- 🟢 1. 顶部插槽：书签定位进度（Round34）/ 存在向上游标时，显示加载较新内容按钮 -->
           <template #header>
+            <!-- Round34：书签按日期定位进行中——静默向下翻页寻找锚定卡片 -->
+            <div v-if="locating && locateInfo" class="locate-bar">
+              <span class="locate-spinner"></span>
+              <span class="locate-text">
+                🔖 正在定位书签「{{ locateInfo.name }}」<template v-if="locateInfo.seekDate">
+                  （已跳转到 {{ locateInfo.seekDate }}）</template
+                >… 已扫描 {{ locateInfo.pages }} 页 / 约 {{ locateInfo.cards }} 张
+              </span>
+            </div>
+
             <div v-if="onlineStore.prevGid" class="top-load-bar">
               <button
                 class="pill-btn"
@@ -354,7 +373,7 @@ onUnmounted(() => {
         <FloatingToolbar
           :show-detail="isWide"
           :show-bookmark="true"
-          @refresh="initSearch"
+          @refresh="handleRefresh"
           @seek-change="(date) => onlineStore.seekToDate(date)"
           @detail-toggle="togglePanel"
           @bookmark-create="handleBookmarkCreate"
@@ -408,6 +427,40 @@ onUnmounted(() => {
 
 .top-load-bar {
   padding: 8px 0;
+}
+
+/* ─── Round34：书签定位进度条（按日期 seek 后自动向下翻页）─── */
+.locate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px auto;
+  padding: 7px 16px;
+  max-width: 92%;
+  border: 1px solid rgba(255, 193, 7, 0.55);
+  border-radius: 20px;
+  background-color: rgba(255, 193, 7, 0.12);
+  color: var(--app-text-strong);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.locate-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 193, 7, 0.35);
+  border-top-color: #ffc107;
+  border-radius: 50%;
+  animation: locate-spin 0.8s linear infinite;
+}
+
+@keyframes locate-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pill-btn {

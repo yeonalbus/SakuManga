@@ -25,6 +25,8 @@ import { useUI } from '@/composables/useUI'
 import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
 // Round37：拖动原语（与书架列表 / 全部书架浮层共用）
 import { useDragReorder } from '@/composables/useDragReorder'
+// Round39：折叠分组标题行（与书架共用，统一样式与结构）
+import SidebarGroupHeader from '@/components/SidebarGroupHeader.vue'
 import { loadStorage, saveStorage } from '@/utils/storage'
 
 const router = useRouter()
@@ -218,15 +220,18 @@ onBeforeUnmount(flushPendingBookmarkSort)
   </div>
 
   <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版；Round33 检测与清理入口；Round37 拖动排序 + 分段收纳）
-       行1：图标位（hover 让位给 ⠿ ✕） + 主文本 + 日期；行2：搜索词 + 时间 -->
+       行1：图标位（hover 让位给 ⠿ ✕） + 主文本 + 日期；行2：搜索词 + 时间
+       Round39：标题行改用 SidebarGroupHeader（与书架同字体、同结构）——去掉 🔖 前缀，
+       放大镜（检测）紧跟「书签」右侧，折叠箭头移至行右端 -->
   <div class="nav-group">
-    <span class="group-title bm-group-title">
-      <span class="bm-title" title="折叠 / 展开书签组" @click="toggleGroup">
-        <span class="bm-arrow" :class="{ open: groupOpen }">❯</span>
-        <span>🔖 书签</span>
-        <span v-if="!groupOpen && scrapeBookmarks.length > 0" class="bm-total">{{ scrapeBookmarks.length }}</span>
-      </span>
-      <span class="bm-actions">
+    <SidebarGroupHeader
+      title="书签"
+      :open="groupOpen"
+      :badge="!groupOpen && scrapeBookmarks.length > 0 ? scrapeBookmarks.length : undefined"
+      badge-title="书签总数"
+      @toggle="toggleGroup"
+    >
+      <template #actions>
         <button
           class="bm-action"
           :class="{ spinning: checking }"
@@ -244,8 +249,8 @@ onBeforeUnmount(flushPendingBookmarkSort)
         >
           🧹<span class="bm-badge">{{ invalidCount }}</span>
         </button>
-      </span>
-    </span>
+      </template>
+    </SidebarGroupHeader>
 
     <template v-if="groupOpen">
       <template v-if="scrapeBookmarks.length > 0">
@@ -530,6 +535,8 @@ onBeforeUnmount(flushPendingBookmarkSort)
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* Round39：与书架折叠体（.foldable-body margin-top:2px）保持同一标题-内容间距 */
+  margin-top: 2px;
 }
 
 /* 收纳区展开后限高滚动：书签再多也不会把下方分组顶出视口 */
@@ -573,47 +580,8 @@ onBeforeUnmount(flushPendingBookmarkSort)
   margin-right: 10px;
 }
 
-/* ─── Round33：书签分组标题行（折叠 + 检测 / 清理入口）─── */
-.bm-group-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-/* 折叠触发区（标题文字 + 箭头） */
-.bm-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  cursor: pointer;
-}
-
-.bm-arrow {
-  font-size: 0.7rem;
-  transition: transform 0.2s;
-}
-
-.bm-arrow.open {
-  transform: rotate(90deg);
-}
-
-/* 折叠时展示总数，避免「组里到底有没有东西」的疑问 */
-.bm-total {
-  font-size: 0.7rem;
-  color: var(--app-text-muted);
-  background-color: var(--app-surface-3);
-  padding: 0 5px;
-  border-radius: 8px;
-}
-
-.bm-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
+/* ─── Round39：标题行结构与字体统一到 SidebarGroupHeader（与书架同款），
+       本文件只保留操作按钮样式 ─── */
 .bm-action {
   position: relative;
   background: transparent;

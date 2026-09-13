@@ -13,6 +13,8 @@ import {
 // Round38：置顶书架未读徽标（与书架墙同口径，后端聚合值优先）
 import { shelfUnreadCount, shelfWallSummary } from '@/composables/useShelfStats'
 import SortRowMenu from '@/components/SortRowMenu.vue'
+// Round39：折叠分组标题行（与书签共用，统一样式与结构）
+import SidebarGroupHeader from '@/components/SidebarGroupHeader.vue'
 // Round22：侧栏置顶书架拖拽排序（把手拖动 / 操作菜单）
 import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
@@ -135,10 +137,8 @@ const onLinkClick = (e: MouseEvent) => {
     <router-link to="/offline/history">历史记录</router-link>
 
     <div class="foldable-item">
-      <div class="foldable-header" @click="toggleBookshelf">
-        <span>书架</span>
-        <span class="arrow" :class="{ open: isBookshelfOpen }">❯</span>
-      </div>
+      <!-- Round39：标题行抽为共用组件（与书签同字体同结构，箭头在行右端） -->
+      <SidebarGroupHeader title="书架" :open="isBookshelfOpen" @toggle="toggleBookshelf" />
 
       <div v-show="isBookshelfOpen" class="foldable-body">
         <!-- Round13：仅常驻展示置顶书架（最多 PIN_LIMIT 个），其余进「全部书架」浮层 -->
@@ -247,30 +247,7 @@ const onLinkClick = (e: MouseEvent) => {
 </template>
 
 <style scoped>
-.foldable-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  color: var(--app-text-2);
-  cursor: pointer;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-}
-.foldable-header:hover {
-  background-color: var(--app-surface-3);
-  color: var(--app-text-strong);
-}
-
-.arrow {
-  font-size: 0.75rem;
-  transition: transform 0.2s;
-}
-.arrow.open {
-  transform: rotate(90deg);
-}
-
+/* Round39：原 .foldable-header / .arrow 样式已并入 SidebarGroupHeader（统一标题基准） */
 .foldable-body {
   display: flex;
   flex-direction: column;

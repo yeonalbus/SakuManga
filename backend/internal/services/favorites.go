@@ -350,6 +350,7 @@ func AttachFavoriteStates(db *gorm.DB, userID uint, comics []OnlineComicDTO) []O
 // 🟢 新增：AttachDownloadStates 挂载本地"已下载"状态
 // 通过比对离线漫画库 (OfflineComic) 的 GID 字段，判断哪些在线画廊已下载到本地，
 // 从而让首页/热门/订阅/收藏等在线列表统一显示"已下载"角标。
+// 同时回填 LocalID（本地记录 ID），供前端由在线画廊跳转本地详情。
 // 注意：本地漫画库为全局共享，无需按用户隔离；只补 true，绝不误改 false。
 func AttachDownloadStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO {
 	if len(comics) == 0 {
@@ -368,18 +369,24 @@ func AttachDownloadStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 	}
 
 	var rows []models.OfflineComic
-	db.Select("g_id").Where("g_id IN ?", gids).Find(&rows)
+	// 同 GID 存在多条本地记录（重复扫描/替换残留）时按 ID 升序取首条，保证跳转目标稳定
+	db.Select("id, g_id").Where("g_id IN ?", gids).Order("id ASC").Find(&rows)
 
-	downloaded := make(map[string]bool, len(rows))
+	// gid → 本地漫画 ID（同 gid 只保留首条，与上方排序配合）
+	localIDs := make(map[string]string, len(rows))
 	for _, r := range rows {
-		if r.GID != "" {
-			downloaded[r.GID] = true
+		if r.GID == "" || r.ID == "" {
+			continue
+		}
+		if _, exists := localIDs[r.GID]; !exists {
+			localIDs[r.GID] = r.ID
 		}
 	}
 
 	for i := range comics {
-		if downloaded[comics[i].ID] {
+		if id, ok := localIDs[comics[i].ID]; ok {
 			comics[i].IsDownloaded = true
+			comics[i].LocalID = id
 		}
 	}
 
@@ -404,15 +411,19 @@ func AttachDetailFavoriteState(db *gorm.DB, userID uint, detail *GalleryDetailRe
 }
 
 // 🟢 新增：详情页挂载本地「已下载」状态（本地离线库存在同 GID 记录 → 拦截重复下载提示）
+// 同时回填 LocalID（本地记录 ID），供前端「🌐 在线详情 → 📚 本地详情」跳转。
 func AttachDetailDownloadState(db *gorm.DB, detail *GalleryDetailResult) *GalleryDetailResult {
 	if detail == nil || detail.ID == "" {
 		return detail
 	}
 
-	var count int64
-	db.Model(&models.OfflineComic{}).Where("g_id = ?", detail.ID).Count(&count)
-	if count > 0 {
+	var local models.OfflineComic
+	// 同 GID 多条时按 ID 升序取首条，保证前端跳转目标稳定；
+	// 用 Find + Limit 而非 First：无本地记录属正常情况，不应产生 record not found 日志噪音
+	db.Select("id").Where("g_id = ?", detail.ID).Order("id ASC").Limit(1).Find(&local)
+	if local.ID != "" {
 		detail.IsDownloaded = true
+		detail.LocalID = local.ID
 	}
 
 	return detail

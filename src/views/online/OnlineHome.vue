@@ -11,7 +11,7 @@ import { useOnlineStore } from '@/stores/onlineStore'
 import { onlineSearchConfig, applySearchOptionsInherit } from '@/stores/searchStore'
 import {
   addScrapeBookmark,
-  bookmarkedGids,
+  scopedBookmarkedGids,
   getBookmarkById,
   snapshotOnlineSearchConfig,
   cloneSearchConfig,
@@ -330,7 +330,7 @@ onUnmounted(() => {
           :selected-ids="selectedIds"
           :panel-mode="isWide"
           :panel-open="isPanelOpen"
-          :bookmarked-gids="bookmarkedGids"
+          :bookmarked-gids="scopedBookmarkedGids"
           @longpress="handleLongPress"
           @select="handleSelect"
           @open="openDetail"

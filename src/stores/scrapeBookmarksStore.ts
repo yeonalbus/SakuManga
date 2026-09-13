@@ -18,6 +18,7 @@ import type {
   SearchConfig,
 } from '@/types/comic'
 import { onlineSearchConfig } from '@/stores/searchStore'
+import { isSameOnlineScope } from '@/utils/bookmarkScope'
 import { loadStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
@@ -134,6 +135,29 @@ export const bookmarkedGids = computed<Set<string>>(() => {
 
 /** 某 gid 是否被任一书签锚定 */
 export const isGidBookmarked = (gid: string): boolean => bookmarkedGids.value.has(gid)
+
+// ─── Round36：书签作用域（标记只在「当时的搜索&筛选条件」下显示）───
+
+/**
+ * 给定搜索&筛选条件下、书签标记应生效的 gid 集合。
+ *
+ * 语义：书签是位置快照，标记只在**创建时那份 config 快照等价**的条件下显示——
+ * 首页条件下标记的书签，不会因为换了关键词/改了筛选而在其它列表里高亮；
+ * 同一 gid 若在另一个条件下也被标记（另一条书签），则由那条书签在自己的作用域内生效。
+ */
+export const bookmarkedGidsFor = (scope: Partial<SearchConfig> | null | undefined): Set<string> => {
+  const set = new Set<string>()
+  for (const bm of scrapeBookmarks.value) {
+    if (!bm.anchor?.gid) continue
+    if (isSameOnlineScope(bm.config, scope)) set.add(bm.anchor.gid)
+  }
+  return set
+}
+
+/** 当前在线搜索&筛选条件下的书签标记集合（OnlineHome 列表角标/高亮据此判定） */
+export const scopedBookmarkedGids = computed<Set<string>>(() =>
+  bookmarkedGidsFor(onlineSearchConfig.value),
+)
 
 /** 按 id 取书签（跳转恢复用；不存在返回 undefined） */
 export const getBookmarkById = (id: string): ScrapeBookmark | undefined =>

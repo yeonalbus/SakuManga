@@ -57,7 +57,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 	toplistHandler := handlers.NewToplistHandler(db, toplistService)
 	favHandler := handlers.NewFavoritesHandler(db, favService)
-	scrapeBookmarkHandler := handlers.NewScrapeBookmarkHandler(db) // Round28：搜刮书签（后端化，多端同步）
+	scrapeBookmarkHandler := handlers.NewScrapeBookmarkHandler(db, ehService) // Round28/31：搜刮书签（后端化 + 失效检测）
 
 	// Round32：XP 词云统计（阶段一）——服务实例同时挂到包级全局，
 	// 供各业务触发点（阅读次数/历史/评分/扫描/Tag 维护）做增量重算，handler 与其共用缓存。
@@ -226,8 +226,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 搜刮书签（Round28：后端化，按用户隔离，多端同步）
 		api.GET("/scrape-bookmarks", scrapeBookmarkHandler.List)
 		api.POST("/scrape-bookmarks", scrapeBookmarkHandler.Create)
-		api.PUT("/scrape-bookmarks/:id", scrapeBookmarkHandler.Rename)
+		api.PUT("/scrape-bookmarks/:id", scrapeBookmarkHandler.Update)
 		api.DELETE("/scrape-bookmarks/:id", scrapeBookmarkHandler.Delete)
+		// Round33：批量失效检测（探测锚定画廊是否被删除 / 下架 / 被新版本取代）
+		api.POST("/scrape-bookmarks/check", scrapeBookmarkHandler.Check)
 
 		// 阅读清单（每用户每来源一个队列）
 		api.GET("/reading-list", libraryHandler.GetReadingList)

@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"SakuManga/internal/models"
@@ -144,5 +145,68 @@ func TestScrapeBookmarkRenameEmptyIgnored(t *testing.T) {
 	items, _ := ListScrapeBookmarks(db, user)
 	if items[0].Name != "测试书签" {
 		t.Fatalf("空名重命名不应改名称: %s", items[0].Name)
+	}
+}
+
+// Round33：锚点更新（迁移 / 失效标记写回）——扩展字段必须原样保留
+func TestUpdateScrapeBookmarkAnchor(t *testing.T) {
+	db := newScrapeBookmarkTestDB(t)
+	user := uint(1)
+	created, _ := CreateScrapeBookmark(db, user, validInput())
+
+	// 带扩展字段的锚点（invalid / migratedFrom）→ 原样存储，不被 struct 往返丢弃
+	rich := json.RawMessage(`{"gid":"999","token":"tt","title":"新锚点","postedAt":"2026-09-12 01:47","invalid":{"kind":"removed","at":1730000000},"migratedFrom":{"gid":"123","title":"旧锚点"},"listIndex":7}`)
+	if err := UpdateScrapeBookmarkAnchor(db, user, created.ID, rich); err != nil {
+		t.Fatalf("锚点更新失败: %v", err)
+	}
+	items, _ := ListScrapeBookmarks(db, user)
+	got := string(items[0].Anchor)
+	for _, must := range []string{"999", "invalid", "migratedFrom", "listIndex"} {
+		if !strings.Contains(got, must) {
+			t.Fatalf("扩展字段 %s 丢失: %s", must, got)
+		}
+	}
+
+	// 非法锚点：缺 gid / 非对象 → 拒绝
+	if err := UpdateScrapeBookmarkAnchor(db, user, created.ID, json.RawMessage(`{"token":"x"}`)); !errors.Is(err, ErrBookmarkInvalidAnchor) {
+		t.Fatalf("缺 gid 应拒绝: %v", err)
+	}
+	if err := UpdateScrapeBookmarkAnchor(db, user, created.ID, json.RawMessage(`"str"`)); !errors.Is(err, ErrBookmarkInvalidAnchor) {
+		t.Fatalf("非对象应拒绝: %v", err)
+	}
+	// null 合法（清空锚点：退化为纯位置书签）
+	if err := UpdateScrapeBookmarkAnchor(db, user, created.ID, json.RawMessage(`null`)); err != nil {
+		t.Fatalf("null 锚点应允许: %v", err)
+	}
+
+	// 越权：他人书签不可更新
+	other, _ := CreateScrapeBookmark(db, uint(2), validInput())
+	if err := UpdateScrapeBookmarkAnchor(db, user, other.ID, rich); !errors.Is(err, ErrBookmarkNotFound) {
+		t.Fatalf("越权更新应报不存在: %v", err)
+	}
+}
+
+// Round33：锚点解析（探测前置）——null / 空 / 缺 gid 一律视为无锚点
+func TestParseAnchorJSON(t *testing.T) {
+	cases := []struct {
+		raw    string
+		wantOK bool
+	}{
+		{`null`, false},
+		{``, false},
+		{`{}`, false},
+		{`{"gid":""}`, false},
+		{`not-json`, false},
+		{`{"gid":"123","token":"abc"}`, true},
+	}
+	for _, c := range cases {
+		a, _ := parseAnchorJSON(c.raw)
+		if (a != nil) != c.wantOK {
+			t.Fatalf("parseAnchorJSON(%q) 期望有效=%v 得到 %+v", c.raw, c.wantOK, a)
+		}
+	}
+	a, err := parseAnchorJSON(`{"gid":"123","token":"abc","postedAt":"2026-09-12 01:47"}`)
+	if err != nil || a == nil || a.Token != "abc" || a.PostedAt != "2026-09-12 01:47" {
+		t.Fatalf("锚点字段解析异常: %+v %v", a, err)
 	}
 }

@@ -11,7 +11,12 @@
  * 字段缺失/类型异常用默认值补齐，绝不让一条书签因结构小问题悄悄消失。
  */
 import { ref, computed } from 'vue'
-import type { ScrapeBookmark, SearchConfig } from '@/types/comic'
+import type {
+  ScrapeBookmark,
+  ScrapeBookmarkCheckResult,
+  ScrapeBookmarkInvalidKind,
+  SearchConfig,
+} from '@/types/comic'
 import { onlineSearchConfig } from '@/stores/searchStore'
 import { loadStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
@@ -53,6 +58,30 @@ const restoreConfig = (raw: unknown): SearchConfig => {
   }
 }
 
+/** 宽松恢复失效标记（Round33） */
+const restoreInvalid = (raw: unknown): NonNullable<ScrapeBookmark['anchor']>['invalid'] => {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const kind = o.kind
+  if (kind !== 'removed' && kind !== 'copyright' && kind !== 'invalid') return null
+  return { kind, at: typeof o.at === 'number' ? o.at : Date.now() }
+}
+
+/** 宽松恢复迁移来源（Round33） */
+const restoreMigratedFrom = (
+  raw: unknown,
+): NonNullable<ScrapeBookmark['anchor']>['migratedFrom'] => {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.gid !== 'string') return null
+  return {
+    gid: o.gid,
+    token: typeof o.token === 'string' ? o.token : undefined,
+    title: typeof o.title === 'string' ? o.title : undefined,
+    postedAt: typeof o.postedAt === 'string' ? o.postedAt : undefined,
+  }
+}
+
 /** 宽松恢复 anchor：gid 非字符串视为未锚定（null），其余字段可缺省 */
 const restoreAnchor = (raw: unknown): ScrapeBookmark['anchor'] => {
   if (raw === null || raw === undefined) return null
@@ -64,6 +93,10 @@ const restoreAnchor = (raw: unknown): ScrapeBookmark['anchor'] => {
     token: typeof a.token === 'string' ? a.token : undefined,
     title: typeof a.title === 'string' ? a.title : undefined,
     postedAt: typeof a.postedAt === 'string' ? a.postedAt : undefined,
+    // Round33：失效标记 / 迁移来源 / 列表位置（宽松透传，不丢字段）
+    invalid: restoreInvalid(a.invalid),
+    migratedFrom: restoreMigratedFrom(a.migratedFrom),
+    listIndex: typeof a.listIndex === 'number' ? a.listIndex : undefined,
   }
 }
 
@@ -301,4 +334,108 @@ export const renameScrapeBookmark = async (id: string, name: string): Promise<bo
     toast.error('书签重命名失败，请重试')
     return false
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round33：失效检测 / 迁移 / 失效判定
+// ─────────────────────────────────────────────────────────────
+
+/** 书签是否已确认失效（检测后写入 invalid 标记） */
+export const isBookmarkInvalid = (bm: ScrapeBookmark): boolean => !!bm.anchor?.invalid
+
+/** 失效原因文案 */
+export const invalidReasonText = (bm: ScrapeBookmark): string => {
+  const kind = bm.anchor?.invalid?.kind
+  switch (kind) {
+    case 'removed':
+      return '画廊已被删除或不可用'
+    case 'copyright':
+      return '画廊因版权投诉被下架'
+    case 'invalid':
+      return '画廊不存在（gid 无效）'
+    default:
+      return ''
+  }
+}
+
+/** 全部失效书签 */
+export const invalidBookmarks = computed<ScrapeBookmark[]>(() =>
+  scrapeBookmarks.value.filter((b) => isBookmarkInvalid(b)),
+)
+
+/** 书签是否由迁移而来（带迁移来源） */
+export const isBookmarkMigrated = (bm: ScrapeBookmark): boolean => !!bm.anchor?.migratedFrom?.gid
+
+/**
+ * 更新书签锚点（迁移 / 失效标记写回）：乐观更新 + 后端 PUT + 失败回滚。
+ * anchor 原样序列化（保留 invalid / migratedFrom / listIndex 等扩展字段）。
+ */
+export const updateBookmarkAnchor = async (
+  id: string,
+  anchor: ScrapeBookmark['anchor'],
+): Promise<boolean> => {
+  if (rejectWhenOffline()) return false
+  const bm = scrapeBookmarks.value.find((b) => b.id === id)
+  if (!bm) return false
+  const prev = bm.anchor ? JSON.parse(JSON.stringify(bm.anchor)) : null
+  bm.anchor = anchor ? JSON.parse(JSON.stringify(anchor)) : null
+  try {
+    await http(`/scrape-bookmarks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ anchor }),
+    })
+    return true
+  } catch (e) {
+    bm.anchor = prev
+    console.error('书签锚点更新失败:', e)
+    toast.error('书签锚点更新失败，请重试')
+    return false
+  }
+}
+
+/** 批量失效检测：ids 为空 = 检测全部（后端串行探测，走 E 站自适应限流） */
+export const checkScrapeBookmarks = async (
+  ids?: string[],
+): Promise<ScrapeBookmarkCheckResult[]> => {
+  const numeric = (ids ?? []).map((i) => Number(i)).filter((n) => Number.isFinite(n))
+  const res = await http<{ results?: ScrapeBookmarkCheckResult[] }>('/scrape-bookmarks/check', {
+    method: 'POST',
+    body: JSON.stringify(ids && ids.length > 0 ? { ids: numeric } : {}),
+  })
+  return res.results || []
+}
+
+/**
+ * 应用检测结果到书签（写入失效标记）。
+ * replaced / ok 由调用方按策略处理（自动精确迁移 / 刷新元信息），此处只处理判定性状态。
+ */
+export const markBookmarkInvalid = async (
+  id: string,
+  kind: ScrapeBookmarkInvalidKind,
+): Promise<boolean> => {
+  const bm = scrapeBookmarks.value.find((b) => b.id === id)
+  if (!bm || !bm.anchor) return false
+  return updateBookmarkAnchor(id, {
+    ...bm.anchor,
+    invalid: { kind, at: Date.now() },
+  })
+}
+
+/** 清除失效标记（检测恢复正常时） */
+export const clearBookmarkInvalid = async (id: string): Promise<boolean> => {
+  const bm = scrapeBookmarks.value.find((b) => b.id === id)
+  if (!bm || !bm.anchor || !bm.anchor.invalid) return true
+  const next = { ...bm.anchor }
+  delete next.invalid
+  return updateBookmarkAnchor(id, next)
+}
+
+/** 一键清理全部失效书签，返回删除数量 */
+export const clearInvalidBookmarks = async (): Promise<number> => {
+  const targets = invalidBookmarks.value.map((b) => b.id)
+  let removed = 0
+  for (const id of targets) {
+    if (await removeScrapeBookmark(id)) removed++
+  }
+  return removed
 }

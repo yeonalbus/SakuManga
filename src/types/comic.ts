@@ -286,7 +286,7 @@ export type ScrapeBookmarkType = 'home' | 'search'
  * - config：创建时深拷贝的搜索/筛选状态（onlineSearchConfig 全量）
  * - anchor：锚定的画廊卡片（gid/token/title/postedAt），跳转后滚动定位 + 视觉突出
  *   Round29：锚定改为必需（去掉「仅保存位置」），postedAt = 锚定画廊发布时间
- *   （E 站卡片 posted 日期，取自 OnlineComic.updatedAt），供侧栏展示「位置 + 时间」
+ *   Round33：新增失效标记 invalid / 迁移来源 migratedFrom / 列表位置 listIndex
  */
 export interface ScrapeBookmark {
   id: string // 唯一标识（bm_ 前缀）
@@ -299,8 +299,33 @@ export interface ScrapeBookmark {
     token?: string
     title?: string
     postedAt?: string // 锚定画廊发布时间（如 "2026-09-12 01:20"）
+    /** Round33：失效标记（检测确认后写入；null/缺省 = 未确认失效） */
+    invalid?: { kind: ScrapeBookmarkInvalidKind; at: number } | null
+    /** Round33：迁移来源（原锚点快照，供撤销与展示） */
+    migratedFrom?: {
+      gid: string
+      token?: string
+      title?: string
+      postedAt?: string
+    } | null
+    /** Round33：保存时在列表中的位置（老书签无 postedAt 时的迁移兜底） */
+    listIndex?: number
   } | null
   createdAt: number
+}
+
+/** 书签失效类型：已删除 / 版权下架 / gid 不存在（Round33） */
+export type ScrapeBookmarkInvalidKind = 'removed' | 'copyright' | 'invalid'
+
+/** 失效检测单条结果（后端 POST /scrape-bookmarks/check 返回，Round33） */
+export interface ScrapeBookmarkCheckResult {
+  id: number
+  status: 'ok' | 'removed' | 'copyright' | 'invalid' | 'replaced' | 'error'
+  message?: string
+  /** status=replaced：精确迁移目标（E 站标记的新版本画廊） */
+  newVersion?: { gid: string; token?: string; title?: string; postedAt?: string }
+  /** status=ok：刷新后的元信息（标题可能改名、发布时间补齐） */
+  refreshed?: { gid: string; token?: string; title?: string; postedAt?: string }
 }
 
 // ==========================================

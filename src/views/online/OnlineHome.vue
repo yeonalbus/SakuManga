@@ -22,6 +22,10 @@ import type { ScrapeBookmark } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 import { useUI } from '@/composables/useUI'
+// Round33：书签跳转失败时的单条失效探测
+import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
+// Round33：检索参数构造（与首页搜索共用同一实现）
+import { buildOnlineSearchParams } from '@/utils/onlineSearchParams'
 // Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
 import { matchExcludes, parseKeywordQueue } from '@/utils/tagFilter'
 // Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
@@ -63,6 +67,8 @@ const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, toggl
 
 // ─── Round27：书签跳转待定位锚点（消费后清空；数据就绪时滚动定位 + 脉冲高亮）───
 const pendingAnchorGid = ref<string | null>(null)
+/** Round33：待定位锚点所属书签 id（定位失败时用于单条失效探测） */
+const pendingBookmarkId = ref<string | null>(null)
 
 // 🆕 URL 驱动搜索：进入 /online/home?kw=xxx（新标签页/分享链接等）时，把关键词写入搜索配置
 // Round27：?bm=<bookmarkId>（搜刮书签跳转）优先于 kw 分支——整体恢复创建时快照，
@@ -75,6 +81,7 @@ if (typeof bmFromUrl === 'string' && bmFromUrl.trim()) {
   if (bm) {
     onlineSearchConfig.value = cloneSearchConfig(bm.config)
     pendingAnchorGid.value = bm.anchor?.gid || null
+    pendingBookmarkId.value = bm.id // Round33：定位失败时据此做单条失效探测
     // 消费后清理 URL 上的 bm 参数（replaceState 不触发路由/keep-alive 重建）：
     // 避免残留 bm 在刷新/后续搜索时把列表重新拉回书签状态
     const url = new URL(window.location.href)
@@ -104,29 +111,8 @@ const {
 } = useBatchSelection(() => filteredComics.value)
 
 const initSearch = () => {
-  const cfg = onlineSearchConfig.value
-  // E-Hentai 的 f_search 支持空格分隔多词（隐式 AND），因此把
-  // 顶栏主搜索词与筛选抽屉的“多关键词队列”合并为一条 f_search 字符串。
-  // Round3-任务6：负向项（`- ` 前缀）不参与服务端搜索（E 站不支持排除语法），
-  // 只保留正向词下发，负向剔除交由 filteredComics 本地完成。
-  const parsed = parseKeywordQueue(cfg.keywords)
-  // Round3-任务6：顶栏主搜索词的「- 」负向部分不参与服务端搜索（E 站不支持排除语法），只取正向词
-  const searchBarParsed = parseKeywordQueue(cfg.keyword?.trim() ? [cfg.keyword] : [])
-  const kwTokens = [...searchBarParsed.positive, ...parsed.positive]
-    .map((t) => t.trim())
-    .filter(Boolean)
-  onlineStore.fetchInitial({
-    keyword: kwTokens.join(' '),
-    categories: cfg.activeCategories,
-    // ─── E-Hentai 高级筛选全量下发 ───
-    minRating: cfg.minRating,
-    language: cfg.language,
-    onlyRemoved: cfg.onlyRemoved,
-    onlyTorrents: cfg.onlyTorrents,
-    disableLangFilter: cfg.disableLangFilter,
-    disableUploaderFilter: cfg.disableUploaderFilter,
-    disableTagFilter: cfg.disableTagFilter,
-  })
+  // Round33：参数构造抽为公共函数（书签时间锚迁移复用同一套检索条件）
+  onlineStore.fetchInitial(buildOnlineSearchParams(onlineSearchConfig.value))
 }
 
 // 🆕 把当前关键词写回 URL（history.replaceState）
@@ -177,14 +163,28 @@ watch(
   { flush: 'post' },
 )
 
-// 兜底：列表已到尽头（hasMore=false）仍未定位到锚点 → 明确提示 + 标记失效（Round28：BUG2 修复）
+// 兜底：列表已到尽头（hasMore=false）仍未定位到锚点
+// Round28：明确提示 + 标记失效；Round33：改为「单条探测确认」，避免结果漂移被误判为失效
 watch(
   () => onlineStore.hasMore,
-  (hasMore) => {
+  async (hasMore) => {
     if (!hasMore && pendingAnchorGid.value) {
       const gid = pendingAnchorGid.value
+      const bmId = pendingBookmarkId.value
       pendingAnchorGid.value = null
+      pendingBookmarkId.value = null
       markAnchorFailed(gid)
+      if (bmId) {
+        // 主动探测：区分「真的失效」与「仅不在当前搜索结果中」
+        const { runCheck } = useBookmarkCheck()
+        const summary = await runCheck([bmId])
+        if (summary && summary.replaced > 0 && summary.migrated > 0) {
+          toast.info('锚定画廊已被新版本取代，已自动迁移；请从侧栏重新打开该书签')
+        } else if (summary && summary.invalid === 0 && summary.errors === 0) {
+          toast.info('锚定画廊仍有效，但不在当前搜索结果中（结果可能已变化）')
+        }
+        return
+      }
       toast.warning('书签锚定的画廊已失效（可能被删除或更换），书签已保留，跳转仅恢复位置')
     }
   },
@@ -247,6 +247,8 @@ const handlePickClick = (e: MouseEvent) => {
     e.stopPropagation()
     const gid = card.dataset.gid || ''
     const comic = filteredComics.value.find((c) => c.id === gid)
+    // Round33：记录卡片在列表中的位置（老书签无发布时间时的迁移兜底）
+    const listIndex = filteredComics.value.findIndex((c) => c.id === gid)
     // Round29：自动记录锚定画廊的发布时间（E 站 posted 日期 → OnlineComic.updatedAt）
     pendingAnchor.value = comic
       ? {
@@ -254,6 +256,7 @@ const handlePickClick = (e: MouseEvent) => {
           token: comic.source === 'online' ? comic.token : undefined,
           title: comic.title,
           postedAt: comic.updatedAt || undefined,
+          listIndex: listIndex >= 0 ? listIndex : undefined,
         }
       : { gid }
     // 弹窗此时才出现（展示自动记录的位置 + 发布时间）

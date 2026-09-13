@@ -1,19 +1,28 @@
 <script setup lang="ts">
 // 🔖 搜刮书签（Round27）：侧栏快速跳转 + hover 删除
 // Round28：后端化（多端同步）+ 失效锚点 ⚠️ 标记（BUG2 修复）
+// Round33：失效检测入口 + 一键清理 + 迁移来源展示
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   scrapeBookmarks,
   removeScrapeBookmark,
   failedAnchorGids,
   bookmarkLocationLabel,
+  isBookmarkInvalid,
+  invalidBookmarks,
+  invalidReasonText,
+  isBookmarkMigrated,
+  clearInvalidBookmarks,
 } from '@/stores/scrapeBookmarksStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
+import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
 
 const router = useRouter()
 const { toast, modal } = useUI()
+const { checking, runCheck } = useBookmarkCheck()
 
 // 点击书签跳转：PWA 同标签 / 桌面新标签（与搜索分流一致，isStandalonePWA 判定）
 const handleBookmarkJump = (bm: ScrapeBookmark) => {
@@ -26,17 +35,39 @@ const handleBookmarkJump = (bm: ScrapeBookmark) => {
   }
 }
 
+/** 书签展示名（名称优先，无名则位置标签） */
+const displayName = (bm: ScrapeBookmark): string =>
+  bm.name.trim() || bookmarkLocationLabel(bm)
+
 const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
-  const ok = await modal.confirm(`确定删除书签「${bm.name}」吗？`, '删除书签')
+  const ok = await modal.confirm(`确定删除书签「${displayName(bm)}」吗？`, '删除书签')
   if (!ok) return
   // Round28：后端化后为异步删除（乐观 + 失败回滚），成功才提示
   const removed = await removeScrapeBookmark(bm.id)
-  if (removed) toast.success(`书签「${bm.name}」已删除`)
+  if (removed) toast.success(`书签「${displayName(bm)}」已删除`)
 }
 
-/** 某书签是否已在本会话内确认锚点失效（⚠️ 标记） */
+/** 某书签是否已在锚点失效状态（持久化标记 或 本会话定位失败） */
 const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
-  !!bm.anchor && failedAnchorGids.value.has(bm.anchor.gid)
+  isBookmarkInvalid(bm) || (!!bm.anchor && failedAnchorGids.value.has(bm.anchor.gid))
+
+/** Round33：检测失效（手动全量） */
+const handleCheck = async () => {
+  await runCheck()
+}
+
+/** Round33：一键清理失效书签 */
+const handleClearInvalid = async () => {
+  const n = invalidBookmarks.value.length
+  if (n === 0) return
+  const ok = await modal.confirm(`确定删除全部 ${n} 条失效书签吗？`, '清理失效书签')
+  if (!ok) return
+  const removed = await clearInvalidBookmarks()
+  toast.success(`已清理 ${removed} 条失效书签`)
+}
+
+/** 失效书签数量（用于清理入口显隐） */
+const invalidCount = computed(() => invalidBookmarks.value.length)
 
 // ─── Round30：邮件列表式双行排版（行1 主文本 + 日期；行2 搜索词 + 时间）───
 
@@ -66,16 +97,22 @@ const postedParts = (bm: ScrapeBookmark): { date: string; time: string } => {
 /** 类型图标：搜索 / 首页 */
 const typeIcon = (bm: ScrapeBookmark): string => (bm.type === 'search' ? '🔍' : '🏠')
 
-/** 悬停提示：完整信息（位置 + 时间 + 锚定画廊标题） */
+/** 悬停提示：完整信息（失效原因 / 位置 / 时间 / 迁移来源 / 锚定画廊标题） */
 const bookmarkTooltip = (bm: ScrapeBookmark): string => {
+  const parts: string[] = []
   if (isAnchorFailed(bm)) {
-    return `⚠️ 锚定画廊已失效（可能被删除或更换）——${bm.anchor?.title || bm.anchor?.gid}`
+    parts.push(`⚠️ ${invalidReasonText(bm) || '锚定画廊已失效（可能被删除或更换）'}`)
   }
-  const parts: string[] = [bookmarkLocationLabel(bm)]
+  parts.push(bookmarkLocationLabel(bm))
   const { date, time } = postedParts(bm)
   if (date) parts.push(`${date} ${time}`.trim())
-  if (bm.anchor?.title) parts.push(bm.anchor.title)
-  else if (!bm.anchor) parts.push('未锚定卡片')
+  if (isBookmarkMigrated(bm) && bm.anchor?.migratedFrom) {
+    parts.push(`已从「${bm.anchor.migratedFrom.title || bm.anchor.migratedFrom.gid}」迁移`)
+  } else if (bm.anchor?.title) {
+    parts.push(bm.anchor.title)
+  } else if (!bm.anchor) {
+    parts.push('未锚定卡片')
+  }
   return parts.join(' · ') + '（点击跳转）'
 }
 </script>
@@ -91,10 +128,31 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
     <router-link to="/online/history">历史记录</router-link>
   </div>
 
-  <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版）
+  <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版；Round33 检测与清理入口）
        行1：图标位（hover 让位给 ✕） + 主文本 + 日期；行2：搜索词 + 时间 -->
   <div class="nav-group">
-    <span class="group-title">🔖 书签</span>
+    <span class="group-title bm-group-title">
+      <span>🔖 书签</span>
+      <span class="bm-actions">
+        <button
+          class="bm-action"
+          :class="{ spinning: checking }"
+          :disabled="checking"
+          :title="checking ? '检测中…' : '检测失效书签（探测锚定画廊是否被删除/下架）'"
+          @click="handleCheck"
+        >
+          {{ checking ? '⏳' : '🔍' }}
+        </button>
+        <button
+          v-if="invalidCount > 0"
+          class="bm-action danger"
+          :title="`清理 ${invalidCount} 条失效书签`"
+          @click="handleClearInvalid"
+        >
+          🧹<span class="bm-badge">{{ invalidCount }}</span>
+        </button>
+      </span>
+    </span>
     <template v-if="scrapeBookmarks.length > 0">
       <button
         v-for="bm in scrapeBookmarks"
@@ -111,7 +169,7 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
             <span class="bm-icon">{{ typeIcon(bm) }}</span>
             <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
           </span>
-          <span v-if="isAnchorFailed(bm)" class="bm-warn" title="锚定画廊已失效">⚠️</span>
+          <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '锚定画廊已失效'">⚠️</span>
           <span class="bm-primary">{{ primaryText(bm) }}</span>
           <span v-if="postedParts(bm).date" class="bm-date">{{ postedParts(bm).date }}</span>
         </span>
@@ -275,5 +333,72 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
   font-size: 0.78rem;
   color: var(--app-text-muted);
   padding: 6px 12px;
+}
+
+/* ─── Round33：书签分组标题行（检测 / 清理入口）─── */
+.bm-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.bm-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bm-action {
+  position: relative;
+  background: transparent;
+  border: none;
+  color: var(--app-text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bm-action:hover:not(:disabled) {
+  color: var(--app-text-strong);
+  background-color: var(--app-surface-3);
+}
+
+.bm-action:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.bm-action.spinning {
+  animation: bm-spin 1.2s linear infinite;
+}
+
+@keyframes bm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.bm-action.danger:hover {
+  color: #ef4444;
+}
+
+/* 失效数量角标 */
+.bm-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background-color: #ef4444;
+  color: #ffffff;
+  font-size: 0.6rem;
+  line-height: 12px;
+  text-align: center;
 }
 </style>

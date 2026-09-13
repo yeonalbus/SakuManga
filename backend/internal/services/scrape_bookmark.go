@@ -137,6 +137,39 @@ func RenameScrapeBookmark(db *gorm.DB, userID uint, id uint, name string) error 
 	return nil
 }
 
+// ErrBookmarkInvalidAnchor 锚点数据不合法
+var ErrBookmarkInvalidAnchor = errors.New("锚点数据不合法")
+
+// UpdateScrapeBookmarkAnchor 更新书签锚点（Round33：迁移写回 / 失效标记写回）。
+// 关键：锚点 JSON **原样存储**（不做 struct 往返），保证 invalid / migratedFrom /
+// listIndex 等扩展字段不丢失；仅校验合法性（null 或含非空 gid 的对象）。
+func UpdateScrapeBookmarkAnchor(db *gorm.DB, userID uint, id uint, anchor json.RawMessage) error {
+	s := strings.TrimSpace(string(anchor))
+	if s == "" {
+		return ErrBookmarkInvalidAnchor
+	}
+	if s != "null" {
+		var probe map[string]any
+		if err := json.Unmarshal(anchor, &probe); err != nil {
+			return ErrBookmarkInvalidAnchor
+		}
+		gid, _ := probe["gid"].(string)
+		if strings.TrimSpace(gid) == "" {
+			return ErrBookmarkInvalidAnchor
+		}
+	}
+	res := db.Model(&models.ScrapeBookmark{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Update("anchor", s)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrBookmarkNotFound
+	}
+	return nil
+}
+
 // DeleteScrapeBookmark 删除书签（仅限本人）
 func DeleteScrapeBookmark(db *gorm.DB, userID uint, id uint) error {
 	res := db.Where("id = ? AND user_id = ?", id, userID).Delete(&models.ScrapeBookmark{})

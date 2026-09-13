@@ -35,6 +35,8 @@ export interface OnlineComic extends BaseComic {
   uploader?: string // 上传者
   isFavorite?: boolean // 是否加入在线收藏
   favIndex?: number // 0-9，对应 E 站的 Favorite 0 ~ Favorite 9
+  /** 本地离线库存在同 GID 记录时的本地漫画 ID（后端回填；供在线画廊跳转本地详情） */
+  localId?: string
 }
 
 /** 本地离线漫画特有属性 (如 本地书架、书目维护等) */

@@ -7,6 +7,8 @@ import TagChip from '@/components/TagChip.vue'
 import { onlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { addHistory, updateOnlineFavoriteState, resolveOnlineToken } from '@/stores/historyStore'
 import { preferenceSettings } from '@/stores/preferenceSettings'
+// 本地副本兜底：后端未回填 localId（老后端 / 详情未开启本地优先）时按 GID 反查本地记录
+import { offlineComics, fetchOfflineComics } from '@/stores/comicStore'
 import { resolveDefaultDownloadScheme } from '@/api/download'
 import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
@@ -89,6 +91,8 @@ interface OnlineDetailDTO {
   isFavorite?: boolean
   favIndex?: number
   isDownloaded?: boolean
+  /** 本地离线库存在同 GID 记录时的本地漫画 ID（后端回填，供跳转本地详情） */
+  localId?: string
   maxPreviewPage?: number
   previewPages?: PreviewPageDTO[]
   comments?: { id: number; user: string; date: string; content: string }[]
@@ -147,6 +151,22 @@ interface LocalVersionInfo {
 const localVersion = ref<LocalVersionInfo | null>(null)
 const useOnlineOverride = ref(false) // 手动切回在线版本（不改设置项，仅本次查看）
 const isLocalMode = computed(() => !!localVersion.value && !useOnlineOverride.value)
+
+/**
+ * 本地副本的本地漫画 ID（供「🌐 在线 → 📚 本地」跳转，即 OfflineDetail「🌐 在线」的逆向实现）。
+ * 取值优先级：
+ *  ① 后端详情接口回填的 localId（与 isDownloaded 同源，不依赖「本地优先」设置）；
+ *  ② S1 本地优先附加的 local.comicId（后端未回填时的等价来源）；
+ *  ③ 离线列表按 GID 反查（老后端兜底）。
+ * 三者皆空 = 本地无副本 → 保持「⬇️ 下载」。
+ */
+const localComicId = computed(() => {
+  if (comic.value.localId) return comic.value.localId
+  if (localVersion.value?.comicId) return localVersion.value.comicId
+  const gid = comic.value.id
+  if (!gid) return ''
+  return offlineComics.value.find((c) => c.gid === gid)?.id || ''
+})
 // 在线预览切片缓存（手动切回在线版本时恢复）
 const onlinePreviewPages = ref<PreviewPageItem[]>([])
 const onlineMaxPreviewPage = ref(1)
@@ -527,6 +547,18 @@ const handleStartReading = async (targetPage?: number) => {
   openReader({ id: comic.value.id, token: comic.value.token, source: 'online', page })
 }
 
+// 5.1 跳转本地画廊详情（「🌐 在线 → 📚 本地」，与 OfflineDetail 的「🌐 在线」互为逆向）
+const goLocalGallery = () => {
+  const localId = localComicId.value
+  if (!localId) {
+    toast.info('该画廊暂无本地副本')
+    return
+  }
+  // Round21：PC 桌面新标签打开（记录来源+入口路由，返回=关标签/回在线详情）；
+  // PWA/窄屏或弹窗被拦截 → openContentTab 自动降级同标签 SPA 跳转
+  openContentTab({ href: buildDetailHref({ id: localId, source: 'offline' }), id: localId })
+}
+
 // 6. 下载功能：GP 面板 + 创建下载任务
 const showDownloadPanel = ref(false)
 const isLoadingGP = ref(false)
@@ -758,6 +790,8 @@ const handleFavClick = async () => {
 
 onMounted(() => {
   fetchDetail()
+  // 本地副本兜底：离线列表未加载时补拉一次（后端未回填 localId 时按 GID 反查用）
+  if (offlineComics.value.length === 0) fetchOfflineComics()
 })
 
 onUnmounted(() => {
@@ -830,8 +864,17 @@ watch(
 
           <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
 
+          <!-- 本地已存在副本：⬇️ 下载 替换为 📚 本地（跳转本地画廊详情） -->
           <button
-            v-if="canDownload"
+            v-if="localComicId"
+            class="action-btn local-btn"
+            title="该画廊已存入本地，点击查看本地详情"
+            @click="goLocalGallery"
+          >
+            📚 本地
+          </button>
+          <button
+            v-else-if="canDownload"
             class="action-btn download-btn"
             @click="handleOpenDownloadPanel"
           >
@@ -899,8 +942,17 @@ watch(
 
         <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
 
+        <!-- 本地已存在副本：⬇️ 下载 替换为 📚 本地（跳转本地画廊详情） -->
         <button
-          v-if="canDownload"
+          v-if="localComicId"
+          class="action-btn local-btn"
+          title="该画廊已存入本地，点击查看本地详情"
+          @click="goLocalGallery"
+        >
+          📚 本地
+        </button>
+        <button
+          v-else-if="canDownload"
           class="action-btn download-btn"
           @click="handleOpenDownloadPanel"
         >
@@ -1798,6 +1850,16 @@ watch(
 }
 .download-btn:hover {
   background: rgba(255, 117, 136, 0.15);
+}
+
+/* 📚 本地按钮（本地副本存在时替换「⬇️ 下载」→ 跳转本地画廊详情） */
+.local-btn {
+  background: var(--app-surface-3);
+  color: #4caf50;
+  border: 1px solid #4caf50;
+}
+.local-btn:hover {
+  background: rgba(76, 175, 80, 0.15);
 }
 
 /* ⬇️ 下载面板 */

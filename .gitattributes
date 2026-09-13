@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Windows 批处理脚本保持 CRLF（cmd 对 LF 换行下的 goto/label 解析不可靠）
+*.bat text eol=crlf

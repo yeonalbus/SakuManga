@@ -94,6 +94,71 @@ func sortedComicIDs(comicIDs []string, sortKeys map[string]float64) []string {
 	return out
 }
 
+// bookshelfStat 单个书架的派生统计（Round38 书架墙）
+type bookshelfStat struct {
+	unread   int    // 架内仍存在且 read_count <= 0 的本子数
+	coverURL string // 封面：展示顺序中第一个仍存在且带封面的本子的 cover_url
+}
+
+// comicStatRow 批量统计查询的原始行（一次 IN 查询取回，避免按书架 N 次查询）
+type comicStatRow struct {
+	ID        string `gorm:"column:id"`
+	ReadCount int    `gorm:"column:read_count"`
+	CoverURL  string `gorm:"column:cover_url"`
+}
+
+// loadBookshelfStats 汇总多个书架的未读数与封面（Round38）：
+// 一次 SELECT ... WHERE id IN ? 取回全部架内本子，再按各书架的展示顺序内存聚合。
+// 架内已失效的 comicId（本子已被删除）不计入未读、也不作为封面来源。
+func loadBookshelfStats(db *gorm.DB, orderedByShelf map[string][]string) map[string]bookshelfStat {
+	stats := make(map[string]bookshelfStat, len(orderedByShelf))
+	idSet := make(map[string]struct{})
+	for _, ids := range orderedByShelf {
+		for _, id := range ids {
+			idSet[id] = struct{}{}
+		}
+	}
+	all := make([]string, 0, len(idSet))
+	for id := range idSet {
+		all = append(all, id)
+	}
+
+	readCount := make(map[string]int, len(all))
+	coverURL := make(map[string]string, len(all))
+	if len(all) > 0 {
+		var rows []comicStatRow
+		if err := db.Model(&models.OfflineComic{}).
+			Select("id, read_count, cover_url").
+			Where("id IN ?", all).
+			Scan(&rows).Error; err != nil {
+			log.Printf("[bookshelf] 未读/封面统计失败: %v", err)
+		} else {
+			for _, r := range rows {
+				readCount[r.ID] = r.ReadCount
+				coverURL[r.ID] = r.CoverURL
+			}
+		}
+	}
+
+	for shelfID, ids := range orderedByShelf {
+		st := bookshelfStat{}
+		for _, id := range ids {
+			rc, ok := readCount[id]
+			if !ok {
+				continue // 失效引用：本子已不在库中
+			}
+			if rc <= 0 {
+				st.unread++
+			}
+			if st.coverURL == "" && coverURL[id] != "" {
+				st.coverURL = coverURL[id]
+			}
+		}
+		stats[shelfID] = st
+	}
+	return stats
+}
+
 // historyLimit 读取每用户历史记录上限（可配置，默认 200）
 func (h *LibraryHandler) historyLimit() int {
 	return getOrCreateServerSetting(h.db).HistoryLimit
@@ -136,18 +201,31 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 	}
 	// comicIds 以 JSON 数组字符串存库，响应统一转为数组返回，
 	// 避免前端拿到字符串后调用 .filter/.includes 抛错（comicIds.filter is not a function）
+	// Round38：先解析各书架展示顺序（权值序），供响应与未读/封面统计共用
+	ordered := make(map[string][]string, len(shelves))
+	for i := range shelves {
+		ids := parseComicIDs(shelves[i].ComicIDs)
+		ordered[shelves[i].ID] = sortedComicIDs(ids, parseSortKeys(shelves[i].SortKeys))
+	}
+	// Round38：书架墙所需的未读数与封面（一次 IN 查询聚合）
+	stats := loadBookshelfStats(h.db, ordered)
+
 	resp := make([]gin.H, 0, len(shelves))
 	for _, s := range shelves {
-		ids := parseComicIDs(s.ComicIDs)
+		ids := ordered[s.ID]
 		sk := parseSortKeys(s.SortKeys)
+		st := stats[s.ID]
 		resp = append(resp, gin.H{
 			"id":       s.ID,
 			"name":     s.Name,
 			"count":    len(ids),
-			"comicIds": sortedComicIDs(ids, sk), // Round22：按权值排序后的展示顺序
+			"comicIds": ids, // Round22：按权值排序后的展示顺序
 			"pinned":   s.Pinned,
 			"sortKey":  s.SortKey,
 			"sortKeys": sk,
+			// Round38：书架墙未读仪表盘（未读=架内 read_count<=0 且仍存在的本子数；封面=展示顺序第一本）
+			"unreadCount": st.unread,
+			"coverUrl":    st.coverURL,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"bookshelves": resp})

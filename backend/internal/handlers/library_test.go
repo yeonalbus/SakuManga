@@ -28,7 +28,7 @@ func newLibraryTestDB(t *testing.T) (*gorm.DB, *LibraryHandler) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { sqlDB.Close() })
-	if err := db.AutoMigrate(&models.Bookshelf{}); err != nil {
+	if err := db.AutoMigrate(&models.Bookshelf{}, &models.OfflineComic{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	gin.SetMode(gin.TestMode)
@@ -382,5 +382,87 @@ func TestSortedComicIDsMixed(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("期望 %v 得到 %v", want, got)
 		}
+	}
+}
+
+// Round38：GetBookshelves 返回书架墙所需的未读数与封面
+// 覆盖：未读按 read_count<=0 计、失效引用（本子已删除）不计入未读也不作封面、
+// 封面取展示顺序中第一个仍存在且带封面的本子、跨用户隔离。
+func TestGetBookshelvesUnreadAndCover(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	// c1 已读且封面为空（应被跳过）、c2 未读有封面、c3 未读无封面
+	comics := []models.OfflineComic{
+		{ID: "c1", Title: "已读", LocalPath: "p1", ReadCount: 3},
+		{ID: "c2", Title: "未读有封面", LocalPath: "p2", CoverURL: "/api/v1/comics/c2/cover"},
+		{ID: "c3", Title: "未读无封面", LocalPath: "p3"},
+	}
+	if err := db.Create(&comics).Error; err != nil {
+		t.Fatalf("插入本子失败: %v", err)
+	}
+
+	a := seedShelf(t, db, 1, "A", []string{"c1", "c2", "c3", "ghost"})
+	// 展示顺序 c1,c2,c3（c1 封面为空 → 封面应回退到 c2）
+	if err := db.Model(&a).Update("sort_keys", `{"c1":1000,"c2":2000,"c3":3000}`).Error; err != nil {
+		t.Fatalf("更新 A sort_keys 失败: %v", err)
+	}
+	seedShelf(t, db, 1, "B", []string{"missing"}) // 架内本子全失效
+	seedShelf(t, db, 2, "他人", []string{"c2"})    // 他人书架不应出现
+
+	r := gin.New()
+	r.GET("/bookshelves", authAs(db, 1), h.GetBookshelves)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/bookshelves", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询返回 %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Bookshelves []struct {
+			Name        string   `json:"name"`
+			Count       int      `json:"count"`
+			UnreadCount int      `json:"unreadCount"`
+			CoverURL    string   `json:"coverUrl"`
+			ComicIDs    []string `json:"comicIds"`
+		} `json:"bookshelves"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if len(resp.Bookshelves) != 2 {
+		t.Fatalf("应只有本人 2 个书架: %+v", resp.Bookshelves)
+	}
+	byName := map[string]int{}
+	for i, s := range resp.Bookshelves {
+		byName[s.Name] = i
+	}
+
+	aShelf := resp.Bookshelves[byName["A"]]
+	if aShelf.Count != 4 {
+		t.Fatalf("count 应为架内 id 数 4: %d", aShelf.Count)
+	}
+	// c2、c3 未读；c1 已读；ghost 失效不计
+	if aShelf.UnreadCount != 2 {
+		t.Fatalf("A 未读数应为 2（ghost 不计、c1 已读）: %d", aShelf.UnreadCount)
+	}
+	// c1 封面为空 → 回退到展示顺序中第一个带封面的 c2
+	if aShelf.CoverURL != "/api/v1/comics/c2/cover" {
+		t.Fatalf("A 封面应回退到 c2: %q", aShelf.CoverURL)
+	}
+
+	bShelf := resp.Bookshelves[byName["B"]]
+	if bShelf.UnreadCount != 0 || bShelf.CoverURL != "" {
+		t.Fatalf("架内本子全失效时未读=0 且无封面: unread=%d cover=%q", bShelf.UnreadCount, bShelf.CoverURL)
+	}
+}
+
+// Round38：loadBookshelfStats 空书架集合不触发查询、返回空统计
+func TestLoadBookshelfStatsEmpty(t *testing.T) {
+	db, _ := newLibraryTestDB(t)
+	stats := loadBookshelfStats(db, map[string][]string{"s1": {}})
+	if len(stats) != 1 {
+		t.Fatalf("空书架也应有一条统计: %+v", stats)
+	}
+	if st := stats["s1"]; st.unread != 0 || st.coverURL != "" {
+		t.Fatalf("空书架统计应为零值: %+v", st)
 	}
 }

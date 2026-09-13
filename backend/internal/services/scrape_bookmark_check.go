@@ -139,10 +139,10 @@ func CheckScrapeBookmarks(
 			continue
 		}
 
-		// 已被新版本取代：回传精确迁移目标
+		// 已被新版本取代：前端按「时间锚迁移」处理（新版本位置已变，不做换 gid 式替代）
 		if detail.NewVersionGID != "" {
 			res.Status = BookmarkStatusReplaced
-			res.Message = "画廊已被新版本取代"
+			res.Message = "画廊已被新版本取代（原锚点位置可能已变化）"
 			res.NewVersion = &BookmarkAnchorInfo{
 				GID:   detail.NewVersionGID,
 				Token: detail.NewVersionToken,

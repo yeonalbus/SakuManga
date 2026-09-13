@@ -4,11 +4,12 @@
  * 流程：
  *  1. 调用后端批量检测（POST /scrape-bookmarks/check）
  *  2. 按结果分类处理：
- *     - replaced（E 站标记被新版本取代）→ **自动精确迁移**（零歧义，直接换 gid/token）
- *     - removed / copyright / invalid → 写入失效标记（持久化）
+ *     - replaced（E 站标记被新版本取代）→ **按时间锚迁移**（询问用户）：
+ *       新版本发布时间不同、列表位置已变，换 gid 会偏离「上次搜刮到的位置」
+ *     - removed / copyright / invalid → 写入失效标记（持久化）+ 询问时间锚迁移
  *     - ok → 静默刷新元信息（标题/发布时间可能已更新）
  *     - error（网络/限流/缺 token）→ 不判定失效，跳过
- *  3. 对本次确认失效的书签：若记录过发布时间 → 计算「时间锚候选」并**询问用户**是否迁移
+ *  3. 失效与「被取代」统一用时间锚恢复原位置（需用户确认，拒绝则保留位置快照）
  */
 import { ref } from 'vue'
 import type { ScrapeBookmark, ScrapeBookmarkCheckResult } from '@/types/comic'
@@ -42,41 +43,28 @@ export const useBookmarkCheck = () => {
     bm.name.trim() || bookmarkLocationLabel(bm)
 
   /**
-   * 精确迁移：把锚点换成 E 站标记的新版本画廊（零歧义，自动执行）
-   * 保留原锚点快照到 migratedFrom（可回溯 / 撤销）
+   * 时间锚迁移（需用户确认）：按发布时间定位「那时那刻」附近的画廊。
+   *
+   * Round33 修订：**所有需要换锚的情况统一走时间锚**（含 E 站标记「已被新版本取代」的画廊）——
+   * 用户关心的是「上次搜刮到了哪个位置」，而新版本画廊的发布时间不同、在列表中的位置也不同，
+   * 直接换成新版本 gid 会把人带到另一个位置，因此不再做「换 gid 式精确迁移」。
+   *
+   * @param replacedHint 该画廊是否被 E 站标记为「已被新版本取代」（用于提示文案）
    */
-  const migrateToNewVersion = async (
+  const migrateByTimeAnchor = async (
     bm: ScrapeBookmark,
-    target: { gid: string; token?: string; title?: string },
+    replacedHint = false,
   ): Promise<boolean> => {
-    const prev = bm.anchor
-    if (!prev) return false
-    const ok = await updateBookmarkAnchor(bm.id, {
-      gid: target.gid,
-      token: target.token || prev.token,
-      // 新版本标题通常相同：优先用已知标题，缺省沿用原锚点标题
-      title: target.title || prev.title,
-      postedAt: prev.postedAt,
-      invalid: null,
-      migratedFrom: {
-        gid: prev.gid,
-        token: prev.token,
-        title: prev.title,
-        postedAt: prev.postedAt,
-      },
-      listIndex: prev.listIndex,
-    })
-    return ok
-  }
-
-  /** 时间锚迁移（需用户确认）：按发布时间定位「那时那刻」附近的画廊 */
-  const migrateByTimeAnchor = async (bm: ScrapeBookmark): Promise<boolean> => {
     const postedAt = bm.anchor?.postedAt?.trim()
     if (!postedAt) {
       toast.info(`「${displayName(bm)}」未记录发布时间，无法按时间迁移`)
       return false
     }
-    toast.info(`正在为「${displayName(bm)}」检索同时刻画廊…`)
+    toast.info(
+      replacedHint
+        ? `「${displayName(bm)}」已有新版本，按发布时间检索原位置…`
+        : `正在为「${displayName(bm)}」检索同时刻画廊…`,
+    )
     const cand = await findTimeAnchorCandidate(bm.config, postedAt)
     if (!cand) {
       toast.warning(`「${displayName(bm)}」未找到可迁移的同时刻画廊（保留位置快照）`)
@@ -87,8 +75,8 @@ export const useBookmarkCheck = () => {
       return false
     }
     const ok = await modal.confirm(
-      `「${displayName(bm)}」锚定画廊已失效。\n\n` +
-        `是否迁移到同时刻附近的画廊？\n「${cand.title}」\n` +
+      `「${displayName(bm)}」${replacedHint ? '锚定画廊已有新版本（位置可能已变化）' : '锚定画廊已失效'}。\n\n` +
+        `是否迁移到同时刻附近的画廊以恢复原位置？\n「${cand.title}」\n` +
         `发布时间 ${cand.postedAt}（相差 ${formatTimeDiff(cand.diffMs)}）`,
       '锚点迁移',
     )
@@ -129,6 +117,8 @@ export const useBookmarkCheck = () => {
       errors: 0,
     }
     const invalidOnes: ScrapeBookmark[] = []
+    /** 被新版本取代的书签（Round33 修订：同样按时间锚迁移，不换 gid） */
+    const replaceOnes: ScrapeBookmark[] = []
 
     for (const r of results) {
       const bm = scrapeBookmarks.value.find((b) => b.id === String(r.id))
@@ -157,11 +147,11 @@ export const useBookmarkCheck = () => {
           break
         }
         case 'replaced': {
+          // Round33 修订：E 站标记「已被新版本取代」的画廊**不直接换新版本 gid**——
+          // 新版本发布时间不同、在列表中的位置也不同，换 gid 会偏离「上次搜刮到的位置」。
+          // 统一按时间锚处理（询问用户，用原锚点发布时间恢复原位置）。
           summary.replaced++
-          if (r.newVersion?.gid) {
-            const done = await migrateToNewVersion(bm, r.newVersion)
-            if (done) summary.migrated++
-          }
+          replaceOnes.push(bm)
           break
         }
         case 'removed':
@@ -179,7 +169,8 @@ export const useBookmarkCheck = () => {
       }
     }
 
-    // 失效书签：按发布时间询问迁移（逐个确认，保持用户掌控）
+    // 需要恢复位置的书签：失效（含已删除/下架/不存在）+ 被新版本取代 → 统一按时间锚询问迁移
+    // （逐个确认，保持用户掌控；拒绝则保留位置快照）
     if (opts?.askTimeAnchor !== false) {
       for (const bm of invalidOnes) {
         if (bm.anchor?.postedAt) {
@@ -188,6 +179,12 @@ export const useBookmarkCheck = () => {
             summary.migrated++
             summary.invalid--
           }
+        }
+      }
+      for (const bm of replaceOnes) {
+        if (bm.anchor?.postedAt) {
+          const done = await migrateByTimeAnchor(bm, true)
+          if (done) summary.migrated++
         }
       }
     }

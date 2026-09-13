@@ -178,8 +178,8 @@ watch(
         // 主动探测：区分「真的失效」与「仅不在当前搜索结果中」
         const { runCheck } = useBookmarkCheck()
         const summary = await runCheck([bmId])
-        if (summary && summary.replaced > 0 && summary.migrated > 0) {
-          toast.info('锚定画廊已被新版本取代，已自动迁移；请从侧栏重新打开该书签')
+        if (summary && summary.migrated > 0) {
+          toast.info('锚点已迁移到同时刻的画廊；请从侧栏重新打开该书签')
         } else if (summary && summary.invalid === 0 && summary.errors === 0) {
           toast.info('锚定画廊仍有效，但不在当前搜索结果中（结果可能已变化）')
         }

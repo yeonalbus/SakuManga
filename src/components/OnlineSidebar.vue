@@ -101,7 +101,7 @@ const typeIcon = (bm: ScrapeBookmark): string => (bm.type === 'search' ? '🔍' 
 const bookmarkTooltip = (bm: ScrapeBookmark): string => {
   const parts: string[] = []
   if (isAnchorFailed(bm)) {
-    parts.push(`⚠️ ${invalidReasonText(bm) || '锚定画廊已失效（可能被删除或更换）'}`)
+    parts.push(`⚠️ ${invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'}`)
   }
   parts.push(bookmarkLocationLabel(bm))
   const { date, time } = postedParts(bm)
@@ -138,7 +138,7 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
           class="bm-action"
           :class="{ spinning: checking }"
           :disabled="checking"
-          :title="checking ? '检测中…' : '检测失效书签（探测锚定画廊是否被删除/下架）'"
+          :title="checking ? '检测中…' : '检测失效书签（按各书签原始搜索&筛选条件复核锚定画廊是否仍可见）'"
           @click="handleCheck"
         >
           {{ checking ? '⏳' : '🔍' }}
@@ -169,7 +169,7 @@ const bookmarkTooltip = (bm: ScrapeBookmark): string => {
             <span class="bm-icon">{{ typeIcon(bm) }}</span>
             <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
           </span>
-          <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '锚定画廊已失效'">⚠️</span>
+          <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'">⚠️</span>
           <span class="bm-primary">{{ primaryText(bm) }}</span>
           <span v-if="postedParts(bm).date" class="bm-date">{{ postedParts(bm).date }}</span>
         </span>

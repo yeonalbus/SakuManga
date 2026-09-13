@@ -1,14 +1,18 @@
 /**
- * 书签失效检测编排（Round33）
+ * 书签失效检测编排（Round33；Round35 语义重写）
+ *
+ * 语义（Round35 与用户对齐）：书签是「位置快照」，只要在**书签自带的搜索&筛选条件**下
+ * 还能看到锚定画廊就有效（位置漂移无关）；一旦在该条件下看不到就失效——与画廊自身状态无关
+ * （Expunged/已移除的画廊页面仍 200、内容仍可访问，但原条件下不可见 → 仍判失效）。
+ * 因此后端改为「按 config 复刻检索 + 动态越过判定」，与定位循环同一判据。
  *
  * 流程：
  *  1. 调用后端批量检测（POST /scrape-bookmarks/check）
  *  2. 按结果分类处理：
- *     - replaced（E 站标记被新版本取代）→ **按时间锚迁移**（询问用户）：
- *       新版本发布时间不同、列表位置已变，换 gid 会偏离「上次搜刮到的位置」
- *     - removed / copyright / invalid → 写入失效标记（持久化）+ 询问时间锚迁移
- *     - ok → 静默刷新元信息（标题/发布时间可能已更新）
- *     - error（网络/限流/缺 token）→ 不判定失效，跳过
+ *     - ok → 清除失效标记与会话级 ⚠️，静默刷新元信息（标题/发布时间可能已更新）
+ *     - unreachable（或历史 removed / copyright / invalid）→ 写入失效标记（持久化）+ 询问时间锚迁移
+ *     - replaced（历史状态）→ 同样按时间锚迁移
+ *     - error（网络/限流/信息不足/超硬上限）→ 不判定失效，跳过
  *  3. 失效与「被取代」统一用时间锚恢复原位置（需用户确认，拒绝则保留位置快照）
  */
 import { ref } from 'vue'
@@ -18,6 +22,7 @@ import {
   updateBookmarkAnchor,
   checkScrapeBookmarks,
   clearBookmarkInvalid,
+  clearAnchorFailed,
   markBookmarkInvalid,
   bookmarkLocationLabel,
 } from '@/stores/scrapeBookmarksStore'
@@ -126,6 +131,9 @@ export const useBookmarkCheck = () => {
       switch (r.status) {
         case 'ok': {
           summary.ok++
+          // Round35：检测确认「在原搜索&筛选条件下仍可见」→ 清掉会话级定位失败 ⚠️
+          // （此前该标记只写不清，会出现「侧栏 ⚠️ 与检测有效」并存的矛盾观感）
+          if (bm.anchor.gid) clearAnchorFailed(bm.anchor.gid)
           // 静默刷新元信息：标题改名 / 发布时间补齐
           const ref = r.refreshed
           if (ref) {
@@ -154,9 +162,12 @@ export const useBookmarkCheck = () => {
           replaceOnes.push(bm)
           break
         }
+        case 'unreachable':
         case 'removed':
         case 'copyright':
         case 'invalid': {
+          // Round35：unreachable = 在书签原搜索&筛选条件下已看不到锚定画廊 → 失效
+          // （removed/copyright/invalid 为 Round33 历史状态，处理方式一致）
           summary.invalid++
           await markBookmarkInvalid(bm.id, r.status)
           invalidOnes.push(bm)
@@ -199,10 +210,14 @@ export const useBookmarkCheck = () => {
   const runCheck = async (ids?: string[]): Promise<BookmarkCheckSummary | null> => {
     if (checking.value) return null
     checking.value = true
+    // Round35：检测改为「按各书签原始搜索条件复刻检索」，可能翻若干页列表 → 先给个耗时提示
+    if (!ids || ids.length === 0) {
+      toast.info('正在按各书签的原始搜索&筛选条件复核可见性，可能需要一点时间…')
+    }
     try {
       const results = await checkScrapeBookmarks(ids)
       if (results.length === 0) {
-        toast.info('没有可检测的书签（未锚定卡片）')
+        toast.info('没有可检测的书签（未锚定卡片或缺锚定发布时间）')
         return null
       }
       const summary = await applyResults(results, { askTimeAnchor: true })

@@ -58,12 +58,14 @@ const restoreConfig = (raw: unknown): SearchConfig => {
   }
 }
 
-/** 宽松恢复失效标记（Round33） */
+/** 宽松恢复失效标记（Round33；Round35 增加 unreachable） */
 const restoreInvalid = (raw: unknown): NonNullable<ScrapeBookmark['anchor']>['invalid'] => {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const kind = o.kind
-  if (kind !== 'removed' && kind !== 'copyright' && kind !== 'invalid') return null
+  if (kind !== 'unreachable' && kind !== 'removed' && kind !== 'copyright' && kind !== 'invalid') {
+    return null
+  }
   return { kind, at: typeof o.at === 'number' ? o.at : Date.now() }
 }
 
@@ -354,19 +356,15 @@ export const renameScrapeBookmark = async (id: string, name: string): Promise<bo
 /** 书签是否已确认失效（检测后写入 invalid 标记） */
 export const isBookmarkInvalid = (bm: ScrapeBookmark): boolean => !!bm.anchor?.invalid
 
-/** 失效原因文案 */
+/**
+ * 失效原因文案（Round35：不细分原因）
+ *
+ * 语义：书签是「位置快照」——失效只意味着「在书签当时的搜索&筛选条件下已看不到锚定画廊，
+ * 因此无法得知上次搜刮到的位置」，用户并不关心底层原因是删除/下架/被移除。
+ */
 export const invalidReasonText = (bm: ScrapeBookmark): string => {
-  const kind = bm.anchor?.invalid?.kind
-  switch (kind) {
-    case 'removed':
-      return '画廊已被删除或不可用'
-    case 'copyright':
-      return '画廊因版权投诉被下架'
-    case 'invalid':
-      return '画廊不存在（gid 无效）'
-    default:
-      return ''
-  }
+  if (!bm.anchor?.invalid) return ''
+  return '在当前搜索&筛选条件下已看不到锚定画廊（书签已失效）'
 }
 
 /** 全部失效书签 */
@@ -404,7 +402,13 @@ export const updateBookmarkAnchor = async (
   }
 }
 
-/** 批量失效检测：ids 为空 = 检测全部（后端串行探测，走 E 站自适应限流） */
+/**
+ * 批量失效检测：ids 为空 = 检测全部。
+ *
+ * Round35：后端改为「按各书签原始搜索&筛选条件复刻检索 + 动态越过判定」，
+ * 因此单次检测可能翻若干页列表（每条书签耗时取决于当日画廊密度）——
+ * 这里给足超时（10 分钟），避免被默认 60s 超时打断而误报检测失败。
+ */
 export const checkScrapeBookmarks = async (
   ids?: string[],
 ): Promise<ScrapeBookmarkCheckResult[]> => {
@@ -412,6 +416,7 @@ export const checkScrapeBookmarks = async (
   const res = await http<{ results?: ScrapeBookmarkCheckResult[] }>('/scrape-bookmarks/check', {
     method: 'POST',
     body: JSON.stringify(ids && ids.length > 0 ? { ids: numeric } : {}),
+    signal: AbortSignal.timeout(10 * 60 * 1000),
   })
   return res.results || []
 }

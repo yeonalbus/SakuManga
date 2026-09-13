@@ -8,8 +8,12 @@
  *   1. 首屏由页面按 `seek=<anchor.postedAt 日期>` 加载（本文件提供 `beginLocate` 返回该日期）
  *   2. 在已加载数据里找锚定 gid：
  *      · 命中 → 滚动居中 + 脉冲高亮 → 结束（并清除会话级失效标记）
- *      · 未命中且未越过 postedAt → 自动 next 翻页（静默追加，600ms 节流，上限 15 页）
- *      · 越过 / 到底 / 超上限 / 报错 → 结束，交由现有失效探测与时间锚迁移兜底
+ *      · 未命中且未越过 postedAt → 自动 next 翻页（静默追加，600ms 节流，硬异常上限 100 页）
+ *      · 越过 / 到底 / 报错 → 结束，交由现有失效判定与时间锚迁移兜底
+ *
+ * Round35：翻页终止改为**动态判据**（不再用 15 页固定上限）——
+ * 列表按发布时间倒序，只要本页最旧一条已早于锚定时间，后续只会更旧、不可能再有锚点，
+ * 即可停止；因此「当日画廊密集」时多翻几页、「稀疏」时首屏即停，不会扫不全也不会白扫。
  *
  * 不打断原则：用户可自由滚动、手动点「加载更多」，与自动循环共用 store 的 isLoading 守卫。
  *
@@ -29,8 +33,9 @@ import { hasPassedTarget, seekDateOf } from '@/utils/bookmarkTimeAnchor'
 import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
 import { useUI } from '@/composables/useUI'
 
-/** 自动向下翻页上限（页；E 站每页 25 张 ≈ 375 张） */
-export const LOCATE_MAX_PAGES = 15
+/** 自动向下翻页的硬异常上限（页）：正常终止条件是「本页最旧一条已早于锚定时间」，
+ *  与当日画廊密度无关（密集日多翻几页、稀疏日首屏即停）；此上限仅防 next 游标异常循环。 */
+export const LOCATE_HARD_CAP_PAGES = 100
 /** 每次翻页之间的间隔（毫秒）——列表接口不走后端 EHRateLimiter，限速必须由前端自理 */
 export const LOCATE_PAGE_INTERVAL_MS = 600
 /** 单页请求偶发失败（E 站限流/瞬时 5xx）时的最大重试次数 */
@@ -107,7 +112,7 @@ export const useBookmarkLocate = () => {
         return
       case 'limit':
         toast.info(
-          `已自动扫描 ${st.pages} 页（约 ${st.cards} 张）仍未定位到书签「${st.name}」，可继续下滑手动加载`,
+          `已扫描 ${st.pages} 页仍未越过书签「${st.name}」的锚定时间点，本次未判定（可稍后重试）`,
         )
         return
       case 'error':
@@ -120,16 +125,16 @@ export const useBookmarkLocate = () => {
         markAnchorFailed(st.gid)
         toast.warning(
           reason === 'passed'
-            ? `书签「${st.name}」时间点附近的检索结果里没有锚定画廊（可能已被删除或更换）`
-            : `已翻到列表尽头仍未找到书签「${st.name}」的锚定画廊`,
+            ? `书签「${st.name}」在当前搜索&筛选条件下已看不到锚定画廊（可能已失效）`
+            : `已翻到列表尽头仍未找到书签「${st.name}」的锚定画廊（该条件下已不可见）`,
         )
-        // 兜底：单条失效探测（Round33 能力；确认失效时询问时间锚迁移）
+        // 兜底：按书签原始搜索条件复核单条（Round35：与定位循环同一判据）
         const { runCheck } = useBookmarkCheck()
         const summary = await runCheck([st.bookmarkId])
         if (summary && summary.migrated > 0) {
           toast.info('锚点已迁移到同时刻的画廊；请从侧栏重新打开该书签')
         } else if (summary && summary.invalid === 0 && summary.errors === 0) {
-          toast.info('锚定画廊仍有效，但不在当前搜索结果中（结果可能已变化）')
+          toast.info('复核检索仍能看到锚定画廊，可重试定位（列表结果可能已变化）')
         }
         return
       }
@@ -210,7 +215,7 @@ export const useBookmarkLocate = () => {
         await finish('exhausted', st)
         return
       }
-      if (st.pages >= LOCATE_MAX_PAGES) {
+      if (st.pages >= LOCATE_HARD_CAP_PAGES) {
         await finish('limit', st)
         return
       }

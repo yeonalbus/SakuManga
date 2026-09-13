@@ -314,13 +314,18 @@ export interface ScrapeBookmark {
   createdAt: number
 }
 
-/** 书签失效类型：已删除 / 版权下架 / gid 不存在（Round33） */
-export type ScrapeBookmarkInvalidKind = 'removed' | 'copyright' | 'invalid'
+/**
+ * 书签失效类型（Round35：语义 = 书签级可见性）
+ * - 'unreachable'：在书签自带的搜索&筛选条件下已看不到锚定画廊（新判定唯一产出）
+ * - 'removed' | 'copyright' | 'invalid'：Round33 旧实现的画廊状态判定结果，仅历史数据兼容
+ */
+export type ScrapeBookmarkInvalidKind = 'unreachable' | 'removed' | 'copyright' | 'invalid'
 
-/** 失效检测单条结果（后端 POST /scrape-bookmarks/check 返回，Round33） */
+/** 失效检测单条结果（后端 POST /scrape-bookmarks/check 返回） */
 export interface ScrapeBookmarkCheckResult {
   id: number
-  status: 'ok' | 'removed' | 'copyright' | 'invalid' | 'replaced' | 'error'
+  /** Round35：unreachable = 原检索条件下不可见（失效）；ok = 仍可见；error = 未判定 */
+  status: 'ok' | 'unreachable' | 'removed' | 'copyright' | 'invalid' | 'replaced' | 'error'
   message?: string
   /** status=replaced：精确迁移目标（E 站标记的新版本画廊） */
   newVersion?: { gid: string; token?: string; title?: string; postedAt?: string }

@@ -56,6 +56,20 @@ const source = computed<'online' | 'offline'>(
 const currentPage = ref(1)
 const totalPages = ref(0)
 const showControls = ref(true) // 悬浮控制条显隐
+// Round40：页码角标由「常驻」改为「翻页闪现」——翻页/唤出控制条时显示，停留 1.5s 后淡出，
+// 避免常驻右下角压住画面文字（停留时长取 1.5s：视线从画面移到角落约 0.4s + 读清数字约 0.5s）
+const PAGE_COUNTER_HOLD_MS = 1500
+const pageCounterVisible = ref(false)
+let pageCounterTimer: ReturnType<typeof setTimeout> | null = null
+/** 闪现页码角标（重复调用重置计时，连续翻页期间角标保持可见） */
+const flashPageCounter = () => {
+  pageCounterVisible.value = true
+  if (pageCounterTimer) clearTimeout(pageCounterTimer)
+  pageCounterTimer = setTimeout(() => {
+    pageCounterTimer = null
+    pageCounterVisible.value = false
+  }, PAGE_COUNTER_HOLD_MS)
+}
 const isFullscreen = ref(false) // 全屏状态
 const showSettings = ref(false) // 显示设置面板
 const isZoomed = ref(false) // 双击放大状态
@@ -1153,6 +1167,11 @@ onUnmounted(() => {
   }
   document.removeEventListener('click', onCaptureClick, true)
   if (autoTurnTimer) clearInterval(autoTurnTimer)
+  // Round40：清理页码角标闪现计时器，防止卸载后回调置位已销毁组件的状态
+  if (pageCounterTimer) {
+    clearTimeout(pageCounterTimer)
+    pageCounterTimer = null
+  }
   if (wakeLockSentinel) wakeLockSentinel.release().catch(() => {})
   // Round7-任务1：退出时立即 flush 未完成的后端进度同步（仅当前页 > 1 时，
   // 避免第 1 页入口快速退出把后端已有进度清零）
@@ -1175,8 +1194,11 @@ onUnmounted(() => {
 // 监听与调度
 // --------------------------------------------------
 
-// 监听当前页码变化：实时触发预加载 + 保存进度
+// 监听当前页码变化：闪现页码角标 + 实时触发预加载 + 保存进度
 watch(currentPage, (newPg) => {
+  // Round40：所有翻页入口（点击热区/键盘/滑动/手柄/自动翻页/滑块跳页/侧栏跳转/
+  // Webtoon 滚动换页/进入时恢复进度）均会改动 currentPage，此处统一闪现角标，避免逐个入口埋点遗漏
+  flashPageCounter()
   if (comicId.value) {
     // Round24：进度存物理索引（离线），在线保持显示序号
     const phys = currentPhysicalIndex()
@@ -1193,6 +1215,12 @@ watch(currentPage, (newPg) => {
     // 在线模式：就近补全当前页附近，保证翻页即时可用
     preloadNearby(newPg - 1)
   })
+})
+
+// Round40：唤出上下控制条时同步闪现页码角标（点中间区/点画布/Esc 均走 showControls，
+// 与底栏同进退；收起控制条不闪现）
+watch(showControls, (visible) => {
+  if (visible) flashPageCounter()
 })
 
 // 监听路由 ID 切换时重新加载页列表
@@ -1432,7 +1460,8 @@ watch(
           </button>
         </div>
 
-        <!-- Round29：页码已改为常驻右下角角标（见 .page-counter），此处只保留阅读方向 -->
+        <!-- Round29：页码已改为右下角角标（见 .page-counter），此处只保留阅读方向 -->
+        <!-- Round40：角标改为翻页闪现，不再常驻 -->
         <div v-if="readerSettings.showBottomBar" class="status-row">
           <span>{{ directionLabel }}</span>
         </div>
@@ -1537,9 +1566,15 @@ watch(
       </div>
     </Transition>
 
-    <!-- Round29：常驻右下角页码角标（20/49）——控制条隐藏、沉浸式、Webtoon 模式均显示；
+    <!-- Round40：右下角页码角标（20/49）——翻页/唤出控制条时闪现 1.5s 后淡出，不再常驻挡字；
          z-index 高于底栏，pointer-events: none 保证不拦截点击翻页热区 -->
-    <div v-if="totalPages > 0" class="page-counter">{{ currentPage }}/{{ totalPages }}</div>
+    <div
+      v-if="totalPages > 0"
+      class="page-counter"
+      :class="{ 'counter-idle': !pageCounterVisible }"
+    >
+      {{ currentPage }}/{{ totalPages }}
+    </div>
 
     <!-- Round24：侧栏抽屉（缩略图/章节大纲/书签，仅本地） -->
     <ReaderSidebar
@@ -1698,7 +1733,7 @@ watch(
   background: var(--reader-reveal-hover);
 }
 
-/* Round29：常驻右下角页码角标（20/49） */
+/* Round29：右下角页码角标（20/49）；Round40：改为翻页闪现，闲置态淡出 */
 .page-counter {
   position: fixed;
   right: calc(14px + var(--safe-right, 0px));
@@ -1715,6 +1750,16 @@ watch(
   letter-spacing: 0.02em;
   pointer-events: none; /* 不挡点击翻页热区 */
   user-select: none;
+  opacity: 1;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+
+/* Round40：闲置态（翻页后 1.5s）淡出并轻微下沉，避免常驻遮挡画面文字 */
+.page-counter.counter-idle {
+  opacity: 0;
+  transform: translateY(4px);
 }
 
 /* 呼出按钮淡入淡出 */

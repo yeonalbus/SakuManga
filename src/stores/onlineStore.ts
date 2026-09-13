@@ -54,10 +54,21 @@ export const useOnlineStore = defineStore('onlineStore', () => {
 
   /**
    * 下滑加载更多 (Load More)[cite: 1]
+   *
+   * Round34：返回本次加载结果（新增条数 / 是否还有更多 / 错误），
+   * 供书签自动定位循环判停（调用方可忽略返回值，行为与旧版一致）。
    */
-  const loadMore = async () => {
+  const loadMore = async (): Promise<{
+    added: number
+    hasMore: boolean
+    error: string | null
+    /** 本次调用被守卫拦下（加载中 / 无更多 / 无游标），并非真的加载了 0 条 */
+    skipped: boolean
+  }> => {
     // 处于加载中、没有更多数据或没有 nextGid 时拦截
-    if (isLoading.value || !hasMore.value || !nextGid.value) return
+    if (isLoading.value || !hasMore.value || !nextGid.value) {
+      return { added: 0, hasMore: hasMore.value, error: null, skipped: true }
+    }
 
     isLoading.value = true
     error.value = null
@@ -70,11 +81,15 @@ export const useOnlineStore = defineStore('onlineStore', () => {
 
       // 流式追加数据到列表尾部[cite: 1]
       // 防御：后端返回 null 时按空数组处理，避免 push 展开 null 抛错
-      comics.value.push(...(res.comics || []))
+      const added = res.comics || []
+      comics.value.push(...added)
       nextGid.value = res.next
       hasMore.value = res.hasMore ?? !!res.next
+      return { added: added.length, hasMore: hasMore.value, error: null, skipped: false }
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : '加载更多失败'
+      const msg = err instanceof Error ? err.message : '加载更多失败'
+      error.value = msg
+      return { added: 0, hasMore: hasMore.value, error: msg, skipped: false }
     } finally {
       isLoading.value = false
     }

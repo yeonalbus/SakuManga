@@ -151,6 +151,17 @@ export const markAnchorFailed = (gid: string): void => {
   failedAnchorGids.value = new Set(failedAnchorGids.value).add(gid)
 }
 
+/**
+ * 清除某 gid 的会话级失效标记（Round34：书签定位成功后调用）。
+ * 此前只写不清，导致「一次定位失败 → 侧栏 ⚠️ 永久残留」。
+ */
+export const clearAnchorFailed = (gid: string): void => {
+  if (!gid || !failedAnchorGids.value.has(gid)) return
+  const next = new Set(failedAnchorGids.value)
+  next.delete(gid)
+  failedAnchorGids.value = next
+}
+
 // ─── 展示辅助（Round29：位置 + 发布时间）───
 
 /**

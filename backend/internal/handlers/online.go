@@ -310,6 +310,7 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 	// P2-7：磁盘缓存命中短路（同一封面 URL 不再重复下载）
 	cachePath := proxyCoverCachePath(targetURL)
 	if _, statErr := os.Stat(cachePath); statErr == nil {
+		services.TouchCoverCacheFile(cachePath) // Round39：打点最后使用时间（供 TTL 回收判活）
 		c.Header("Content-Type", contentTypeOfProxyCache(cachePath))
 		c.Header("Cache-Control", "public, max-age=86400")
 		c.File(cachePath)
@@ -321,6 +322,7 @@ func (h *OnlineComicHandler) ProxyCover(c *gin.Context) {
 	if waiting {
 		<-waitCh
 		if _, statErr := os.Stat(cachePath); statErr == nil {
+			services.TouchCoverCacheFile(cachePath) // Round39：同上，命中即打点
 			c.Header("Content-Type", contentTypeOfProxyCache(cachePath))
 			c.Header("Cache-Control", "public, max-age=86400")
 			c.File(cachePath)

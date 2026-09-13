@@ -70,6 +70,10 @@ func main() {
 	// 3. 启动标签引擎：加载本地翻译/热度数据，若缺失或非最新则自动下载（含 24 小时自动更新周期）
 	services.InitTagEngine()
 
+	// 3.1 启动封面缓存回收（Round39）：超过 7 天未被访问的缩略图/代理缓存自动清理，
+	//     防止 cover_cache/ 无限膨胀（判定依据为「最后使用时间」，热门封面命中即续期）
+	services.StartCoverCacheGC()
+
 	// 4. 确保初始管理员存在（users 表为空时创建 admin/admin123，E 站凭证置空，日志打印账密）
 	if err := services.EnsureInitialAdmin(database.DB); err != nil {
 		panic("创建初始管理员失败: " + err.Error())

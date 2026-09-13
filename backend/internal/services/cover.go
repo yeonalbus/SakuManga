@@ -310,6 +310,7 @@ func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, ca
 	// P0-1：缓存命中短路（不读源图、不开 zip、不缩放）
 	if fi, statErr := os.Stat(cachePath); statErr == nil {
 		if !srcMod.IsZero() && !fi.ModTime().Before(srcMod) {
+			TouchCoverCacheFile(cachePath) // Round39：打点最后使用时间（供 TTL 回收判活）
 			return nil, cachePath, true, nil
 		}
 	}
@@ -319,6 +320,7 @@ func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, ca
 	if waiting {
 		<-waitCh
 		if _, statErr := os.Stat(cachePath); statErr == nil {
+			TouchCoverCacheFile(cachePath) // Round39：同上，命中即打点
 			return nil, cachePath, true, nil
 		}
 		// 对方生成失败/未写盘 → 继续自行生成

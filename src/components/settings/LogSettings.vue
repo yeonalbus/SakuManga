@@ -91,13 +91,19 @@
         <button class="toolbar-btn" @click="clearMonitor">🗑 清屏</button>
       </div>
 
-      <div ref="terminalRef" class="terminal">
+      <div
+        ref="terminalRef"
+        class="terminal"
+        @scroll.passive="onTerminalScroll"
+        @wheel.passive="markUserScroll"
+        @touchmove.passive="markUserScroll"
+      >
         <div v-if="monitorLines.length === 0" class="terminal-empty">
           {{ monitorPaused ? '已暂停，等待继续…' : '暂无日志输出…' }}
         </div>
         <div
-          v-for="(line, i) in monitorLines"
-          :key="i"
+          v-for="line in monitorLines"
+          :key="line.id"
           class="terminal-line"
           :class="lineClass(line.text)"
         >
@@ -273,7 +279,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 // Round25：日志开关与清除由原「高级」页并入
@@ -430,13 +436,34 @@ interface LogTailLine {
   text: string
 }
 
+/** 终端保留的最大行数。
+ *  Round41：原为 2000 行 —— 超过上限后 slice(-2000) 使全体行索引位移，
+ *  Vue 按索引 key 匹配会把 2000 个节点逐行改写，且代价与新增行数无关
+ *  （只要有 1 行新行就整表重写）。实测真实 Chrome 下滚动阶段约 1 核持续满载。 */
+const MONITOR_MAX_LINES = 300
+/** 增量轮询单次接收上限（安全阀：日志暴增时避免一次性灌入，终端只保留尾部若干行） */
+const MONITOR_FETCH_LIMIT = 600
+/** 判定「贴底跟随」的容差（px） */
+const MONITOR_STICK_PX = 24
+/** 认定某次滚动属于"用户翻历史"的时间窗（ms）：超出该窗口的滚动视为内容更新/滚动锚定引起 */
+const USER_SCROLL_WINDOW_MS = 600
+
+interface MonitorLine extends LogTailLine {
+  /** 前端自增 id：为 v-for 提供稳定 key（索引 key 是整表重写的根因） */
+  id: number
+}
+
 const monitorCategory = ref('update')
-const monitorLines = ref<LogTailLine[]>([])
+const monitorLines = ref<MonitorLine[]>([])
 const monitorPaused = ref(false)
 const monitorAutoScroll = ref(true)
+/** 终端是否贴底：用户往上翻历史时置 false（不再被新日志拽回底部），滚回底部自动恢复 */
+const stickToBottom = ref(true)
 const terminalRef = ref<HTMLElement | null>(null)
 const lastTs = ref(0)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let lineSeq = 0
+let scrollRaf: number | null = null
 
 /** 行着色：错误红 / 警告黄 / 其余默认 */
 const lineClass = (text: string): string => {
@@ -445,29 +472,58 @@ const lineClass = (text: string): string => {
   return ''
 }
 
+/** 用户主动滚动输入（滚轮/触摸）的最近时刻：用于区分"用户翻历史"与"内容更新/滚动锚定" */
+let lastUserScrollInput = 0
+const markUserScroll = () => {
+  lastUserScrollInput = Date.now()
+}
+
+/** 滚动处理：
+ *  - 到达/回到底部 → 恢复跟随（任何来源都可恢复）；
+ *  - 离开底部 → 仅在"刚发生过用户滚动输入"时解除跟随，
+ *    否则内容增删/浏览器滚动锚定引起的位置变化会被误判成用户翻历史，导致跟随意外中断。 */
+const onTerminalScroll = () => {
+  const el = terminalRef.value
+  if (!el) return
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= MONITOR_STICK_PX
+  if (atBottom) {
+    stickToBottom.value = true
+    return
+  }
+  if (Date.now() - lastUserScrollInput < USER_SCROLL_WINDOW_MS) stickToBottom.value = false
+}
+
+/** 追加新行后按需滚到底：rAF 合并到帧末，每帧最多一次 */
 const scrollTerminal = () => {
-  if (!monitorAutoScroll.value) return
-  void nextTick(() => {
+  if (!monitorAutoScroll.value || !stickToBottom.value) return
+  if (scrollRaf !== null) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = null
     const el = terminalRef.value
     if (el) el.scrollTop = el.scrollHeight
   })
 }
 
 const pollLogs = async () => {
+  const firstLoad = lastTs.value <= 0
   try {
     const data = await http<{ lines: LogTailLine[] }>('/logs/tail', {
-      params: { category: monitorCategory.value, since: lastTs.value > 0 ? lastTs.value : undefined },
+      params: {
+        category: monitorCategory.value,
+        // 首屏/切换类别：只取尾部 N 行（原先不带 since → 全量拉整天日志，实测单次可达 2MB）
+        since: firstLoad ? undefined : lastTs.value,
+        limit: firstLoad ? MONITOR_MAX_LINES : MONITOR_FETCH_LIMIT,
+      },
     })
     const lines = data.lines ?? []
-    if (lines.length > 0) {
-      monitorLines.value.push(...lines)
-      if (monitorLines.value.length > 2000) {
-        monitorLines.value = monitorLines.value.slice(-2000)
-      }
-      const maxTs = lines.reduce((m, l) => (l.ts > m ? l.ts : m), 0)
-      if (maxTs > lastTs.value) lastTs.value = maxTs
-      scrollTerminal()
-    }
+    if (lines.length === 0) return
+    const appended: MonitorLine[] = lines.map((l) => ({ id: ++lineSeq, ts: l.ts, text: l.text }))
+    const merged = monitorLines.value.concat(appended)
+    monitorLines.value =
+      merged.length > MONITOR_MAX_LINES ? merged.slice(merged.length - MONITOR_MAX_LINES) : merged
+    const maxTs = lines.reduce((m, l) => (l.ts > m ? l.ts : m), 0)
+    if (maxTs > lastTs.value) lastTs.value = maxTs
+    scrollTerminal()
   } catch {
     /* 轮询失败静默，下一轮重试 */
   }
@@ -487,6 +543,16 @@ const stopPolling = () => {
   }
 }
 
+/** 页面切到后台停轮询、恢复可见时立即补一次（长时间后台不该持续拉日志） */
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopPolling()
+    return
+  }
+  void pollLogs()
+  startPolling()
+}
+
 const togglePause = () => {
   monitorPaused.value = !monitorPaused.value
 }
@@ -494,12 +560,14 @@ const togglePause = () => {
 const clearMonitor = () => {
   monitorLines.value = []
   lastTs.value = 0
+  stickToBottom.value = true
 }
 
-// 切换监控类目：清空并立即拉取一次
+// 切换监控类目：清空并立即拉取一次（走首屏路径，只取尾部 N 行）
 watch(monitorCategory, () => {
   monitorLines.value = []
   lastTs.value = 0
+  stickToBottom.value = true
   void pollLogs()
 })
 
@@ -616,12 +684,20 @@ onMounted(async () => {
   }
   // 初始化查询日期
   queryDate.value = availableDates.value[0] ?? ''
-  // 启动监控轮询
+  // 启动监控轮询（Round41：页面隐藏时自动停、恢复可见时自动续）
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   void pollLogs()
   startPolling()
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (scrollRaf !== null) {
+    cancelAnimationFrame(scrollRaf)
+    scrollRaf = null
+  }
+})
 </script>
 
 <style scoped>
@@ -975,6 +1051,9 @@ input:checked + .slider:before {
 .terminal {
   height: 360px;
   overflow-y: auto;
+  /* 禁用滚动锚定：日志终端需要"贴底跟随"，浏览器锚定会在内容增删时改写 scrollTop，
+     既让视图跳动、又会造成"用户翻历史"的误判（Round41） */
+  overflow-anchor: none;
   background: #0d1117;
   border: 1px solid var(--app-border-3);
   border-radius: 8px;

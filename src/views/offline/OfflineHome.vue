@@ -133,6 +133,16 @@ const comicTagStrings = (comic: ComicItem): string[] => {
   return out.map((t) => t.toLowerCase()).filter(Boolean)
 }
 
+// Round41-Bug（搜索结果条数不全）：标题文本池 = 主标题 + 日文原名(titleJpn)。
+// 卡片主标题展示的是 titleJpn（ItemCard：displayTitle = titleJpn || title），而 metadata 抓取入库时
+// title 常为罗马音、titleJpn 才是日文原名 —— 此前只匹配 title，导致「按卡片上看得见的标题搜」漏掉
+// title 为罗马音的条目（实测 [夢ねこ屋] 極東絢爛賭博島ドリームアイランド 系列 5 本只搜出 1 本）。
+// 与负向关键词的文本池（utils/tagFilter.ts collectSearchTexts 已含离线 titleJpn）保持对称。
+const comicTitleTexts = (comic: ComicItem): string[] => {
+  const out = [comic.title, (comic as OfflineComic).titleJpn]
+  return out.map((t) => (t || '').toLowerCase()).filter(Boolean)
+}
+
 // 🟢 2. 核心过滤管道：兼顾 URL 中的 ?q= 搜索词 与 TopBar 传进来的离线筛选配置 (求交集)
 const filteredComics = computed(() => {
   const cfg = offlineSearchConfig.value
@@ -155,8 +165,9 @@ const filteredComics = computed(() => {
   return offlineComics.value.filter((comic) => {
     // 关卡 1：顶栏 SearchBar 的主搜索词匹配
     // Round20-Bug3：tag 形关键词（含命名空间）额外按 f_search 语义匹配 tagRaws
+    // Round41-Bug：标题匹配走 comicTitleTexts（title + titleJpn），与卡片展示的主标题一致
     if (searchBarKw) {
-      const matchTitle = comic.title.toLowerCase().includes(searchBarKw)
+      const matchTitle = comicTitleTexts(comic).some((t) => t.includes(searchBarKw))
       const tagHit = matchFSearchKeyword(searchBarKw, comic)
       const matchTag =
         matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(searchBarKw))
@@ -168,7 +179,8 @@ const filteredComics = computed(() => {
     if (parsedQueue.positive.length > 0) {
       const allMatched = parsedQueue.positive.every((filterKw: string) => {
         const lowerKw = filterKw.toLowerCase()
-        const matchTitle = comic.title.toLowerCase().includes(lowerKw)
+        // Round41-Bug：同上，标题匹配覆盖 title + titleJpn（筛选抽屉关键词队列）
+        const matchTitle = comicTitleTexts(comic).some((t) => t.includes(lowerKw))
         // Round20-Bug3：tag 形关键词按 f_search 语义精确/前缀匹配 tagRaws
         const tagHit = matchFSearchKeyword(filterKw, comic)
         const matchTag = matchTagEnabled && comicTagStrings(comic).some((t) => t.includes(lowerKw))

@@ -150,7 +150,11 @@ func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
 
 	if kw := strings.TrimSpace(f.keyword); kw != "" {
 		like := "%" + services.EscapeLike(kw) + "%"
-		q = q.Where("title LIKE ? OR tags LIKE ?", like, like)
+		// Round41-Bug：标题池 = 主标题(title) + 日文原名(title_jpn)。metadata 入库时 title 常为
+		// 罗马音、title_jpn 才是日文原名，而前端卡片主标题展示的是 titleJpn（displayTitle =
+		// titleJpn || title）——只匹配 title 会让「按看得见的标题」抽不到卡。
+		// 与 OfflineHome.vue 的 comicTitleTexts 保持同语义。
+		q = q.Where("title LIKE ? OR title_jpn LIKE ? OR tags LIKE ?", like, like, like)
 	}
 	// 问题1：多关键词队列按 AND 语义匹配（须全部命中标题或标签，与 OfflineHome 一致）
 	// Round20-Bug3：tag 形关键词（含命名空间，如 female:"magical girl$" / female:yuri$）按
@@ -162,8 +166,10 @@ func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
 		}
 		tag := services.ParseFSearchTag(kw)
 		if tag.IsTag {
-			orParts := []string{"title LIKE ? ESCAPE '\\'"}
-			orArgs := []interface{}{"%" + services.EscapeLike(kw) + "%"}
+			// Round41-Bug：标题兜底同样覆盖日文原名（title_jpn），与前端标题池一致
+			like := "%" + services.EscapeLike(kw) + "%"
+			orParts := []string{"title LIKE ? ESCAPE '\\'", "title_jpn LIKE ? ESCAPE '\\'"}
+			orArgs := []interface{}{like, like}
 			for _, p := range tag.TagJSONMatchPatterns() {
 				orParts = append(orParts, "tags LIKE ? ESCAPE '\\'")
 				orArgs = append(orArgs, p)
@@ -172,7 +178,7 @@ func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
 			continue
 		}
 		like := "%" + services.EscapeLike(kw) + "%"
-		q = q.Where("(title LIKE ? OR tags LIKE ?)", like, like)
+		q = q.Where("(title LIKE ? OR title_jpn LIKE ? OR tags LIKE ?)", like, like, like)
 	}
 	// Round3-任务6：离线随机负向排除（与前端 matchExcludes 语义一致）
 	for _, raw := range f.excludeTags {
@@ -201,7 +207,13 @@ func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
 			continue
 		}
 		like := "%" + services.EscapeLike(kw) + "%"
-		q = q.Where("(title NOT LIKE ? AND tags NOT LIKE ?)", like, like)
+		// Round41-Bug：负向关键词的文本池同样含日文原名（与前端 matchExcludes 的
+		// collectSearchTexts 一致），否则 titleJpn 命中负向词的条目会被前端兜底剔除却不补位。
+		// title_jpn 可空：NULL 时 NOT LIKE 结果为 NULL 会误排整行，故显式 IS NULL 兜底。
+		q = q.Where(
+			"(title NOT LIKE ? AND tags NOT LIKE ? AND (title_jpn IS NULL OR title_jpn NOT LIKE ?))",
+			like, like, like,
+		)
 	}
 	if f.minRating > 0 {
 		q = q.Where("rating >= ?", f.minRating)
@@ -240,8 +252,8 @@ func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
 //   - count:       抽卡数量（默认 8，上限 50）
 //   - source:      范围 all | online | offline（默认 all）
 //   - mode:        卡池模式 random | recommend（Round32；默认 random，行为与旧版一致）
-//   - keyword:     搜索关键词（在线走 f_search，离线匹配标题/标签）
-//   - keywords:    筛选抽屉的多关键词队列（在线与 keyword 合并进 f_search；离线须全部命中标题/标签）
+//   - keyword:     搜索关键词（在线走 f_search，离线匹配标题（含日文原名 title_jpn）/标签）
+//   - keywords:    筛选抽屉的多关键词队列（在线与 keyword 合并进 f_search；离线须全部命中标题（含日文原名）/标签）
 //   - excludeTags: 负向 tag（namespace:key 精确匹配，在线采样池丢弃+补位/离线 SQL 排除，多次传递）
 //   - excludeKeywords: 负向关键词（标题/标签/上传者子串匹配，在线采样池丢弃+补位/离线 SQL 排除，多次传递）
 //   - categories:  分类过滤（在线/离线均生效，多次传递）

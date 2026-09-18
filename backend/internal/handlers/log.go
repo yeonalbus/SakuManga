@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -161,8 +163,21 @@ type LogTailLine struct {
 	Text string `json:"text"`
 }
 
+// 实时监控反向读取参数（Round41）
+//
+// 原实现 os.ReadFile 全量读 + 逐行 time.ParseInLocation：成本 O(文件行数)，
+// 前端 1s 轮询一次且随当天日志增长线性恶化（16905 行 ≈ 6ms，响应体可达 2MB）。
+const (
+	tailReadChunk    = 64 * 1024 // 反向读取块大小
+	tailMaxScanBytes = 8 << 20   // 单次请求反向扫描上限（异常巨大文件保护）
+	tailMaxLines     = 5000      // 单次返回行数硬上限
+)
+
 // TailLogs 返回某分类 since（毫秒）之后的新日志行，供前端 1s 轮询做实时监控
-// GET /logs/tail?category=update&since=1750000000000
+// GET /logs/tail?category=update&since=1750000000000&limit=300
+//
+//	limit > 0  → 最多返回最后 limit 行（前端首屏与增量轮询都用它做安全阀）
+//	limit <= 0 → 兼容旧调用方：返回全部命中行（受 tailMaxLines 硬上限约束）
 func TailLogs(c *gin.Context) {
 	cat := c.Query("category")
 	if cat == "" {
@@ -170,36 +185,121 @@ func TailLogs(c *gin.Context) {
 		return
 	}
 	since, _ := strconv.ParseInt(c.DefaultQuery("since", "0"), 10, 64)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
 
-	var lines []LogTailLine
+	var path string
 	if cat == "client" {
-		lines = tailFileLines(clientLogPath, since)
+		path = clientLogPath
 	} else {
-		path := filepath.Join("logs", services.LogFileName(services.LogCategory(cat), time.Now().Format("2006-01-02")))
-		lines = tailFileLines(path, since)
+		path = filepath.Join("logs", services.LogFileName(services.LogCategory(cat), time.Now().Format("2006-01-02")))
 	}
-	c.JSON(http.StatusOK, gin.H{"lines": lines})
+	c.JSON(http.StatusOK, gin.H{"lines": tailFileLines(path, since, limit)})
 }
 
-// tailFileLines 读取文件全部行，解析行首时间戳并返回 ts > since 的行
-func tailFileLines(path string, since int64) []LogTailLine {
-	data, err := os.ReadFile(path)
+// tailFileLines 返回 ts > since 的日志行（since <= 0 时返回文件尾部行），按时间正序。
+//
+// Round41：从文件尾部反向分块读取，只解析将要返回的行，满足任一条件即停止：
+//   - 已收集满 maxLines 行；
+//   - 遇到 ts <= since 的行（日志按时间追加，更早的行必然也不满足）；
+//   - 反向扫描达到 tailMaxScanBytes。
+//
+// 取舍：停止依据是"时间戳单调递增"。若日志中途发生系统时间回退，回退点之前的行将不再返回
+// （监控场景只关心最新动态，可接受）；无时间戳的行（多行堆栈等 ts=0）不作为停止依据。
+// 文件末尾若没有换行符（正在写入的半行）会被丢弃，等待下一轮以完整行出现。
+func tailFileLines(path string, since int64, limit int) []LogTailLine {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	var out []LogTailLine
-	for _, ln := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(ln)
-		if trimmed == "" {
-			continue
-		}
-		ts := parseLogTs(trimmed)
-		if since > 0 && ts <= since {
-			continue
-		}
-		out = append(out, LogTailLine{Ts: ts, Text: trimmed})
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil || info.Size() <= 0 {
+		return nil
 	}
-	return out
+	size := info.Size()
+
+	maxLines := tailMaxLines
+	if limit > 0 && limit < maxLines {
+		maxLines = limit
+	}
+
+	// 文件末尾是否存在"尚未写完"的半行（日志写入恒以 \n 结尾，无换行即为写入中）
+	dropTailPartial := false
+	lastByte := make([]byte, 1)
+	if _, rerr := f.ReadAt(lastByte, size-1); rerr == nil {
+		dropTailPartial = lastByte[0] != '\n'
+	}
+
+	var (
+		pos       = size
+		pending   []byte        // 已切出但开头可能被截断的首行，留待与更早内容拼接
+		collected []LogTailLine // 逆序收集（最新在前）
+		scanned   int64
+		firstRead = true
+		stop      bool
+	)
+
+	for pos > 0 && !stop && len(collected) < maxLines && scanned < tailMaxScanBytes {
+		readSize := int64(tailReadChunk)
+		if pos < readSize {
+			readSize = pos
+		}
+		pos -= readSize
+		scanned += readSize
+
+		buf := make([]byte, readSize)
+		if _, rerr := f.ReadAt(buf, pos); rerr != nil && rerr != io.EOF {
+			break
+		}
+
+		// 更早的 buf 在前、上一轮遗留的 pending 在后 → 拼接出跨块的完整行
+		chunk := buf
+		if len(pending) > 0 {
+			chunk = append(buf, pending...)
+		}
+
+		lines := bytes.Split(chunk, []byte("\n"))
+		if pos > 0 {
+			// 未到文件开头：首行开头被截断，留给下一轮拼接（不含分隔符）
+			pending = append([]byte(nil), lines[0]...)
+			lines = lines[1:]
+		} else {
+			pending = nil
+		}
+		if firstRead && dropTailPartial && len(lines) > 0 {
+			lines = lines[:len(lines)-1] // 丢弃正在写入的半行
+		}
+		firstRead = false
+
+		for i := len(lines) - 1; i >= 0; i-- {
+			text := strings.TrimSpace(string(lines[i]))
+			if text == "" {
+				continue
+			}
+			ts := parseLogTs(text)
+			if since > 0 {
+				if ts == 0 {
+					continue // 无时间戳的行：过滤，但不作为"更早的行都不满足"的依据
+				}
+				if ts <= since {
+					stop = true
+					break
+				}
+			}
+			collected = append(collected, LogTailLine{Ts: ts, Text: text})
+			if len(collected) >= maxLines {
+				stop = true
+				break
+			}
+		}
+	}
+
+	// 逆序 → 正序
+	for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
+		collected[i], collected[j] = collected[j], collected[i]
+	}
+	return collected
 }
 
 // parseLogTs 解析 Go 默认日志前缀 "2006/01/02 15:04:05 ..."，失败返回 0

@@ -60,7 +60,12 @@
             🔄
           </button>
           <label class="toggle-switch">
-            <input type="checkbox" v-model="enableTagCNTranslation" />
+            <input
+              type="checkbox"
+              v-model="enableTagCNTranslation"
+              :disabled="savingEngineSetting"
+              @change="saveEngineSetting('enableCN', enableTagCNTranslation)"
+            />
             <span class="slider"></span>
           </label>
         </div>
@@ -96,7 +101,12 @@
             🔄
           </button>
           <label class="toggle-switch">
-            <input type="checkbox" v-model="enableTagSortRules" />
+            <input
+              type="checkbox"
+              v-model="enableTagSortRules"
+              :disabled="savingEngineSetting"
+              @change="saveEngineSetting('enableSort', enableTagSortRules)"
+            />
             <span class="slider"></span>
           </label>
         </div>
@@ -227,6 +237,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
+import { useTagStore } from '@/stores/tagStore'
 
 interface TagMaintainSetting {
   enableDailyRefresh: boolean
@@ -275,6 +286,9 @@ const tagCNVersion = ref('未加载')
 
 const enableTagSortRules = ref(true)
 const tagSortVersion = ref('未加载')
+
+// 开关保存中（防连点：保存期间禁用开关，失败回滚）
+const savingEngineSetting = ref(false)
 
 // 自动更新周期（小时），后端 /tags/status 返回
 const updateCycleHours = ref(24)
@@ -429,6 +443,45 @@ const pollTagEngineProgress = async () => {
   }
 }
 
+/**
+ * 保存标签引擎开关（中文翻译 / 补全排序）。
+ *
+ * 修复：此前两个开关只有 v-model，既不发请求也没有后端写入接口，
+ * 表现为「点了没反应、刷新后弹回原状」的假开关。现调用 POST /tags/settings 持久化到
+ * config.json 并即时生效；失败则回滚开关状态，避免 UI 与服务端不一致。
+ *
+ * @param key   设置项：enableCN（中文翻译）| enableSort（补全排序）
+ * @param value 目标值
+ */
+const saveEngineSetting = async (key: 'enableCN' | 'enableSort', value: boolean) => {
+  if (savingEngineSetting.value) return
+  savingEngineSetting.value = true
+  try {
+    const saved = await http<{ enableCN: boolean; enableSort: boolean }>('/tags/settings', {
+      method: 'POST',
+      body: JSON.stringify({ [key]: value }),
+    })
+    // 以服务端返回为准回填，避免本地状态漂移
+    enableTagCNTranslation.value = saved.enableCN
+    enableTagSortRules.value = saved.enableSort
+
+    // 中文翻译开关直接决定前端词典内容：置 false 时立即清空本地词典（标签即时回退英文原文，
+    // 无需刷新页面）；置 true 时强制重新拉取服务端刚重建好的词典（含中文名）。
+    if (key === 'enableCN') {
+      const tagStore = useTagStore()
+      if (value) await tagStore.ensureDictionary(true)
+      else tagStore.resetDictionary()
+    }
+    toast.success(value ? '已开启并保存' : '已关闭并保存')
+  } catch (e) {
+    if (key === 'enableCN') enableTagCNTranslation.value = !value
+    else enableTagSortRules.value = !value
+    toast.error(`保存失败：${e instanceof Error ? e.message : '未知错误'}`)
+  } finally {
+    savingEngineSetting.value = false
+  }
+}
+
 const fetchTagEngineStatus = async () => {
   try {
     const data = await http<{
@@ -446,6 +499,12 @@ const fetchTagEngineStatus = async () => {
     if (typeof data.updateCycleHours === 'number' && data.updateCycleHours > 0) {
       updateCycleHours.value = data.updateCycleHours
     }
+
+    // 与前端词典对齐：服务端 EnableCN 状态与本地词典不一致时以服务端为准
+    // （例：开关被服务端关闭 / 换设备打开设置页），避免「开关关着但标签仍中文」。
+    const tagStore = useTagStore()
+    if (data.enableCN && !tagStore.isLoaded) await tagStore.ensureDictionary(true)
+    else if (!data.enableCN && tagStore.isLoaded) tagStore.resetDictionary()
   } catch (err) {
     console.error('获取引擎状态失败:', err)
   }

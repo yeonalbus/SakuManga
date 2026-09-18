@@ -13,10 +13,13 @@ import { useUserStore } from '@/stores/userStore'
 import { useModeStore } from '@/stores/modeStore'
 import { useLayoutMode } from '@/composables/useLayoutMode'
 import { preferenceSettings } from '@/stores/preferenceSettings'
+import { useUI } from '@/composables/useUI'
+import { reportError } from '@/utils/errorReporter'
 
 const tagStore = useTagStore()
 const userStore = useUserStore()
 const modeStore = useModeStore()
+const { toast } = useUI()
 
 // Round15-Bug4：阅读器路由隐藏全局外壳（TopBar + 侧栏 + 移动 padding 归零）
 const isReaderRoute = computed(() => route.path === '/reader')
@@ -66,15 +69,6 @@ const handleMainScroll = (e: Event) => {
 onMounted(() => {
   // Round15-Bug1：监听横竖屏切换，重算动态视口高度与安全区
   window.addEventListener('orientationchange', handleOrientationChange)
-  // 🚀 应用启动时异步获取翻译字典
-  // Round24-P1-5：字典为全量 JSON（数千条），N150 低配解析慢且阻塞首屏 →
-  // 改空闲期加载（requestIdleCallback 兜底 setTimeout），首屏渲染优先。
-  const loadDict = () => tagStore.fetchTagDictionary()
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(loadDict, { timeout: 3000 })
-  } else {
-    setTimeout(loadDict, 2000)
-  }
 
   // 🖥️ 偏好设置：以全屏模式启动（受浏览器用户手势限制，被拦截时静默忽略）
   if (preferenceSettings.startInFullscreen && document.documentElement.requestFullscreen) {
@@ -83,6 +77,44 @@ onMounted(() => {
     })
   }
 })
+
+// ─────────────────────────────────────────────────────────────
+// 🏷️ 标签词典加载：与「登录态」绑定（修复标签中文化失效的根因）
+//
+// 旧实现：App onMounted 里 requestIdleCallback 无条件拉一次 /tags/dictionary。
+// 问题：App 在 /login 就已挂载，而登录是 SPA 内跳转（onMounted 不会再触发）——
+//   登录页 boot 阶段没有 token，请求必然 401「未登录」，失败后又只打 console 不重试，
+//   于是「在登录页输入账密登录」这条路径下整个会话词典恒为空、标签全部显示英文原文，
+//   必须整页刷新（此时 token 已在 localStorage）才恢复。
+// 现实现：监听认证态，登录成功（或启动时已登录）即拉词典；失败自动退避重试 + 可见提示。
+// ─────────────────────────────────────────────────────────────
+const loadTagDictionary = async () => {
+  const ok = await tagStore.ensureDictionary()
+  if (!ok && localStorage.getItem('saku_token')) {
+    // 仅在确实有登录态却拿不到词典时提示（无 token 时是正常早退，不打扰用户）
+    toast.warning('标签翻译词典加载失败，标签将以原文显示（可在 设置 → Tag 维护 中重试）')
+    reportError('warn', `标签词典加载失败: ${tagStore.lastError || '未知原因'}`, undefined, 'tagStore')
+  }
+}
+
+// 空闲期触发（Round24-P1-5 性能取舍保留）：词典为全量 JSON（11MB+），
+// 低配设备解析慢，放到空闲期避免和首屏渲染抢主线程；仍受登录态门控，不会在登录页空跑。
+const scheduleDictionaryLoad = () => {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => void loadTagDictionary(), { timeout: 3000 })
+  } else {
+    window.setTimeout(() => void loadTagDictionary(), 500)
+  }
+}
+
+watch(
+  () => userStore.isAuthenticated,
+  (authed) => {
+    if (authed) scheduleDictionaryLoad()
+    else tagStore.resetDictionary() // 登出 / 会话失效：清空词典，避免残留他账号数据
+  },
+  { immediate: true },
+)
 
 const route = useRoute()
 

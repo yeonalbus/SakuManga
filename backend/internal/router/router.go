@@ -304,6 +304,11 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.POST("/tags/sync/count", handlers.SyncTagCount)
 			admin.GET("/tags/progress", handlers.GetTagProgress)
 
+			// Tag 引擎开关（中文翻译 / 补全排序，系统级，仅管理员）：
+			// 写入 config.json 并即时生效（GET 供设置页回显，POST 保存）
+			admin.GET("/tags/settings", handlers.GetTagEngineSettings)
+			admin.POST("/tags/settings", handlers.UpdateTagEngineSettings)
+
 			// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 手动写回 / 进度轮询）
 			admin.GET("/offline/tags/setting", tagMaintainHandler.GetSetting)
 			admin.POST("/offline/tags/setting", tagMaintainHandler.SaveSetting)

@@ -13,11 +13,63 @@ import (
 func GetTagEngineStatus(c *gin.Context) {
 	cnVer, sortVer := services.GlobalTagEngine.GetVersions()
 	c.JSON(http.StatusOK, gin.H{
-		"enableCN":            services.GlobalTagEngine.EnableCN,
-		"tagCNVersion":        cnVer,
-		"enableSort":          services.GlobalTagEngine.EnableSort,
-		"tagSortVersion":      sortVer,
-		"updateCycleHours":    services.TagUpdateIntervalHours,
+		"enableCN":         services.GlobalTagEngine.EnableCN,
+		"tagCNVersion":     cnVer,
+		"enableSort":       services.GlobalTagEngine.EnableSort,
+		"tagSortVersion":   sortVer,
+		"updateCycleHours": services.TagUpdateIntervalHours,
+	})
+}
+
+// GetTagEngineSettings 读取标签引擎开关（供设置页回显）
+// GET /api/v1/tags/settings
+func GetTagEngineSettings(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"enableCN":   services.GlobalTagEngine.EnableCN,
+		"enableSort": services.GlobalTagEngine.EnableSort,
+	})
+}
+
+// UpdateTagEngineSettings 保存标签引擎开关（中文翻译 / 补全排序）
+// POST /api/v1/tags/settings
+//
+// 修复：此前「开启标签中文翻译」开关只改前端 ref，既不发请求也没有后端写入接口，
+// 表现为「点了没反应、刷新后回到原状」。现持久化到 config.json 并即时生效。
+func UpdateTagEngineSettings(c *gin.Context) {
+	// 指针字段区分「未传」与「显式 false」（与 tag_maintain SaveSetting 同一约定）
+	var req struct {
+		EnableCN   *bool `json:"enableCN"`
+		EnableSort *bool `json:"enableSort"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+		return
+	}
+	if req.EnableCN == nil && req.EnableSort == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少需要更新的设置项"})
+		return
+	}
+
+	enableCN := services.GlobalTagEngine.EnableCN
+	enableSort := services.GlobalTagEngine.EnableSort
+	if req.EnableCN != nil {
+		enableCN = *req.EnableCN
+	}
+	if req.EnableSort != nil {
+		enableSort = *req.EnableSort
+	}
+
+	if err := services.GlobalTagEngine.ApplySettings(enableCN, enableSort); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存标签引擎设置失败: " + err.Error()})
+		return
+	}
+
+	cnVer, sortVer := services.GlobalTagEngine.GetVersions()
+	c.JSON(http.StatusOK, gin.H{
+		"enableCN":       enableCN,
+		"enableSort":     enableSort,
+		"tagCNVersion":   cnVer,
+		"tagSortVersion": sortVer,
 	})
 }
 

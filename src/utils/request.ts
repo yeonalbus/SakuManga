@@ -88,7 +88,12 @@ export async function http<T = unknown>(
   }
   // 会话失效：清除本地 token 并通知应用层跳转登录页（去重，见 unauthorizedHandled 注释）。
   // skipAuthRedirect 置位时（如 /auth/login 密码错误）跳过全局登出语义，仅抛错由调用方处理。
-  if (response.status === 401 && !options.skipAuthRedirect) {
+  //
+  // 边界修复：本请求发出时若本地【本就没有 token】（登录页 boot 阶段的匿名请求），
+  // 这个 401 只说明「该接口需要登录」，不代表会话失效——此时不得清 token、
+  // 更不能 dispatch app:unauthorized（会触发全局登出流程并跳转 /login）。
+  const tokenAtRequest = localStorage.getItem(TOKEN_KEY)
+  if (response.status === 401 && !options.skipAuthRedirect && tokenAtRequest) {
     localStorage.removeItem(TOKEN_KEY)
     if (!unauthorizedHandled) {
       unauthorizedHandled = true

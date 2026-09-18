@@ -67,6 +67,9 @@ func main() {
 	// 2. 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 
+	// 2.1 套用 config.json 中的标签引擎开关（须在 InitTagEngine 之前：决定启动时是否联网同步数据）
+	services.InitTagEngineConfig()
+
 	// 3. 启动标签引擎：加载本地翻译/热度数据，若缺失或非最新则自动下载（含 24 小时自动更新周期）
 	services.InitTagEngine()
 

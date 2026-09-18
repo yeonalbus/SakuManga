@@ -102,6 +102,44 @@ var GlobalTagEngine = &TagEngine{
 	SortProgress:  DownloadProgress{Status: "idle"},
 }
 
+// InitTagEngineConfig 从 config.json 套用标签引擎开关（须在 InitTagEngine 之前调用：
+// InitTagEngine 会依据 EnableCN / EnableSort 决定是否在启动时联网同步数据）。
+// 缺失（历史配置）时保持默认「均开启」，不影响老用户行为。
+func InitTagEngineConfig() {
+	conf := GetTagEngineConf()
+	if conf == nil {
+		return
+	}
+	GlobalTagEngine.mu.Lock()
+	defer GlobalTagEngine.mu.Unlock()
+	if conf.EnableCN != nil {
+		GlobalTagEngine.EnableCN = *conf.EnableCN
+	}
+	if conf.EnableSort != nil {
+		GlobalTagEngine.EnableSort = *conf.EnableSort
+	}
+	log.Printf("[TagEngine] 已套用本地配置：中文翻译=%v，补全排序=%v\n",
+		GlobalTagEngine.EnableCN, GlobalTagEngine.EnableSort)
+}
+
+// ApplySettings 运行时更新标签引擎开关并持久化到 config.json。
+// 返回值变更后即时生效：中文翻译开关直接决定 TranslateTags/联想/词典是否输出中文名，
+// 因此调用方须重建词典缓存（RebuildDictCache），否则前端仍拿到旧词典。
+func (e *TagEngine) ApplySettings(enableCN, enableSort bool) error {
+	e.mu.Lock()
+	e.EnableCN = enableCN
+	e.EnableSort = enableSort
+	e.mu.Unlock()
+
+	if err := PersistTagEngineSettings(enableCN, enableSort); err != nil {
+		return err
+	}
+	// 即时生效：词典接口是「预序列化缓存」，开关变化须重建（否则关闭后前端仍显示中文）
+	e.RebuildDictCache()
+	log.Printf("[TagEngine] 设置已更新：中文翻译=%v，补全排序=%v\n", enableCN, enableSort)
+	return nil
+}
+
 func SetGlobalProxy(proxyStr string) error {
 	proxyStr = strings.TrimSpace(proxyStr)
 	if proxyStr != "" {
@@ -290,14 +328,26 @@ func (e *TagEngine) LoadFromDisk() {
 
 	log.Printf("[TagEngine] 成功装载标签库！内存总计 %d 条标签，其中包含中文翻译 %d 条\n", len(e.tags), cnLoadedCount)
 
-	// 3. 重建精简标签列表 + 词典 JSON 缓存（GetTagDictionary 直接返回，零序列化开销；
-	//    ETag 取缓存内容哈希，数据变化才失效，浏览器二次访问走 304）
+	// 3. 重建精简标签列表 + 词典 JSON 缓存
+	e.rebuildDictCacheLocked()
+}
+
+// rebuildDictCacheLocked 重建精简标签列表与词典 JSON/gzip 缓存（调用方须已持有 e.mu 写锁）。
+// GetTagDictionary 直接返回缓存字节，零序列化开销；ETag 取内容哈希，数据变化才失效，
+// 浏览器二次访问走 304。
+func (e *TagEngine) rebuildDictCacheLocked() {
 	e.tagListBrief = make([]TagItemBrief, 0, len(e.tagList))
 	for _, t := range e.tagList {
+		// 中文翻译关闭时：词典的 name 退化为英文原文，前端 TagChip 取不到中文名 →
+		// 标签全站按原文展示（与卡片接口 TranslateTagsBrief 的语义保持一致）。
+		name := t.Name
+		if !e.EnableCN {
+			name = t.Key
+		}
 		e.tagListBrief = append(e.tagListBrief, TagItemBrief{
 			Namespace: t.Namespace,
 			Key:       t.Key,
-			Name:      t.Name,
+			Name:      name,
 			Count:     t.Count,
 		})
 	}
@@ -326,6 +376,13 @@ func (e *TagEngine) LoadFromDisk() {
 		e.dictETag = ""
 		log.Printf("[TagEngine] 词典 JSON 缓存序列化失败: %v", err)
 	}
+}
+
+// RebuildDictCache 对外暴露的词典缓存重建（设置变更后即时生效）
+func (e *TagEngine) RebuildDictCache() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rebuildDictCacheLocked()
 }
 
 func downloadFileWithProgress(destPath string, urlStr string, onProgress func(downloaded, total int64)) error {

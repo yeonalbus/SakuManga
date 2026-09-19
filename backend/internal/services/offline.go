@@ -749,18 +749,18 @@ func buildUpdateNote(latestGID string, children []GalleryRelation) string {
 //   仅 parent（父子画廊）可忽略（gid 粒度）；gid/hash/signature（同 GID/hash/内容签名）不可忽略。
 type DedupItem struct {
 	Comic     models.OfflineComic  `json:"comic"`
-	Reason    string               `json:"reason"` // 重复原因
-	Keep      bool                 `json:"keep"`   // 是否建议保留（true=保留，false=建议删除）
-	Rule      string               `json:"rule"`   // gid | hash | parent | signature（Round26 O2）
+	Reason    string               `json:"reason"`              // 重复原因
+	Keep      bool                 `json:"keep"`                // 是否建议保留（true=保留，false=建议删除）
+	Rule      string               `json:"rule"`                // gid | hash | parent | signature（Round26 O2）
 	PairComic *models.OfflineComic `json:"pairComic,omitempty"` // 成对对象（Round4 任务一）
 }
 
 // DedupResult 查重结果
 type DedupResult struct {
-	Items      []DedupItem    `json:"items"`                // 需要处理的项（含建议保留项与建议删除项）
-	Clusters   []DedupCluster `json:"clusters,omitempty"`   // Round26 O3：疑似重复组（名称级弱证据，只建议）
-	FinishedAt int64          `json:"finishedAt"`           // 结果生成时间戳(ms)
-	Stale      bool           `json:"stale"`                // 是否已过期（删除操作后置 true，提示前端重新扫描）
+	Items      []DedupItem    `json:"items"`              // 需要处理的项（含建议保留项与建议删除项）
+	Clusters   []DedupCluster `json:"clusters,omitempty"` // Round26 O3：疑似重复组（名称级弱证据，只建议）
+	FinishedAt int64          `json:"finishedAt"`         // 结果生成时间戳(ms)
+	Stale      bool           `json:"stale"`              // 是否已过期（删除操作后置 true，提示前端重新扫描）
 
 	// forceFull 本次结果是否来自「全量在线核对」（不导出、不落 JSON）：
 	// 定向同步缓存（SyncMaintainDedupClusters）据此保持与本次扫描一致的忽略语义——
@@ -806,13 +806,18 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	keepSet := map[string]bool{}   // 建议保留的 comic id
 	removeSet := map[string]bool{} // 建议删除的 comic id
 	reasonMap := map[string]string{}
-	ruleMap := map[string]string{} // Round26 O2：comic id → 命中规则（gid/hash/parent/signature），前端区分可忽略项
+	ruleMap := map[string]string{}       // Round26 O2：comic id → 命中规则（gid/hash/parent/signature），前端区分可忽略项
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
 	pairID := map[string]string{}        // Round4 任务一：comic id → 成对对象 comic id（对比视图双列展示）
 	// Round26 O2：忽略索引（本轮扫描一次性加载）。
 	// 规则 3（父画廊）gid 型忽略：增量扫描跳过「旧版可删除」提示；全量（forceFull）不豁免。
 	// 规则 1/2/4 与更新检测不读取忽略表。
 	ignoreIdx := LoadIgnoreIndex(db)
+
+	// ── Round42 D5/D6：本地判重先行（不阻塞联网核对）──
+	// 名称级疑似重复为纯本地毫秒级计算：先产出并入缓存 + 落库，前端进维护页即可秒级看到结果，
+	// 不必等待后续逐本联网（每本 ~1.2s 限流）。联网阶段结束后完整结果（含规则 1/2/3/4）会覆盖本快照。
+	PublishLocalDedupSnapshot(comics, ignoreIdx, forceFull, onProgress)
 
 	// ── 0. D5-B 在线回填 GID（S6）──
 	// 额外路径无 sidecar 元数据的文件夹 GID==''，规则 1/3 无法跨路径识别「新版/旧版」。
@@ -1127,93 +1132,93 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 		}
 	}
-		// ── 4. 文件夹内容签名查重（问题3修复）──
-		// 针对「无 gid/hash/parent 元数据的复制型文件夹重复」：
-		//   递归收集文件夹内所有图片的「相对路径|大小」生成内容签名，签名相同 = 内容完全一致。
-		//   签名缓存进 file_hash（与规则2的归档 hash 互斥：仅 gallery 形态使用）。
-		sigGroups := map[string][]models.OfflineComic{}
-		sigTotal := 0
-		for i := range comics {
-			c := &comics[i]
-			if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
-				continue
-			}
-			if removeSet[c.ID] {
-				continue
-			}
-			sigTotal++
+	// ── 4. 文件夹内容签名查重（问题3修复）──
+	// 针对「无 gid/hash/parent 元数据的复制型文件夹重复」：
+	//   递归收集文件夹内所有图片的「相对路径|大小」生成内容签名，签名相同 = 内容完全一致。
+	//   签名缓存进 file_hash（与规则2的归档 hash 互斥：仅 gallery 形态使用）。
+	sigGroups := map[string][]models.OfflineComic{}
+	sigTotal := 0
+	for i := range comics {
+		c := &comics[i]
+		if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
+			continue
 		}
-		sigDone := 0
-		for i := range comics {
-			// Round29：任务暂停/取消检查点（文件夹签名单本可能耗时，暂停在下一本开始前生效）
-			if err := OfflineTaskCheckpoint(); err != nil {
-				return nil, err
-			}
-			c := &comics[i]
-			if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
-				continue
-			}
-			if removeSet[c.ID] {
-				continue
-			}
-			sigDone++
-			if onProgress != nil {
-				onProgress(sigDone, sigTotal, c.Title, "文件夹内容签名")
-			}
-			// 快路径：已有签名且文件夹目录 mtime 未超过已记录的最新文件 mtime → 内容未变，直接复用
-			if c.FileHash != "" && !c.FileModifiedAt.IsZero() {
-				if fi, err := os.Stat(c.LocalPath); err == nil && !fi.ModTime().After(c.FileModifiedAt) {
-					sigGroups[c.FileHash] = append(sigGroups[c.FileHash], *c)
-					continue
-				}
-			}
-			sig, maxMod, err := folderSignature(c.LocalPath)
-			if err != nil {
-				log.Printf("%s [maintain] 计算 %q 内容签名失败: %v", dlWarnTag, c.LocalPath, err)
-				continue
-			}
-			if c.FileHash != sig || maxMod.After(c.FileModifiedAt) {
-				c.FileHash = sig
-				c.FileModifiedAt = maxMod
-				_ = db.Model(c).Updates(map[string]interface{}{"file_hash": sig, "file_modified_at": maxMod})
-			}
-			sigGroups[sig] = append(sigGroups[sig], *c)
+		if removeSet[c.ID] {
+			continue
 		}
-		for sig, group := range sigGroups {
-			if len(group) < 2 {
+		sigTotal++
+	}
+	sigDone := 0
+	for i := range comics {
+		// Round29：任务暂停/取消检查点（文件夹签名单本可能耗时，暂停在下一本开始前生效）
+		if err := OfflineTaskCheckpoint(); err != nil {
+			return nil, err
+		}
+		c := &comics[i]
+		if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
+			continue
+		}
+		if removeSet[c.ID] {
+			continue
+		}
+		sigDone++
+		if onProgress != nil {
+			onProgress(sigDone, sigTotal, c.Title, "文件夹内容签名")
+		}
+		// 快路径：已有签名且文件夹目录 mtime 未超过已记录的最新文件 mtime → 内容未变，直接复用
+		if c.FileHash != "" && !c.FileModifiedAt.IsZero() {
+			if fi, err := os.Stat(c.LocalPath); err == nil && !fi.ModTime().After(c.FileModifiedAt) {
+				sigGroups[c.FileHash] = append(sigGroups[c.FileHash], *c)
 				continue
-			}
-			keepIdx := -1
-			for i := range group {
-				if keepSet[group[i].ID] && !removeSet[group[i].ID] {
-					keepIdx = i
-					break
-				}
-			}
-			if keepIdx == -1 {
-				keepIdx = 0
-			}
-			for i := range group {
-				if i == keepIdx {
-					keepSet[group[i].ID] = true
-					continue
-				}
-				if removeSet[group[i].ID] {
-					continue
-				}
-				removeSet[group[i].ID] = true
-				reasonMap[group[i].ID] = fmt.Sprintf("文件夹内容完全相同（%s，共 %d 份）：删除复制项", shortHash(sig), len(group))
-				ruleMap[group[i].ID] = "signature"
-				totalBytes[group[i].ID] = group[i].FileSize
-				// Round4 任务一：与同组保留项互为成对对象（对比视图双列展示）
-				pairID[group[i].ID] = group[keepIdx].ID
-				if pairID[group[keepIdx].ID] == "" {
-					pairID[group[keepIdx].ID] = group[i].ID
-				}
 			}
 		}
-	
-		// ── 5. 名称级疑似重复（Round26 O3，纯本地弱证据，只建议）──
+		sig, maxMod, err := folderSignature(c.LocalPath)
+		if err != nil {
+			log.Printf("%s [maintain] 计算 %q 内容签名失败: %v", dlWarnTag, c.LocalPath, err)
+			continue
+		}
+		if c.FileHash != sig || maxMod.After(c.FileModifiedAt) {
+			c.FileHash = sig
+			c.FileModifiedAt = maxMod
+			_ = db.Model(c).Updates(map[string]interface{}{"file_hash": sig, "file_modified_at": maxMod})
+		}
+		sigGroups[sig] = append(sigGroups[sig], *c)
+	}
+	for sig, group := range sigGroups {
+		if len(group) < 2 {
+			continue
+		}
+		keepIdx := -1
+		for i := range group {
+			if keepSet[group[i].ID] && !removeSet[group[i].ID] {
+				keepIdx = i
+				break
+			}
+		}
+		if keepIdx == -1 {
+			keepIdx = 0
+		}
+		for i := range group {
+			if i == keepIdx {
+				keepSet[group[i].ID] = true
+				continue
+			}
+			if removeSet[group[i].ID] {
+				continue
+			}
+			removeSet[group[i].ID] = true
+			reasonMap[group[i].ID] = fmt.Sprintf("文件夹内容完全相同（%s，共 %d 份）：删除复制项", shortHash(sig), len(group))
+			ruleMap[group[i].ID] = "signature"
+			totalBytes[group[i].ID] = group[i].FileSize
+			// Round4 任务一：与同组保留项互为成对对象（对比视图双列展示）
+			pairID[group[i].ID] = group[keepIdx].ID
+			if pairID[group[keepIdx].ID] == "" {
+				pairID[group[keepIdx].ID] = group[i].ID
+			}
+		}
+	}
+
+	// ── 5. 名称级疑似重复（Round26 O3，纯本地弱证据，只建议）──
 	// 候选 = 未被确定性规则标记删除的漫画（规则 1/2/4 已判删的不再参与名称聚类，
 	// 避免与强证据结果重复提示）；keepSet 的「新版本」仍参与（它也可能是语言版重复）。
 	var clusterCandidates []models.OfflineComic
@@ -1225,8 +1230,8 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	result.Clusters = detectTitleClusters(clusterCandidates, ignoreIdx, forceFull)
 
 	// ── 组装结果 ──
-		// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删，
-		// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
+	// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删，
+	// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
 	for i := range comics {
 		c := comics[i]
 		var pair *models.OfflineComic

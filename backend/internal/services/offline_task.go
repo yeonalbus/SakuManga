@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"SakuManga/internal/database"
 	"SakuManga/internal/models"
 
 	"gorm.io/gorm"
@@ -44,7 +45,7 @@ type OfflineTaskStatus string
 const (
 	OfflineTaskIdle      OfflineTaskStatus = "idle"
 	OfflineTaskRunning   OfflineTaskStatus = "running"
-	OfflineTaskPaused    OfflineTaskStatus = "paused"    // Round29：用户暂停（等待继续/取消）
+	OfflineTaskPaused    OfflineTaskStatus = "paused" // Round29：用户暂停（等待继续/取消）
 	OfflineTaskSuccess   OfflineTaskStatus = "success"
 	OfflineTaskError     OfflineTaskStatus = "error"
 	OfflineTaskCancelled OfflineTaskStatus = "cancelled" // Round29：用户取消（任务已终止）
@@ -56,16 +57,16 @@ var ErrOfflineTaskCancelled = errors.New("任务已被用户取消")
 
 // OfflineTaskState 离线维护任务进度快照（返回给前端轮询）
 type OfflineTaskState struct {
-	Type         OfflineTaskKind   `json:"type"`                  // 任务类型 maintain | update
-	Status       OfflineTaskStatus `json:"status"`                // idle | running | paused | success | error | cancelled
-	Phase        string            `json:"phase,omitempty"`       // 当前阶段说明（如「在线父子关系发现」「归档 Hash 计算」）
-	Total        int               `json:"total"`                 // 当前阶段总数
-	Done         int               `json:"done"`                  // 当前阶段已完成数
+	Type         OfflineTaskKind   `json:"type"`                   // 任务类型 maintain | update
+	Status       OfflineTaskStatus `json:"status"`                 // idle | running | paused | success | error | cancelled
+	Phase        string            `json:"phase,omitempty"`        // 当前阶段说明（如「在线父子关系发现」「归档 Hash 计算」）
+	Total        int               `json:"total"`                  // 当前阶段总数
+	Done         int               `json:"done"`                   // 当前阶段已完成数
 	CurrentTitle string            `json:"currentTitle,omitempty"` // 当前处理的漫画标题
-	Message      string            `json:"message,omitempty"`     // 附加提示（如「共 2760 个，仅对含 gid 的联网」）
-	StartedAt    int64             `json:"startedAt,omitempty"`   // 开始时间戳(ms)
-	FinishedAt   int64             `json:"finishedAt,omitempty"`  // 结束时间戳(ms)
-	Error        string            `json:"error,omitempty"`       // 失败原因（status=error 时）
+	Message      string            `json:"message,omitempty"`      // 附加提示（如「共 2760 个，仅对含 gid 的联网」）
+	StartedAt    int64             `json:"startedAt,omitempty"`    // 开始时间戳(ms)
+	FinishedAt   int64             `json:"finishedAt,omitempty"`   // 结束时间戳(ms)
+	Error        string            `json:"error,omitempty"`        // 失败原因（status=error 时）
 }
 
 // OfflineProgressFn 离线任务阶段进度回调
@@ -153,9 +154,10 @@ func CancelOfflineTask() bool {
 }
 
 // OfflineTaskCheckpoint 任务循环检查点（Round29）：
-//   1. 任务被暂停时挂起当前 goroutine（不占锁/CPU），等待继续或取消；
-//   2. 已请求取消时返回 ErrOfflineTaskCancelled，调用方应终止任务并向
-//      FinishOfflineTask 传递该错误（收尾为 cancelled 状态）。
+//  1. 任务被暂停时挂起当前 goroutine（不占锁/CPU），等待继续或取消；
+//  2. 已请求取消时返回 ErrOfflineTaskCancelled，调用方应终止任务并向
+//     FinishOfflineTask 传递该错误（收尾为 cancelled 状态）。
+//
 // 应放在业务循环每本处理前调用（粒度：逐本漫画）。
 func OfflineTaskCheckpoint() error {
 	offlineTaskMu.Lock()
@@ -224,15 +226,20 @@ func FinishOfflineTask(err error) {
 // StoreMaintainDedupResult 缓存维护查重结果（记录生成时间并清除过期标记，
 // 前端据此判断结果是否可信：删除操作后结果会被标记为过期）。
 // forceFull 记录本次扫描是否为「全量在线核对」，定向同步缓存时据以保持忽略语义一致。
+//
+// Round42 D6：写内存缓存后同步落库（结果快照），使进程重启后进维护页可秒开上次结果。
 func StoreMaintainDedupResult(res *DedupResult, forceFull bool) {
 	offlineTaskMu.Lock()
-	defer offlineTaskMu.Unlock()
 	if res != nil {
 		res.FinishedAt = time.Now().UnixMilli()
 		res.Stale = false
 		res.forceFull = forceFull
 	}
 	offlineMaintainRes = res
+	offlineTaskMu.Unlock()
+
+	// 锁外落库（IO 不持锁）；全局 DB 不可用（如单测）时静默跳过
+	PersistMaintainSnapshot(database.DB)
 }
 
 // GetMaintainDedupResult 读取最近一次维护查重结果缓存
@@ -252,7 +259,6 @@ func GetMaintainDedupResult() *DedupResult {
 // 调用方随后应调用 SyncMaintainDedupClusters 重算疑似重复簇并清除 stale。
 func InvalidateMaintainDedupResult(removedIDs []string) {
 	offlineTaskMu.Lock()
-	defer offlineTaskMu.Unlock()
 	if offlineMaintainRes != nil {
 		if len(removedIDs) > 0 {
 			idSet := make(map[string]struct{}, len(removedIDs))
@@ -280,6 +286,10 @@ func InvalidateMaintainDedupResult(removedIDs []string) {
 		offlineMaintainRes.Stale = true
 	}
 	offlineUpdateRes = nil
+	offlineTaskMu.Unlock()
+
+	// Round42 D6：失效状态（stale 标记与已移除项）同步落库，避免重启后快照与内存不一致
+	PersistMaintainSnapshot(database.DB)
 }
 
 // SyncMaintainDedupClusters 定向同步维护查重结果缓存中的「疑似重复」簇（Round33）。
@@ -360,6 +370,9 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 		offlineMaintainRes.FinishedAt = time.Now().UnixMilli()
 	}
 	offlineTaskMu.Unlock()
+
+	// Round42 D6：定向同步后的结果同步落库（内存/DB 一致，重启后仍是最新簇）
+	PersistMaintainSnapshot(db)
 
 	log.Printf("%s [dedup-sync] 疑似重复簇已定向同步：候选 %d 本，簇 %d 组（全量语义=%v）",
 		dlLogTag, len(candidates), len(clusters), full)

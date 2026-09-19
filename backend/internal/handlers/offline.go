@@ -195,12 +195,15 @@ func (h *OfflineHandler) GetMaintainProgress(c *gin.Context) {
 
 // GetMaintainResult 维护查重结果读取 GET /api/v1/offline/maintain/result
 func (h *OfflineHandler) GetMaintainResult(c *gin.Context) {
+	// Round42 D6：结果持久化——进程重启后内存缓存为空，先从快照回填，前端即可秒开上次结果
+	services.EnsureMaintainResultLoaded(h.db)
 	c.JSON(http.StatusOK, services.GetMaintainDedupResult())
 }
 
 // GetMaintainUnsynced 书库变更同步状态读取 GET /api/v1/offline/maintain/unsynced
 // 需求4：前端进入维护界面时据此判断是否自动触发增量查重（下载/更新/删除后结果未反映变更）。
 func (h *OfflineHandler) GetMaintainUnsynced(c *gin.Context) {
+	services.EnsureMaintainResultLoaded(h.db)
 	c.JSON(http.StatusOK, services.GetMaintainUnsyncedStatus())
 }
 

@@ -37,11 +37,12 @@ func InitDB() {
 		&models.UpdateScanSetting{},
 		&models.ComicBookmark{},
 		&models.ComicChapter{},
-		&models.ScrapeBookmark{},    // Round28：搜刮书签（后端化，多端同步）
-		&models.IgnoredIdentifier{}, // Round26 O2：忽略标记（疑似重复/父画廊）
-		&models.XpComicStat{},       // Round32：XP 词云 — 单本贡献快照
-		&models.XpTagStat{},         // Round32：XP 词云 — tag 聚合权重
-		&models.XpMeta{},            // Round32：XP 词云 — 统计元信息
+		&models.ScrapeBookmark{},        // Round28：搜刮书签（后端化，多端同步）
+		&models.IgnoredIdentifier{},     // Round26 O2：忽略标记（疑似重复/父画廊）
+		&models.XpComicStat{},           // Round32：XP 词云 — 单本贡献快照
+		&models.XpTagStat{},             // Round32：XP 词云 — tag 聚合权重
+		&models.XpMeta{},                // Round32：XP 词云 — 统计元信息
+		&models.MaintainDedupSnapshot{}, // Round42 D6：维护查重结果快照（重启后免重扫）
 	)
 
 	migrateFavoriteStateTable()

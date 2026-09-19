@@ -570,10 +570,41 @@ const refreshOnEnter = async () => {
   }
 }
 
+// ── Round42 D2：联网复核设置（默认关闭）──
+const onlineVerify = ref(false)
+
+const loadDedupSetting = async () => {
+  try {
+    const s = await http<{ onlineVerify?: boolean }>('/offline/dedup/setting')
+    onlineVerify.value = !!s?.onlineVerify
+  } catch {
+    // 设置接口异常（如后端未启动）→ 保持默认关闭
+  }
+}
+
+const toggleOnlineVerify = async (e: Event) => {
+  const next = (e.target as HTMLInputElement).checked
+  try {
+    const s = await http<{ onlineVerify?: boolean }>('/offline/dedup/setting', {
+      method: 'POST',
+      body: JSON.stringify({ onlineVerify: next }),
+    })
+    onlineVerify.value = !!s?.onlineVerify
+    toast.success(onlineVerify.value ? '已开启联网复核（下次扫描生效）' : '已关闭联网复核')
+  } catch (err) {
+    onlineVerify.value = !next // 保存失败回滚开关
+    toast.error(err instanceof Error ? err.message : '设置保存失败')
+  }
+}
+
 let activatedOnce = false
-onMounted(refreshOnEnter)
+onMounted(() => {
+  void loadDedupSetting()
+  void refreshOnEnter()
+})
 onActivated(() => {
   if (activatedOnce) {
+    void loadDedupSetting()
     refreshOnEnter()
   }
   activatedOnce = true
@@ -629,6 +660,18 @@ onUnmounted(stopPolling)
     <div class="scope-hint">
       💡 范围：默认查重所有离线漫画。可在「设置 → 额外扫描路径」中关闭某路径的「离线维护」开关，
       该路径下的漫画将不参与本查重（下载导入的漫画始终参与）。
+    </div>
+
+    <!-- Round42 D2：联网复核设置（默认关闭）——对「近似重复组」用标题去 E 站反查校验 -->
+    <div class="verify-setting">
+      <label class="verify-toggle" title="开启后，近似重复组会用其标题去 E 站反查：命中同标题条目则升为高置信，未命中则标注「未确认」">
+        <input type="checkbox" :checked="onlineVerify" @change="toggleOnlineVerify" />
+        <span>联网复核（E 站反查，默认关闭）</span>
+      </label>
+      <span class="verify-hint">
+        仅作用于「近似判定」的疑似重复组（本地精确归一组不重复联网）；每本约 1.2s 限流、单次上限 30 组，
+        需已绑定 E 站账号。设置立即保存，下次扫描生效。
+      </span>
     </div>
 
     <!-- ⑨ Round26：结果过期（书库变更 / 跨设备删除）→ 仅提示，不再自动扫描，引导手动「重新扫描」 -->
@@ -1222,6 +1265,39 @@ onUnmounted(stopPolling)
   border-radius: 6px;
   color: #a8b0d8;
   font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* Round42 D2：联网复核设置（默认关闭） */
+.verify-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  padding: 8px 14px;
+  background-color: var(--app-surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--app-border-2, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+
+.verify-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--app-text-2, #c7cbe0);
+  user-select: none;
+}
+
+.verify-toggle input {
+  cursor: pointer;
+  accent-color: #3d5afe;
+}
+
+.verify-hint {
+  color: var(--app-text-3, #8b90a8);
   line-height: 1.5;
 }
 .scanning-title {

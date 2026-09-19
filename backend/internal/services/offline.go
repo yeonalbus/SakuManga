@@ -516,6 +516,7 @@ func clearOfflineUpdate(c *models.OfflineComic) bool {
 // 覆盖两种场景：
 //   - 漫画自身 gid = 下载 gid：用户在「更新」页手动下载了标记需要更新的漫画本体；
 //   - 漫画 new_gid = 下载 gid：用户下载了检测到的新版本，父画廊的更新标记应一并消除。
+//
 // 复用 clearOfflineUpdate 的字段清空语义，避免与维护查重、老化判定产生新状态冲突。
 // 返回清除的记录数。
 func ClearOfflineUpdateByGID(db *gorm.DB, gid string) (int64, error) {
@@ -746,7 +747,8 @@ func buildUpdateNote(latestGID string, children []GalleryRelation) string {
 // DedupItem 查重建议项
 // Round4 任务一：新增 PairComic —— 成对对象（对比视图双列展示：同 GID 保留↔删除、父子版本 新版↔旧版）。
 // Round26 O2：新增 Rule —— 命中规则标识（gid/hash/parent/signature），前端据此展示「忽略」入口：
-//   仅 parent（父子画廊）可忽略（gid 粒度）；gid/hash/signature（同 GID/hash/内容签名）不可忽略。
+//
+//	仅 parent（父子画廊）可忽略（gid 粒度）；gid/hash/signature（同 GID/hash/内容签名）不可忽略。
 type DedupItem struct {
 	Comic     models.OfflineComic  `json:"comic"`
 	Reason    string               `json:"reason"`              // 重复原因
@@ -1256,6 +1258,13 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			removeCount++
 		}
 	}
+	// ── Round42 D2：联网复核（可选，默认关闭）──
+	// 对近似层（Tier 2）产出的非高置信簇做一次 E 站反查校验（逐簇限流 + 单次上限），
+	// 通过则升为高置信，未通过则标注「未确认」供人工优先看。设置项默认关闭。
+	if GetDedupSetting(db).OnlineVerify {
+		VerifyApproxClustersOnline(db, ehService, result.Clusters, onProgress)
+	}
+
 	log.Printf("%s [maintain] 维护查重完成：建议保留 %d 项，建议删除 %d 项", dlLogTag, keepCount, removeCount)
 	return result, nil
 }
@@ -1296,7 +1305,7 @@ func climbParentChain(fetch parentDetailFetcher, startGID, startToken string, gi
 	return hits
 }
 
-// backfillGIDOnline D5-B：对 GID=='' 的离线漫画按标题在线搜索，回填 GID/Token。
+// backfillGIDOnline D5-B：对 GID==” 的离线漫画按标题在线搜索，回填 GID/Token。
 //
 // 背景（S6）：额外路径下的文件夹若无 sidecar 元数据（metadata/ComicInfo.xml），
 // 入库时 GID/Token 为空，规则 1（同 GID 查重）与规则 3（父画廊关系）无法匹配，

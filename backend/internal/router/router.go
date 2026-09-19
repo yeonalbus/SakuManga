@@ -350,6 +350,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/ignore/list", offlineHandler.ListIgnores)
 			admin.POST("/offline/ignore/:id/restore", offlineHandler.RestoreIgnore)
 
+			// Round42 D2：查重设置（联网复核，默认关闭）
+			admin.GET("/offline/dedup/setting", offlineHandler.GetDedupSetting)
+			admin.POST("/offline/dedup/setting", offlineHandler.SaveDedupSetting)
+
 			// Round32：XP 词云全量重算（公式调整 / 增量链路漏接后的兜底）
 			admin.POST("/offline/xp-cloud/rebuild", xpCloudHandler.RebuildXpCloud)
 		}

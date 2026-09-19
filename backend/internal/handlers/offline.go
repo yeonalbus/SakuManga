@@ -164,9 +164,9 @@ func (h *OfflineHandler) DownloadUpdate(c *gin.Context) {
 // GetMaintainDedup 异步启动维护查重 GET /api/v1/offline/maintain
 //
 // 维护查重逐画廊联网核对，可能耗时数十分钟，改为异步任务 + 进度轮询：
-//   1. 本接口立即返回 202（启动结果）；
-//   2. 前端轮询 GET /offline/maintain/progress 获取进度；
-//   3. 完成后前端读取 GET /offline/maintain/result 获取结果。
+//  1. 本接口立即返回 202（启动结果）；
+//  2. 前端轮询 GET /offline/maintain/progress 获取进度；
+//  3. 完成后前端读取 GET /offline/maintain/result 获取结果。
 func (h *OfflineHandler) GetMaintainDedup(c *gin.Context) {
 	if !services.StartOfflineTask(services.OfflineTaskMaintain) {
 		c.JSON(http.StatusConflict, gin.H{"error": "已有离线维护任务正在运行，请稍后再试"})
@@ -205,6 +205,30 @@ func (h *OfflineHandler) GetMaintainResult(c *gin.Context) {
 func (h *OfflineHandler) GetMaintainUnsynced(c *gin.Context) {
 	services.EnsureMaintainResultLoaded(h.db)
 	c.JSON(http.StatusOK, services.GetMaintainUnsyncedStatus())
+}
+
+// GetDedupSetting 读取查重设置 GET /api/v1/offline/dedup/setting
+// Round42 D2：目前仅「联网复核」一项，默认关闭（无记录时返回默认值）。
+func (h *OfflineHandler) GetDedupSetting(c *gin.Context) {
+	c.JSON(http.StatusOK, services.GetDedupSetting(h.db))
+}
+
+// SaveDedupSetting 保存查重设置 POST /api/v1/offline/dedup/setting
+func (h *OfflineHandler) SaveDedupSetting(c *gin.Context) {
+	var req struct {
+		OnlineVerify bool `json:"onlineVerify"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式错误"})
+		return
+	}
+	s := services.GetDedupSetting(h.db)
+	s.OnlineVerify = req.OnlineVerify
+	if err := services.SaveDedupSetting(h.db, s); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, services.GetDedupSetting(h.db))
 }
 
 // ─────────────────────────────────────────────────────────────

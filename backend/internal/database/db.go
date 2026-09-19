@@ -43,6 +43,7 @@ func InitDB() {
 		&models.XpTagStat{},             // Round32：XP 词云 — tag 聚合权重
 		&models.XpMeta{},                // Round32：XP 词云 — 统计元信息
 		&models.MaintainDedupSnapshot{}, // Round42 D6：维护查重结果快照（重启后免重扫）
+		&models.DedupSetting{},          // Round42 D2：查重设置（联网复核默认关闭）
 	)
 
 	migrateFavoriteStateTable()

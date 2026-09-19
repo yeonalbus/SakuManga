@@ -36,8 +36,8 @@ const (
 	dedupBodySimMin = 0.95
 )
 
-// reAnyParen 任意圆/方括号及其内容（此处 core 已剥净版本标记，残留括注基本是作品名/原作名）
-var reAnyParen = regexp.MustCompile(`[\(\[]([^\)\]]*)[\)\]]`)
+// reAnyParen 任意圆/方括号/中文方头括号及其内容（此处 core 已剥净版本标记，残留括注基本是作品名/原作名）
+var reAnyParen = regexp.MustCompile(`[\(\[【]([^\)\]】]*)[\)\]】]`)
 
 // bodyOf 取「正文」= 去掉所有括注后的核心名（折叠空白）
 func bodyOf(core string) string {

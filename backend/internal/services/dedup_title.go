@@ -63,8 +63,9 @@ type TitleFingerprint struct {
 // ── 清洗层 ──
 
 var (
-	// 开头连续括号/方括号前缀（[circle] / [汉化组] / (C94) / (Artbook) 等），循环剥离
-	reBracketPrefix = regexp.MustCompile(`^\s*(?:\([^)]*\)|\[[^\]]*\])\s*`)
+	// 开头连续括号/方括号前缀（[circle] / [汉化组] / (C94) / 【DL版】 等），循环剥离
+	// Round42：补充中文方头括号 【】（中文命名常见，如 【机翻+个人润色】）
+	reBracketPrefix = regexp.MustCompile(`^\s*(?:\([^)]*\)|\[[^\]]*\]|【[^】]*】)\s*`)
 	// 日文卷号：第N巻/第N話/第N編/第N回（N 可为阿拉伯或一二三…）
 	reVolumeJp = regexp.MustCompile(`第\s*([0-9]+|[一二三四五六七八九十两])\s*[巻卷話话編编回夜章]`)
 	// 英文卷号：vol.2 / Vol 2 / V2 / Part 2 / Ep.3 / Chapter 4 / No.5
@@ -100,19 +101,19 @@ var (
 
 	// Round42：剥离后残留的空括号必须清理（如 `[DL版]` 被剥成 `[ ]`），
 	// 否则同一作品会因差一个 "[ ]" 而无法同键（用户报告样本即卡在这一层）。
-	reEmptyParen = regexp.MustCompile(`[\(\[]\s*[\)\]]`)
+	reEmptyParen = regexp.MustCompile(`[\(\[【]\s*[\)\]】]`)
 )
 
-// reEventToken 展会/期号标记（圆括号或方括号），剥净后同一作品的不同首发届数可归一
+// reEventToken 展会/期号标记（圆括号 / 方括号 / 中文方头括号），剥净后同一作品的不同首发届数可归一
 var reEventToken = regexp.MustCompile(
-	`(?i)[\(\[]\s*(?:c\s*\d{2,3}|comic1[☆\s]*\d+|例大祭\s*\d*|コミティア\s*\d*|コミック[^\s\)\]]*\d*|ff\s*\d+|sunshine\s*creation\s*\d*|red\s*box\s*\d*|comic\s*castle\s*\d*|コミックキャッスル\s*\d*)\s*[\)\]]`,
+	`(?i)[\(\[【]\s*(?:c\s*\d{2,3}|comic1[☆\s]*\d+|例大祭\s*\d*|コミティア\s*\d*|コミック[^\s\)\]】]*\d*|ff\s*\d+|sunshine\s*creation\s*\d*|red\s*box\s*\d*|comic\s*castle\s*\d*|コミックキャッスル\s*\d*)\s*[\)\]】]`,
 )
 
-// reParenVersionToken 圆/方括号内**含版本/语言/汉化/润色关键词**的整块 token（黑名单式）。
+// reParenVersionToken 圆/方括号/【】内**含版本/语言/汉化/润色关键词**的整块 token（黑名单式）。
 // 只有括注内含下列关键词才剥离；作品名括注（如 `(Fate/Grand Order)`、`(ブルーアーカイブ)`）保持不动。
 // 注意：不收英文 `original`（易误伤作品名），只收日文 `オリジナル`。
 var reParenVersionToken = regexp.MustCompile(
-	`(?i)[\(\[]\s*[^\)\]]*(?:dl\s*版|digital|decensored|uncensored|無修正|无修正|中国翻訳|中国語|中文翻译|翻譯|翻译|translated|chinese|english|japanese|korean|french|german|spanish|russian|italian|汉化|漢化|润色|潤色|机翻|機翻|reupload|re-upload|remaster|renewal|re-edition|reprint|re-release|復刻版|新装版|完全版|修正版|オリジナル|v2)[^\)\]]*[\)\]]`,
+	`(?i)[\(\[【]\s*[^\)\]】]*(?:dl\s*版|digital|decensored|uncensored|無修正|无修正|中国翻訳|中国語|中文翻译|翻譯|翻译|translated|chinese|english|japanese|korean|french|german|spanish|russian|italian|汉化|漢化|润色|潤色|机翻|機翻|reupload|re-upload|remaster|renewal|re-edition|reprint|re-release|復刻版|新装版|完全版|修正版|オリジナル|v2)[^\)\]】]*[\)\]】]`,
 )
 
 // reCnSuffixNoParen 无括号的中文/汉化类后缀（中文词作版本标记概率高，故允许无括号剥离）
@@ -439,6 +440,17 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, f
 		}
 		clusters = append(clusters, *cl)
 	}
+
+	// ── Tier 2：近似层（Round42）──
+	// Tier 1 凭「精确归一键 + 作者硬否决」已聚入簇的条目不重复参与；
+	// Tier 2 在同一作者桶内用多字段加权打分产出额外簇，覆盖「括注增删 / 字段混排」等近似情形。
+	clustered := make(map[string]bool, len(cands))
+	for _, cl := range clusters {
+		for _, m := range cl.Members {
+			clustered[m.Comic.ID] = true
+		}
+	}
+	clusters = append(clusters, detectApproxClusters(comics, clustered, ignoreIdx, forceFull)...)
 
 	// 排序：成员多者优先（疑似度更高的组排前面）
 	sort.Slice(clusters, func(i, j int) bool {

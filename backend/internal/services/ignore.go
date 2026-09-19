@@ -141,17 +141,24 @@ func RestoreIgnore(db *gorm.DB, id string) error {
 
 // IgnoreIndex 忽略索引：title 型按「核心名+画师」匹配，gid 型按 gid 匹配，comic 型按漫画 id 匹配
 type IgnoreIndex struct {
-	titleKeys map[string]bool // key: titleIgnoreKey(TitleKey, Artist)
+	titleKeys map[string]bool // key: titleIgnoreKey(TitleKey, Artist)（原样）
 	gids      map[string]bool // key: gid
 	comicIDs  map[string]bool // key: comicID（Round26-2：成员级忽略，聚类时剔除）
+
+	// Round42 D8：存量 title 键经**新清洗算法**归一后的索引。
+	// 背景：Round42 前写入的 title_key 由旧清洗产出（如 `女神ックス (超次元ゲイム ネプテューヌ) [中国翻訳]`，
+	// 版本标记未剥离），算法升级后新产出的 TitleKey 已剥净 → 旧 key 不再精确匹配，用户已忽略的组会「复活」。
+	// 兼容做法：加载时把存量 key 也过一遍新清洗，查询时用归一键兜底匹配（无需数据迁移）。
+	titleKeysNorm map[string]bool
 }
 
 // LoadIgnoreIndex 加载全部忽略条目到内存索引
 func LoadIgnoreIndex(db *gorm.DB) *IgnoreIndex {
 	idx := &IgnoreIndex{
-		titleKeys: map[string]bool{},
-		gids:      map[string]bool{},
-		comicIDs:  map[string]bool{},
+		titleKeys:     map[string]bool{},
+		titleKeysNorm: map[string]bool{},
+		gids:          map[string]bool{},
+		comicIDs:      map[string]bool{},
 	}
 	if db == nil {
 		return idx
@@ -164,6 +171,7 @@ func LoadIgnoreIndex(db *gorm.DB) *IgnoreIndex {
 		switch ig.Type {
 		case "title":
 			idx.titleKeys[titleIgnoreKey(ig.TitleKey, ig.Artist)] = true
+			idx.titleKeysNorm[ignoreTitleKeyOf(ig.TitleKey, ig.Artist)] = true
 		case "gid":
 			idx.gids[ig.GID] = true
 		case "comic":
@@ -177,9 +185,26 @@ func titleIgnoreKey(titleKey, artist string) string {
 	return strings.ToLower(strings.TrimSpace(titleKey)) + "\x00" + strings.ToLower(strings.TrimSpace(artist))
 }
 
-// IsTitleIgnored title 型命中：核心名 + 画师双匹配（防撞名误伤）
+// ignoreTitleKeyOf 归一化忽略键：把 title_key 过一遍现有清洗（Round42 新算法）后再组键。
+// 用于「存量旧 key ↔ 新算法产出的 key」对齐；清洗后为空（极端输入）时退回原值，避免误匹配。
+func ignoreTitleKeyOf(titleKey, artist string) string {
+	core := fingerprintTitle(titleKey, artist).Core
+	if core == "" {
+		core = strings.TrimSpace(titleKey)
+	}
+	return titleIgnoreKey(core, artist)
+}
+
+// IsTitleIgnored title 型命中：核心名 + 画师双匹配（防撞名误伤）。
+// Round42 D8：先精确匹配；未命中时用「新清洗算法归一后的键」兜底，兼容存量旧 key。
 func (idx *IgnoreIndex) IsTitleIgnored(titleKey, artist string) bool {
-	return idx != nil && idx.titleKeys[titleIgnoreKey(titleKey, artist)]
+	if idx == nil {
+		return false
+	}
+	if idx.titleKeys[titleIgnoreKey(titleKey, artist)] {
+		return true
+	}
+	return idx.titleKeysNorm[ignoreTitleKeyOf(titleKey, artist)]
 }
 
 // IsGIDIgnored gid 型命中（父画廊 gid，规则 3 例外）

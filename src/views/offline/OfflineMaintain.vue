@@ -552,7 +552,10 @@ const syncStaleOnEnter = async () => {
 // bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
 // 改为同步一次当前任务状态：后台任务在跑（含暂停中）则接管轮询显示进度/控制按钮；否则拉取最近结果并同步「过期」提示。
 // Round26-⑨：不再因书库变更自动触发增量查重，只提示过期，手动扫描。
+// Round42 D6：**先拉取结果再读任务状态**——结果已持久化（后端快照），重启后也能秒开上次结果；
+// 即使后台任务正在跑，也能立即看到已有结果，不必空等到任务结束。
 const refreshOnEnter = async () => {
+  await loadResult()
   try {
     const s = await http<OfflineTaskState>('/offline/maintain/progress')
     taskState.value = s

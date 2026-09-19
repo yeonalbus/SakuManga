@@ -38,12 +38,12 @@ const dedupPageTolerance = 5
 // DedupCluster 疑似重复组（名称级，弱证据，只建议）
 type DedupCluster struct {
 	ID         string          `json:"id"`
-	TitleKey   string          `json:"titleKey"`            // 归一化核心名（忽略条目标记用）
-	Artist     string          `json:"artist,omitempty"`    // 共同画师（来自 artist:xxx）
-	Confidence string          `json:"confidence"`          // high | medium
-	Reason     string          `json:"reason"`              // 判定依据摘要
-	Members    []ClusterMember `json:"members"`             // 成员（≥2）
-	Ignored    bool            `json:"ignored"`             // 全量核对时命中忽略；增量直接跳过
+	TitleKey   string          `json:"titleKey"`         // 归一化核心名（忽略条目标记用）
+	Artist     string          `json:"artist,omitempty"` // 共同画师（来自 artist:xxx）
+	Confidence string          `json:"confidence"`       // high | medium
+	Reason     string          `json:"reason"`           // 判定依据摘要
+	Members    []ClusterMember `json:"members"`          // 成员（≥2）
+	Ignored    bool            `json:"ignored"`          // 全量核对时命中忽略；增量直接跳过
 }
 
 // ClusterMember 疑似重复组单个成员
@@ -79,15 +79,45 @@ var (
 	// 安全原则（Round26 审查修复）：英文 token（english/digital/reupload 等）必须「括号包裹」才剥离，
 	// 防误伤作品名内嵌单词（如 "Digital Devil Story" 不应被剥成 "Devil Story"）；中文后缀（汉化版/DL版 等）保留无括号剥离。
 	reVersionTokens = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\(c\s*\d{2,3}\)`),                          // (C94) / (C101)
-		regexp.MustCompile(`(?i)\(\[?digital\]?\)|\[digital\]`),            // [Digital] / (Digital)
-		regexp.MustCompile(`(?i)dl\s*版`),                                  // DL版 / DL 版（无括号）
+		// ── Round42：先整块剥离「括号内含量标记」的 token。**顺序关键**：必须排在无括号中文正则之前，
+		//    否则 `[空気系☆漢化]` 会先被 "汉化" 剥成 `[空気系☆ ]`、`[廉价汉化组]` 被剥成 `[廉价 组]`，
+		//    整块规则之后再也匹配不上（用户报告样本正是被这类残留卡住）。──
+		reEventToken,        // 展会/期号：(C94) [C99] (COMIC1☆6) (例大祭7) (コミティア140) (FF46) 等
+		reParenVersionToken, // 圆/方括号内含版本/语言/汉化关键词的整块：[無修正] [中国翻訳] [空気系☆漢化] [廉价汉化组] (オリジナル) 等
+
+		regexp.MustCompile(`(?i)\(c\s*\d{2,3}\)`),                                                               // (C94) / (C101)
+		regexp.MustCompile(`(?i)\(\[?digital\]?\)|\[digital\]`),                                                 // [Digital] / (Digital)
+		regexp.MustCompile(`(?i)dl\s*版`),                                                                        // DL版 / DL 版（无括号）
 		regexp.MustCompile(`(?i)\((?:english|chinese|japanese|korean|french|german|spanish|russian|italian)\)`), // 英文语言后缀（须括号包裹）
-		regexp.MustCompile(`\(?(?:中文版|汉化版|漢化版|简中版|繁中版|中文|汉化|漢化|简中|繁中)\)?`), // 中文/汉化后缀（长词优先，括号可选——中文词作版本标记概率高）
+		regexp.MustCompile(`\(?(?:中文版|汉化版|漢化版|简中版|繁中版|中文|汉化|漢化|简中|繁中)\)?`),                                      // 中文/汉化后缀（长词优先，括号可选——中文词作版本标记概率高）
 		regexp.MustCompile(`(?i)\((?:reupload|re-upload|remaster|renewal|re-edition|new\s*edition|reprint|re-release|復刻版|新装版|完全版|修正版|無修正|无修正)\)`), // 版本/重制标记（须括号包裹）
-		regexp.MustCompile(`(?i)\bv2\b|(?i)\bver\.?\s*2\b`),                // v2 / ver.2（无括号）
+		regexp.MustCompile(`(?i)\bv2\b|(?i)\bver\.?\s*2\b`),                 // v2 / ver.2（无括号）
 		regexp.MustCompile(`[\[\]()]?[^\[\]()\s]*汉化组[^\[\]()\s]*[\[\]()]?`), // 汉化组名（如 [萌你妹汉化组]）
+
+		// 无括号中文/汉化后缀补充（放最后：仅在整块规则未命中时才逐词剥离）
+		reCnSuffixNoParen,
 	}
+
+	// Round42：剥离后残留的空括号必须清理（如 `[DL版]` 被剥成 `[ ]`），
+	// 否则同一作品会因差一个 "[ ]" 而无法同键（用户报告样本即卡在这一层）。
+	reEmptyParen = regexp.MustCompile(`[\(\[]\s*[\)\]]`)
+)
+
+// reEventToken 展会/期号标记（圆括号或方括号），剥净后同一作品的不同首发届数可归一
+var reEventToken = regexp.MustCompile(
+	`(?i)[\(\[]\s*(?:c\s*\d{2,3}|comic1[☆\s]*\d+|例大祭\s*\d*|コミティア\s*\d*|コミック[^\s\)\]]*\d*|ff\s*\d+|sunshine\s*creation\s*\d*|red\s*box\s*\d*|comic\s*castle\s*\d*|コミックキャッスル\s*\d*)\s*[\)\]]`,
+)
+
+// reParenVersionToken 圆/方括号内**含版本/语言/汉化/润色关键词**的整块 token（黑名单式）。
+// 只有括注内含下列关键词才剥离；作品名括注（如 `(Fate/Grand Order)`、`(ブルーアーカイブ)`）保持不动。
+// 注意：不收英文 `original`（易误伤作品名），只收日文 `オリジナル`。
+var reParenVersionToken = regexp.MustCompile(
+	`(?i)[\(\[]\s*[^\)\]]*(?:dl\s*版|digital|decensored|uncensored|無修正|无修正|中国翻訳|中国語|中文翻译|翻譯|翻译|translated|chinese|english|japanese|korean|french|german|spanish|russian|italian|汉化|漢化|润色|潤色|机翻|機翻|reupload|re-upload|remaster|renewal|re-edition|reprint|re-release|復刻版|新装版|完全版|修正版|オリジナル|v2)[^\)\]]*[\)\]]`,
+)
+
+// reCnSuffixNoParen 无括号的中文/汉化类后缀（中文词作版本标记概率高，故允许无括号剥离）
+var reCnSuffixNoParen = regexp.MustCompile(
+	`(?i)中国翻訳|中国翻译|中国語|机翻|機翻|ai\s*润色|个人润色|個人潤色|個人翻譯|个人翻译`,
 )
 
 // fingerprintTitle 标题 + 画师 → 指纹（纯函数，可测）
@@ -124,11 +154,13 @@ func fingerprintTitle(title, artist string) TitleFingerprint {
 	}
 
 	// 3) 剥离版本后缀 token（循环到稳定，上限防死循环）
+	//    Round42：每轮剥离后清理残留空括号（[DL版] → "[ ]" → 清空），避免同作品因空括号而不同键
 	for pass := 0; pass < 10; pass++ {
 		before := t
 		for _, re := range reVersionTokens {
 			t = re.ReplaceAllString(t, " ")
 		}
+		t = reEmptyParen.ReplaceAllString(t, " ")
 		if strings.TrimSpace(t) == strings.TrimSpace(before) {
 			break
 		}
@@ -252,7 +284,23 @@ func extractNamespaceTag(tags []string, ns string) string {
 // clusterCandidate 分组过程中的候选成员
 type clusterCandidate struct {
 	comic *models.OfflineComic
-	fp    TitleFingerprint
+	fp    TitleFingerprint // 主指纹（title_jpn 优先，title 兜底）
+}
+
+// clusterKey 分组键：归一核心名 + 卷号 + 画师（小写）。
+// 卷号进 key → 续集/分卷天然隔离；画师进 key → **作者硬否决**（Round42 决策 D10：
+// artist tag 双方都非空且不同时不可能同键，从源头避免「不同作者同名」误报）。
+func clusterKey(fp TitleFingerprint) string {
+	return strings.ToLower(fp.Core) + "\x00" + fp.Volume + "\x00" + strings.ToLower(fp.Artist)
+}
+
+// coreVolKeyOf 从 clusterKey 截出「核心名 + 卷号」段（去掉 artist），
+// 供 D10 的「作者未知」兜底判定使用。
+func coreVolKeyOf(key string) string {
+	if i := strings.LastIndex(key, "\x00"); i >= 0 {
+		return key[:i]
+	}
+	return key
 }
 
 // detectTitleClusters 名称级疑似重复检测（O3 规则 5，纯本地）
@@ -260,9 +308,16 @@ type clusterCandidate struct {
 // comics 应为「未被确定性规则标记删除」的漫画集合（调用方过滤 removeSet）。
 // forceFull=false 时命中忽略（核心名+画师）的簇直接跳过；
 // forceFull=true 时全部输出，命中忽略的簇带 Ignored=true（前端折叠展示）。
+//
+// Round42 改造（D9 标定集驱动）：
+//   - **双字段池**：`title_jpn`（E 站规范标题）与 `title` 各自生成指纹，任一字段同键即成组。
+//     此前只用 `title`（metadata 抓取常为罗马音），导致卡片显示的日文标题搜不到 / 聚不了组。
+//   - **并查集合并**：一本可能持有 2 个键（两个字段），用并查集按「相同键」连通，
+//     等价于多键精确匹配，且保持传递性正确（键是精确匹配，非相似度）。
 func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, forceFull bool) []DedupCluster {
-	// 预分组：key = 核心名 + 卷号 + 画师（卷号进 key → 续集/分卷天然隔离）
-	groups := map[string][]*clusterCandidate{}
+	cands := make([]*clusterCandidate, 0, len(comics))
+	keySets := make([][]string, 0, len(comics))
+	artistKnown := make([]bool, 0, len(comics))
 	for i := range comics {
 		c := &comics[i]
 		// Round26-2：成员级忽略——被忽略的漫画（type=comic）不参与名称聚类
@@ -271,16 +326,104 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, f
 		}
 		tags := UnmarshalTagSlice(c.OnlineTags)
 		artist := extractNamespaceTag(tags, "artist")
-		fp := fingerprintTitle(c.Title, artist)
-		if fp.Core == "" {
+
+		// 双字段池：title_jpn 优先（E 站规范标题），title 兜底；两者都可作为分组依据
+		var main TitleFingerprint
+		keys := make([]string, 0, 2)
+		for _, src := range []string{c.TitleJpn, c.Title} {
+			if strings.TrimSpace(src) == "" {
+				continue
+			}
+			fp := fingerprintTitle(src, artist)
+			if fp.Core == "" {
+				continue
+			}
+			if main.Core == "" {
+				main = fp
+			}
+			keys = append(keys, clusterKey(fp))
+		}
+		if len(keys) == 0 {
 			continue
 		}
-		key := strings.ToLower(fp.Core) + "\x00" + fp.Volume + "\x00" + strings.ToLower(fp.Artist)
-		groups[key] = append(groups[key], &clusterCandidate{comic: c, fp: fp})
+		cands = append(cands, &clusterCandidate{comic: c, fp: main})
+		keySets = append(keySets, keys)
+		artistKnown = append(artistKnown, strings.TrimSpace(main.Artist) != "")
+	}
+
+	// 并查集：同一键的书连通为同一组
+	parent := make([]int, len(cands))
+	for i := range parent {
+		parent[i] = i
+	}
+	find := func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	firstSeen := map[string]int{}
+	for i, keys := range keySets {
+		for _, k := range keys {
+			if j, ok := firstSeen[k]; ok {
+				union(i, j)
+			} else {
+				firstSeen[k] = i
+			}
+		}
+	}
+
+	// 轮 2：**作者未知兜底**（D10 语义：artist 缺失不构成否决）。
+	// 同一「核心名 + 卷号」下若**存在 artist 缺失的书**，则该组整体并为一簇——
+	// 空 artist 只代表「作者未知」，不能据此否决；供人工优先确认（buildCluster 会降档并标注）。
+	// 若该组内所有书 artist 都非空，则保持轮 1 的硬否决结果（不同作者同名不合并）。
+	byCoreVol := map[string][]int{}
+	for i, keys := range keySets {
+		for _, k := range keys {
+			cv := coreVolKeyOf(k)
+			byCoreVol[cv] = append(byCoreVol[cv], i)
+		}
+	}
+	for _, members := range byCoreVol {
+		if len(members) < 2 {
+			continue
+		}
+		hasUnknown := false
+		for _, i := range members {
+			if !artistKnown[i] {
+				hasUnknown = true
+				break
+			}
+		}
+		if !hasUnknown {
+			continue
+		}
+		for _, i := range members[1:] {
+			union(members[0], i)
+		}
+	}
+
+	// 按根聚合（保持输入顺序，便于结果稳定）
+	groups := map[int][]*clusterCandidate{}
+	roots := make([]int, 0, len(cands))
+	for i := range cands {
+		r := find(i)
+		if _, ok := groups[r]; !ok {
+			roots = append(roots, r)
+		}
+		groups[r] = append(groups[r], cands[i])
 	}
 
 	var clusters []DedupCluster
-	for _, g := range groups {
+	for _, r := range roots {
+		g := groups[r]
 		if len(g) < 2 {
 			continue
 		}
@@ -335,12 +478,27 @@ func buildCluster(g []*clusterCandidate) *DedupCluster {
 
 	confidence := "high"
 	reason := fmt.Sprintf("画师相同（artist:%s）+ 核心名相同 + 页数差 ≤%d，疑似多语言/重传/不同版本", fp.Artist, dedupPageTolerance)
-	if fp.Artist == "" {
-		reason = fmt.Sprintf("核心名相同 + 页数差 ≤%d，疑似多语言/重传/不同版本（无画师 tag 辅助）", dedupPageTolerance)
-	}
 	if maxDiff > dedupPageTolerance {
 		confidence = "medium"
 		reason = fmt.Sprintf("核心名 + 画师相同，但页数差 %d 页（>%d），可能为重绘/合集/双页合并版，请人工确认", maxDiff, dedupPageTolerance)
+	}
+	// Round42 决策 D10（语义已与用户对齐）：作者标识只用 `artist` tag 做硬否决（体现在分组键 + 轮 2 兜底）；
+	// 组内存在「作者未知」成员（无 artist tag）时不否决，但置信度降一档并明确标注，供人工优先复核。
+	// 实测全库 278 本无 artist tag，其中 218 本可用开头中括号（circle 名）辅助判断。
+	hasUnknownAuthor := strings.TrimSpace(fp.Artist) == ""
+	if !hasUnknownAuthor {
+		for _, cand := range g {
+			if strings.TrimSpace(cand.fp.Artist) == "" {
+				hasUnknownAuthor = true
+				break
+			}
+		}
+	}
+	if hasUnknownAuthor {
+		reason += "；**含作者未知条目**（无 artist tag），请优先人工确认"
+		if confidence == "high" {
+			confidence = "medium"
+		}
 	}
 
 	return &DedupCluster{

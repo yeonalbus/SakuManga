@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	"SakuManga/internal/models"
@@ -258,5 +259,151 @@ func TestDetectClustersNoArtistTag(t *testing.T) {
 	}
 	if clusters[0].Artist != "" {
 		t.Errorf("无画师 tag 时 Artist 应为空，得到 %q", clusters[0].Artist)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round42：方括号版本标记 / 空括号残留 / 跨字段池 / 作者硬否决
+// 依据：plans/round42-dedup-calibration-set.md（人工确认结论）
+// ─────────────────────────────────────────────────────────────
+
+// mkComicFull 构造带日文原名（TitleJpn）的测试漫画
+func mkComicFull(id, title, titleJpn string, tags []string, pageCount int) models.OfflineComic {
+	return models.OfflineComic{
+		ID:                id,
+		Title:             title,
+		TitleJpn:          titleJpn,
+		OnlineTags:        MarshalTagSlice(tags),
+		PageCount:         pageCount,
+		OriginalPageCount: pageCount,
+	}
+}
+
+func TestFingerprintTitleBracketVersionMarks(t *testing.T) {
+	// Round42：方括号形式的版本/语言/汉化标记必须剥离（此前只认圆括号），且剥离后不留空括号
+	cases := []struct {
+		title string
+		core  string
+	}{
+		{"[CIRCLE] サンプル [無修正]", "サンプル"},
+		{"[CIRCLE] サンプル [中国翻訳]", "サンプル"},
+		{"[CIRCLE] サンプル [Chinese]", "サンプル"},
+		{"[CIRCLE] サンプル [Digital]", "サンプル"},
+		{"[CIRCLE] サンプル [空気系☆漢化]", "サンプル"},
+		{"[CIRCLE] サンプル [廉价汉化组]", "サンプル"},
+		{"[CIRCLE] サンプル [C99]", "サンプル"},
+		{"[CIRCLE] サンプル (C99)", "サンプル"},
+		{"[CIRCLE] サンプル [江之下流个人AI润色]", "サンプル"},
+		// 空括号残留（根因 R3）：[DL版] 剥成 "[ ]" 后必须清空，不留痕
+		{"[CIRCLE] サンプル [DL版]", "サンプル"},
+		// 安全：作品名括注必须保留（黑名单式，不剥作品名）
+		{"[CIRCLE] とある本 (Fate/Grand Order)", "とある本 (fate/grand order)"},
+		{"[CIRCLE] とある本 (ブルーアーカイブ)", "とある本 (ブルーアーカイブ)"},
+	}
+	for _, c := range cases {
+		fp := fingerprintTitle(c.title, "")
+		if fp.Core != c.core {
+			t.Errorf("标题 %q：核心名 = %q，期望 %q", c.title, fp.Core, c.core)
+		}
+		if strings.ContainsAny(fp.Core, "[]") {
+			t.Errorf("标题 %q：核心名仍残留方括号 %q", c.title, fp.Core)
+		}
+	}
+}
+
+func TestFingerprintTitleUserReportedPair(t *testing.T) {
+	// 用户报告样本：同一作品的 [中国翻訳] [DL版] 版 vs [中国翻訳] 版（不同汉化组上传），
+	// 剥净版本标记后核心名必须一致（此前因 "[DL版]" 剥成 "[ ]" 残留而不同键）
+	a := "[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランド3 アルトリア&頼光編 (Fate/Grand Order) [中国翻訳] [DL版]"
+	b := "[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランド3 アルトリア&頼光編 (Fate/Grand Order) [中国翻訳]"
+	fa := fingerprintTitle(a, "muunyan")
+	fb := fingerprintTitle(b, "muunyan")
+	if fa.Core != fb.Core {
+		t.Errorf("用户报告样本核心名应一致：\n  A=%q\n  B=%q", fa.Core, fb.Core)
+	}
+	if fa.Volume != fb.Volume {
+		t.Errorf("卷号应一致：%q vs %q", fa.Volume, fb.Volume)
+	}
+}
+
+func TestDetectClustersUserReportedCase(t *testing.T) {
+	// 用户报告样本（端到端）：两本 title 是不同汉化组的罗马音，title_jpn 是同一日文原名
+	//（仅差 [DL版]）→ 双字段池应聚成 1 簇
+	comics := []models.OfflineComic{
+		mkComicFull("u1",
+			"[Yumenekoya (Muunyan)] Kyokutou Kenran Tobakutou Dream Island 3 - Artoria & Raikou Hen (Fate/Grand Order) [Chinese] [空気系☆漢化] [Digital]",
+			"[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランド3 アルトリア&頼光編 (Fate/Grand Order) [中国翻訳] [DL版]",
+			[]string{"artist:muunyan", "language:chinese", "language:translated"}, 112),
+		mkComicFull("u2",
+			"[Yumenekoya (Muunyan)] Kyokutou Kenran Tobakutou Dream Island 3 - Artoria & Raikou Hen (Fate/Grand Order) [Chinese] [黎欧出资汉化]",
+			"[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランド3 アルトリア&頼光編 (Fate/Grand Order) [中国翻訳]",
+			[]string{"artist:muunyan", "language:chinese", "language:translated"}, 112),
+	}
+	clusters := detectTitleClusters(comics, nil, false)
+	if len(clusters) != 1 {
+		t.Fatalf("用户报告样本应聚成 1 簇，得到 %d 簇", len(clusters))
+	}
+	if len(clusters[0].Members) != 2 {
+		t.Errorf("簇成员应为 2，得到 %d", len(clusters[0].Members))
+	}
+	if clusters[0].Confidence != "high" {
+		t.Errorf("页数相同 + 画师相同应为 high 置信，得到 %s", clusters[0].Confidence)
+	}
+	if clusters[0].Artist != "muunyan" {
+		t.Errorf("Artist 应为 muunyan，得到 %q", clusters[0].Artist)
+	}
+}
+
+func TestDetectClustersCrossFieldPool(t *testing.T) {
+	// 跨字段池：一本标题是罗马音（title_jpn 有日文原名），另一本标题本身就是日文原名 → 应聚组
+	comics := []models.OfflineComic{
+		mkComicFull("x1",
+			"[Yumenekoya] Kyokutou Kenran Tobakutou Dream Island - Miyamoto Musashi Hen [Chinese] [Digital]",
+			"[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランドー宮本武蔵編 (Fate/Grand Order) [中国翻訳] [無修正] [DL版]",
+			[]string{"artist:muunyan"}, 35),
+		mkComicFull("x2",
+			"[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランドー宮本武蔵編 (Fate/Grand Order) [中国翻訳] [DL版]",
+			"",
+			[]string{"artist:muunyan"}, 35),
+	}
+	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 1 {
+		t.Fatalf("跨字段同作品应聚成 1 簇，得到 %d 簇", len(clusters))
+	}
+}
+
+func TestDetectClustersAuthorVeto(t *testing.T) {
+	// 作者硬否决（D10）：同名同页数但 artist 不同 → 不聚组。
+	// 场景取自标定集：`[thirty8ght] サツキ` vs `[りおん] サツキ` 是不同作者的同名作品，
+	// 用户明确要求「必须避免」这类误报。
+	comics := []models.OfflineComic{
+		mkComicFull("v1", "[thirty8ght] サツキ (ブルーアーカイブ)", "", []string{"artist:38 | thirty8ght"}, 22),
+		mkComicFull("v2", "[りおん] サツキ (ブルーアーカイブ)", "", []string{"artist:rion"}, 22),
+	}
+	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 0 {
+		t.Fatalf("不同作者的同名作品不应聚组，得到 %d 簇", len(clusters))
+	}
+	// 反向对照：只把 artist 改成相同 → 应聚组（证明否决来自作者，而非标题差异）
+	comics[1].OnlineTags = MarshalTagSlice([]string{"artist:38 | thirty8ght"})
+	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 1 {
+		t.Fatalf("同作者同名应聚组，得到 %d 簇", len(clusters))
+	}
+}
+
+func TestDetectClustersNoArtistDowngrade(t *testing.T) {
+	// 作者未知（无 artist tag）：不否决（部分版权本有意不带 artist tag）→ 仍聚组，
+	// 但置信度降一档并标注「作者未知」，供人工优先复核
+	comics := []models.OfflineComic{
+		mkComic("w1", "[CIRCLE] とある本 [中国翻訳]", nil, 30),
+		mkComic("w2", "[CIRCLE] とある本 [無修正] [中国翻訳]", nil, 31),
+	}
+	clusters := detectTitleClusters(comics, nil, false)
+	if len(clusters) != 1 {
+		t.Fatalf("作者未知时不应否决，应聚成 1 簇，得到 %d 簇", len(clusters))
+	}
+	if clusters[0].Confidence != "medium" {
+		t.Errorf("作者未知应降一档为 medium，得到 %s", clusters[0].Confidence)
+	}
+	if !strings.Contains(clusters[0].Reason, "作者未知") {
+		t.Errorf("reason 应标注「作者未知」，得到 %q", clusters[0].Reason)
 	}
 }

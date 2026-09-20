@@ -166,7 +166,8 @@ src/
         ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片 + Round26-2 疑似重复簇对比：左右标签卡独立切换；Round43 删除成员 + 原地占位）
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
-        ├── OfflineMaintain.vue     # 离线书目维护（查重/移除 + 双列对比入口；Round43 疑似重复勾选批量 / 单卡删除）
+        ├── OfflineIgnore.vue       # 忽略清单独立页（Round44：成员卡片 + 同组标注 + 新增感知 + 失效清理）
+        ├── OfflineMaintain.vue     # 离线书目维护（Round44 v3：差异分组 + 组内就地对比 + 移除这本 / 都留 + 含文件勾选记忆 + 舒适/紧凑）
         ├── OfflineToplist.vue      # 离线排行榜
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
@@ -185,6 +186,7 @@ src/
 |            | `PreferenceSettings.vue`     | 偏好设置（默认菜单/回顶/评论/全屏/搜索继承）     |     —      |
 | 下载与离线 | `DownloadSettings.vue`       | 下载设置（含并发/归档并发/优先级，内嵌子面板）   |     ✔      |
 |            | `UpdateScanSettings.vue`     | 更新扫描（周扫描时刻/老化规则）                  |     ✔      |
+|            | `DedupSettings.vue`          | 维护查重（联网复核 / 移除时删除本地文件的默认值，Round44 从维护页移入） |     ✔      |
 | 标签管理   | `MyTagsSettings.vue`         | 我的标签（独立子面板，含返回按钮）               |     —      |
 |            | `TagMaintainSettings.vue`    | Tag 维护（双轨三态：设置/刷新/写回/进度）        |     ✔      |
 | 日志       | `LogSettings.vue`            | 日志（四类日志查看/尾随/清除）                   |     ✔      |
@@ -401,6 +403,7 @@ backend/
 | 改「忽略/删除后即时生效」（Round33） | `services/offline_task.go`（`SyncMaintainDedupClusters` / `InvalidateMaintainDedupResult`）、`services/maintain_auto.go`（`StoreMaintainDedupResult`）、`handlers/offline.go`（ignore/restore/remove 三入口）、`maintain_result_sync_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改疑似重复聚类（O3）      | `services/dedup_title.go`（清洗/判定/决策 + 簇）、`dedup_title_test.go`、`offline_dedup_e2e_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改疑似重复删除（Round43） | `src/views/offline/OfflineMaintain.vue`（勾选批量 / 单卡删除）、`src/views/offline/OfflineCompare.vue`（对比页删除 + 原地占位）、`services/maintain_result_sync_test.go`（删至剩 1 本即消失） |
+| 改维护界面 v3 / 忽略新增感知（Round44） | `src/views/offline/OfflineMaintain.vue`（差异分组 / 逐本移除 / 都留 / 含文件勾选 / 舒适紧凑）、`src/views/offline/OfflineIgnore.vue`（忽略清单独立页）、`src/components/settings/DedupSettings.vue`、`services/ignore.go`（成员快照 + `CountNewMembers` + `ListIgnoresWithMembers` + `AckIgnoreSnapshot` + `BackfillIgnoreSnapshots`）、`services/dedup_title.go` / `dedup_match.go`（忽略过滤改「有新增才列出」）、`models/ignore.go`（`SeenComicIDs`）、`models/dedup_setting.go`（`DeleteFileDefault`）、`handlers/offline.go`（list 带成员 + `:id/ack`）、`main.go`（启动回填快照）、`ignore_members_test.go`、`plans/round44-offline-maintain-ui-plan.md` |
 | 改 E 站请求限流           | `backend/internal/services/eh_ratelimit.go`（自适应：成功提速/失败退避）                              |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |

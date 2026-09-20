@@ -80,6 +80,8 @@ const removingId = ref('')
 const coverFailed = ref<Record<string, boolean>>({})
 // 批量删除：多选“建议删除”项后一次提交，避免反复“删除→刷新”
 const selectedIds = ref<string[]>([])
+// Round43：疑似重复区的勾选批量删除——与「建议删除」区状态完全独立，互不影响
+const selectedClusterIds = ref<string[]>([])
 
 // ── Round26 O2/O3：疑似重复簇 + 忽略标记 ──
 const clusters = ref<DedupClusterDTO[]>([]) // O3 疑似重复组（不含已忽略）
@@ -162,6 +164,11 @@ const loadResult = async () => {
     clusters.value = data?.clusters || []
     ignoredClusters.value = clusters.value.filter((c) => c.ignored)
     clusters.value = clusters.value.filter((c) => !c.ignored)
+    // Round43：清理勾选残留（成员可能已被删除、被忽略或已随簇重算消失）
+    const aliveMemberIds = new Set(
+      clusters.value.flatMap((c) => c.members.map((m) => m.comic.id)),
+    )
+    selectedClusterIds.value = selectedClusterIds.value.filter((id) => aliveMemberIds.has(id))
     resultStale.value = !!data?.stale
   } catch {
     // 结果暂未就绪，交给轮询下一轮
@@ -400,10 +407,10 @@ const isSelectAll = computed(
   () => removeItems.value.length > 0 && selectedIds.value.length === removeItems.value.length,
 )
 
-// 删除重复项：deleteFile=true 时同时物理删除本地文件
-const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
-  if (isRemoving.value) return
-  const c = item.comic
+// 删除本地漫画记录：deleteFile=true 时同时物理删除本地文件。
+// Round43：「建议删除」区与「疑似重复」区共用同一实现，避免两处确认文案 / 幽灵文件容错漂移。
+const doRemoveComic = async (c: OfflineComicDTO, deleteFile: boolean): Promise<boolean> => {
+  if (isRemoving.value) return false
   const title = c.title || '未命名'
 
   const confirmed = await modal.confirm(
@@ -412,7 +419,7 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
       : `确定仅删除《${title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
     deleteFile ? '删除记录 + 本地文件' : '删除记录（保留文件）',
   )
-  if (!confirmed) return
+  if (!confirmed) return false
 
   isRemoving.value = true
   removingId.value = c.id
@@ -429,15 +436,115 @@ const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
         deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
       )
     }
-    // Round33：后端已剪除该项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
-    selectedIds.value = selectedIds.value.filter((id) => id !== c.id)
-    await loadResult()
+    return true
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '删除失败')
+    return false
   } finally {
     isRemoving.value = false
     removingId.value = ''
+  }
+}
+
+// 删除重复项：deleteFile=true 时同时物理删除本地文件
+const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
+  const ok = await doRemoveComic(item.comic, deleteFile)
+  if (!ok) return
+  // Round33：后端已剪除该项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
+  selectedIds.value = selectedIds.value.filter((id) => id !== item.comic.id)
+  await loadResult()
+}
+
+// ── Round43：疑似重复区删除（成员勾选批量删除 / 单卡删除）──
+// 语义：疑似重复只是建议，删除粒度是「组内单个成员」——用户勾选若干本后一键删除，
+// 后端定向重算簇：某组删到只剩 1 本即不再构成疑似重复，该类自动消失（无需重新扫描）。
+
+// 已选本数涉及的组数（工具栏「涉及 K 组」）
+const selectedClusterGroupCount = computed(
+  () =>
+    activeClusters.value.filter((c) =>
+      c.members.some((m) => selectedClusterIds.value.includes(m.comic.id)),
+    ).length,
+)
+
+const isClusterMemberSelected = (id: string) => selectedClusterIds.value.includes(id)
+
+// 每组至少保留 1 本：某组已勾选「成员数 − 1」本时，最后 1 本禁止再勾（防止整组删空）
+const isClusterMemberLocked = (cluster: DedupClusterDTO, id: string) => {
+  if (isClusterMemberSelected(id)) return false
+  const selectedInGroup = cluster.members.filter((m) =>
+    selectedClusterIds.value.includes(m.comic.id),
+  ).length
+  return cluster.members.length > 1 && selectedInGroup >= cluster.members.length - 1
+}
+
+const toggleClusterMember = (cluster: DedupClusterDTO, id: string) => {
+  if (isRemoving.value) return
+  const idx = selectedClusterIds.value.indexOf(id)
+  if (idx >= 0) {
+    selectedClusterIds.value.splice(idx, 1)
+    return
+  }
+  if (isClusterMemberLocked(cluster, id)) {
+    toast.warning('每组至少保留 1 本，该组其余成员已被勾选')
+    return
+  }
+  selectedClusterIds.value.push(id)
+}
+
+// 单卡删除某成员（保留文件 / 含文件）
+const removeClusterMember = async (m: ClusterMemberDTO, deleteFile: boolean) => {
+  const ok = await doRemoveComic(m.comic, deleteFile)
+  if (!ok) return
+  selectedClusterIds.value = selectedClusterIds.value.filter((id) => id !== m.comic.id)
+  await loadResult()
+}
+
+// 批量删除勾选的疑似重复成员：一次提交后端，后端重算簇（某组删到只剩 1 本即自动消失）
+const removeSelectedClusterMembers = async (deleteFile: boolean) => {
+  if (isRemoving.value) return
+  const ids = [...selectedClusterIds.value]
+  if (ids.length === 0) {
+    toast.warning('请先勾选要删除的画廊')
+    return
+  }
+  const groups = selectedClusterGroupCount.value
+  const confirmed = await modal.confirm(
+    `确定批量删除选中的 ${ids.length} 本画廊（涉及 ${groups} 组）吗？\n\n每组均已保留至少 1 本；某组删到只剩 1 本后将自动从疑似重复列表消失。\n\n${
+      deleteFile ? '将同时删除本地文件，此操作不可恢复！' : '本地文件将保留。'
+    }`,
+    deleteFile ? '批量删除记录 + 本地文件' : '批量删除记录（保留文件）',
+  )
+  if (!confirmed) return
+
+  isRemoving.value = true
+  try {
+    const data = await http<{ ok: boolean; deleted?: number; alreadyDeleted?: boolean }>(
+      '/offline/maintain/remove',
+      {
+        method: 'POST',
+        body: JSON.stringify({ comicIds: ids, deleteFile }),
+      },
+    )
+    const deleted = data.deleted ?? ids.length
+    if (data.alreadyDeleted) {
+      toast.info(`已处理 ${deleted} 本（部分记录已不存在，视为已删除），已同步刷新列表`)
+    } else {
+      toast.success(
+        deleteFile
+          ? `已批量删除 ${deleted} 本（记录 + 本地文件）🗑️`
+          : `已批量删除 ${deleted} 本记录（保留本地文件）`,
+      )
+    }
+    selectedClusterIds.value = []
+    // Round33：后端已剪除已删项并重算疑似重复簇 → 重读即最新（无需重新扫描）
+    await loadResult()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '批量删除失败')
+  } finally {
+    isRemoving.value = false
   }
 }
 
@@ -878,6 +985,31 @@ onUnmounted(stopPolling)
       <!-- Round26 O3：疑似重复区（名称级弱证据，只建议，不自动处理） -->
       <div v-if="activeClusters.length > 0" class="section">
         <h3 class="section-title suspect">🔎 疑似重复（名称级，仅建议 · 不自动处理）</h3>
+        <!-- Round43：勾选批量删除工具栏（不给全选：由用户自行勾选后一键删除） -->
+        <div class="remove-toolbar suspect-toolbar">
+          <span class="selected-count suspect"
+            >已选 <b>{{ selectedClusterIds.length }}</b> 本<template v-if="selectedClusterGroupCount > 0">
+              · 涉及 {{ selectedClusterGroupCount }} 组</template
+            ></span
+          >
+          <span class="toolbar-hint">每组至少保留 1 本（同组最多可勾选「成员数 − 1」本）</span>
+          <div class="batch-actions">
+            <button
+              class="action-btn danger-soft"
+              :disabled="isRemoving || selectedClusterIds.length === 0"
+              @click="removeSelectedClusterMembers(false)"
+            >
+              {{ isRemoving ? '⏳ 处理中...' : '批量删除（保留文件）' }}
+            </button>
+            <button
+              class="action-btn danger"
+              :disabled="isRemoving || selectedClusterIds.length === 0"
+              @click="removeSelectedClusterMembers(true)"
+            >
+              {{ isRemoving ? '⏳ 处理中...' : '批量删除（含文件）' }}
+            </button>
+          </div>
+        </div>
         <div class="item-list">
           <div
             v-for="cluster in activeClusters"
@@ -915,9 +1047,28 @@ onUnmounted(stopPolling)
                 v-for="(m, mi) in cluster.members"
                 :key="m.comic.id"
                 class="member"
+                :class="{ selected: isClusterMemberSelected(m.comic.id) }"
                 :title="`打开本地详情：${m.comic.title}`"
                 @click="openClusterMember(m)"
               >
+                <!-- Round43：勾选框固定在卡片右上角 -->
+                <label
+                  class="member-check-corner"
+                  :class="{ locked: isClusterMemberLocked(cluster, m.comic.id) }"
+                  :title="
+                    isClusterMemberLocked(cluster, m.comic.id)
+                      ? '每组至少保留 1 本，该组其余成员已被勾选'
+                      : '勾选后可批量删除该画廊'
+                  "
+                  @click.stop
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isClusterMemberSelected(m.comic.id)"
+                    :disabled="isRemoving || isClusterMemberLocked(cluster, m.comic.id)"
+                    @change="toggleClusterMember(cluster, m.comic.id)"
+                  />
+                </label>
                 <div class="member-cover">
                   <img
                     v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
@@ -933,6 +1084,25 @@ onUnmounted(stopPolling)
                   <span v-if="m.lang" class="lang-chip">{{ m.lang }}</span>
                   <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
                   <span v-if="mi === 0 && cluster.artist" class="member-artist">artist: {{ cluster.artist }}</span>
+                </div>
+                <!-- Round43：单卡删除（保留文件 / 含文件） -->
+                <div class="member-actions" @click.stop>
+                  <button
+                    class="mini-btn"
+                    :disabled="isRemoving"
+                    title="仅删除该画廊的记录，本地文件保留"
+                    @click="removeClusterMember(m, false)"
+                  >
+                    {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '删除（保留文件）' }}
+                  </button>
+                  <button
+                    class="mini-btn danger"
+                    :disabled="isRemoving"
+                    title="删除该画廊记录并同时删除本地文件，不可恢复"
+                    @click="removeClusterMember(m, true)"
+                  >
+                    {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '删除（含文件）' }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1799,6 +1969,7 @@ onUnmounted(stopPolling)
   flex-shrink: 0;
   cursor: pointer;
   transition: border-color 0.15s;
+  position: relative;
 }
 .member:hover {
   border-color: var(--app-accent);
@@ -1858,6 +2029,78 @@ onUnmounted(stopPolling)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Round43：疑似重复成员——右上角勾选框 / 选中态 / 单卡删除按钮 */
+.selected-count.suspect {
+  color: #00c2a8;
+}
+.suspect-toolbar {
+  background-color: rgba(0, 194, 168, 0.06);
+  border-color: rgba(0, 194, 168, 0.28);
+}
+.toolbar-hint {
+  font-size: 0.72rem;
+  color: var(--app-text-muted);
+}
+.member.selected {
+  border-color: #00c2a8;
+  box-shadow: 0 0 0 1px rgba(0, 194, 168, 0.4);
+}
+.member-check-corner {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+}
+.member-check-corner input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #00c2a8;
+  cursor: pointer;
+}
+.member-check-corner.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.member-check-corner.locked input {
+  cursor: not-allowed;
+}
+.member-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.mini-btn {
+  border: none;
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: #5a3a3a;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.mini-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mini-btn.danger {
+  background-color: #ff7588;
 }
 
 /* 已忽略折叠区（O2） */

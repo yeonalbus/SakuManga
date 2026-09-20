@@ -238,3 +238,55 @@ func TestInvalidateMaintainDedupResultPrunesPair(t *testing.T) {
 		t.Error("定向同步后应清除 stale 标记")
 	}
 }
+
+// removeMemberForTest 复现 handler 的删除链路：删记录 → 缓存剪除 → 定向重算簇
+func removeMemberForTest(t *testing.T, db *gorm.DB, id string) {
+	t.Helper()
+	if err := RemoveDedupComic(db, id, false); err != nil {
+		t.Fatalf("删除漫画 %s 失败: %v", id, err)
+	}
+	InvalidateMaintainDedupResult([]string{id})
+	SyncMaintainDedupClusters(db)
+}
+
+// TestSyncMaintainDedupClustersAfterMemberRemoval 删除簇内成员 → 簇收缩 / 剩 1 本即消失（Round43）
+//
+// 需求语义：在疑似重复区删掉某组内的画廊后——
+//   - 该组仍有 ≥2 本 → 视为未处理完毕，继续显示（成员数收缩）
+//   - 该组只剩 1 本 → 视为处理完毕，不再显示该类
+func TestSyncMaintainDedupClustersAfterMemberRemoval(t *testing.T) {
+	resetMaintainResultForTest(t)
+	db := newSyncTestDB(t)
+	seedClusterComics(t, db)
+
+	res, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("增量维护查重失败: %v", err)
+	}
+	StoreMaintainDedupResult(res, false)
+	if got := GetMaintainDedupResult(); len(got.Clusters) != 1 || len(got.Clusters[0].Members) != 3 {
+		t.Fatalf("基线应为 1 簇 3 成员，得到 %d 簇", len(got.Clusters))
+	}
+
+	// 删掉 1 本（保留本地文件）→ 组内仍 2 本，继续显示
+	removeMemberForTest(t, db, "a1")
+	got := GetMaintainDedupResult()
+	if len(got.Clusters) != 1 || len(got.Clusters[0].Members) != 2 {
+		t.Fatalf("删 1 本后应为 2 成员 1 簇，得到 %d 簇", len(got.Clusters))
+	}
+	for _, m := range got.Clusters[0].Members {
+		if m.Comic.ID == "a1" {
+			t.Error("已删除的 a1 不应残留在簇成员中")
+		}
+	}
+
+	// 再删 1 本 → 组内只剩 1 本，不成组 → 该类不再显示
+	removeMemberForTest(t, db, "a2")
+	got = GetMaintainDedupResult()
+	if len(got.Clusters) != 0 {
+		t.Errorf("组内仅剩 1 本应视为处理完毕（不再显示该类），得到 %d 簇", len(got.Clusters))
+	}
+	if got.Stale {
+		t.Error("定向同步后应清除 stale 标记（前端不提示重新扫描）")
+	}
+}

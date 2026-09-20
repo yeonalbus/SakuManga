@@ -83,6 +83,9 @@ interface ClusterMemberDTO {
   comic: OfflineDetailDTO
   pageCount: number
   lang?: string
+  // Round43：本页内删除后原地占位（不重排标签卡，左右面板索引不跳动）
+  deleted?: boolean
+  deleteFile?: boolean
 }
 interface DedupClusterDTO {
   id: string
@@ -95,11 +98,76 @@ interface DedupClusterDTO {
 }
 const clusterMembers = ref<ClusterMemberDTO[]>([])
 const clusterReason = ref('')
+const clusterTitleKey = ref('')
 const leftIdx = ref(0)
 const rightIdx = ref(1)
 const memberLabel = (i: number) => String.fromCharCode(65 + i) // A / B / C…
-const clusterLeftComic = computed(() => clusterMembers.value[leftIdx.value]?.comic || null)
-const clusterRightComic = computed(() => clusterMembers.value[rightIdx.value]?.comic || null)
+const clusterLeftMember = computed(() => clusterMembers.value[leftIdx.value] || null)
+const clusterRightMember = computed(() => clusterMembers.value[rightIdx.value] || null)
+const clusterLeftComic = computed(() => clusterLeftMember.value?.comic || null)
+const clusterRightComic = computed(() => clusterRightMember.value?.comic || null)
+// Round43：未删除成员不足 2 本 → 该组已处理完毕（不再构成疑似重复组）
+const aliveClusterMembers = computed(() => clusterMembers.value.filter((m) => !m.deleted))
+const clusterDone = computed(
+  () => clusterMembers.value.length > 0 && aliveClusterMembers.value.length < 2,
+)
+
+// 切换标签卡：已删除的成员不可再选中（占位保留，仅作视觉参照）
+const selectClusterMember = (side: 'left' | 'right', i: number) => {
+  const m = clusterMembers.value[i]
+  if (!m) return
+  if (m.deleted) {
+    toast.warning(`成员 ${memberLabel(i)} 已删除，无法再参与对比`)
+    return
+  }
+  if (side === 'left') leftIdx.value = i
+  else rightIdx.value = i
+}
+
+// ── Round43：对比页删除成员（删除后原地占位，不重排标签卡）──
+const deleteTarget = ref<'left' | 'right' | null>(null)
+const pendingDeleteMember = computed(() => {
+  const side = deleteTarget.value
+  if (!side) return null
+  return side === 'left' ? clusterLeftMember.value : clusterRightMember.value
+})
+
+const openDeletePicker = (side: 'left' | 'right') => {
+  const m = side === 'left' ? clusterLeftMember.value : clusterRightMember.value
+  if (!m || m.deleted) return
+  deleteTarget.value = side
+}
+
+// 确认删除：deleteFile=false 仅删记录（保留本地文件）；true 同时物理删除本地文件
+const confirmDeleteMember = async (deleteFile: boolean) => {
+  const m = pendingDeleteMember.value
+  if (!m || m.deleted || removing.value) return
+  const c = m.comic
+  removing.value = true
+  try {
+    const data = await http<{ ok: boolean; alreadyDeleted?: boolean }>('/offline/maintain/remove', {
+      method: 'POST',
+      body: JSON.stringify({ comicId: c.id, deleteFile }),
+    })
+    if (data.alreadyDeleted) {
+      toast.info(`《${c.title}》记录已不存在（可能已在其他设备删除），已同步标记为已删除`)
+    } else {
+      toast.success(
+        deleteFile ? `《${c.title}》记录与本地文件已删除 🗑️` : `《${c.title}》记录已删除（保留本地文件）`,
+      )
+    }
+    // 原地占位：保留标签卡位置与左右索引，便于继续对比其余成员；
+    // 后端已定向重算疑似重复簇，返回维护页时该组按最新成员数显示（不足 2 本即消失）
+    m.deleted = true
+    m.deleteFile = deleteFile
+    deleteTarget.value = null
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    toast.error(msg || '删除失败')
+  } finally {
+    removing.value = false
+  }
+}
 
 const downloading = ref(false)
 const removing = ref(false)
@@ -144,12 +212,18 @@ const load = async () => {
       const cluster = (data?.clusters || []).find(
         (c) => c.titleKey === titleKey && (c.artist || '') === artist,
       )
-      if (!cluster || cluster.members.length < 2) {
+      if (!cluster) {
         error.value = '未找到对应的疑似重复组（结果可能已刷新或成员被忽略）。请返回维护页重新扫描后重试。'
+        return
+      }
+      if (cluster.members.length < 2) {
+        // Round43：组内只剩 1 本 → 该组已按「处理完毕」从疑似重复列表移除，无需再对比
+        error.value = '该疑似重复组已处理完毕（成员不足 2 本），无需再对比。请返回维护页查看最新结果。'
         return
       }
       clusterMembers.value = cluster.members
       clusterReason.value = cluster.reason
+      clusterTitleKey.value = cluster.titleKey
       leftIdx.value = 0
       rightIdx.value = Math.min(1, cluster.members.length - 1)
     } else {
@@ -276,6 +350,22 @@ onMounted(load)
       </div>
     </header>
 
+    <!-- Round43：组内剩余成员不足 2 本 → 该组已处理完毕（占位页保留，可继续查看） -->
+    <div
+      v-if="!loading && !error && compareType === 'cluster' && clusterDone"
+      class="cluster-done-banner"
+    >
+      <span class="done-icon">✅</span>
+      <div class="done-info">
+        <p class="done-title">该组已处理完毕</p>
+        <p class="done-sub">
+          「{{ clusterTitleKey }}」剩余 {{ aliveClusterMembers.length }} 本（不足 2 本），不再构成疑似重复组；
+          返回维护页后该组已从列表消失。
+        </p>
+      </div>
+      <button class="action-btn ghost" @click="goBack">← 返回维护页</button>
+    </div>
+
     <div v-if="loading" class="compare-state">
       <span class="spinner"></span>
       <p>加载对比数据...</p>
@@ -314,15 +404,25 @@ onMounted(load)
                   v-for="(m, i) in clusterMembers"
                   :key="m.comic.id"
                   class="cluster-tab"
-                  :class="{ active: i === leftIdx }"
-                  :title="m.comic.title"
-                  @click="leftIdx = i"
+                  :class="{ active: i === leftIdx, deleted: m.deleted }"
+                  :title="m.deleted ? `${m.comic.title}（已删除）` : m.comic.title"
+                  :disabled="m.deleted"
+                  @click="selectClusterMember('left', i)"
                 >
                   {{ memberLabel(i) }}
                 </button>
               </div>
+              <button
+                class="member-del-btn"
+                :disabled="removing || !clusterLeftMember || !!clusterLeftMember.deleted"
+                title="删除当前左侧成员（可选择仅删记录或连同本地文件）"
+                @click="openDeletePicker('left')"
+              >
+                🗑️ 删除此成员
+              </button>
             </header>
             <OfflineDetailPanel
+              v-if="clusterLeftMember && !clusterLeftMember.deleted"
               :comic="clusterLeftComic"
               :tags="buildTags(clusterLeftComic)"
               :badge="'成员 ' + memberLabel(leftIdx)"
@@ -330,6 +430,16 @@ onMounted(load)
               :reason="clusterReason"
               @open-full="openFullDetail(clusterLeftComic)"
             />
+            <!-- Round43：删除后原地占位（不重排标签卡，避免左右面板索引跳动） -->
+            <div v-else-if="clusterLeftMember" class="member-placeholder">
+              <div class="ph-icon">🗑️</div>
+              <p class="ph-title">{{ clusterLeftMember.comic.title }}</p>
+              <p class="ph-sub">
+                该成员已删除（{{
+                  clusterLeftMember.deleteFile ? '记录 + 本地文件' : '记录，本地文件已保留'
+                }}）。本位置保留为占位，标签卡 {{ memberLabel(leftIdx) }} 不可再选中。
+              </p>
+            </div>
           </div>
         </template>
         <template v-else>
@@ -370,15 +480,25 @@ onMounted(load)
                   v-for="(m, i) in clusterMembers"
                   :key="m.comic.id"
                   class="cluster-tab"
-                  :class="{ active: i === rightIdx }"
-                  :title="m.comic.title"
-                  @click="rightIdx = i"
+                  :class="{ active: i === rightIdx, deleted: m.deleted }"
+                  :title="m.deleted ? `${m.comic.title}（已删除）` : m.comic.title"
+                  :disabled="m.deleted"
+                  @click="selectClusterMember('right', i)"
                 >
                   {{ memberLabel(i) }}
                 </button>
               </div>
+              <button
+                class="member-del-btn"
+                :disabled="removing || !clusterRightMember || !!clusterRightMember.deleted"
+                title="删除当前右侧成员（可选择仅删记录或连同本地文件）"
+                @click="openDeletePicker('right')"
+              >
+                🗑️ 删除此成员
+              </button>
             </header>
             <OfflineDetailPanel
+              v-if="clusterRightMember && !clusterRightMember.deleted"
               :comic="clusterRightComic"
               :tags="buildTags(clusterRightComic)"
               :badge="'成员 ' + memberLabel(rightIdx)"
@@ -386,6 +506,16 @@ onMounted(load)
               :reason="clusterReason"
               @open-full="openFullDetail(clusterRightComic)"
             />
+            <!-- Round43：删除后原地占位（不重排标签卡，避免左右面板索引跳动） -->
+            <div v-else-if="clusterRightMember" class="member-placeholder">
+              <div class="ph-icon">🗑️</div>
+              <p class="ph-title">{{ clusterRightMember.comic.title }}</p>
+              <p class="ph-sub">
+                该成员已删除（{{
+                  clusterRightMember.deleteFile ? '记录 + 本地文件' : '记录，本地文件已保留'
+                }}）。本位置保留为占位，标签卡 {{ memberLabel(rightIdx) }} 不可再选中。
+              </p>
+            </div>
           </div>
         </template>
         <template v-else>
@@ -398,6 +528,31 @@ onMounted(load)
             @open-full="openFullDetail(rightComic)"
           />
         </template>
+      </div>
+    </div>
+
+    <!-- Round43：删除成员弹层（二选一：仅删记录 / 记录 + 本地文件） -->
+    <div v-if="deleteTarget" class="modal-mask" @click.self="deleteTarget = null">
+      <div class="modal-box">
+        <div class="modal-head">
+          <span class="modal-title">🗑️ 删除该成员</span>
+          <button class="modal-close" title="关闭" @click="deleteTarget = null">×</button>
+        </div>
+        <p class="modal-target">《{{ pendingDeleteMember?.comic.title }}》</p>
+        <p class="modal-path">📁 {{ pendingDeleteMember?.comic.localPath || '—' }}</p>
+        <p class="modal-sub">
+          删除后该成员在本页原地占位（标签卡置灰、不可再选中），后端会立即重算该疑似重复组；
+          组内删到只剩 1 本时，该组不再显示于疑似重复列表。
+        </p>
+        <div class="modal-actions">
+          <button class="action-btn ghost" @click="deleteTarget = null">取消</button>
+          <button class="action-btn primary" :disabled="removing" @click="confirmDeleteMember(false)">
+            {{ removing ? '⏳ 处理中...' : '仅删除记录（保留文件）' }}
+          </button>
+          <button class="action-btn danger" :disabled="removing" @click="confirmDeleteMember(true)">
+            {{ removing ? '⏳ 处理中...' : '删除记录 + 本地文件' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -650,5 +805,165 @@ onMounted(load)
   background: var(--app-accent);
   color: #fff;
   border-color: var(--app-accent);
+}
+
+/* ── Round43：对比页删除成员（标签卡置灰 / 删除按钮 / 占位页 / 完毕横幅 / 弹层） ── */
+.cluster-tab.deleted {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+.member-del-btn {
+  border: 1px solid rgba(255, 93, 115, 0.5);
+  background: transparent;
+  color: #ff8898;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.member-del-btn:hover:not(:disabled) {
+  background: rgba(255, 93, 115, 0.12);
+  color: #ffb3bd;
+}
+.member-del-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.member-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 260px;
+  padding: 32px 24px;
+  text-align: center;
+  background: var(--app-surface-2);
+  border: 1px dashed var(--app-border-3);
+  border-radius: 10px;
+  opacity: 0.85;
+}
+.member-placeholder .ph-icon {
+  font-size: 2.4rem;
+}
+.member-placeholder .ph-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--app-text-2);
+  word-break: break-all;
+}
+.member-placeholder .ph-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--app-text-3);
+  max-width: 420px;
+}
+.cluster-done-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background-color: rgba(0, 168, 150, 0.08);
+  border: 1px solid rgba(0, 168, 150, 0.4);
+  border-left: 3px solid #00a896;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.cluster-done-banner .done-icon {
+  font-size: 1.2rem;
+}
+.cluster-done-banner .done-info {
+  flex: 1;
+  min-width: 0;
+}
+.cluster-done-banner .done-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #4fd1c0;
+}
+.cluster-done-banner .done-sub {
+  margin: 4px 0 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--app-text-3);
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal-box {
+  width: 520px;
+  max-width: 92vw;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.modal-title {
+  flex: 1;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--app-text-strong);
+}
+.modal-close {
+  border: none;
+  background: transparent;
+  color: var(--app-text-3);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.modal-close:hover {
+  color: var(--app-text-strong);
+  background: var(--app-surface-3);
+}
+.modal-target {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--app-text-strong);
+  word-break: break-all;
+}
+.modal-path {
+  margin: 0;
+  font-size: 0.74rem;
+  font-family: Consolas, monospace;
+  color: #7ec8ff;
+  word-break: break-all;
+}
+.modal-sub {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: var(--app-text-3);
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }
 </style>

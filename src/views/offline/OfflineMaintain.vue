@@ -34,6 +34,7 @@ interface ClusterMemberDTO {
   comic: OfflineComicDTO
   pageCount: number
   lang?: string
+  artist?: string // Round43：成员各自的 artist tag（缺失时卡片显示 artist: null）
 }
 interface DedupClusterDTO {
   id: string
@@ -1044,7 +1045,7 @@ onUnmounted(stopPolling)
             </div>
             <div class="members">
               <div
-                v-for="(m, mi) in cluster.members"
+                v-for="m in cluster.members"
                 :key="m.comic.id"
                 class="member"
                 :class="{ selected: isClusterMemberSelected(m.comic.id) }"
@@ -1079,12 +1080,16 @@ onUnmounted(stopPolling)
                   />
                   <span v-else class="cover-fallback">{{ (cluster.titleKey || '?').slice(0, 1) }}</span>
                 </div>
-                <div class="member-title">{{ m.comic.title }}</div>
-                <div class="member-meta">
-                  <span v-if="m.lang" class="lang-chip">{{ m.lang }}</span>
-                  <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
-                  <span v-if="mi === 0 && cluster.artist" class="member-artist">artist: {{ cluster.artist }}</span>
+                <!-- Round43：固定 4 行——标题 2 行（不足留空） / 语言 + 页数 1 行 / 画师 1 行，
+                     使同组各卡片内容高度一致，删除按钮位置对齐 -->
+                <div class="member-title" :class="{ 'is-empty': !m.comic.title }">
+                  {{ m.comic.title || '（无标题）' }}
                 </div>
+                <div class="member-meta">
+                  <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
+                  <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
+                </div>
+                <div class="member-artist">artist: {{ m.artist || 'null' }}</div>
                 <!-- Round43：单卡删除（保留文件 / 含文件） -->
                 <div class="member-actions" @click.stop>
                   <button
@@ -1999,17 +2004,24 @@ onUnmounted(stopPolling)
   font-size: 0.78rem;
   color: var(--app-text-strong);
   line-height: 1.35;
+  /* Round43：固定两行高度——标题不足两行用空行占位，保证同组卡片内容与按钮位置对齐 */
+  height: 2.7em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 2.1em;
+  word-break: break-word;
+}
+/* 无标题：灰字占位，仍占满固定的两行高度 */
+.member-title.is-empty {
+  color: var(--app-text-muted);
 }
 .member-meta {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  min-width: 0;
 }
 .lang-chip {
   font-size: 0.68rem;
@@ -2018,14 +2030,28 @@ onUnmounted(stopPolling)
   border: 1px solid var(--app-border-3);
   padding: 1px 6px;
   border-radius: 8px;
+  /* 长语言名（如 chinese (simplified)）省略，保证「页数」始终可见 */
+  display: inline-block;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Round43：无 language tag 的成员显示 null（弱化样式，与真实语言区分） */
+.lang-chip.is-null {
+  color: var(--app-text-muted);
+  background: transparent;
+  border-style: dashed;
 }
 .member-pages {
   font-size: 0.7rem;
   color: var(--app-text-3);
+  flex-shrink: 0;
 }
 .member-artist {
   font-size: 0.68rem;
   color: var(--app-text-muted);
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

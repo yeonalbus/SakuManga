@@ -422,8 +422,13 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		maxDiff := 0
 		for _, idx := range members {
 			c := cands[idx]
-			lang := extractNamespaceTag(UnmarshalTagSlice(c.comic.OnlineTags), "language")
-			membersOut = append(membersOut, ClusterMember{Comic: *c.comic, PageCount: c.pages, Lang: lang})
+			tags := UnmarshalTagSlice(c.comic.OnlineTags)
+			membersOut = append(membersOut, ClusterMember{
+				Comic:     *c.comic,
+				PageCount: c.pages,
+				Lang:      extractNamespaceTag(tags, "language"),
+				Artist:    extractNamespaceTag(tags, "artist"), // Round43：成员各自的画师
+			})
 		}
 		for i := 0; i < len(membersOut); i++ {
 			for j := i + 1; j < len(membersOut); j++ {

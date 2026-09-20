@@ -83,6 +83,7 @@ interface ClusterMemberDTO {
   comic: OfflineDetailDTO
   pageCount: number
   lang?: string
+  artist?: string // Round43：成员各自的 artist tag（后端新增字段，本页暂不展示）
   // Round43：本页内删除后原地占位（不重排标签卡，左右面板索引不跳动）
   deleted?: boolean
   deleteFile?: boolean

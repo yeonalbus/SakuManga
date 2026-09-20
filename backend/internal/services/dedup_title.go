@@ -51,6 +51,8 @@ type ClusterMember struct {
 	Comic     models.OfflineComic `json:"comic"`
 	PageCount int                 `json:"pageCount"` // 物理页数（OriginalPageCount 优先，隐藏页不影响比对）
 	Lang      string              `json:"lang,omitempty"`
+	// Round43：成员各自的 artist tag（不同于组级 Artist——组内可能存在「作者未知」成员，前端逐卡展示）
+	Artist string `json:"artist,omitempty"`
 }
 
 // TitleFingerprint 标题指纹（清洗层输出）
@@ -474,7 +476,12 @@ func buildCluster(g []*clusterCandidate) *DedupCluster {
 		if pc <= 0 {
 			pc = cand.comic.PageCount
 		}
-		members = append(members, ClusterMember{Comic: *cand.comic, PageCount: pc, Lang: lang})
+		members = append(members, ClusterMember{
+			Comic:     *cand.comic,
+			PageCount: pc,
+			Lang:      lang,
+			Artist:    extractNamespaceTag(tags, "artist"),
+		})
 	}
 	for i := 0; i < len(members); i++ {
 		for j := i + 1; j < len(members); j++ {

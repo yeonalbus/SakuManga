@@ -163,10 +163,10 @@ src/
         ├── OfflineHome.vue         # 离线首页（翻页回顶 + 日期跳页）
         ├── OfflineBookshelf.vue    # 离线书架（Round38：导入清单 / 设封面入口）
         ├── OfflineBookshelfWall.vue # 书架墙（Round38：未读仪表盘 + 导入清单 + 排序模式 + 设封面）
-        ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片 + Round26-2 疑似重复簇对比：左右标签卡独立切换）
+        ├── OfflineCompare.vue      # 离线双列对比（更新/维护对照片 + Round26-2 疑似重复簇对比：左右标签卡独立切换；Round43 删除成员 + 原地占位）
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
-        ├── OfflineMaintain.vue     # 离线书目维护（查重/移除 + 双列对比入口）
+        ├── OfflineMaintain.vue     # 离线书目维护（查重/移除 + 双列对比入口；Round43 疑似重复勾选批量 / 单卡删除）
         ├── OfflineToplist.vue      # 离线排行榜
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
@@ -400,6 +400,7 @@ backend/
 | 改维护查重/忽略标记（O2） | `backend/internal/handlers/offline.go`（ignore 三接口）、`services/ignore.go`、`models/ignore.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改「忽略/删除后即时生效」（Round33） | `services/offline_task.go`（`SyncMaintainDedupClusters` / `InvalidateMaintainDedupResult`）、`services/maintain_auto.go`（`StoreMaintainDedupResult`）、`handlers/offline.go`（ignore/restore/remove 三入口）、`maintain_result_sync_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改疑似重复聚类（O3）      | `services/dedup_title.go`（清洗/判定/决策 + 簇）、`dedup_title_test.go`、`offline_dedup_e2e_test.go`、`src/views/offline/OfflineMaintain.vue` |
+| 改疑似重复删除（Round43） | `src/views/offline/OfflineMaintain.vue`（勾选批量 / 单卡删除）、`src/views/offline/OfflineCompare.vue`（对比页删除 + 原地占位）、`services/maintain_result_sync_test.go`（删至剩 1 本即消失） |
 | 改 E 站请求限流           | `backend/internal/services/eh_ratelimit.go`（自适应：成功提速/失败退避）                              |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |

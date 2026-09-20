@@ -51,6 +51,21 @@
 - `aliveClusterMembers < 2` 时顶部横幅提示该组已处理完毕。
 - 顺带修文案：命中「簇存在但成员 <2」时不再误报「结果可能已刷新，请重新扫描」。
 
+### 4.3 成员卡片布局一致性
+
+问题：卡片内容行数随数据变化（有无语言 / 有无画师），导致同组卡片高度与删除按钮位置参差。
+约定**固定 4 行**结构（组内一致，跨组允许高低不同）：
+
+| 行 | 内容 | 缺失时 |
+|----|------|--------|
+| 1–2 | 标题（固定两行高度） | 无标题 → 灰字「（无标题）」，**仍占两行** |
+| 3 | 语言 chip + 页数 | 无 language tag → chip 显示 `null`（虚线弱化样式）；页数恒显示 |
+| 4 | `artist: xxx` | 无 artist tag → `artist: null`（整组都无也逐卡显示，保持结构一致） |
+
+配套改动：`ClusterMember` 新增成员级 `Artist` 字段（原模板用组级 `cluster.artist`，
+对「作者未知」成员会显示不属于它的画师名）；语言 chip 限宽 96px 省略号，保证「页数」始终可见。
+卡片宽度保持 168px。
+
 ## 5. 验证
 
 - `npm run type-check` 通过。
@@ -60,6 +75,6 @@
 ## 6. 影响面
 
 - 前端：`src/views/offline/OfflineMaintain.vue`、`src/views/offline/OfflineCompare.vue`
-- 后端：仅测试 `backend/internal/services/maintain_result_sync_test.go`（无生产逻辑改动）
+- 后端：`services/dedup_title.go` / `services/dedup_match.go`（`ClusterMember` 新增成员级 `artist`）、`maintain_result_sync_test.go`（回归测试）
 - 文档：`README.md`、`VerNotes/wiki.md`、`PROJECT_TREE.md`
 - 发布产物：需按惯例 `npm run build` 同步 `backend/webui/dist`（单独 `chore(build)` 提交）

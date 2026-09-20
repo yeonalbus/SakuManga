@@ -139,6 +139,8 @@ const onLinkClick = (e: MouseEvent) => {
     <!-- Round3-任务2：更新/维护入口仅管理员可见 -->
     <router-link v-if="isAdmin" to="/offline/update">更新</router-link>
     <router-link v-if="isAdmin" to="/offline/maintain">维护</router-link>
+    <!-- Round44：忽略清单独立页（维护页的已忽略内容都收在这里） -->
+    <router-link v-if="isAdmin" to="/offline/ignore">忽略清单</router-link>
     <router-link to="/offline/toplist">排行榜</router-link>
     <router-link to="/offline/history">历史记录</router-link>
 

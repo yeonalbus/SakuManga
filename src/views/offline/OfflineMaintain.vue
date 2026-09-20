@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
 
-const { modal, toast } = useUI()
-const router = useRouter()
+// ─────────────────────────────────────────────────────────────
+// Round44：本地书库维护 v3
+//
+// 设计要点（珱垣拍板，见 plans/round44-offline-maintain-ui-plan.md）：
+//   - 目标「彻底清零」：主列表只显示待处理项，已忽略内容移出（忽略清单独立页）；
+//   - 分组折叠总览：按「两本差在哪」分 6 类，默认只展开「高度相似」；
+//   - 成员级动作统一为「移除这本」（选删除谁）；「保留」只有组级「都留（不再提示）」；
+//   - 差异 chips 让用户不进对比页也能判断；需要细节时在列表内就地展开对比；
+//   - 「含文件」为页面级勾选，默认不勾、记忆上次选择（存后端设置）；
+//   - 忽略＝"直到有变化为止"：命中忽略且无新增的组静默；出现忽略后新入库的本子才列出并标注。
+// ─────────────────────────────────────────────────────────────
 
-// 后端 GET /offline/maintain 返回的离线漫画 DTO
+const { modal, toast } = useUI()
+
 interface OfflineComicDTO {
   id: string
   title: string
@@ -20,22 +29,24 @@ interface OfflineComicDTO {
   fileSize?: number
   gid?: string
   sourceMode?: string
+  onlineTags?: string
 }
 
 interface DedupItemDTO {
   comic: OfflineComicDTO
   reason: string // 重复原因
   keep: boolean // true=建议保留，false=建议删除
-  rule?: string // Round26 O2：gid | hash | parent | signature（仅 parent 可忽略）
+  rule?: string // gid | hash | parent | signature（仅 parent 可忽略）
 }
 
-// Round26 O3：疑似重复组（名称级弱证据，只建议）
 interface ClusterMemberDTO {
   comic: OfflineComicDTO
   pageCount: number
   lang?: string
-  artist?: string // Round43：成员各自的 artist tag（缺失时卡片显示 artist: null）
+  artist?: string
 }
+
+// 疑似重复组（名称级弱证据，只建议）
 interface DedupClusterDTO {
   id: string
   titleKey: string
@@ -43,56 +54,24 @@ interface DedupClusterDTO {
   confidence: 'high' | 'medium'
   reason: string
   members: ClusterMemberDTO[]
-  ignored?: boolean // 全量核对时命中忽略（增量已跳过，不会返回）
-}
-
-// Round26 O2：忽略清单条目
-interface IgnoreItemDTO {
-  id: string
-  type: 'title' | 'gid' | 'comic'
-  titleKey?: string
-  artist?: string
-  gid?: string
-  comicId?: string
-  comicTitle?: string // comic 型：被忽略漫画的标题（后端补查）
-  note?: string
-  createdAt: string
+  ignored?: boolean // 命中忽略但出现"忽略后新增"成员（Round44）
+  ignoredNewCount?: number
+  ignoreId?: string
 }
 
 interface DedupResultDTO {
   items: DedupItemDTO[]
-  clusters?: DedupClusterDTO[] // Round26 O3
-  finishedAt?: number // 结果生成时间戳(ms)
-  stale?: boolean // 结果是否已过期（删除操作后置 true，提示重新扫描）
+  clusters?: DedupClusterDTO[]
+  finishedAt?: number
+  stale?: boolean
 }
 
-// 需求4（⑨ 改造）：书库变更与查重结果的同步状态（进入维护界面时仅用于「过期提示」，不再自动触发增量查重）
 interface UnsyncedStatusDTO {
-  lastLibraryChange: number // 书库最近一次变更时间戳(ms)
-  resultFinishedAt: number // 最近一次查重结果生成时间戳(ms)
-  hasUnsynced: boolean // 是否存在尚未反映到查重结果的变更
+  lastLibraryChange: number
+  resultFinishedAt: number
+  hasUnsynced: boolean
 }
 
-const items = ref<DedupItemDTO[]>([])
-const resultStale = ref(false) // 幽灵文件修复：结果过期标记（跨设备删除后旧缓存不可信）
-const isScanning = ref(false)
-const isRemoving = ref(false)
-const removingId = ref('')
-const coverFailed = ref<Record<string, boolean>>({})
-// 批量删除：多选“建议删除”项后一次提交，避免反复“删除→刷新”
-const selectedIds = ref<string[]>([])
-// Round43：疑似重复区的勾选批量删除——与「建议删除」区状态完全独立，互不影响
-const selectedClusterIds = ref<string[]>([])
-
-// ── Round26 O2/O3：疑似重复簇 + 忽略标记 ──
-const clusters = ref<DedupClusterDTO[]>([]) // O3 疑似重复组（不含已忽略）
-const ignoredClusters = ref<DedupClusterDTO[]>([]) // 全量核对返回的已忽略簇（折叠区展示）
-const ignoreItems = ref<IgnoreItemDTO[]>([]) // O2 忽略清单
-const ignoreModalOpen = ref(false)
-const ignoreCount = computed(() => ignoreItems.value.length)
-const activeClusters = computed(() => clusters.value.filter((c) => !c.ignored))
-
-// ── 任务进度（问题3：异步任务 + 进度轮询，让用户看到“现在进度在哪”）──
 interface OfflineTaskState {
   type: 'maintain' | 'update'
   status: 'idle' | 'running' | 'paused' | 'success' | 'error' | 'cancelled'
@@ -106,7 +85,26 @@ interface OfflineTaskState {
   error?: string
 }
 
+// ── 状态 ──
+const items = ref<DedupItemDTO[]>([])
+const clusters = ref<DedupClusterDTO[]>([])
+const resultStale = ref(false)
+const isScanning = ref(false)
+const isRemoving = ref(false)
+const removingId = ref('')
+const coverFailed = ref<Record<string, boolean>>({})
+const deleteFile = ref(false) // 「含文件」勾选（记忆于后端设置）
+const density = ref<'comfortable' | 'compact'>(readDensity())
+const moreMenuOpen = ref(false)
+const expanded = ref<Record<string, boolean>>({}) // 就地展开对比的簇 id
+const openGroups = ref<Record<string, boolean>>({ F: true, REMOVE: true })
+const processedCount = ref(0) // 本次进入页面后已处理的组数（进度条用）
+
 const taskState = ref<OfflineTaskState | null>(null)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const isTaskPaused = computed(() => taskState.value?.status === 'paused')
+const isTaskRunning = computed(() => taskState.value?.status === 'running')
 const progressPercent = computed(() => {
   const s = taskState.value
   if (!s || s.total <= 0) return 0
@@ -114,11 +112,162 @@ const progressPercent = computed(() => {
 })
 const phaseText = computed(() => taskState.value?.phase || '')
 const currentTitle = computed(() => taskState.value?.currentTitle || '')
-// Round29：暂停/继续/取消（任务控制按钮组）
-const isTaskPaused = computed(() => taskState.value?.status === 'paused')
-const isTaskRunning = computed(() => taskState.value?.status === 'running')
-let pollTimer: ReturnType<typeof setInterval> | null = null
 
+const keepItems = computed(() => items.value.filter((i) => i.keep))
+const removeItems = computed(() => items.value.filter((i) => !i.keep))
+
+// ── 标签 / 差异判定（纯前端，数据已在 clusters 内）──
+const parseTags = (raw?: string): string[] => {
+  if (!raw) return []
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.map((t) => String(t)) : []
+  } catch {
+    return []
+  }
+}
+const hasChineseTag = (c: OfflineComicDTO) =>
+  parseTags(c.onlineTags).some((t) => t.toLowerCase() === 'language:chinese')
+const hasDecensored = (c: OfflineComicDTO) =>
+  (c.title || '').toLowerCase().includes('decensored') ||
+  parseTags(c.onlineTags).some((t) => t.toLowerCase().includes('decensored'))
+
+const sizeRatio = (a?: number, b?: number) => {
+  if (!a || !b || a <= 0 || b <= 0) return 1
+  return a > b ? a / b : b / a
+}
+const dirOf = (p?: string) => {
+  if (!p) return ''
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.slice(-2).join('/')
+}
+
+// 「这两本差在哪」：分类（决定进哪个分组）+ chips（卡片上直接展示）
+const classify = (cl: DedupClusterDTO): string => {
+  const ms = cl.members
+  if (ms.length >= 3) return 'MULTI'
+  if (ms.length < 2) return 'F'
+  const [a, b] = ms
+  if (hasChineseTag(a.comic) !== hasChineseTag(b.comic)) return 'A'
+  if (Math.abs((a.pageCount || 0) - (b.pageCount || 0)) > 5) return 'C'
+  if (hasDecensored(a.comic) !== hasDecensored(b.comic)) return 'D'
+  if (sizeRatio(a.comic.fileSize, b.comic.fileSize) >= 1.5) return 'E'
+  return 'F'
+}
+
+const diffChips = (cl: DedupClusterDTO): string[] => {
+  const out: string[] = []
+  const ms = cl.members
+  if (ms.length >= 3) out.push(`${ms.length} 本一组`)
+  if (ms.length >= 2) {
+    const [a, b] = ms
+    out.push(`页数 ${a.pageCount || 0} vs ${b.pageCount || 0}`)
+    const r = sizeRatio(a.comic.fileSize, b.comic.fileSize)
+    if (r >= 1.5) out.push(`体积 ${r.toFixed(1)}×`)
+    if ((a.lang || '') !== (b.lang || '')) out.push(`语言 ${a.lang || '—'} / ${b.lang || '—'}`)
+    if (hasDecensored(a.comic) !== hasDecensored(b.comic)) out.push('去码标记不同')
+    out.push(dirOf(a.comic.localPath) === dirOf(b.comic.localPath) ? '同目录' : '不同目录')
+  }
+  return out
+}
+
+const chipClass = (chip: string) => {
+  if (chip.startsWith('语言')) return 'diff lang'
+  if (chip.startsWith('体积')) return 'diff size'
+  if (chip.startsWith('页数')) return 'diff page'
+  return 'diff'
+}
+
+const GROUP_META: Record<string, { name: string; desc: string }> = {
+  F: { name: '高度相似', desc: '标题 / 页数 / 体积几乎一致 —— 最像重复下载，建议先处理' },
+  A: { name: '语言版本不同', desc: '一本中文版、一本无中文标记 —— 常常两本都要留' },
+  E: { name: '体积差异大', desc: '同作品不同压制 / 画质 —— 留哪本看清晰度' },
+  C: { name: '页数差异大', desc: '页数差 > 5 页 —— 可能是合集 / 分卷 / 重绘版' },
+  D: { name: '去码 / 无码不同', desc: '标题或标签带 [Decensored] 差异' },
+  MULTI: { name: '三本及以上', desc: '组内 3 本以上，可逐个移除' },
+}
+const GROUP_ORDER = ['F', 'A', 'E', 'C', 'D', 'MULTI']
+
+// 分组：待处理簇（含"此前已忽略 · 有新增"的簇，它们也需要处理）
+const groupedClusters = computed(() => {
+  const byCat: Record<string, DedupClusterDTO[]> = {}
+  for (const cl of clusters.value) {
+    const cat = classify(cl)
+    ;(byCat[cat] = byCat[cat] || []).push(cl)
+  }
+  return GROUP_ORDER.filter((k) => byCat[k]?.length).map((k) => ({
+    key: k,
+    meta: GROUP_META[k],
+    list: byCat[k],
+  }))
+})
+
+// 顶部忽略提示：命中忽略但出现"忽略后新增"的组
+const newIgnoreClusters = computed(() => clusters.value.filter((c) => c.ignored))
+const newIgnoreMemberCount = computed(() =>
+  newIgnoreClusters.value.reduce((s, c) => s + (c.ignoredNewCount || 0), 0),
+)
+
+// ── 持久化（前端偏好）──
+const DENSITY_KEY = 'saku-maintain-density'
+function readDensity(): 'comfortable' | 'compact' {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable'
+  } catch {
+    return 'comfortable'
+  }
+}
+const setDensity = (v: 'comfortable' | 'compact') => {
+  density.value = v
+  try {
+    localStorage.setItem(DENSITY_KEY, v)
+  } catch {
+    /* 忽略 */
+  }
+}
+
+// ── 数据加载 ──
+const loadResult = async () => {
+  try {
+    const data = await http<DedupResultDTO>('/offline/maintain/result')
+    items.value = data?.items || []
+    clusters.value = data?.clusters || []
+    resultStale.value = !!data?.stale
+  } catch {
+    // 结果暂未就绪，交给轮询下一轮
+  }
+}
+
+// Round44：查重设置（联网复核 + 「含文件」记忆）
+const loadDedupSetting = async () => {
+  try {
+    const s = await http<{ onlineVerify?: boolean; deleteFileDefault?: boolean }>(
+      '/offline/dedup/setting',
+    )
+    deleteFile.value = !!s?.deleteFileDefault
+  } catch {
+    deleteFile.value = false
+  }
+}
+
+const onDeleteFileChange = async () => {
+  try {
+    await http('/offline/dedup/setting', {
+      method: 'POST',
+      body: JSON.stringify({ deleteFileDefault: deleteFile.value }),
+    })
+    toast.info(
+      deleteFile.value
+        ? '已开启：之后的移除会同时删除本地文件（不可恢复）'
+        : '已关闭：之后只移除记录，本地文件保留',
+    )
+  } catch (err) {
+    deleteFile.value = !deleteFile.value
+    toast.error(err instanceof Error ? err.message : '设置保存失败')
+  }
+}
+
+// ── 任务控制（暂停 / 继续 / 取消）──
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
@@ -126,15 +275,13 @@ const stopPolling = () => {
   }
 }
 
-// Round29：任务控制（暂停/继续/取消，作用于单槽位任务）
 const controlTask = async (action: 'pause' | 'resume') => {
   try {
     await http(`/offline/task/${action}`, { method: 'POST' })
     if (taskState.value) {
       taskState.value = { ...taskState.value, status: action === 'pause' ? 'paused' : 'running' }
     }
-    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
-    else toast.info('▶ 已继续')
+    toast.info(action === 'pause' ? '⏸ 已暂停，可继续或取消' : '▶ 已继续')
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
@@ -150,173 +297,12 @@ const cancelTask = async () => {
   try {
     await http('/offline/task/cancel', { method: 'POST' })
     toast.info('已请求取消，正在停止…')
-    // 交由轮询接收 cancelled 终态收尾
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '取消失败，任务可能已完成')
   }
 }
 
-// 拉取查重结果（任务完成后调用）
-const loadResult = async () => {
-  try {
-    const data = await http<DedupResultDTO>('/offline/maintain/result')
-    items.value = data?.items || []
-    clusters.value = data?.clusters || []
-    ignoredClusters.value = clusters.value.filter((c) => c.ignored)
-    clusters.value = clusters.value.filter((c) => !c.ignored)
-    // Round43：清理勾选残留（成员可能已被删除、被忽略或已随簇重算消失）
-    const aliveMemberIds = new Set(
-      clusters.value.flatMap((c) => c.members.map((m) => m.comic.id)),
-    )
-    selectedClusterIds.value = selectedClusterIds.value.filter((id) => aliveMemberIds.has(id))
-    resultStale.value = !!data?.stale
-  } catch {
-    // 结果暂未就绪，交给轮询下一轮
-  }
-}
-
-// ── Round26 O2：忽略标记 ──
-
-// 拉取忽略清单（计数 + 弹层数据）
-const loadIgnoreList = async () => {
-  try {
-    const data = await http<{ items: IgnoreItemDTO[] }>('/offline/ignore/list')
-    ignoreItems.value = data?.items || []
-  } catch {
-    // 接口异常忽略
-  }
-}
-
-// 忽略一个疑似重复组（title 型：核心名 + 画师）——从忽略选择弹层的「忽略整组」进入
-const ignoreCluster = async (cluster: DedupClusterDTO) => {
-  const name = cluster.artist ? `${cluster.titleKey}（artist:${cluster.artist}）` : cluster.titleKey
-  const confirmed = await modal.confirm(
-    `忽略后，后续增量查重不再提示与「${name}」相关的疑似重复；全量核对仍会列出（可在忽略清单中恢复）。\n\n确定忽略整组吗？`,
-    '🕶️ 忽略本组',
-  )
-  if (!confirmed) return
-  try {
-    await http('/offline/ignore', {
-      method: 'POST',
-      body: JSON.stringify({ type: 'title', titleKey: cluster.titleKey, artist: cluster.artist || '' }),
-    })
-    toast.success('已忽略本组，可在「忽略清单」中恢复')
-    // Round33：后端已定向同步结果缓存（簇即时移除）→ 重读即最新，无需重新扫描
-    await Promise.all([loadResult(), loadIgnoreList()])
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : '忽略失败')
-  }
-}
-
-// ── Round26-2：忽略选择弹层（整组忽略 / 成员级忽略）──
-const ignorePickerOpen = ref(false)
-const ignorePickerCluster = ref<DedupClusterDTO | null>(null)
-const ignoreSelectedMembers = ref<string[]>([])
-
-const openIgnorePicker = (cluster: DedupClusterDTO) => {
-  ignorePickerCluster.value = cluster
-  ignoreSelectedMembers.value = []
-  ignorePickerOpen.value = true
-}
-
-// 成员级忽略：选中的成员不再参与疑似重复聚类（误判剔除）
-const confirmIgnoreMembers = async () => {
-  const cluster = ignorePickerCluster.value
-  if (!cluster || ignoreSelectedMembers.value.length === 0) return
-  const ids = [...ignoreSelectedMembers.value]
-  try {
-    for (const m of cluster.members) {
-      if (ids.includes(m.comic.id)) {
-        await http('/offline/ignore', {
-          method: 'POST',
-          body: JSON.stringify({ type: 'comic', comicId: m.comic.id }),
-        })
-      }
-    }
-    toast.success(`已忽略 ${ids.length} 个成员（可在「忽略清单」中恢复）`)
-    ignorePickerOpen.value = false
-    // Round33：后端已按最新忽略表重算簇（成员剔除 / 剩余 <2 整簇消失）→ 重读即最新
-    await Promise.all([loadResult(), loadIgnoreList()])
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : '忽略成员失败')
-  }
-}
-
-// 进入簇对比视图（双列 + 标签卡切换，OfflineCompare type=cluster）
-const openClusterCompare = (cluster: DedupClusterDTO) => {
-  router.push({
-    path: '/offline/compare',
-    query: { type: 'cluster', titleKey: cluster.titleKey, artist: cluster.artist || '' },
-  })
-}
-
-// 忽略规则 3 父画廊更新提示（gid 型：忽略父画廊 gid）
-const ignoreParent = async (item: DedupItemDTO) => {
-  const gid = item.comic.gid
-  if (!gid) {
-    toast.warning('该漫画缺少 gid，无法忽略')
-    return
-  }
-  const confirmed = await modal.confirm(
-    `忽略后，后续增量查重不再提示「${item.comic.title}」的「旧版被取代」；全量核对仍会列出（可在忽略清单中恢复）。\n\n确定忽略此提示吗？`,
-    '🕶️ 忽略此提示',
-  )
-  if (!confirmed) return
-  try {
-    await http('/offline/ignore', {
-      method: 'POST',
-      body: JSON.stringify({ type: 'gid', gid }),
-    })
-    toast.success('已忽略此更新提示，可在「忽略清单」中恢复')
-    // 同步清理勾选残留（该条目已不在建议删除区，避免批量删除提交不存在的 id）
-    selectedIds.value = selectedIds.value.filter((id) => id !== item.comic.id)
-    // Round33：后端已定向同步结果缓存 → 重读即最新
-    await Promise.all([loadResult(), loadIgnoreList()])
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : '忽略失败')
-  }
-}
-
-// 恢复忽略条目（即时重新纳入查重结果）
-const restoreIgnore = async (ig: IgnoreItemDTO) => {
-  try {
-    await http(`/offline/ignore/${ig.id}/restore`, { method: 'POST' })
-    toast.success('已恢复，已即时回到查重列表')
-    // Round33：后端已重算结果缓存 → 恢复的簇/提示立即回归，无需重新扫描
-    await Promise.all([loadResult(), loadIgnoreList()])
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : '恢复失败')
-  }
-}
-
-// 全量结果中的已忽略簇 → 解除忽略（按 titleKey+artist 匹配忽略清单条目恢复）
-const restoreCluster = async (cluster: DedupClusterDTO) => {
-  const match = ignoreItems.value.find(
-    (ig) =>
-      ig.type === 'title' &&
-      ig.titleKey === cluster.titleKey &&
-      (ig.artist || '') === (cluster.artist || ''),
-  )
-  if (!match) {
-    toast.warning('未找到对应的忽略条目，请前往「忽略清单」管理')
-    return
-  }
-  // restoreIgnore 内部已重读结果缓存（该簇随之回到疑似重复列表）
-  await restoreIgnore(match)
-}
-
-// 忽略清单弹层分组
-const titleIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'title'))
-const gidIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'gid'))
-const comicIgnores = computed(() => ignoreItems.value.filter((i) => i.type === 'comic'))
-
-// 点击簇成员 → 打开该本地漫画详情
-const openClusterMember = (m: ClusterMemberDTO) => {
-  openComicDetailInNewTab({ id: m.comic.id, source: 'offline' })
-}
-
-// 轮询维护任务进度（1s 一次；结束后停止并拉取结果）
 const pollProgress = () => {
   stopPolling()
   pollTimer = setInterval(async () => {
@@ -331,7 +317,6 @@ const pollProgress = () => {
           return
         }
         if (s.status === 'cancelled') {
-          // Round29：用户取消——不拉取结果
           toast.info('查重已取消')
           return
         }
@@ -343,12 +328,11 @@ const pollProgress = () => {
   }, 1000)
 }
 
-// 异步启动维护查重：接口立即返回，随后轮询进度
-// full=false 走增量（跳过已核对过父画廊关系的漫画）；full=true 强制全量在线核对（需求1）
 const runMaintain = async (full = false) => {
   if (isScanning.value) return
   isScanning.value = true
   taskState.value = null
+  moreMenuOpen.value = false
   try {
     await http<{ started: boolean }>(`/offline/maintain?full=${full}`)
     pollProgress()
@@ -359,8 +343,8 @@ const runMaintain = async (full = false) => {
   }
 }
 
-// 强制全量在线核对：忽略 parent_checked_at 增量标记，联网逐本重抓全部画廊详情（可能数十分钟）
 const runFullMaintain = async () => {
+  moreMenuOpen.value = false
   const confirmed = await modal.confirm(
     '强制全量在线核对将忽略已核对标记，逐本联网抓取全部离线画廊详情页（每本约 1.2 秒限流退避），可能耗时数十分钟。确定继续吗？',
     '⚡ 强制全量在线核对',
@@ -369,14 +353,13 @@ const runFullMaintain = async () => {
   await runMaintain(true)
 }
 
-// S5/D4：清除全部「已被删除/移除」标记并复位核对时间戳，随后强制全量在线重新匹配
-// （失效画廊修复后重新参与查重/更新检测；此前增量核对已跳过，需全量重新在线核对）。
 const isClearingRemoved = ref(false)
 const clearRemovedAndRematch = async () => {
+  moreMenuOpen.value = false
   if (isScanning.value || isClearingRemoved.value) return
   const confirmed = await modal.confirm(
     '将清除全部「已被删除/移除」标记并复位其核对时间戳，随后强制全量在线重新匹配这些画廊（可能耗时数十分钟）。\n\n仅适用于画廊已重新上传 / 源已恢复的情况。确定继续吗？',
-    '🧹 清除移除标记并全局重新匹配',
+    '🧹 清除移除标记并重新匹配',
   )
   if (!confirmed) return
   isClearingRemoved.value = true
@@ -399,26 +382,15 @@ const clearRemovedAndRematch = async () => {
   }
 }
 
-const keepItems = computed(() => items.value.filter((i) => i.keep))
-const removeItems = computed(() => items.value.filter((i) => !i.keep))
-const activeClusterMemberCount = computed(() =>
-  activeClusters.value.reduce((sum, c) => sum + c.members.length, 0),
-)
-const isSelectAll = computed(
-  () => removeItems.value.length > 0 && selectedIds.value.length === removeItems.value.length,
-)
-
-// 删除本地漫画记录：deleteFile=true 时同时物理删除本地文件。
-// Round43：「建议删除」区与「疑似重复」区共用同一实现，避免两处确认文案 / 幽灵文件容错漂移。
-const doRemoveComic = async (c: OfflineComicDTO, deleteFile: boolean): Promise<boolean> => {
+// ── 移除（主操作）／都留（忽略整组）／确认新增 ──
+const doRemoveComic = async (c: OfflineComicDTO, withFile: boolean): Promise<boolean> => {
   if (isRemoving.value) return false
   const title = c.title || '未命名'
-
   const confirmed = await modal.confirm(
-    deleteFile
-      ? `确定删除《${title}》并同时删除其本地文件吗？\n\n📁 ${c.localPath || ''}\n\n此操作不可恢复！`
-      : `确定仅删除《${title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
-    deleteFile ? '删除记录 + 本地文件' : '删除记录（保留文件）',
+    withFile
+      ? `确定移除《${title}》并同时删除其本地文件吗？\n\n📁 ${c.localPath || ''}\n\n此操作不可恢复！`
+      : `确定移除《${title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
+    withFile ? '移除记录 + 本地文件' : '移除记录（保留文件）',
   )
   if (!confirmed) return false
 
@@ -427,20 +399,17 @@ const doRemoveComic = async (c: OfflineComicDTO, deleteFile: boolean): Promise<b
   try {
     const data = await http<{ ok: boolean; alreadyDeleted?: boolean }>('/offline/maintain/remove', {
       method: 'POST',
-      body: JSON.stringify({ comicId: c.id, deleteFile }),
+      body: JSON.stringify({ comicId: c.id, deleteFile: withFile }),
     })
     if (data.alreadyDeleted) {
-      // 幽灵文件容错：记录已不存在（可能已在其他设备删除）→ 视为删除成功并同步刷新列表
       toast.info(`《${title}》记录已不存在（可能已在其他设备删除），已同步刷新列表`)
     } else {
-      toast.success(
-        deleteFile ? `《${title}》记录与本地文件已删除 🗑️` : `《${title}》记录已删除（保留本地文件）`,
-      )
+      toast.success(withFile ? `《${title}》已移除（含本地文件）` : `《${title}》记录已移除（保留本地文件）`)
     }
     return true
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
-    toast.error(msg || '删除失败')
+    toast.error(msg || '移除失败')
     return false
   } finally {
     isRemoving.value = false
@@ -448,176 +417,112 @@ const doRemoveComic = async (c: OfflineComicDTO, deleteFile: boolean): Promise<b
   }
 }
 
-// 删除重复项：deleteFile=true 时同时物理删除本地文件
-const removeComic = async (item: DedupItemDTO, deleteFile: boolean) => {
-  const ok = await doRemoveComic(item.comic, deleteFile)
+// 建议删除区（规则 1/2/3/4 强证据）：移除
+const removeSuggested = async (item: DedupItemDTO) => {
+  const ok = await doRemoveComic(item.comic, deleteFile.value)
   if (!ok) return
-  // Round33：后端已剪除该项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
-  selectedIds.value = selectedIds.value.filter((id) => id !== item.comic.id)
+  processedCount.value++
   await loadResult()
 }
 
-// ── Round43：疑似重复区删除（成员勾选批量删除 / 单卡删除）──
-// 语义：疑似重复只是建议，删除粒度是「组内单个成员」——用户勾选若干本后一键删除，
-// 后端定向重算簇：某组删到只剩 1 本即不再构成疑似重复，该类自动消失（无需重新扫描）。
-
-// 已选本数涉及的组数（工具栏「涉及 K 组」）
-const selectedClusterGroupCount = computed(
-  () =>
-    activeClusters.value.filter((c) =>
-      c.members.some((m) => selectedClusterIds.value.includes(m.comic.id)),
-    ).length,
-)
-
-const isClusterMemberSelected = (id: string) => selectedClusterIds.value.includes(id)
-
-// 每组至少保留 1 本：某组已勾选「成员数 − 1」本时，最后 1 本禁止再勾（防止整组删空）
-const isClusterMemberLocked = (cluster: DedupClusterDTO, id: string) => {
-  if (isClusterMemberSelected(id)) return false
-  const selectedInGroup = cluster.members.filter((m) =>
-    selectedClusterIds.value.includes(m.comic.id),
-  ).length
-  return cluster.members.length > 1 && selectedInGroup >= cluster.members.length - 1
-}
-
-const toggleClusterMember = (cluster: DedupClusterDTO, id: string) => {
-  if (isRemoving.value) return
-  const idx = selectedClusterIds.value.indexOf(id)
-  if (idx >= 0) {
-    selectedClusterIds.value.splice(idx, 1)
-    return
-  }
-  if (isClusterMemberLocked(cluster, id)) {
-    toast.warning('每组至少保留 1 本，该组其余成员已被勾选')
-    return
-  }
-  selectedClusterIds.value.push(id)
-}
-
-// 单卡删除某成员（保留文件 / 含文件）
-const removeClusterMember = async (m: ClusterMemberDTO, deleteFile: boolean) => {
-  const ok = await doRemoveComic(m.comic, deleteFile)
+// 成员级：移除这本（2 本组＝保留另一本；3 本组可逐个移除，剩 <2 本该组自动消失）
+const removeMember = async (cl: DedupClusterDTO, m: ClusterMemberDTO) => {
+  const ok = await doRemoveComic(m.comic, deleteFile.value)
   if (!ok) return
-  selectedClusterIds.value = selectedClusterIds.value.filter((id) => id !== m.comic.id)
+  expanded.value[cl.id] = false
+  processedCount.value++
   await loadResult()
 }
 
-// 批量删除勾选的疑似重复成员：一次提交后端，后端重算簇（某组删到只剩 1 本即自动消失）
-const removeSelectedClusterMembers = async (deleteFile: boolean) => {
-  if (isRemoving.value) return
-  const ids = [...selectedClusterIds.value]
-  if (ids.length === 0) {
-    toast.warning('请先勾选要删除的画廊')
-    return
-  }
-  const groups = selectedClusterGroupCount.value
+// 组级：都留（不再提示）＝忽略整组（可逆，可在忽略清单恢复）
+const keepWholeGroup = async (cl: DedupClusterDTO) => {
+  const name = cl.artist ? `${cl.titleKey}（artist:${cl.artist}）` : cl.titleKey
   const confirmed = await modal.confirm(
-    `确定批量删除选中的 ${ids.length} 本画廊（涉及 ${groups} 组）吗？\n\n每组均已保留至少 1 本；某组删到只剩 1 本后将自动从疑似重复列表消失。\n\n${
-      deleteFile ? '将同时删除本地文件，此操作不可恢复！' : '本地文件将保留。'
-    }`,
-    deleteFile ? '批量删除记录 + 本地文件' : '批量删除记录（保留文件）',
+    `两本都留，之后不再提示与「${name}」相关的疑似重复。\n\n忽略是可逆的：随时可在「忽略清单」里恢复；若该作品之后又入库了新的本子，会自动重新提醒你。\n\n确定忽略整组吗？`,
+    '🕶️ 都留（不再提示）',
   )
   if (!confirmed) return
-
-  isRemoving.value = true
   try {
-    const data = await http<{ ok: boolean; deleted?: number; alreadyDeleted?: boolean }>(
-      '/offline/maintain/remove',
-      {
-        method: 'POST',
-        body: JSON.stringify({ comicIds: ids, deleteFile }),
-      },
-    )
-    const deleted = data.deleted ?? ids.length
-    if (data.alreadyDeleted) {
-      toast.info(`已处理 ${deleted} 本（部分记录已不存在，视为已删除），已同步刷新列表`)
-    } else {
-      toast.success(
-        deleteFile
-          ? `已批量删除 ${deleted} 本（记录 + 本地文件）🗑️`
-          : `已批量删除 ${deleted} 本记录（保留本地文件）`,
-      )
-    }
-    selectedClusterIds.value = []
-    // Round33：后端已剪除已删项并重算疑似重复簇 → 重读即最新（无需重新扫描）
+    await http('/offline/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'title', titleKey: cl.titleKey, artist: cl.artist || '' }),
+    })
+    toast.success('已忽略本组，可在「忽略清单」中恢复')
+    processedCount.value++
     await loadResult()
   } catch (err) {
-    const msg = err instanceof Error ? err.message : ''
-    toast.error(msg || '批量删除失败')
-  } finally {
-    isRemoving.value = false
+    toast.error(err instanceof Error ? err.message : '忽略失败')
   }
 }
 
+// 忽略项出现"忽略后新增" → 确认新增（刷新成员快照，之后继续静默）
+const ackIgnoreNew = async (cl: DedupClusterDTO) => {
+  if (!cl.ignoreId) return
+  try {
+    await http(`/offline/ignore/${cl.ignoreId}/ack`, { method: 'POST' })
+    toast.success('已确认新增，该组回到静默（忽略清单里可随时恢复）')
+    await loadResult()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '确认失败')
+  }
+}
+
+// 规则 3（父子画廊）更新提示忽略（gid 型）
+const ignoreParent = async (item: DedupItemDTO) => {
+  const gid = item.comic.gid
+  if (!gid) {
+    toast.warning('该漫画缺少 gid，无法忽略')
+    return
+  }
+  const confirmed = await modal.confirm(
+    `忽略后，后续不再提示「${item.comic.title}」的「旧版被取代（父画廊关系）」。\n\n可在「忽略清单」中恢复。确定忽略此提示吗？`,
+    '🕶️ 忽略此提示',
+  )
+  if (!confirmed) return
+  try {
+    await http('/offline/ignore', { method: 'POST', body: JSON.stringify({ type: 'gid', gid }) })
+    toast.success('已忽略此更新提示')
+    await loadResult()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '忽略失败')
+  }
+}
+
+// ── 展示辅助 ──
+const toggleGroup = (key: string) => {
+  openGroups.value[key] = !openGroups.value[key]
+}
+const toggleExpand = (id: string) => {
+  expanded.value[id] = !expanded.value[id]
+}
+const isExpanded = (id: string) => !!expanded.value[id]
+const aliveCount = (cl: DedupClusterDTO) => cl.members.length
+
+// 统计（进度条 / 汇总 chips）
+const totalMemberCount = computed(() => clusters.value.reduce((s, c) => s + c.members.length, 0))
+const highCount = computed(() => clusters.value.filter((c) => c.confidence === 'high').length)
+const mediumCount = computed(() => clusters.value.filter((c) => c.confidence === 'medium').length)
+// 进度：结果里只含"当前待处理"项，故以「本次会话已处理 + 当前待处理」为分母
+const progressWidth = computed(() => {
+  const total = clusters.value.length + processedCount.value
+  if (total <= 0) return '0%'
+  return `${Math.round((processedCount.value / total) * 100)}%`
+})
+
+// 成员相对差异（展开对比的面板头）
+// 注意：多本组（≥3 本）时不能再用 members[1-mi]（mi=2 会取到 -1），统一与「成员 A」比较。
+const memberDiff = (cl: DedupClusterDTO, mi: number) => {
+  if (cl.members.length < 2) return ''
+  const refIdx = mi === 0 ? 1 : 0
+  const label = String.fromCharCode(65 + refIdx)
+  const d = (cl.members[mi].pageCount || 0) - (cl.members[refIdx].pageCount || 0)
+  if (d === 0) return `页数与成员 ${label} 相同`
+  return d > 0 ? `比成员 ${label} 多 ${d} 页` : `比成员 ${label} 少 ${-d} 页`
+}
 const onCoverError = (id: string) => {
   coverFailed.value[id] = true
 }
-
-// Round4 任务一：点击卡片进入双列对比视图（左=建议保留，右=建议删除）
-const openCompare = (comicId: string) => {
-  router.push({ path: '/offline/compare', query: { type: 'maintain', id: comicId } })
-}
-
-// 勾选/取消勾选单个删除项
-const toggleSelect = (id: string) => {
-  if (isRemoving.value) return
-  const idx = selectedIds.value.indexOf(id)
-  if (idx >= 0) selectedIds.value.splice(idx, 1)
-  else selectedIds.value.push(id)
-}
-
-// 全选/取消全选“建议删除”项
-const toggleSelectAll = () => {
-  if (isRemoving.value) return
-  selectedIds.value = isSelectAll.value ? [] : removeItems.value.map((i) => i.comic.id)
-}
-
-// 批量删除：comicIds 一次提交后端，避免反复“删除→刷新”
-const removeSelected = async (deleteFile: boolean) => {
-  if (isRemoving.value) return
-  if (selectedIds.value.length === 0) {
-    toast.warning('请先勾选要删除的项')
-    return
-  }
-  const ids = [...selectedIds.value]
-  const count = ids.length
-  const confirmed = await modal.confirm(
-    deleteFile
-      ? `确定批量删除选中的 ${count} 项，并同时删除其本地文件吗？\n\n此操作不可恢复！`
-      : `确定批量删除选中的 ${count} 项记录吗？\n\n本地文件将保留。`,
-    deleteFile ? '批量删除记录 + 本地文件' : '批量删除记录（保留文件）',
-  )
-  if (!confirmed) return
-
-  isRemoving.value = true
-  try {
-    const data = await http<{ ok: boolean; deleted?: number; alreadyDeleted?: boolean }>(
-      '/offline/maintain/remove',
-      {
-        method: 'POST',
-        body: JSON.stringify({ comicIds: ids, deleteFile }),
-      },
-    )
-    const deleted = data.deleted ?? count
-    if (data.alreadyDeleted) {
-      toast.info(`已处理 ${deleted} 项（部分记录已不存在，视为已删除），已同步刷新列表`)
-    } else {
-      toast.success(
-        deleteFile
-          ? `已批量删除 ${deleted} 项（记录 + 本地文件）🗑️`
-          : `已批量删除 ${deleted} 项记录（保留本地文件）`,
-      )
-    }
-    selectedIds.value = []
-    // Round33：后端已剪除已删项及其配对项并重算疑似重复簇 → 重读即最新（无需重新扫描）
-    await loadResult()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : ''
-    toast.error(msg || '批量删除失败')
-  } finally {
-    isRemoving.value = false
-  }
-}
+const openComic = (id: string) => openComicDetailInNewTab({ id, source: 'offline' })
 
 const formatBytes = (bytes?: number) => {
   if (!bytes || bytes <= 0) return '—'
@@ -630,38 +535,30 @@ const formatBytes = (bytes?: number) => {
   }
   return `${v.toFixed(1)} ${units[i]}`
 }
-
 const formatDate = (iso?: string) => {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString('zh-CN', { hour12: false })
 }
-
 const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
 
-// ⑨ Round26：检测书库变更 → 仅置「结果过期」提示，不再自动启动增量查重。
-// 手动「重新扫描 / 强制全量在线核对」按钮始终保留（见模板）。
+const closeMenu = () => {
+  moreMenuOpen.value = false
+}
+
+// ── 进入页面：拉结果 + 任务状态（不再自动扫描）──
 const syncStaleOnEnter = async () => {
-  if (isScanning.value) return // 已有任务在跑（含后台定时器触发的），不重复拉取
+  if (isScanning.value) return
   try {
     const st = await http<UnsyncedStatusDTO>('/offline/maintain/unsynced')
     await loadResult()
-    await loadIgnoreList()
-    if (st.hasUnsynced) {
-      // 书库有未反映到查重结果的变更：仅标记过期提示，等待用户手动点「重新扫描」
-      resultStale.value = true
-    }
+    if (st.hasUnsynced) resultStale.value = true
   } catch {
     // 状态接口异常（如后端未启动），忽略
   }
 }
 
-// bug2 修复：进入页面不再自动启动维护任务（否则会与后台正在运行的维护任务冲突，被后端 409 拒绝）。
-// 改为同步一次当前任务状态：后台任务在跑（含暂停中）则接管轮询显示进度/控制按钮；否则拉取最近结果并同步「过期」提示。
-// Round26-⑨：不再因书库变更自动触发增量查重，只提示过期，手动扫描。
-// Round42 D6：**先拉取结果再读任务状态**——结果已持久化（后端快照），重启后也能秒开上次结果；
-// 即使后台任务正在跑，也能立即看到已有结果，不必空等到任务结束。
 const refreshOnEnter = async () => {
   await loadResult()
   try {
@@ -670,38 +567,11 @@ const refreshOnEnter = async () => {
     if (s.status === 'running' || s.status === 'paused') {
       isScanning.value = true
       pollProgress()
-      return // 后台任务在跑（或暂停中）：交给轮询，不重复拉取结果
+      return
     }
     await syncStaleOnEnter()
   } catch {
-    // 进度接口异常（如后端未启动），忽略，页面保持空态
-  }
-}
-
-// ── Round42 D2：联网复核设置（默认关闭）──
-const onlineVerify = ref(false)
-
-const loadDedupSetting = async () => {
-  try {
-    const s = await http<{ onlineVerify?: boolean }>('/offline/dedup/setting')
-    onlineVerify.value = !!s?.onlineVerify
-  } catch {
-    // 设置接口异常（如后端未启动）→ 保持默认关闭
-  }
-}
-
-const toggleOnlineVerify = async (e: Event) => {
-  const next = (e.target as HTMLInputElement).checked
-  try {
-    const s = await http<{ onlineVerify?: boolean }>('/offline/dedup/setting', {
-      method: 'POST',
-      body: JSON.stringify({ onlineVerify: next }),
-    })
-    onlineVerify.value = !!s?.onlineVerify
-    toast.success(onlineVerify.value ? '已开启联网复核（下次扫描生效）' : '已关闭联网复核')
-  } catch (err) {
-    onlineVerify.value = !next // 保存失败回滚开关
-    toast.error(err instanceof Error ? err.message : '设置保存失败')
+    // 进度接口异常，页面保持空态
   }
 }
 
@@ -709,96 +579,83 @@ let activatedOnce = false
 onMounted(() => {
   void loadDedupSetting()
   void refreshOnEnter()
+  window.addEventListener('click', closeMenu)
 })
 onActivated(() => {
   if (activatedOnce) {
     void loadDedupSetting()
-    refreshOnEnter()
+    void refreshOnEnter()
   }
   activatedOnce = true
 })
-onUnmounted(stopPolling)
+onUnmounted(() => {
+  stopPolling()
+  window.removeEventListener('click', closeMenu)
+})
 </script>
 
 <template>
-  <div class="maintenance-page">
+  <div class="maintenance-page" @click="closeMenu">
     <div class="page-header">
       <div>
-        <h2 class="page-title">🛠️ 本地书库维护与查重</h2>
+        <h2 class="page-title">🛠️ 本地书库维护</h2>
         <p class="subtitle">
-          扫描本地书库：同 GID 重复、归档 Hash 相同、父画廊关系旧版被取代，均可在此清理
+          扫描本地书库查重：只给建议，移除与忽略都由你确认；疑似重复按「两本差在哪」分组
         </p>
       </div>
-
       <div class="header-actions">
-        <!-- Round26 O2：忽略清单入口（计数常驻） -->
-        <button
-          class="scan-btn ignore"
-          title="查看全部忽略条目（疑似重复组 / 父画廊更新提示），可逐条恢复"
-          @click="ignoreModalOpen = true"
-        >
-          🕶️ 忽略清单 <span class="count-badge">{{ ignoreCount }}</span>
-        </button>
-        <button
-          class="scan-btn ghost"
-          :disabled="isScanning || isClearingRemoved"
-          title="清除全部「已被删除/移除」标记并复位核对时间戳，随后强制全量在线重新匹配（失效画廊修复后重新参与查重）"
-          @click="clearRemovedAndRematch"
-        >
-          {{ isClearingRemoved ? '⏳ 处理中...' : '🧹 清除移除标记并全局重新匹配' }}
-        </button>
-        <button
-          class="scan-btn ghost"
-          :disabled="isScanning || isClearingRemoved"
-          title="忽略已核对标记，联网逐本重抓全部画廊详情页，可能耗时数十分钟"
-          @click="runFullMaintain"
-        >
-          ⚡ 强制全量在线核对
-        </button>
         <button
           class="scan-btn primary"
           :disabled="isScanning || isClearingRemoved"
           @click="runMaintain(false)"
         >
-          {{ isScanning ? '扫描中...' : '🔍 重新扫描' }}
+          {{ isScanning ? '⏳ 扫描中...' : '🔍 重新扫描' }}
         </button>
+        <div class="menu-wrap">
+          <button class="scan-btn ghost" @click.stop="moreMenuOpen = !moreMenuOpen">⋯ 更多</button>
+          <div v-if="moreMenuOpen" class="more-menu" @click.stop>
+            <button :disabled="isScanning || isClearingRemoved" @click="runFullMaintain">
+              ⚡ 强制全量在线核对
+              <small>忽略已核对标记，逐本联网，可能数十分钟</small>
+            </button>
+            <button :disabled="isScanning || isClearingRemoved" @click="clearRemovedAndRematch">
+              🧹 清除移除标记并重新匹配
+              <small>画廊已重新上传 / 更换源时使用</small>
+            </button>
+            <router-link to="/settings?tab=dedup" class="menu-link">
+              ⚙️ 查重设置
+              <small>联网复核（E 站反查）等，已收进设置页</small>
+            </router-link>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="scope-hint">
-      💡 范围：默认查重所有离线漫画。可在「设置 → 额外扫描路径」中关闭某路径的「离线维护」开关，
-      该路径下的漫画将不参与本查重（下载导入的漫画始终参与）。
+    <!-- 顶部：忽略项出现「忽略后新增」的提醒（平时不占位） -->
+    <div v-if="newIgnoreClusters.length > 0" class="alert-bar">
+      <span class="alert-icon">🕶️</span>
+      <div class="alert-text">
+        <b>{{ newIgnoreClusters.length }}</b> 条忽略项下出现了忽略之后新入库的本子（共
+        <b>{{ newIgnoreMemberCount }}</b> 本），可能构成新的重复 —— 已忽略的内容不会一直占位，只在有变化时提醒你。
+      </div>
+      <router-link class="action-btn ghost-gray" to="/offline/ignore">去忽略清单查看 →</router-link>
     </div>
 
-    <!-- Round42 D2：联网复核设置（默认关闭）——对「近似重复组」用标题去 E 站反查校验 -->
-    <div class="verify-setting">
-      <label class="verify-toggle" title="开启后，近似重复组会用其标题去 E 站反查：命中同标题条目则升为高置信，未命中则标注「未确认」">
-        <input type="checkbox" :checked="onlineVerify" @change="toggleOnlineVerify" />
-        <span>联网复核（E 站反查，默认关闭）</span>
-      </label>
-      <span class="verify-hint">
-        仅作用于「近似判定」的疑似重复组（本地精确归一组不重复联网）；每本约 1.2s 限流、单次上限 30 组，
-        需已绑定 E 站账号。设置立即保存，下次扫描生效。
-      </span>
-    </div>
-
-    <!-- ⑨ Round26：结果过期（书库变更 / 跨设备删除）→ 仅提示，不再自动扫描，引导手动「重新扫描」 -->
+    <!-- 结果过期提示 -->
     <div v-if="resultStale" class="stale-banner">
       <span class="stale-icon">⚠️</span>
       <div class="stale-info">
         <p class="stale-title">查重结果已过期</p>
         <p class="stale-sub">
-          本地书库已发生变化（新下载 / 更新 / 删除），当前列表不再准确。已停止自动扫描，请手动点击「重新扫描」获取最新结果。
+          本地书库已发生变化（新下载 / 更新 / 删除），当前列表不再准确。请手动点击「重新扫描」获取最新结果。
         </p>
       </div>
-      <div class="stale-action">
-        <button class="scan-btn primary" :disabled="isScanning" @click="runMaintain(false)">
-          🔍 重新扫描
-        </button>
-      </div>
+      <button class="scan-btn primary" :disabled="isScanning" @click="runMaintain(false)">
+        🔍 重新扫描
+      </button>
     </div>
 
-    <!-- Round29：任务控制——扫描中可暂停；暂停后可继续/取消 -->
+    <!-- 扫描进度 -->
     <div v-if="isScanning" class="scanning-banner" :class="{ 'is-paused': isTaskPaused }">
       <span v-if="!isTaskPaused" class="spinner"></span>
       <span v-else class="paused-icon">⏸</span>
@@ -815,7 +672,7 @@ onUnmounted(stopPolling)
         </div>
         <p class="scanning-sub">
           <template v-if="isTaskPaused">
-            已暂停于 {{ taskState?.done }} / {{ taskState?.total }} · {{ phaseText }}，可继续或取消
+            已暂停于 {{ taskState?.done }} / {{ taskState?.total }} · {{ phaseText }}
           </template>
           <template v-else-if="taskState && taskState.total > 0">
             进度 {{ taskState.done }} / {{ taskState.total }} · {{ phaseText }}
@@ -829,702 +686,624 @@ onUnmounted(stopPolling)
           <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
           <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
         </template>
-        <button
-          v-else-if="isTaskRunning"
-          class="control-btn pause"
-          title="暂停后当前项处理完即停止，可随时继续或取消"
-          @click="controlTask('pause')"
-        >
+        <button v-else-if="isTaskRunning" class="control-btn pause" @click="controlTask('pause')">
           ⏸ 暂停
         </button>
       </div>
     </div>
 
-    <div v-else-if="items.length === 0 && activeClusters.length === 0 && ignoredClusters.length === 0" class="empty-box">
-      <span class="icon">{{ resultStale ? '🔄' : '🎉' }}</span>
-      <p class="empty-title">
-        {{ resultStale ? '查重结果已过期，请重新扫描' : '恭喜！本地画库暂无重复或异常项' }}
-      </p>
-      <p class="empty-sub">
-        {{
-          resultStale
-            ? '本地书库可能已发生变化（如已在其他设备删除），重新扫描可获取最新一致的结果。'
-            : '若刚导入新内容，可点击「重新扫描」再次核对。'
-        }}
-      </p>
-    </div>
-
     <template v-else>
-      <div class="summary-bar">
-        <span class="summary-item warn"
-          >🗑️ 建议删除 <b>{{ removeItems.length }}</b> 项</span
-        >
-        <span v-if="activeClusters.length > 0" class="summary-item suspect"
-          >🔎 疑似重复 <b>{{ activeClusters.length }}</b> 组
-          <span class="hint">（共 {{ activeClusterMemberCount }} 本，仅建议不自动处理）</span></span
-        >
-        <span v-if="ignoredClusters.length > 0" class="summary-item ignored"
-          >🕶️ 已忽略 <b>{{ ignoredClusters.length }}</b> 组
-          <span class="hint">（全量核对仍会列出）</span></span
-        >
-        <span class="summary-item ok"
-          >✔ 建议保留 <b>{{ keepItems.length }}</b> 项</span
-        >
-      </div>
-
-      <!-- 建议删除区 -->
-      <div v-if="removeItems.length > 0" class="section">
-        <h3 class="section-title danger">🗑️ 建议删除</h3>
-        <div class="remove-toolbar">
-          <label class="select-all">
-            <input
-              type="checkbox"
-              :checked="isSelectAll"
-              :disabled="isRemoving || removeItems.length === 0"
-              @change="toggleSelectAll"
-            />
-            <span>全选</span>
-          </label>
-          <span class="selected-count"
-            >已选 {{ selectedIds.length }} / {{ removeItems.length }} 项</span
-          >
-          <div class="batch-actions">
-            <button
-              class="action-btn danger-soft"
-              :disabled="isRemoving || selectedIds.length === 0"
-              @click="removeSelected(false)"
-            >
-              {{ isRemoving ? '⏳ 处理中...' : '批量删除（保留文件）' }}
-            </button>
-            <button
-              class="action-btn danger"
-              :disabled="isRemoving || selectedIds.length === 0"
-              @click="removeSelected(true)"
-            >
-              {{ isRemoving ? '⏳ 处理中...' : '批量删除（含文件）' }}
-            </button>
-          </div>
-        </div>
-        <div class="item-list">
-          <div
-            v-for="item in removeItems"
-            :key="item.comic.id"
-            class="dedup-card remove-card"
-            :class="{ selected: selectedIds.includes(item.comic.id) }"
-            title="点击查看双列对比（左=建议保留，右=建议删除）"
-            @click="openCompare(item.comic.id)"
-          >
-            <label class="select-check" @click.stop>
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(item.comic.id)"
-                :disabled="isRemoving"
-                @change="toggleSelect(item.comic.id)"
-              />
-            </label>
-            <div class="cover-box">
-              <img
-                v-if="item.comic.coverUrl && !coverFailed[item.comic.id]"
-                :src="item.comic.coverUrl"
-                :alt="item.comic.title"
-                loading="lazy"
-                @error="onCoverError(item.comic.id)"
-              />
-              <span v-else class="cover-fallback">🗑️</span>
-            </div>
-
-            <div class="card-main">
-              <div class="card-top">
-                <h4 class="card-title">{{ item.comic.title }}</h4>
-                <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
-                <span class="compare-hint">⇄ 对比</span>
-              </div>
-              <div class="reason-box">
-                <span class="reason-icon">⚠️</span>
-                <span>{{ item.reason }}</span>
-              </div>
-              <div class="card-meta">
-                <span class="meta-text">📄 {{ item.comic.pageCount || 0 }} 页</span>
-                <span class="meta-text">💾 {{ formatBytes(item.comic.fileSize) }}</span>
-                <span class="meta-text">🕒 {{ formatDate(item.comic.updatedAt) }}</span>
-              </div>
-              <div class="card-path">📁 {{ item.comic.localPath || '—' }}</div>
-            </div>
-
-            <div class="card-actions" @click.stop>
-              <button
-                class="action-btn danger-soft"
-                :disabled="isRemoving"
-                @click="removeComic(item, false)"
-              >
-                {{
-                  isRemoving && removingId === item.comic.id ? '⏳ 处理中...' : '删除（保留文件）'
-                }}
-              </button>
-              <button
-                class="action-btn danger"
-                :disabled="isRemoving"
-                @click="removeComic(item, true)"
-              >
-                {{ isRemoving && removingId === item.comic.id ? '⏳ 处理中...' : '删除（含文件）' }}
-              </button>
-              <!-- Round26 O2：仅规则 3（父子画廊）可忽略（gid 粒度）；同 GID/hash/签名不提供忽略 -->
-              <button
-                v-if="item.rule === 'parent'"
-                class="action-btn ghost-gray"
-                :disabled="isRemoving"
-                title="忽略此更新提示（父画廊 gid），后续增量查重不再提示「旧版可删除」"
-                @click="ignoreParent(item)"
-              >
-                🕶️ 忽略此提示
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Round26 O3：疑似重复区（名称级弱证据，只建议，不自动处理） -->
-      <div v-if="activeClusters.length > 0" class="section">
-        <h3 class="section-title suspect">🔎 疑似重复（名称级，仅建议 · 不自动处理）</h3>
-        <!-- Round43：勾选批量删除工具栏（不给全选：由用户自行勾选后一键删除） -->
-        <div class="remove-toolbar suspect-toolbar">
-          <span class="selected-count suspect"
-            >已选 <b>{{ selectedClusterIds.length }}</b> 本<template v-if="selectedClusterGroupCount > 0">
-              · 涉及 {{ selectedClusterGroupCount }} 组</template
-            ></span
-          >
-          <span class="toolbar-hint">每组至少保留 1 本（同组最多可勾选「成员数 − 1」本）</span>
-          <div class="batch-actions">
-            <button
-              class="action-btn danger-soft"
-              :disabled="isRemoving || selectedClusterIds.length === 0"
-              @click="removeSelectedClusterMembers(false)"
-            >
-              {{ isRemoving ? '⏳ 处理中...' : '批量删除（保留文件）' }}
-            </button>
-            <button
-              class="action-btn danger"
-              :disabled="isRemoving || selectedClusterIds.length === 0"
-              @click="removeSelectedClusterMembers(true)"
-            >
-              {{ isRemoving ? '⏳ 处理中...' : '批量删除（含文件）' }}
-            </button>
-          </div>
-        </div>
-        <div class="item-list">
-          <div
-            v-for="cluster in activeClusters"
-            :key="cluster.id"
-            class="cluster-card"
-          >
-            <div class="cluster-head">
-              <span class="cluster-name">{{ cluster.titleKey }}</span>
-              <span
-                class="conf-badge"
-                :class="cluster.confidence === 'high' ? 'conf-high' : 'conf-medium'"
-              >
-                {{ cluster.confidence === 'high' ? '高置信' : '中置信' }}
-              </span>
-              <span class="cluster-reason">{{ cluster.reason }}</span>
-              <div class="cluster-actions">
-                <button
-                  class="action-btn ghost-teal"
-                  title="进入双列对比（标签卡可切换组内任意两本）"
-                  @click="openClusterCompare(cluster)"
-                >
-                  ⇄ 查看对比
-                </button>
-                <button
-                  class="action-btn ghost-gray"
-                  title="忽略本组（整组或仅选择部分成员，可在忽略清单中恢复）"
-                  @click="openIgnorePicker(cluster)"
-                >
-                  🕶️ 忽略本组
-                </button>
-              </div>
-            </div>
-            <div class="members">
-              <div
-                v-for="m in cluster.members"
-                :key="m.comic.id"
-                class="member"
-                :class="{ selected: isClusterMemberSelected(m.comic.id) }"
-                :title="`打开本地详情：${m.comic.title}`"
-                @click="openClusterMember(m)"
-              >
-                <!-- Round43：勾选框固定在卡片右上角 -->
-                <label
-                  class="member-check-corner"
-                  :class="{ locked: isClusterMemberLocked(cluster, m.comic.id) }"
-                  :title="
-                    isClusterMemberLocked(cluster, m.comic.id)
-                      ? '每组至少保留 1 本，该组其余成员已被勾选'
-                      : '勾选后可批量删除该画廊'
-                  "
-                  @click.stop
-                >
-                  <input
-                    type="checkbox"
-                    :checked="isClusterMemberSelected(m.comic.id)"
-                    :disabled="isRemoving || isClusterMemberLocked(cluster, m.comic.id)"
-                    @change="toggleClusterMember(cluster, m.comic.id)"
-                  />
-                </label>
-                <div class="member-cover">
-                  <img
-                    v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
-                    :src="m.comic.coverUrl"
-                    :alt="m.comic.title"
-                    loading="lazy"
-                    @error="onCoverError(m.comic.id)"
-                  />
-                  <span v-else class="cover-fallback">{{ (cluster.titleKey || '?').slice(0, 1) }}</span>
-                </div>
-                <!-- Round43：固定 4 行——标题 2 行（不足留空） / 语言 + 页数 1 行 / 画师 1 行，
-                     使同组各卡片内容高度一致，删除按钮位置对齐 -->
-                <div class="member-title" :class="{ 'is-empty': !m.comic.title }">
-                  {{ m.comic.title || '（无标题）' }}
-                </div>
-                <div class="member-meta">
-                  <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
-                  <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
-                </div>
-                <div class="member-artist">artist: {{ m.artist || 'null' }}</div>
-                <!-- Round43：单卡删除（保留文件 / 含文件） -->
-                <div class="member-actions" @click.stop>
-                  <button
-                    class="mini-btn"
-                    :disabled="isRemoving"
-                    title="仅删除该画廊的记录，本地文件保留"
-                    @click="removeClusterMember(m, false)"
-                  >
-                    {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '删除（保留文件）' }}
-                  </button>
-                  <button
-                    class="mini-btn danger"
-                    :disabled="isRemoving"
-                    title="删除该画廊记录并同时删除本地文件，不可恢复"
-                    @click="removeClusterMember(m, true)"
-                  >
-                    {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '删除（含文件）' }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Round26 O2：已忽略折叠区（全量核对仍列出，默认折叠，可单独解除） -->
-      <details v-if="ignoredClusters.length > 0" class="ignored-section">
-        <summary class="ignored-head">
-          <span class="arrow">▶</span>
-          <span>🕶️ 已忽略（{{ ignoredClusters.length }} 组 · 全量核对仍会列出，可单独解除）</span>
-          <span class="ignored-manage">
-            <button class="scan-btn ignore" style="padding: 4px 12px; font-size: 0.78rem" @click="ignoreModalOpen = true">
-              管理忽略清单
-            </button>
+      <!-- 待办进度 + 视图密度 + 统计 + 含文件勾选 -->
+      <div class="progress-card">
+        <div class="progress-top">
+          <span class="progress-num">待处理 <b>{{ clusters.length }}</b> 组</span>
+          <span class="progress-meta">
+            {{ totalMemberCount }} 本 · 建议删除 {{ removeItems.length }} 项
           </span>
-        </summary>
-        <div v-for="cluster in ignoredClusters" :key="cluster.id" class="ignored-item">
-          <span class="ignored-badge">已忽略</span>
-          <div class="ignored-info">
-            <div class="ignored-name">{{ cluster.titleKey }}</div>
-            <div class="ignored-sub">
-              {{ cluster.artist ? 'artist: ' + cluster.artist + ' · ' : '' }}{{ cluster.members.length }} 个成员 · 全量核对列出
-            </div>
+          <span class="spacer"></span>
+          <div class="seg">
+            <button :class="{ on: density === 'comfortable' }" @click="setDensity('comfortable')">
+              舒适
+            </button>
+            <button :class="{ on: density === 'compact' }" @click="setDensity('compact')">
+              紧凑
+            </button>
           </div>
-          <button
-            class="action-btn ghost-gray"
-            title="解除忽略，下次查重重新参与判定"
-            @click="restoreCluster(cluster)"
-          >
-            解除忽略
-          </button>
-        </div>
-      </details>
-
-      <!-- 建议保留区 -->
-      <div v-if="keepItems.length > 0" class="section">
-        <h3 class="section-title ok">✔ 建议保留</h3>
-        <div class="item-list">
-          <div
-            v-for="item in keepItems"
-            :key="item.comic.id"
-            class="dedup-card keep-card"
-            title="点击查看双列对比（左=建议保留，右=建议删除）"
-            @click="openCompare(item.comic.id)"
-          >
-            <div class="cover-box">
-              <img
-                v-if="item.comic.coverUrl && !coverFailed[item.comic.id]"
-                :src="item.comic.coverUrl"
-                :alt="item.comic.title"
-                loading="lazy"
-                @error="onCoverError(item.comic.id)"
-              />
-              <span v-else class="cover-fallback">✔</span>
-            </div>
-
-            <div class="card-main">
-              <div class="card-top">
-                <h4 class="card-title">{{ item.comic.title }}</h4>
-                <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
-                <span class="compare-hint">⇄ 对比</span>
-              </div>
-              <div class="keep-box">
-                <span class="keep-icon">✔</span>
-                <span>保留该副本（与上面待删除项形成同一组）</span>
-              </div>
-              <div class="card-meta">
-                <span class="meta-text">📄 {{ item.comic.pageCount || 0 }} 页</span>
-                <span class="meta-text">💾 {{ formatBytes(item.comic.fileSize) }}</span>
-                <span class="meta-text">🕒 {{ formatDate(item.comic.updatedAt) }}</span>
-              </div>
-              <div class="card-path">📁 {{ item.comic.localPath || '—' }}</div>
-            </div>
-
-            <div class="card-actions">
-              <span class="kept-badge">已保留</span>
-            </div>
+          <div class="stat-chips">
+            <span class="chip high"><i class="dot"></i>高置信 {{ highCount }}</span>
+            <span class="chip medium"><i class="dot"></i>中置信 {{ mediumCount }}</span>
+            <router-link class="chip link" to="/offline/ignore">🕶️ 忽略清单 →</router-link>
           </div>
         </div>
+        <div class="track"><i :style="{ width: progressWidth }"></i></div>
+        <div class="progress-foot">
+          <label class="checkline" title="页面级一次设定：之后每一次「移除这本」都按这个选择执行">
+            <input type="checkbox" v-model="deleteFile" @change="onDeleteFileChange" />
+            <span>移除时删除本地文件</span>
+            <span class="hint">默认不勾；记住上次选择</span>
+          </label>
+          <span class="spacer"></span>
+          <span class="hint dim">不勾选＝只移除记录，本地文件保留（可随时重新扫描回来）</span>
+        </div>
       </div>
-    </template>
-  </div>
 
-  <!-- Round26-2：忽略选择弹层（整组忽略 / 成员级忽略） -->
-  <div v-if="ignorePickerOpen" class="modal-mask" @click.self="ignorePickerOpen = false">
-    <div class="modal-box">
-      <div class="modal-head">
-        <span class="modal-title">🕶️ 忽略选择</span>
-        <button class="modal-close" title="关闭" @click="ignorePickerOpen = false">×</button>
-      </div>
-      <p class="modal-sub">
-        组「{{ ignorePickerCluster?.titleKey }}」共 {{ ignorePickerCluster?.members.length }} 个成员。
-        可忽略整组（后续不再提示该作品的疑似重复），或仅忽略部分成员（将误判成员剔除，不再参与疑似判定）。
-      </p>
-      <div class="ignore-group-title">选择要忽略的成员</div>
-      <label
-        v-for="m in ignorePickerCluster?.members || []"
-        :key="m.comic.id"
-        class="member-check"
+      <!-- 空态 -->
+      <div
+        v-if="clusters.length === 0 && removeItems.length === 0"
+        class="empty-box"
       >
-        <input type="checkbox" :value="m.comic.id" v-model="ignoreSelectedMembers" />
-        <span class="member-check-title" :title="m.comic.title">{{ m.comic.title }}</span>
-        <span v-if="m.lang" class="lang-chip">{{ m.lang }}</span>
-        <span class="member-pages">{{ m.pageCount || 0 }} 页</span>
-      </label>
-      <div class="modal-actions">
-        <button
-          class="action-btn danger-soft"
-          :disabled="ignoreSelectedMembers.length === 0"
-          title="仅忽略勾选的成员（误判剔除，可在忽略清单中恢复）"
-          @click="confirmIgnoreMembers"
-        >
-          忽略所选成员（{{ ignoreSelectedMembers.length }}）
-        </button>
-        <button
-          class="action-btn ghost-gray"
-          title="忽略整组（按核心名+画师记录，关联画廊一并忽略）"
-          @click="ignoreCluster(ignorePickerCluster!)"
-        >
-          忽略整组
-        </button>
+        <span class="icon">{{ resultStale ? '🔄' : '🎉' }}</span>
+        <p class="empty-title">
+          {{ resultStale ? '查重结果已过期，请重新扫描' : '恭喜！本地画库暂无重复或异常项' }}
+        </p>
+        <p class="empty-sub">
+          {{
+            resultStale
+              ? '本地书库可能已发生变化（如已在其他设备删除），重新扫描可获取最新一致的结果。'
+              : '若刚导入新内容，可点击「重新扫描」再次核对。'
+          }}
+        </p>
       </div>
-    </div>
-  </div>
 
-  <!-- Round26 O2：忽略清单弹层（快速查看 / 恢复忽略条目） -->
-  <div v-if="ignoreModalOpen" class="modal-mask" @click.self="ignoreModalOpen = false">
-    <div class="modal-box">
-      <div class="modal-head">
-        <span class="modal-title">🕶️ 忽略清单（{{ ignoreCount }}）</span>
-        <button class="modal-close" title="关闭" @click="ignoreModalOpen = false">×</button>
-      </div>
-      <p class="modal-sub">忽略的疑似重复组与父画廊更新提示，恢复后将于下次查重重新参与判定。</p>
-
-      <template v-if="ignoreItems.length === 0">
-        <div class="modal-empty">暂无忽略条目</div>
-      </template>
       <template v-else>
-        <div v-if="titleIgnores.length > 0" class="ignore-group-title">作品指纹（title 型 · 核心名 + 画师）</div>
-        <div v-for="ig in titleIgnores" :key="ig.id" class="ignore-row">
-          <div class="ignore-main">
-            <div class="ignore-name">{{ ig.titleKey }}</div>
-            <div class="ignore-sub">
-              {{ ig.artist ? 'artist: ' + ig.artist + ' · ' : '' }}忽略于 {{ formatDate(ig.createdAt) }}
+        <!-- 建议删除（强证据；仅在有内容时出现）-->
+        <section v-if="removeItems.length > 0" class="group open">
+          <div class="group-head" @click="toggleGroup('REMOVE')">
+            <span class="arrow">▶</span>
+            <span class="group-name">🗑️ 建议删除</span>
+            <span class="group-count">{{ removeItems.length }} 项</span>
+            <span class="group-desc">同 GID / 归档 Hash / 父子画廊等强证据规则判定</span>
+          </div>
+          <div v-show="openGroups['REMOVE'] !== false" class="group-body">            <div v-for="item in removeItems" :key="item.comic.id" class="card danger">
+              <div class="card-head">
+                <span class="card-key" :title="item.comic.title">{{ item.comic.title }}</span>
+                <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
+                <span class="spacer"></span>
+                <span class="reason-chip">⚠️ {{ item.reason }}</span>
+              </div>
+              <div class="member-meta">
+                <span>📄 {{ item.comic.pageCount || 0 }} 页</span>
+                <span>💾 {{ formatBytes(item.comic.fileSize) }}</span>
+                <span>🕒 {{ formatDate(item.comic.updatedAt) }}</span>
+              </div>
+              <div class="member-path">📁 {{ item.comic.localPath || '—' }}</div>
+              <div class="card-actions">
+                <span class="spacer"></span>
+                <button
+                  v-if="item.rule === 'parent'"
+                  class="action-btn ghost-gray"
+                  :disabled="isRemoving"
+                  title="忽略此更新提示（父画廊 gid），后续不再提示「旧版可删除」"
+                  @click="ignoreParent(item)"
+                >
+                  🕶️ 忽略此提示
+                </button>
+                <button
+                  class="action-btn danger-soft"
+                  :disabled="isRemoving"
+                  @click="removeSuggested(item)"
+                >
+                  {{ isRemoving && removingId === item.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                </button>
+              </div>
             </div>
           </div>
-          <button class="action-btn ghost-gray" title="恢复后下次查重重新参与判定" @click="restoreIgnore(ig)">恢复</button>
+        </section>
+
+        <!-- 疑似重复：按差异模式分组折叠 -->
+        <section
+          v-for="g in groupedClusters"
+          :key="g.key"
+          class="group"
+          :class="{ open: openGroups[g.key] }"
+        >
+          <div class="group-head" @click="toggleGroup(g.key)">
+            <span class="arrow">▶</span>
+            <span class="group-name">🔎 {{ g.meta.name }}</span>
+            <span class="group-count">{{ g.list.length }} 组</span>
+            <span class="group-desc">{{ g.meta.desc }}</span>
+          </div>
+          <div v-show="openGroups[g.key]" class="group-body">
+            <div v-for="cl in g.list" :key="cl.id" class="card suspect" :class="{ ignored: cl.ignored }">
+              <div class="card-head">
+                <span class="card-key" :title="cl.titleKey">{{ cl.titleKey }}</span>
+                <span class="card-artist">artist: {{ cl.artist || 'null' }}</span>
+                <span class="conf" :class="cl.confidence">
+                  {{ cl.confidence === 'high' ? '高置信' : '中置信' }}
+                </span>
+                <span v-if="cl.ignored" class="ignored-badge">
+                  此前已忽略 · 新增 {{ cl.ignoredNewCount }} 本
+                </span>
+                <span class="spacer"></span>
+                <div class="diffs">
+                  <span v-for="c in diffChips(cl)" :key="c" :class="chipClass(c)">{{ c }}</span>
+                </div>
+              </div>
+
+              <!-- 紧凑视图：一行一组 -->
+              <template v-if="density === 'compact'">
+                <div class="crow-line">
+                  <div class="crow-main">
+                    <div class="declared-hint">
+                      {{ aliveCount(cl) === 2 ? '移除其中一本 ＝ 保留另一本' : `组内 ${aliveCount(cl)} 本 · 可逐个移除` }}
+                    </div>
+                  </div>
+                  <div class="crow-actions">
+                    <button
+                      v-for="(m, mi) in cl.members"
+                      :key="m.comic.id"
+                      class="action-btn danger-soft sm"
+                      :disabled="isRemoving"
+                      :title="`移除《${m.comic.title}》（其余本子保留）`"
+                      @click.stop="removeMember(cl, m)"
+                    >
+                      {{ isRemoving && removingId === m.comic.id ? '⏳' : `🗑️ ${String.fromCharCode(65 + mi)}` }}
+                    </button>
+                    <button class="action-btn ghost-gray sm" @click.stop="keepWholeGroup(cl)" title="两本都留（忽略本组）">
+                      🕶️ 都留
+                    </button>
+                    <button class="action-btn ghost-teal sm" @click.stop="toggleExpand(cl.id)">
+                      {{ isExpanded(cl.id) ? '▴ 收起' : '🔍 对比' }}
+                    </button>
+                    <button v-if="cl.ignored" class="action-btn ghost-gray sm" @click.stop="ackIgnoreNew(cl)">
+                      ✔ 确认新增
+                    </button>
+                  </div>
+                </div>
+                <div v-show="isExpanded(cl.id)" class="inline-compare">
+                  <div class="diffline">这两本差在哪：<b>{{ diffChips(cl).join(' · ') }}</b></div>
+                  <div class="compare">
+                    <div v-for="(m, mi) in cl.members" :key="m.comic.id" class="panel">
+                      <div class="panel-head">
+                        <span class="panel-badge info">成员 {{ String.fromCharCode(65 + mi) }}</span>
+                        <span class="panel-diff">{{ memberDiff(cl, mi) }}</span>
+                      </div>
+                      <div class="panel-top">
+                        <div class="cover lg" @click="openComic(m.comic.id)">
+                          <img
+                            v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
+                            :src="m.comic.coverUrl"
+                            :alt="m.comic.title"
+                            loading="lazy"
+                            @error="onCoverError(m.comic.id)"
+                          />
+                          <span v-else class="cover-fallback">{{ (cl.titleKey || '?').slice(0, 1) }}</span>
+                        </div>
+                        <div class="member-main">
+                          <div class="panel-title" @click="openComic(m.comic.id)">{{ m.comic.title }}</div>
+                          <div class="member-meta">
+                            <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
+                            <span>📄 {{ m.pageCount }} 页</span>
+                            <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                            <span>artist: {{ m.artist || 'null' }}</span>
+                          </div>
+                          <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                        </div>
+                      </div>
+                      <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
+                        {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 舒适视图：成员卡并排 -->
+              <template v-else>
+                <div class="members">
+                  <div v-for="m in cl.members" :key="m.comic.id" class="member">
+                    <div class="member-cover" @click="openComic(m.comic.id)">
+                      <img
+                        v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
+                        :src="m.comic.coverUrl"
+                        :alt="m.comic.title"
+                        loading="lazy"
+                        @error="onCoverError(m.comic.id)"
+                      />
+                      <span v-else class="cover-fallback">{{ (cl.titleKey || '?').slice(0, 1) }}</span>
+                    </div>
+                    <div class="member-main">
+                      <div class="member-title" :title="m.comic.title" @click="openComic(m.comic.id)">
+                        {{ m.comic.title || '（无标题）' }}
+                      </div>
+                      <div class="member-meta">
+                        <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
+                        <span>{{ m.pageCount || 0 }} 页</span>
+                        <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                      </div>
+                      <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                      <div class="member-actions">
+                        <button
+                          class="action-btn danger-soft sm"
+                          :disabled="isRemoving"
+                          :title="`仅移除这一本，组内其余本子照常保留`"
+                          @click="removeMember(cl, m)"
+                        >
+                          {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-actions">
+                  <span class="hint dim">
+                    {{
+                      aliveCount(cl) === 2
+                        ? '移除其中一本 ＝ 保留另一本'
+                        : `组内 ${aliveCount(cl)} 本 · 可逐个移除（移除后仍 ≥2 本会继续挂着）`
+                    }}
+                  </span>
+                  <span class="spacer"></span>
+                  <button class="action-btn ghost-teal" @click="toggleExpand(cl.id)">
+                    {{ isExpanded(cl.id) ? '▴ 收起对比' : '🔍 展开对比' }}
+                  </button>
+                  <button
+                    v-if="cl.ignored"
+                    class="action-btn ghost-gray"
+                    title="把新入库的本子纳入「已知」，之后继续静默"
+                    @click="ackIgnoreNew(cl)"
+                  >
+                    ✔ 确认新增
+                  </button>
+                  <button class="action-btn ghost-gray" @click="keepWholeGroup(cl)">
+                    🕶️ 都留（不再提示）
+                  </button>
+                </div>
+                <div v-show="isExpanded(cl.id)" class="inline-compare">
+                  <div class="diffline">这两本差在哪：<b>{{ diffChips(cl).join(' · ') }}</b></div>
+                  <div class="compare">
+                    <div v-for="(m, mi) in cl.members" :key="m.comic.id" class="panel">
+                      <div class="panel-head">
+                        <span class="panel-badge info">成员 {{ String.fromCharCode(65 + mi) }}</span>
+                        <span class="panel-diff">{{ memberDiff(cl, mi) }}</span>
+                      </div>
+                      <div class="panel-top">
+                        <div class="cover lg" @click="openComic(m.comic.id)">
+                          <img
+                            v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
+                            :src="m.comic.coverUrl"
+                            :alt="m.comic.title"
+                            loading="lazy"
+                            @error="onCoverError(m.comic.id)"
+                          />
+                          <span v-else class="cover-fallback">{{ (cl.titleKey || '?').slice(0, 1) }}</span>
+                        </div>
+                        <div class="member-main">
+                          <div class="panel-title" @click="openComic(m.comic.id)">{{ m.comic.title }}</div>
+                          <div class="member-meta">
+                            <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
+                            <span>📄 {{ m.pageCount }} 页</span>
+                            <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                            <span>artist: {{ m.artist || 'null' }}</span>
+                          </div>
+                          <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                        </div>
+                      </div>
+                      <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
+                        {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                      </button>
+                    </div>
+                  </div>
+                  <p class="hint dim">移除前会二次确认；是否连本地文件一起删由上方勾选决定</p>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+
+        <!-- 建议保留：无需操作的信息，默认收起 -->
+        <div v-if="keepItems.length > 0" class="fold">
+          <details>
+            <summary>✔ 建议保留 {{ keepItems.length }} 项 —— 无需操作，点开查看</summary>
+            <div class="fold-body">
+              <div v-for="item in keepItems" :key="item.comic.id" class="keep-row">
+                <span class="keep-title" @click="openComic(item.comic.id)">{{ item.comic.title }}</span>
+                <span class="hint dim">{{ item.reason }}</span>
+              </div>
+            </div>
+          </details>
         </div>
 
-        <div v-if="gidIgnores.length > 0" class="ignore-group-title">父画廊（gid 型 · 不再提示「旧版可删除」）</div>
-        <div v-for="ig in gidIgnores" :key="ig.id" class="ignore-row">
-          <div class="ignore-main">
-            <div class="ignore-name">gid {{ ig.gid }}</div>
-            <div class="ignore-sub">忽略于 {{ formatDate(ig.createdAt) }}</div>
-          </div>
-          <button class="action-btn ghost-gray" title="恢复后下次查重重新参与判定" @click="restoreIgnore(ig)">恢复</button>
-        </div>
-
-        <div v-if="comicIgnores.length > 0" class="ignore-group-title">成员（comic 型 · 不再参与疑似判定）</div>
-        <div v-for="ig in comicIgnores" :key="ig.id" class="ignore-row">
-          <div class="ignore-main">
-            <div class="ignore-name">{{ ig.comicTitle || '漫画 ' + (ig.comicId || '') }}</div>
-            <div class="ignore-sub">忽略于 {{ formatDate(ig.createdAt) }}</div>
-          </div>
-          <button class="action-btn ghost-gray" title="恢复后该漫画重新参与疑似判定" @click="restoreIgnore(ig)">恢复</button>
+        <!-- 已忽略：主列表不占位，只在独立页可见 -->
+        <div class="fold flat">
+          <span>🕶️</span>
+          <span>已忽略的作品移到 <router-link to="/offline/ignore">忽略清单</router-link> 独立页 —— 有新增本子时会自动回到这里提醒</span>
         </div>
       </template>
-    </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
+/* ─────────────────────────────────────────────────────────────
+   Round44 维护页 v3 样式（布局对齐 Test/mockups 样稿）
+   ───────────────────────────────────────────────────────────── */
 .maintenance-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   padding: 20px;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--app-border-2);
+  align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--app-border-2);
 }
-
 .page-title {
+  margin: 0;
   font-size: 1.3rem;
   color: var(--app-text-strong);
-  margin: 0;
 }
-
 .subtitle {
-  font-size: 0.85rem;
+  margin: 4px 0 0;
+  font-size: 0.8rem;
   color: var(--app-text-3);
-  margin: 4px 0 0 0;
-  max-width: 640px;
-}
-
-.scan-btn {
-  background: #007acc;
-  color: #fff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.88rem;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-.scan-btn:hover {
-  opacity: 0.85;
-}
-.scan-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+}
+
+/* 更多菜单 */
+.menu-wrap {
+  position: relative;
+}
+.more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 250px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  z-index: 30;
+}
+.more-menu button,
+.more-menu .menu-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--app-fg);
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.more-menu button:hover,
+.more-menu .menu-link:hover {
+  background: var(--app-surface-3);
+}
+.more-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.more-menu small {
+  display: block;
+  color: var(--app-text-muted);
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+/* 按钮 */
+.scan-btn {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  background: #007acc;
+  color: #fff;
+  transition: all 0.15s;
+}
+.scan-btn:hover {
+  opacity: 0.9;
+}
+.scan-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .scan-btn.ghost {
   background: transparent;
-  color: #7ec8ff;
-  border: 1px solid #007acc;
+  border-color: var(--app-border-3);
+  color: var(--app-text-2);
 }
 .scan-btn.ghost:hover {
-  opacity: 0.85;
+  border-color: #007acc;
+  color: #7ec8ff;
+  opacity: 1;
+}
+.action-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--app-surface-3);
+  color: var(--app-fg);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.action-btn:hover {
+  background: var(--app-surface-3-hover);
+}
+.action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.action-btn.sm {
+  padding: 3px 9px;
+  font-size: 0.74rem;
+}
+.action-btn.danger-soft {
+  background: #5a3a3a;
+  color: #ffc9d1;
+}
+.action-btn.ghost-gray {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  text-decoration: none;
+}
+.action-btn.ghost-gray:hover {
+  border-color: var(--app-text-3);
+  color: var(--app-text-strong);
+}
+.action-btn.ghost-teal {
+  background: transparent;
+  border: 1px solid #1d5148;
+  color: #00c2a8;
+}
+.action-btn.ghost-teal:hover {
+  background: #0f2622;
 }
 
+/* 顶部忽略新增提示 */
+.alert-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #2a2414;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #f5d08a;
+}
+.alert-text {
+  flex: 1;
+  min-width: 0;
+}
+.alert-text b {
+  color: #ffd98a;
+}
+
+/* 过期提示 */
 .stale-banner {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  margin: 4px 0 12px;
-  padding: 12px 14px;
-  background-color: rgba(255, 193, 7, 0.08);
-  border: 1px solid rgba(255, 193, 7, 0.4);
-  border-left: 3px solid #ffc107;
+  background: #2a2414;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 3px solid #f59e0b;
   border-radius: 6px;
-}
-.stale-icon {
-  font-size: 1.1rem;
-  line-height: 1.4;
+  padding: 12px 14px;
 }
 .stale-info {
   flex: 1;
   min-width: 0;
 }
 .stale-title {
-  color: #ffd54f;
   margin: 0;
-  font-weight: 600;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
+  color: #ffd98a;
 }
 .stale-sub {
-  color: #b8a26a;
-  margin: 4px 0 0 0;
+  margin: 3px 0 0;
   font-size: 0.78rem;
-  line-height: 1.5;
-}
-.stale-action {
-  flex-shrink: 0;
-  align-self: center;
-}
-.stale-action .scan-btn {
-  padding: 6px 14px;
-  font-size: 0.8rem;
+  color: #c9b184;
 }
 
+/* 扫描进度 */
 .scanning-banner {
   display: flex;
   align-items: center;
   gap: 14px;
-  background-color: #14283a;
+  background: var(--app-surface);
   border: 1px solid #007acc;
   border-radius: 8px;
   padding: 14px 16px;
 }
-
-/* Round29：暂停态样式 + 任务控制按钮 */
 .scanning-banner.is-paused {
   border-color: #f59e0b;
-  background-color: #2a2414;
-}
-.paused-icon {
-  font-size: 1.3rem;
-  flex-shrink: 0;
-}
-.banner-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.control-btn {
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  color: #fff;
-  transition: opacity 0.2s;
-}
-.control-btn:hover {
-  opacity: 0.85;
-}
-.control-btn.pause {
-  background: #6b7280;
-}
-.control-btn.resume {
-  background: #00a896;
-}
-.control-btn.cancel {
-  background: #ff7588;
-}
-.scope-hint {
-  margin: 4px 0 12px;
-  padding: 10px 14px;
-  background-color: rgba(61, 90, 254, 0.08);
-  border: 1px solid rgba(61, 90, 254, 0.35);
-  border-left: 3px solid #3d5afe;
-  border-radius: 6px;
-  color: #a8b0d8;
-  font-size: 0.78rem;
-  line-height: 1.5;
-}
-
-/* Round42 D2：联网复核设置（默认关闭） */
-.verify-setting {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-  margin: 0 0 12px;
-  padding: 8px 14px;
-  background-color: var(--app-surface-2, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--app-border-2, rgba(255, 255, 255, 0.08));
-  border-radius: 6px;
-  font-size: 0.78rem;
-}
-
-.verify-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  color: var(--app-text-2, #c7cbe0);
-  user-select: none;
-}
-
-.verify-toggle input {
-  cursor: pointer;
-  accent-color: #3d5afe;
-}
-
-.verify-hint {
-  color: var(--app-text-3, #8b90a8);
-  line-height: 1.5;
-}
-.scanning-title {
-  color: #fff;
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.92rem;
-}
-.scanning-sub {
-  color: #9bb6c8;
-  margin: 3px 0 0 0;
-  font-size: 0.78rem;
 }
 .scanning-info {
   flex: 1;
   min-width: 0;
+}
+.scanning-title {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--app-text-strong);
 }
 .scanning-percent {
   margin-left: 8px;
   color: #7ec8ff;
   font-weight: 700;
 }
+.scanning-sub {
+  margin: 4px 0 0;
+  font-size: 0.76rem;
+  color: var(--app-text-3);
+}
 .scanning-current {
-  color: #d7e6f0;
-  margin: 6px 0 0 0;
-  font-size: 0.82rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin: 4px 0 0;
+  font-size: 0.76rem;
+  color: var(--app-text-2);
 }
 .progress-track {
   height: 6px;
-  background-color: rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  margin-top: 8px;
+  background: var(--app-surface-3);
+  border-radius: 999px;
   overflow: hidden;
+  margin-top: 8px;
 }
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #007acc, #4cc3ff);
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, #007acc, #00c2a8);
+  transition: width 0.3s;
 }
-
+.banner-actions {
+  display: flex;
+  gap: 8px;
+}
+.control-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: #fff;
+  background: var(--app-surface-3);
+}
+.control-btn.pause {
+  background: #f59e0b;
+  color: #2a2414;
+}
+.control-btn.resume {
+  background: #00c2a8;
+  color: #06231f;
+}
+.control-btn.cancel {
+  background: #5a3a3a;
+  color: #ffc9d1;
+}
 .spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
   border-top-color: #007acc;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+}
+.paused-icon {
+  font-size: 1.1rem;
 }
 @keyframes spin {
   to {
@@ -1532,799 +1311,600 @@ onUnmounted(stopPolling)
   }
 }
 
-.empty-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 0;
-  color: var(--app-text-3);
-  text-align: center;
-}
-.empty-box .icon {
-  font-size: 3rem;
-  margin-bottom: 12px;
-}
-.empty-title {
-  color: var(--app-text-2);
-  font-size: 1rem;
-  margin: 0;
-}
-.empty-sub {
-  font-size: 0.82rem;
-  margin: 6px 0 0 0;
-  max-width: 420px;
-}
-
-.summary-bar {
-  display: flex;
-  gap: 16px;
-  font-size: 0.85rem;
-  flex-wrap: wrap;
-}
-.summary-item b {
-  font-size: 1rem;
-}
-.summary-item.warn {
-  color: #f59e0b;
-}
-.summary-item.ok {
-  color: #4caf50;
-}
-
-.section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.section-title {
-  font-size: 0.95rem;
-  margin: 0;
-}
-.section-title.danger {
-  color: #ff7588;
-}
-.section-title.ok {
-  color: #4caf50;
-}
-
-.item-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.dedup-card {
-  display: flex;
-  gap: 14px;
-  background-color: var(--app-surface-2);
-  border: 1px solid var(--app-border-2);
+/* 待办进度卡 */
+.progress-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  padding: 14px;
-  align-items: flex-start;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.dedup-card:hover {
-  border-color: #00a896;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-}
-.remove-card {
-  border-left: 3px solid #ff7588;
-}
-.keep-card {
-  border-left: 3px solid #4caf50;
-  opacity: 0.92;
-}
-
-.compare-hint {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: #00a896;
-  border: 1px solid rgba(0, 168, 150, 0.4);
-  background: rgba(0, 168, 150, 0.1);
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-
-.cover-box {
-  width: 56px;
-  height: 78px;
-  border-radius: 6px;
-  overflow: hidden;
-  background-color: var(--app-surface-3);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.cover-box img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.cover-fallback {
-  font-size: 1.4rem;
-}
-
-.card-main {
-  flex: 1;
-  min-width: 0;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
-
-.card-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.card-title {
-  font-size: 0.92rem;
-  color: var(--app-text-strong);
-  margin: 0;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.mode-chip {
-  font-size: 0.7rem;
-  color: #9bb6c8;
-  background-color: #14283a;
-  border: 1px solid #007acc;
-  padding: 2px 8px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.reason-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 0.82rem;
-  color: #f59e0b;
-  background-color: #2a2414;
-  border: 1px solid #5a4a1a;
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-.reason-icon {
-  flex-shrink: 0;
-}
-
-.keep-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 0.82rem;
-  color: #4caf50;
-  background-color: #14281a;
-  border: 1px solid #1f4a2a;
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-.keep-icon {
-  flex-shrink: 0;
-}
-
-.card-meta {
+.progress-top {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.meta-text {
-  font-size: 0.75rem;
+.progress-num {
+  font-size: 1rem;
+  color: var(--app-text-strong);
+}
+.progress-num b {
+  color: #7ec8ff;
+  font-size: 1.3rem;
+}
+.progress-meta {
+  font-size: 0.78rem;
   color: var(--app-text-3);
 }
-
-.card-path {
-  font-size: 0.72rem;
-  color: #007acc;
-  font-family: Consolas, monospace;
-  word-break: break-all;
+.progress-top .spacer,
+.card-actions .spacer,
+.progress-foot .spacer {
+  flex: 1;
 }
-
-.card-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  flex-shrink: 0;
-  width: 150px;
-  justify-content: center;
+.seg {
+  display: inline-flex;
+  background: var(--app-surface-3);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
 }
-
-.action-btn {
+.seg button {
   border: none;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-  color: #fff;
-}
-.action-btn:hover {
-  opacity: 0.85;
-}
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.action-btn.danger-soft {
-  background-color: #5a3a3a;
-}
-.action-btn.danger {
-  background-color: #ff7588;
-}
-
-.kept-badge {
-  display: inline-block;
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #4caf50;
-  border: 1px solid #2f6b3a;
-  background-color: #14281a;
-  padding: 6px 10px;
-  border-radius: 6px;
-}
-
-.remove-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  background-color: rgba(245, 158, 11, 0.06);
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-.select-all {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #e5e7eb;
-  font-size: 0.82rem;
-  cursor: pointer;
-  user-select: none;
-}
-.select-all input,
-.select-check input {
-  width: 16px;
-  height: 16px;
-  accent-color: #ff7588;
+  background: none;
+  color: var(--app-text-3);
+  font-family: inherit;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 4px;
   cursor: pointer;
 }
-.select-check {
-  flex-shrink: 0;
-  padding-top: 2px;
-  cursor: pointer;
-}
-.select-all:has(input:disabled),
-.select-check:has(input:disabled) {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.selected-count {
-  color: #f59e0b;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-.batch-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-.dedup-card.selected {
-  border-color: #ff7588;
-  box-shadow: 0 0 0 1px rgba(255, 117, 136, 0.4);
-}
-
-@media (max-width: 720px) {
-  .dedup-card {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .card-actions {
-    width: 100%;
-    flex-direction: row;
-  }
-  .card-actions .action-btn {
-    flex: 1;
-  }
-  .kept-badge {
-    text-align: center;
-  }
-}
-
-/* ── Round26 O2/O3：主按钮 / 忽略清单按钮 / 统计条 / 簇卡片 / 折叠区 / 弹层 ── */
-.scan-btn.primary {
+.seg button.on {
   background: #007acc;
   color: #fff;
 }
-.scan-btn.ignore {
-  background: transparent;
-  color: #b8b8c0;
-  border: 1px solid var(--app-border-3);
+.stat-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-.count-badge {
+  gap: 5px;
   background: var(--app-surface-3);
-  color: #e8e8f0;
-  border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.summary-item.suspect {
-  color: #00c2a8;
-}
-.summary-item.ignored {
-  color: #9a9aa2;
-}
-.summary-item .hint {
-  font-size: 0.72rem;
-  color: var(--app-text-muted);
-  font-weight: 400;
-}
-
-.section-title.suspect {
-  color: #00c2a8;
-}
-.section-title.ignored {
-  color: #9a9aa2;
-}
-
-.action-btn.ghost-gray {
-  background: transparent;
-  color: #b8b8c0;
   border: 1px solid var(--app-border-3);
-  font-weight: 500;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.74rem;
+  color: var(--app-text-2);
+  text-decoration: none;
 }
-.action-btn.ghost-teal {
-  background: transparent;
-  color: #00c2a8;
-  border: 1px solid rgba(0, 194, 168, 0.5);
-  font-weight: 500;
+.chip.high {
+  color: #7ec8ff;
+  border-color: #2b4a63;
+  background: #14283a;
 }
-
-/* 疑似重复簇卡片（O3） */
-.cluster-card {
-  background: var(--app-surface-2);
-  border: 1px solid var(--app-border-2);
-  border-left: 3px solid #00a896;
-  border-radius: 8px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition: border-color 0.15s;
+.chip.medium {
+  color: #f5d08a;
+  border-color: #4a3c14;
+  background: #2a2414;
 }
-.cluster-card:hover {
-  border-color: #00a896;
+.chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
-.cluster-head {
+.chip.link:hover {
+  border-color: #007acc;
+  color: #7ec8ff;
+}
+.track {
+  height: 6px;
+  background: var(--app-surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.track > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #007acc, #00c2a8);
+  transition: width 0.3s;
+}
+.progress-foot {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.cluster-name {
-  font-size: 0.95rem;
-  color: var(--app-text-strong);
-  font-weight: 700;
+.checkline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--app-text-2);
+  cursor: pointer;
+  user-select: none;
 }
-.conf-badge {
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 2px 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
+.checkline input {
+  accent-color: #ff7588;
+  width: 14px;
+  height: 14px;
 }
-.conf-high {
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.4);
-  background: rgba(52, 211, 153, 0.1);
+.hint {
+  font-size: 0.74rem;
 }
-.conf-medium {
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.1);
+.hint.dim {
+  color: var(--app-text-muted);
 }
-.cluster-reason {
-  font-size: 0.78rem;
+
+/* 分组 */
+.group {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.group.open .group-head .arrow {
+  transform: rotate(90deg);
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: var(--app-surface-2);
+}
+.group-head:hover {
+  background: var(--app-surface-3);
+}
+.group-head .arrow {
   color: var(--app-text-3);
+  font-size: 0.7rem;
+  transition: transform 0.15s;
+}
+.group-name {
+  font-size: 0.92rem;
+  color: var(--app-text-strong);
+  white-space: nowrap;
+}
+.group-count {
+  background: var(--app-surface-3);
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 0.74rem;
+  color: var(--app-text-2);
+}
+.group-desc {
   flex: 1;
-  min-width: 200px;
+  color: var(--app-text-muted);
+  font-size: 0.76rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.cluster-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.members {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-.member {
+.group-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: var(--app-surface-3);
+  gap: 10px;
+  padding: 12px;
+}
+
+/* 组卡片 */
+.card {
   border: 1px solid var(--app-border-2);
+  border-radius: 8px;
+  background: var(--app-surface-2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card.suspect {
+  border-left: 3px solid #00c2a8;
+}
+.card.suspect.ignored {
+  border-left-color: #f59e0b;
+}
+.card.danger {
+  border-left: 3px solid #ff7588;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card-key {
+  font-size: 0.88rem;
+  color: var(--app-text-strong);
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-artist {
+  font-size: 0.76rem;
+  color: var(--app-text-3);
+}
+.conf {
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 0.72rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.conf.high {
+  color: #00c2a8;
+  border-color: #1d5148;
+  background: #0f2622;
+}
+.conf.medium {
+  color: #f5d08a;
+  border-color: #4a3c14;
+  background: #2a2414;
+}
+.ignored-badge {
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 0.72rem;
+  color: #ffd98a;
+  border: 1px solid #4a3c14;
+  background: #2a2414;
+  white-space: nowrap;
+}
+.reason-chip {
+  font-size: 0.74rem;
+  color: #f0d9a8;
+  background: #2a2414;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.mode-chip {
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+  border: 1px solid var(--app-border-3);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.diffs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.diff {
+  font-size: 0.72rem;
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: #14283a;
+  border: 1px solid #24425c;
+  color: #9bb6c8;
+  white-space: nowrap;
+}
+.diff.lang {
+  background: #2a2414;
+  border-color: #4a3c14;
+  color: #f5d08a;
+}
+.diff.size {
+  background: #241a2a;
+  border-color: #46305c;
+  color: #cfb0e8;
+}
+.diff.page {
+  background: #14281a;
+  border-color: #24502c;
+  color: #9fd8a6;
+}
+
+/* 成员卡（舒适视图） */
+.members {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.member {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 10px;
-  width: 168px;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: border-color 0.15s;
-  position: relative;
-}
-.member:hover {
-  border-color: var(--app-accent);
 }
 .member-cover {
-  width: 100%;
-  height: 96px;
-  border-radius: 4px;
+  width: 54px;
+  height: 72px;
+  border-radius: 6px;
+  flex: 0 0 auto;
   overflow: hidden;
-  position: relative;
+  cursor: pointer;
+  background: var(--app-surface-4);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--app-surface-3);
 }
 .member-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.member-cover .cover-fallback {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.7);
+.cover.lg {
+  width: 132px;
+  height: 176px;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--app-surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cover.lg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cover-fallback {
+  font-size: 1.2rem;
+  color: var(--app-text-3);
+}
+.member-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .member-title {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   color: var(--app-text-strong);
   line-height: 1.35;
-  /* Round43：固定两行高度——标题不足两行用空行占位，保证同组卡片内容与按钮位置对齐 */
-  height: 2.7em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  word-break: break-word;
+  cursor: pointer;
 }
-/* 无标题：灰字占位，仍占满固定的两行高度 */
-.member-title.is-empty {
-  color: var(--app-text-muted);
+.panel-title {
+  font-size: 0.85rem;
+  color: var(--app-text-strong);
+  line-height: 1.4;
+  cursor: pointer;
 }
 .member-meta {
   display: flex;
-  gap: 6px;
-  flex-wrap: nowrap;
-  align-items: center;
-  min-width: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
 }
 .lang-chip {
-  font-size: 0.68rem;
-  color: #c9d6e0;
-  background: #14283a;
-  border: 1px solid var(--app-border-3);
-  padding: 1px 6px;
-  border-radius: 8px;
-  /* 长语言名（如 chinese (simplified)）省略，保证「页数」始终可见 */
-  display: inline-block;
+  border: 1px dashed var(--app-border-3);
+  border-radius: 6px;
+  padding: 0 6px;
   max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Round43：无 language tag 的成员显示 null（弱化样式，与真实语言区分） */
 .lang-chip.is-null {
   color: var(--app-text-muted);
-  background: transparent;
-  border-style: dashed;
 }
-.member-pages {
+.member-path {
   font-size: 0.7rem;
-  color: var(--app-text-3);
-  flex-shrink: 0;
-}
-.member-artist {
-  font-size: 0.68rem;
   color: var(--app-text-muted);
-  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Round43：疑似重复成员——右上角勾选框 / 选中态 / 单卡删除按钮 */
-.selected-count.suspect {
-  color: #00c2a8;
-}
-.suspect-toolbar {
-  background-color: rgba(0, 194, 168, 0.06);
-  border-color: rgba(0, 194, 168, 0.28);
-}
-.toolbar-hint {
-  font-size: 0.72rem;
-  color: var(--app-text-muted);
-}
-.member.selected {
-  border-color: #00c2a8;
-  box-shadow: 0 0 0 1px rgba(0, 194, 168, 0.4);
-}
-.member-check-corner {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 4px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  cursor: pointer;
-}
-.member-check-corner input {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  accent-color: #00c2a8;
-  cursor: pointer;
-}
-.member-check-corner.locked {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.member-check-corner.locked input {
-  cursor: not-allowed;
 }
 .member-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.mini-btn {
-  border: none;
-  border-radius: 5px;
-  padding: 4px 6px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: #fff;
-  background-color: #5a3a3a;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity 0.15s;
-}
-.mini-btn:hover:not(:disabled) {
-  opacity: 0.85;
-}
-.mini-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.mini-btn.danger {
-  background-color: #ff7588;
-}
-
-/* 已忽略折叠区（O2） */
-.ignored-section {
-  border: 1px dashed var(--app-border-3);
-  border-radius: 8px;
-  background: rgba(138, 138, 146, 0.04);
-  padding: 10px 14px;
-}
-.ignored-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.88rem;
-  color: #9a9aa2;
-  font-weight: 600;
-  list-style: none;
-}
-.ignored-head::-webkit-details-marker {
-  display: none;
-}
-.ignored-head .arrow {
-  transition: transform 0.2s;
-  font-size: 0.7rem;
-}
-details[open] .ignored-head .arrow {
-  transform: rotate(90deg);
-}
-.ignored-manage {
-  margin-left: auto;
-}
-.ignored-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  background: var(--app-surface-2);
-  border: 1px solid var(--app-border-2);
-  border-left: 3px solid #8a8a92;
-  border-radius: 6px;
-  padding: 10px 12px;
-}
-.ignored-badge {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #b0b0b8;
-  background: rgba(138, 138, 146, 0.12);
-  border: 1px solid var(--app-border-3);
-  padding: 2px 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.ignored-info {
-  flex: 1;
-  min-width: 0;
-}
-.ignored-name {
-  font-size: 0.85rem;
-  color: var(--app-text-strong);
-}
-.ignored-sub {
-  font-size: 0.72rem;
-  color: var(--app-text-muted);
-}
-.ignored-item .action-btn {
-  flex-shrink: 0;
-}
-
-/* 忽略清单弹层（O2） */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-}
-.modal-box {
-  width: 560px;
-  max-width: 92vw;
-  max-height: 78vh;
-  overflow: auto;
-  background: var(--app-surface-2);
-  border: 1px solid var(--app-border-3);
-  border-radius: 10px;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
-.modal-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.modal-title {
-  font-size: 1.02rem;
-  color: var(--app-text-strong);
-  font-weight: 700;
-  flex: 1;
-}
-.modal-close {
-  border: none;
-  background: transparent;
-  color: var(--app-text-3);
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.modal-close:hover {
-  color: var(--app-text-strong);
-  background: var(--app-surface-3);
-}
-.modal-sub {
-  font-size: 0.76rem;
-  color: var(--app-text-3);
-}
-.ignore-group-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--app-text-2);
-  margin-top: 4px;
-}
-.ignore-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--app-surface-3);
-  border: 1px solid var(--app-border-2);
-  border-radius: 6px;
-  padding: 10px 12px;
-}
-.ignore-row + .ignore-row {
-  margin-top: 8px;
-}
-.ignore-main {
-  flex: 1;
-  min-width: 0;
-}
-.ignore-name {
-  font-size: 0.85rem;
-  color: var(--app-text-strong);
-  word-break: break-all;
-}
-.ignore-sub {
-  font-size: 0.72rem;
-  color: var(--app-text-muted);
   margin-top: 2px;
 }
-.ignore-row .action-btn {
-  flex-shrink: 0;
-}
-.modal-empty {
-  text-align: center;
-  color: var(--app-text-muted);
-  font-size: 0.85rem;
-  padding: 28px 0;
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-/* Round26-2：忽略选择弹层（成员多选） */
-.member-check {
+/* 紧凑视图 */
+.crow-line {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--app-surface-3);
-  border: 1px solid var(--app-border-2);
-  border-radius: 6px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 0.82rem;
+  flex-wrap: wrap;
 }
-.member-check:hover {
-  border-color: var(--app-accent);
-}
-.member-check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--app-accent);
-  flex-shrink: 0;
-}
-.member-check-title {
+.crow-main {
   flex: 1;
   min-width: 0;
+}
+.declared-hint {
+  font-size: 0.74rem;
+  color: var(--app-text-muted);
+}
+.crow-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 就地展开对比 */
+.inline-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px dashed var(--app-border-3);
+  padding-top: 10px;
+}
+.diffline {
+  background: #14283a;
+  border: 1px solid #24425c;
+  border-radius: 6px;
+  padding: 7px 11px;
+  font-size: 0.78rem;
+  color: #a9c8dd;
+}
+.diffline b {
+  color: #7ec8ff;
+}
+.compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.panel {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.panel-badge {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  padding: 1px 9px;
+  color: #7ec8ff;
+  border: 1px solid #2b4a63;
+  background: #14283a;
+}
+.panel-diff {
+  font-size: 0.74rem;
+  color: var(--app-text-3);
+}
+.panel-top {
+  display: flex;
+  gap: 12px;
+}
+
+/* 折叠区 */
+.fold {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: var(--app-text-3);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.fold.flat {
+  background: transparent;
+}
+.fold a {
+  color: #7ec8ff;
+}
+.fold summary {
+  cursor: pointer;
+}
+.fold-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.keep-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.78rem;
+}
+.keep-title {
+  color: var(--app-text-2);
+  cursor: pointer;
+  max-width: 46ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--app-text-strong);
 }
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 4px;
-  flex-wrap: wrap;
+
+/* 空态 */
+.empty-box {
+  text-align: center;
+  padding: 56px 20px;
+  color: var(--app-text-3);
+}
+.empty-box .icon {
+  font-size: 2.4rem;
+}
+.empty-title {
+  margin: 12px 0 6px;
+  color: var(--app-text-strong);
+  font-size: 1.05rem;
+}
+.empty-sub {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* ── 窄屏（手机 / PWA 可用性）：成员竖排 + 对比上下堆叠 + 按钮全宽 ── */
+@media (max-width: 720px) {
+  .maintenance-page {
+    padding: 12px;
+    gap: 12px;
+  }
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .header-actions {
+    justify-content: flex-end;
+  }
+  .compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .members {
+    flex-direction: column;
+  }
+  .member {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+  }
+  .member-main {
+    min-width: 140px;
+  }
+  .member-actions {
+    width: 100%;
+  }
+  .member-actions .action-btn {
+    width: 100%;
+  }
+  .panel-top {
+    flex-wrap: wrap;
+  }
+  .cover.lg {
+    width: 96px;
+    height: 128px;
+  }
+  .card-key {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .group-desc {
+    display: none;
+  }
+  .crow-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .crow-actions .action-btn {
+    flex: 1 1 auto;
+  }
 }
 </style>

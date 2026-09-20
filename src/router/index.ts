@@ -95,6 +95,13 @@ const routes: RouteRecordRaw[] = [
     // Round3-任务2：仅管理员可访问
     meta: { requiresAdmin: true },
   },
+  // Round44：忽略清单独立页（从维护页弹层剥离，可点开看每条忽略覆盖的成员）
+  {
+    path: '/offline/ignore',
+    name: 'OfflineIgnore',
+    component: () => import('@/views/offline/OfflineIgnore.vue'),
+    meta: { requiresAdmin: true },
+  },
   // 🎲 工具：画质升级（跨模式全局功能，与 random/reading-list 同属工具组，所有登录用户可用）
   {
     path: '/upgrade',

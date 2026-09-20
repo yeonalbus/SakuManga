@@ -44,6 +44,7 @@
           <PreferenceSettings v-else-if="activeTab === 'preference'" />
           <NetworkSettings v-else-if="activeTab === 'network'" />
           <DownloadSettings v-else-if="activeTab === 'download'" />
+          <DedupSettings v-else-if="activeTab === 'dedup'" />
           <TagMaintainSettings v-else-if="activeTab === 'tag-maintain'" />
           <UpdateScanSettings v-else-if="activeTab === 'update-scan'" />
           <LogSettings v-else-if="activeTab === 'logs'" />
@@ -71,6 +72,7 @@ import DownloadSettings from '@/components/settings/DownloadSettings.vue'
 import TagMaintainSettings from '@/components/settings/TagMaintainSettings.vue'
 import MyTagsSettings from '@/components/settings/MyTagsSettings.vue'
 import UpdateScanSettings from '@/components/settings/UpdateScanSettings.vue'
+import DedupSettings from '@/components/settings/DedupSettings.vue'
 import LogSettings from '@/components/settings/LogSettings.vue'
 import AboutSettings from '@/components/settings/AboutSettings.vue'
 
@@ -128,6 +130,7 @@ const allGroups: SettingsMenuGroup[] = [
     items: [
       { id: 'download', label: '下载', icon: '📥', title: '下载设置', adminOnly: true },
       { id: 'update-scan', label: '更新扫描', icon: '🔄', title: '更新扫描', adminOnly: true },
+      { id: 'dedup', label: '维护查重', icon: '🔎', title: '维护查重设置', adminOnly: true },
     ],
   },
   {

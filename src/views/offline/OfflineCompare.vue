@@ -299,7 +299,7 @@ const removeRight = async () => {
   const c = rightComic.value
   const confirmed = await modal.confirm(
     `确定仅删除《${c.title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
-    '删除记录（保留文件）',
+    '移除记录（保留文件）',
   )
   if (!confirmed) return
   removing.value = true
@@ -308,7 +308,7 @@ const removeRight = async () => {
       method: 'POST',
       body: JSON.stringify({ comicId: c.id, deleteFile: false }),
     })
-    toast.success(`《${c.title}》记录已删除（保留本地文件）`)
+    toast.success(`《${c.title}》记录已移除（保留本地文件）`)
     goBack()
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
@@ -345,7 +345,7 @@ onMounted(load)
             :disabled="removing"
             @click="removeRight"
           >
-            {{ removing ? '⏳ 删除中...' : '🗑️ 删除该对象' }}
+            {{ removing ? '⏳ 处理中...' : '🗑️ 移除这本' }}
           </button>
         </template>
       </div>
@@ -419,7 +419,7 @@ onMounted(load)
                 title="删除当前左侧成员（可选择仅删记录或连同本地文件）"
                 @click="openDeletePicker('left')"
               >
-                🗑️ 删除此成员
+                🗑️ 移除这本
               </button>
             </header>
             <OfflineDetailPanel
@@ -495,7 +495,7 @@ onMounted(load)
                 title="删除当前右侧成员（可选择仅删记录或连同本地文件）"
                 @click="openDeletePicker('right')"
               >
-                🗑️ 删除此成员
+                🗑️ 移除这本
               </button>
             </header>
             <OfflineDetailPanel
@@ -536,7 +536,7 @@ onMounted(load)
     <div v-if="deleteTarget" class="modal-mask" @click.self="deleteTarget = null">
       <div class="modal-box">
         <div class="modal-head">
-          <span class="modal-title">🗑️ 删除该成员</span>
+          <span class="modal-title">🗑️ 移除这本</span>
           <button class="modal-close" title="关闭" @click="deleteTarget = null">×</button>
         </div>
         <p class="modal-target">《{{ pendingDeleteMember?.comic.title }}》</p>
@@ -548,10 +548,10 @@ onMounted(load)
         <div class="modal-actions">
           <button class="action-btn ghost" @click="deleteTarget = null">取消</button>
           <button class="action-btn primary" :disabled="removing" @click="confirmDeleteMember(false)">
-            {{ removing ? '⏳ 处理中...' : '仅删除记录（保留文件）' }}
+            {{ removing ? '⏳ 处理中...' : '仅移除记录（保留文件）' }}
           </button>
           <button class="action-btn danger" :disabled="removing" @click="confirmDeleteMember(true)">
-            {{ removing ? '⏳ 处理中...' : '删除记录 + 本地文件' }}
+            {{ removing ? '⏳ 处理中...' : '移除记录 + 本地文件' }}
           </button>
         </div>
       </div>

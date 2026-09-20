@@ -124,6 +124,9 @@ const route = useRoute()
 watch(
   () => route.path,
   (newPath) => {
+    // Round45-Bug：进入阅读器即收起抽屉（窄屏下抽屉可能正处于展开态），
+    // 否则 isSidebarOpen 残留为 true，退出阅读器后抽屉会莫名其妙自己弹开
+    if (newPath === '/reader') closeSidebar()
     if (newPath.startsWith('/online')) {
       modeStore.setMode('online')
     } else if (newPath.startsWith('/offline')) {
@@ -145,8 +148,13 @@ watch(
     class="app-container"
     :class="{ 'sidebar-open': isSidebarOpen }"
   >
-    <!-- 🍔 汉堡按钮（窄屏显示，fixed 悬浮于顶栏左侧；桌面端隐藏） -->
+    <!-- 🍔 汉堡按钮（窄屏显示，fixed 悬浮于顶栏左侧；桌面端隐藏）
+         Round45-Bug：阅读器隐藏——阅读器顶栏自带「‹ 退出阅读」按钮，二者几何位置几乎完全重合
+         （汉堡 rect 10,8,40x40 / 返回按钮 rect 12,10,29x30）。Chrome 里 .reader-viewport(z-index:3000)
+         能压住它，但 iOS 上 .main-content 的 -webkit-overflow-scrolling:touch 会创建层叠上下文，
+         把阅读器的 z-index 局部化，导致汉堡(z-index:70)反超显示在上层，三条横杠糊住返回按钮。 -->
     <button
+      v-if="!isReaderRoute"
       class="menu-toggle"
       :class="{ active: isSidebarOpen }"
       aria-label="打开菜单"
@@ -157,8 +165,8 @@ watch(
       <span class="menu-toggle-bar"></span>
     </button>
 
-    <!-- 抽屉遮罩（窄屏抽屉打开时显示，点击关闭） -->
-    <div v-if="isSidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
+    <!-- 抽屉遮罩（窄屏抽屉打开时显示，点击关闭；Round45-Bug：阅读器同样不渲染，避免遮罩残留在阅读器之上） -->
+    <div v-if="isSidebarOpen && !isReaderRoute" class="sidebar-overlay" @click="closeSidebar"></div>
 
     <!-- 左侧导航栏（错误边界包裹：单区渲染错误不影响其他区域；Round15-Bug4 阅读器隐藏） -->
     <ErrorBoundary>

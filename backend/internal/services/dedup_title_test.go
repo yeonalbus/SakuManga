@@ -3,6 +3,7 @@ package services
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"SakuManga/internal/models"
 
@@ -229,22 +230,57 @@ func TestDetectClustersIgnore(t *testing.T) {
 		mkComic("e1", "[CIRCLE] もう一つの世界", []string{"artist:abc"}, 30),
 		mkComic("e2", "[CIRCLE] もう一つの世界 (English)", []string{"artist:abc"}, 31),
 	}
-	idx := &IgnoreIndex{titleKeys: map[string]bool{}, gids: map[string]bool{}}
-	idx.titleKeys[titleIgnoreKey("もう一つの世界", "abc")] = true
+	// Round44：忽略条目带「忽略当时的成员快照」
+	idx := newTestIgnoreIndex("もう一つの世界", "abc", []string{"e1", "e2"})
 
-	// 增量：忽略的簇直接跳过
-	incr := detectTitleClusters(comics, idx, false)
-	if len(incr) != 0 {
-		t.Fatalf("增量查重应跳过已忽略簇，得到 %d 簇", len(incr))
+	// 成员全在快照内 → 增量与全量都不列出（语义＝"直到有变化为止"）
+	if got := detectTitleClusters(comics, idx, false); len(got) != 0 {
+		t.Fatalf("忽略且无新增时不应列出（增量），得到 %d 簇", len(got))
 	}
-	// 全量：仍列出，带 Ignored 标记
-	full := detectTitleClusters(comics, idx, true)
-	if len(full) != 1 {
-		t.Fatalf("全量核对应列出已忽略簇，得到 %d 簇", len(full))
+	if got := detectTitleClusters(comics, idx, true); len(got) != 0 {
+		t.Fatalf("忽略且无新增时不应列出（全量，Round44 已撤销「永久列出」），得到 %d 簇", len(got))
 	}
-	if !full[0].Ignored {
-		t.Error("全量核对时命中忽略的簇应带 Ignored=true")
+
+	// 出现快照外的成员（忽略之后新入库）→ 照常列出并标注新增
+	newComic := mkComic("e3", "[CIRCLE] もう一つの世界 (Chinese)", []string{"artist:abc"}, 30)
+	newComic.AddedAt = time.Now() // 忽略之后入库
+	comics = append(comics, newComic)
+	got := detectTitleClusters(comics, idx, true)
+	if len(got) != 1 {
+		t.Fatalf("忽略项出现新入库成员时应列出该簇，得到 %d 簇", len(got))
 	}
+	if !got[0].Ignored {
+		t.Error("应带 Ignored=true（此前已忽略）")
+	}
+	if got[0].IgnoredNewCount != 1 {
+		t.Errorf("IgnoredNewCount 应为 1，得到 %d", got[0].IgnoredNewCount)
+	}
+	if got[0].IgnoreID != "test-ignore" {
+		t.Errorf("IgnoreID 应为 test-ignore，得到 %q", got[0].IgnoreID)
+	}
+}
+
+// newTestIgnoreIndex 构造带 title 型忽略（含成员快照）的内存索引
+func newTestIgnoreIndex(titleKey, artist string, seen []string) *IgnoreIndex {
+	idx := &IgnoreIndex{
+		titleEntries:     map[string]*TitleIgnoreEntry{},
+		titleEntriesNorm: map[string]*TitleIgnoreEntry{},
+		gids:             map[string]bool{},
+		comicIDs:         map[string]bool{},
+	}
+	e := &TitleIgnoreEntry{
+		ID:        "test-ignore",
+		TitleKey:  titleKey,
+		Artist:    artist,
+		CreatedAt: time.Now().Add(-time.Hour).UnixMilli(), // 新增感知的时间基线（1 小时前）
+		seen:      map[string]bool{},
+	}
+	for _, id := range seen {
+		e.seen[id] = true
+	}
+	idx.titleEntries[titleIgnoreKey(titleKey, artist)] = e
+	idx.titleEntriesNorm[ignoreTitleKeyOf(titleKey, artist)] = e
+	return idx
 }
 
 func TestDetectClustersNoArtistTag(t *testing.T) {

@@ -64,6 +64,14 @@ func main() {
 		log.Printf("[DB] 数据库路径: %s", dbPath)
 	}
 
+	// 1.2 Round44：回填存量 title 型忽略条目的成员快照（幂等）。
+	//     快照是「新增感知」的比较基线：升级前写入的忽略条目没有快照，若不回填，
+	//     所有已忽略的组都会因为"出现快照外的成员"而重新冒出来。逐条按当前匹配集合回填后，
+	//     升级前后行为连续，之后新入库的本子才会触发新增提示。
+	if n := services.BackfillIgnoreSnapshots(database.DB); n > 0 {
+		log.Printf("[DB] 已回填 %d 条忽略条目的成员快照（Round44 新增感知）", n)
+	}
+
 	// 2. 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 

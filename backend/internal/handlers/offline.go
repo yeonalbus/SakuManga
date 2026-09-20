@@ -214,16 +214,25 @@ func (h *OfflineHandler) GetDedupSetting(c *gin.Context) {
 }
 
 // SaveDedupSetting 保存查重设置 POST /api/v1/offline/dedup/setting
+//
+// Round44：新增 deleteFileDefault（维护页「移除时删除本地文件」勾选的记忆）。
+// 字段为指针 → 支持部分更新（前端只传其中一项时另一项保持原值）。
 func (h *OfflineHandler) SaveDedupSetting(c *gin.Context) {
 	var req struct {
-		OnlineVerify bool `json:"onlineVerify"`
+		OnlineVerify      *bool `json:"onlineVerify"`
+		DeleteFileDefault *bool `json:"deleteFileDefault"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式错误"})
 		return
 	}
 	s := services.GetDedupSetting(h.db)
-	s.OnlineVerify = req.OnlineVerify
+	if req.OnlineVerify != nil {
+		s.OnlineVerify = *req.OnlineVerify
+	}
+	if req.DeleteFileDefault != nil {
+		s.DeleteFileDefault = *req.DeleteFileDefault
+	}
 	if err := services.SaveDedupSetting(h.db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -370,13 +379,36 @@ func (h *OfflineHandler) CreateIgnore(c *gin.Context) {
 }
 
 // ListIgnores 忽略清单 GET /api/v1/offline/ignore/list
+//
+// Round44：返回体附带每条忽略的成员视图（宽松口径 + 同组标注 + 新增感知），
+// 供忽略清单独立页展示成员卡片；同时给出 matchedCount / groupCount / newCount。
 func (h *OfflineHandler) ListIgnores(c *gin.Context) {
-	list, err := services.ListIgnoresWithTitles(h.db)
+	list, err := services.ListIgnoresWithMembers(h.db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": list})
+}
+
+// AckIgnoreNewMembers 确认新增 POST /api/v1/offline/ignore/:id/ack
+//
+// Round44 新增感知：被忽略的作品下出现"忽略之后新入库"的本子时，该簇会重新出现在维护页；
+// 用户在忽略清单页确认已知悉后，把成员快照刷新为当前匹配集合，之后继续静默。
+func (h *OfflineHandler) AckIgnoreNewMembers(c *gin.Context) {
+	id := c.Param("id")
+	rec, err := services.AckIgnoreSnapshot(h.db, id)
+	if err != nil {
+		if errors.Is(err, services.ErrIgnoreNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 快照更新后该簇回到静默态 → 定向同步结果缓存（无需重新扫描）
+	services.SyncMaintainDedupClusters(h.db)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 
 // RestoreIgnore 恢复（删除）忽略条目 POST /api/v1/offline/ignore/:id/restore

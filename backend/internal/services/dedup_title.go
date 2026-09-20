@@ -43,7 +43,12 @@ type DedupCluster struct {
 	Confidence string          `json:"confidence"`       // high | medium
 	Reason     string          `json:"reason"`           // 判定依据摘要
 	Members    []ClusterMember `json:"members"`          // 成员（≥2）
-	Ignored    bool            `json:"ignored"`          // 全量核对时命中忽略；增量直接跳过
+	Ignored    bool            `json:"ignored"`          // 命中忽略但出现新增成员时列出（Round44 新增感知）
+
+	// Round44：命中 title 型忽略、且簇内存在「忽略之后新入库」的成员时填充，
+	// 前端据此标注「此前已忽略 · 新增 N 本」并提供「确认新增（更新快照）」。
+	IgnoredNewCount int    `json:"ignoredNewCount,omitempty"`
+	IgnoreID        string `json:"ignoreId,omitempty"`
 }
 
 // ClusterMember 疑似重复组单个成员
@@ -434,11 +439,17 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, f
 		if cl == nil {
 			continue
 		}
-		if ignoreIdx != nil && ignoreIdx.IsTitleIgnored(cl.TitleKey, cl.Artist) {
-			if !forceFull {
-				continue // 增量：忽略的簇直接跳过
+		if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
+			// Round44：忽略 = "直到有变化为止"。
+			// 簇成员全在忽略当时的快照内 → 静默跳过（增量/全量一致）；
+			// 出现快照外的成员（忽略之后新入库）→ 照常列出并标注新增，供用户确认。
+			newCnt := entry.CountNewMembers(cl.Members)
+			if newCnt == 0 {
+				continue
 			}
-			cl.Ignored = true // 全量：仍列出，带标记
+			cl.Ignored = true
+			cl.IgnoredNewCount = newCnt
+			cl.IgnoreID = entry.ID
 		}
 		clusters = append(clusters, *cl)
 	}

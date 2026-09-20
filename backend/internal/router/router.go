@@ -349,6 +349,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.POST("/offline/ignore", offlineHandler.CreateIgnore)
 			admin.GET("/offline/ignore/list", offlineHandler.ListIgnores)
 			admin.POST("/offline/ignore/:id/restore", offlineHandler.RestoreIgnore)
+			// Round44：确认新增（刷新 title 型忽略的成员快照 → 该簇回到静默态）
+			admin.POST("/offline/ignore/:id/ack", offlineHandler.AckIgnoreNewMembers)
 
 			// Round42 D2：查重设置（联网复核，默认关闭）
 			admin.GET("/offline/dedup/setting", offlineHandler.GetDedupSetting)

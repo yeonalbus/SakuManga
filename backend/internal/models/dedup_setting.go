@@ -14,5 +14,8 @@ type DedupSetting struct {
 	// OnlineVerify 联网复核开关（默认 false）
 	OnlineVerify bool `gorm:"default:false" json:"onlineVerify"`
 
+	// Round44：移除时是否同时删除本地文件（维护页「含文件」勾选的记忆，默认 false）
+	DeleteFileDefault bool `gorm:"default:false" json:"deleteFileDefault"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }

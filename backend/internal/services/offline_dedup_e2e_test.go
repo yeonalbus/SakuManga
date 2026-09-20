@@ -2,6 +2,7 @@ package services
 
 import (
 	"testing"
+	"time"
 
 	"SakuManga/internal/models"
 
@@ -79,31 +80,67 @@ func TestMaintainDedupClustersE2E(t *testing.T) {
 		t.Errorf("同 GID 应建议删除 1 项，得到 %d", removeCount)
 	}
 
-	// ── 全量（forceFull=true）：被忽略的 A 组簇仍列出，带 Ignored=true ──
+	// ── 全量（forceFull=true）：Round44 起不再"永久列出"已忽略项 ──
+	// 语义＝"直到有变化为止"：成员全在快照内 → 增量与全量都不列出。
 	full, err := MaintainDedupWithProgress(db, nil, nil, true)
 	if err != nil {
 		t.Fatalf("全量维护查重失败: %v", err)
 	}
-	foundIgnored := false
 	for _, cl := range full.Clusters {
 		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
-			foundIgnored = true
+			t.Error("忽略且无新增时，全量核对同样不应列出该簇")
+		}
+		if cl.TitleKey == "サンプルタイトル vol.2" {
+			t.Errorf("续集不应聚簇，得到 %q", cl.TitleKey)
+		}
+	}
+
+	// ── Round44 新增感知：忽略之后新入库同指纹本子 → 该簇重新冒头 ──
+	newComic := mkComic("a4", "[サークル] サンプルタイトル (Korean)", []string{"artist:てすと", "language:korean"}, 31)
+	newComic.GID = "g-new"
+	newComic.LocalPath = "/nonexistent/a4"
+	newComic.AddedAt = time.Now() // 忽略之后入库
+	if err := db.Create(&newComic).Error; err != nil {
+		t.Fatalf("创建新增漫画失败: %v", err)
+	}
+	after, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("新增后维护查重失败: %v", err)
+	}
+	foundNew := false
+	for _, cl := range after.Clusters {
+		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
+			foundNew = true
 			if !cl.Ignored {
-				t.Error("全量核对时命中忽略的簇应带 Ignored=true")
+				t.Error("出现快照外的成员时该簇应带 Ignored=true（此前已忽略）")
 			}
-			if len(cl.Members) != 3 {
-				t.Errorf("A 组簇成员应为 3，得到 %d", len(cl.Members))
+			if cl.IgnoredNewCount != 1 {
+				t.Errorf("IgnoredNewCount 应为 1，得到 %d", cl.IgnoredNewCount)
+			}
+			if cl.IgnoreID == "" {
+				t.Error("应带 IgnoreID（供前端「确认新增」调用）")
 			}
 		}
 	}
-	if !foundIgnored {
-		t.Error("全量核对应列出被忽略的 A 组簇")
+	if !foundNew {
+		t.Error("忽略项出现新入库成员时应重新列出该簇")
 	}
 
-	// 全量下 B（续集）与 C（撞名）不应产生簇
-	for _, cl := range full.Clusters {
-		if cl.TitleKey == "サンプルタイトル vol.2" {
-			t.Errorf("续集不应聚簇，得到 %q", cl.TitleKey)
+	// ── 确认新增（刷新快照）→ 该簇回到静默 ──
+	var ig models.IgnoredIdentifier
+	if err := db.Where("type = ?", "title").First(&ig).Error; err != nil {
+		t.Fatalf("读取忽略条目失败: %v", err)
+	}
+	if _, err := AckIgnoreSnapshot(db, ig.ID); err != nil {
+		t.Fatalf("确认新增失败: %v", err)
+	}
+	acked, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("确认新增后维护查重失败: %v", err)
+	}
+	for _, cl := range acked.Clusters {
+		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
+			t.Errorf("确认新增后该簇应回到静默，不再列出（得到 %d 成员）", len(cl.Members))
 		}
 	}
 }

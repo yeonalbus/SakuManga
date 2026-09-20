@@ -458,11 +458,15 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 			Reason:     reason,
 			Members:    membersOut,
 		}
-		if ignoreIdx != nil && ignoreIdx.IsTitleIgnored(cl.TitleKey, cl.Artist) {
-			if !forceFull {
+		if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
+			// Round44：同 Tier1 —— 有快照外的新成员才列出，否则静默
+			newCnt := entry.CountNewMembers(cl.Members)
+			if newCnt == 0 {
 				continue
 			}
 			cl.Ignored = true
+			cl.IgnoredNewCount = newCnt
+			cl.IgnoreID = entry.ID
 		}
 		clusters = append(clusters, cl)
 	}

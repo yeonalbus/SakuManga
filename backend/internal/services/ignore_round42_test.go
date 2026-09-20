@@ -2,6 +2,7 @@ package services
 
 import (
 	"testing"
+	"time"
 
 	"SakuManga/internal/models"
 
@@ -87,23 +88,34 @@ func TestIgnoreIndexLegacyKeyRound42RealCases(t *testing.T) {
 }
 
 func TestDetectClustersIgnoreCompatLegacyKey(t *testing.T) {
-	// 端到端：存量旧 key 的忽略记录，应能抑制新算法聚出的簇（增量语义）
+	// 端到端：存量旧 key 的忽略记录，应能抑制新算法聚出的簇。
+	// Round44：忽略＝"直到有变化为止"——无新增成员时增量与全量都静默；出现新成员才列出并标记。
 	db := newIgnoreTestDB(t)
 	if _, err := CreateIgnore(db, "title", "もう一つの世界 [中国翻訳]", "abc", "", "", ""); err != nil {
 		t.Fatalf("写入忽略失败: %v", err)
 	}
 	idx := LoadIgnoreIndex(db)
-	comics := []models.OfflineComic{
-		mkComic("lc1", "[CIRCLE] もう一つの世界 [中国翻訳]", []string{"artist:abc"}, 30),
-		mkComic("lc2", "[CIRCLE] もう一つの世界 [無修正] [中国翻訳]", []string{"artist:abc"}, 31),
-	}
+	lc1 := mkComic("lc1", "[CIRCLE] もう一つの世界 [中国翻訳]", []string{"artist:abc"}, 30)
+	lc2 := mkComic("lc2", "[CIRCLE] もう一つの世界 [無修正] [中国翻訳]", []string{"artist:abc"}, 31)
+	comics := []models.OfflineComic{lc1, lc2}
 	// 增量：命中忽略（含兼容匹配）→ 跳过
 	if got := detectTitleClusters(comics, idx, false); len(got) != 0 {
 		t.Errorf("兼容匹配应让增量查重跳过已忽略簇，得到 %d 簇", len(got))
 	}
-	// 全量：仍列出但带 Ignored 标记
-	full := detectTitleClusters(comics, idx, true)
-	if len(full) != 1 || !full[0].Ignored {
-		t.Errorf("全量核对应列出并标记 Ignored，得到 %+v", full)
+	// 全量：无新增成员 → 同样静默（Round44 撤销「永久列出」）
+	if got := detectTitleClusters(comics, idx, true); len(got) != 0 {
+		t.Errorf("无新增成员时全量核对也不应列出，得到 %d 簇", len(got))
+	}
+
+	// 兼容匹配 + 出现快照外的成员（且是忽略之后入库）→ 列出并标记新增
+	lc2.AddedAt = time.Now()
+	comics2 := []models.OfflineComic{lc1, lc2}
+	idx2 := LoadIgnoreIndex(db)
+	for _, e := range idx2.titleEntries {
+		e.seen["lc1"] = true // 只把 lc1 视为"忽略时已知"
+	}
+	got := detectTitleClusters(comics2, idx2, true)
+	if len(got) != 1 || !got[0].Ignored || got[0].IgnoredNewCount != 1 {
+		t.Errorf("兼容匹配下出现新成员应列出并标记 NewCount=1，得到 %+v", got)
 	}
 }

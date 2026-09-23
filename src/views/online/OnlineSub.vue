@@ -9,6 +9,8 @@ import { useSubStore } from '@/stores/subStore' // 🟢 对应订阅专用的 Pi
 import { subSearchConfig } from '@/stores/searchStore' // 🟢 对应订阅专用的搜索/分类配置
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round36：「加载较新内容」滚动锚定（前置插入后保持锚点卡不动 + 脉冲高亮）
+import { usePrependAnchor } from '@/composables/usePrependAnchor'
 // Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
 import { onBeforeRouteLeave } from 'vue-router'
 import {
@@ -42,6 +44,13 @@ const initSearch = () => {
     keyword: cfg.keyword || '',
     categories: cfg.activeCategories,
   })
+}
+
+// Round36：「加载较新内容」滚动锚定——前置插入后让「加载前列表第一本」像素级原地不动
+// 并脉冲高亮，避免每次都要从新加载页第一行往下滑回原处。
+const { loadNewerKeepingPosition } = usePrependAnchor()
+const handleLoadBefore = () => {
+  void loadNewerKeepingPosition(() => subStore.loadBefore())
 }
 
 // 监听订阅检索配置变更（如搜索框输入、分类勾选）
@@ -107,7 +116,7 @@ onBeforeRouteLeave(() => {
           <!-- 1. 顶部插槽：存在向上游标时，显示加载较新内容按钮 -->
           <template #header>
             <div v-if="subStore.prevGid" class="top-load-bar">
-              <button class="pill-btn" :disabled="subStore.isLoading" @click="subStore.loadBefore">
+              <button class="pill-btn" :disabled="subStore.isLoading" @click="handleLoadBefore">
                 ⬆️ {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>

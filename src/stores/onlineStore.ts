@@ -112,9 +112,12 @@ export const useOnlineStore = defineStore('onlineStore', () => {
 
   /**
    * 🟢 向上加载较新内容 (Load Before)
+   *
+   * Round36：返回本次新增条数（0 = 被守卫拦下 / 没有新数据 / 请求失败），
+   * 供 usePrependAnchor 判断是否需要做滚动锚定补偿与锚点卡高亮。
    */
-  const loadBefore = async () => {
-    if (isLoading.value || !prevGid.value) return
+  const loadBefore = async (): Promise<number> => {
+    if (isLoading.value || !prevGid.value) return 0
 
     isLoading.value = true
     error.value = null
@@ -126,11 +129,14 @@ export const useOnlineStore = defineStore('onlineStore', () => {
       })
 
       // 使用 unshift 向列表头部前置插入新数据
-      comics.value.unshift(...(res.comics || []))
+      const incoming = res.comics || []
+      if (incoming.length > 0) comics.value.unshift(...incoming)
       // 更新上游游标
       prevGid.value = res.prev
+      return incoming.length
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : '加载较新内容失败'
+      return 0
     } finally {
       isLoading.value = false
     }

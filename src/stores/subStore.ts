@@ -47,12 +47,15 @@ export const useSubStore = defineStore('subStore', () => {
 
   /**
    * 核心 API 请求：针对 E 站订阅端点 (/api/v1/online/watched)
+   *
+   * Round36：返回本次请求得到的条数（0 = 被守卫拦下或请求失败），
+   * 供 usePrependAnchor 判断是否需要做滚动锚定补偿与锚点卡高亮。
    */
   const fetchSubComics = async (
     params: FilterParams,
     mode: 'replace' | 'append' | 'prepend' = 'replace',
-  ) => {
-    if (isLoading.value) return
+  ): Promise<number> => {
+    if (isLoading.value) return 0
     isLoading.value = true
     error.value = null
 
@@ -93,9 +96,11 @@ export const useSubStore = defineStore('subStore', () => {
       nextGid.value = resData.next
       prevGid.value = resData.prev
       hasMore.value = !!resData.hasMore
+      return newComics.length
     } catch (err: unknown) {
       console.error('[subStore] 获取订阅列表失败:', err)
       error.value = err instanceof Error ? err.message : '获取订阅失败，请重试'
+      return 0
     } finally {
       isLoading.value = false
     }
@@ -113,16 +118,18 @@ export const useSubStore = defineStore('subStore', () => {
 
   /**
    * 2. 向上加载较新内容 (利用 prev 游标)[cite: 1, 5]
+   *
+   * Round36：返回本次新增条数，供 usePrependAnchor 的滚动锚定判断。
    */
-  const loadBefore = async () => {
-    if (!prevGid.value || isLoading.value) return
+  const loadBefore = async (): Promise<number> => {
+    if (!prevGid.value || isLoading.value) return 0
     const params: FilterParams = {
       ...currentParams.value,
       prev: prevGid.value,
       next: undefined,
       seek: undefined,
     }
-    await fetchSubComics(params, 'prepend')
+    return fetchSubComics(params, 'prepend')
   }
 
   /**

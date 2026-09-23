@@ -12,6 +12,8 @@ import { isGidDownloading } from '@/stores/downloadTasksStore'
 import { http } from '@/utils/request'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
 import { useDetailPanel } from '@/composables/useDetailPanel'
+// Round36：「加载较新内容」滚动锚定（前置插入后保持锚点卡不动 + 脉冲高亮）
+import { usePrependAnchor } from '@/composables/usePrependAnchor'
 // Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
 import { onBeforeRouteLeave } from 'vue-router'
 import {
@@ -223,8 +225,9 @@ const loadMoreFav = async () => {
 }
 
 // 4. 向上加载较新内容 (Load Before)
-const loadBeforeFav = async () => {
-  if (isLoading.value || !prevGid.value) return
+// Round36：返回本次实际插入条数（已去重），供 usePrependAnchor 的滚动锚定判断
+const loadBeforeFav = async (): Promise<number> => {
+  if (isLoading.value || !prevGid.value) return 0
 
   isLoading.value = true
   errorMsg.value = null
@@ -252,12 +255,21 @@ const loadBeforeFav = async () => {
     }
 
     prevGid.value = cleanCursor(data.prev, true)
+    return uniqueIncoming.length
   } catch (err: unknown) {
     errorMsg.value = err instanceof Error ? err.message : '加载较新内容失败'
     toast.error('加载较新内容失败')
+    return 0
   } finally {
     isLoading.value = false
   }
+}
+
+// Round36：「加载较新内容」滚动锚定——前置插入后让「加载前列表第一本」像素级原地不动，
+// 并给该卡加脉冲金框作为「新内容边界」标记（不必再从新加载页第一行往下滑回原处）。
+const { loadNewerKeepingPosition } = usePrependAnchor()
+const handleLoadBefore = () => {
+  void loadNewerKeepingPosition(() => loadBeforeFav())
 }
 
 watch(activeFav, () => {
@@ -365,7 +377,7 @@ onBeforeRouteLeave(() => {
         >
           <template #header>
             <div v-if="prevGid" class="top-load-bar">
-              <button class="pill-btn" :disabled="isLoading" @click="loadBeforeFav">
+              <button class="pill-btn" :disabled="isLoading" @click="handleLoadBefore">
                 ⬆️ {{ isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>

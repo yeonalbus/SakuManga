@@ -23,6 +23,8 @@ import { useDetailPanel } from '@/composables/useDetailPanel'
 import { useUI } from '@/composables/useUI'
 // Round34：书签「按日期定位」编排（seek 到 postedAt 当天 → 自动向下翻页寻找锚定卡片）
 import { useBookmarkLocate } from '@/composables/useBookmarkLocate'
+// Round36：「加载较新内容」滚动锚定（前置插入后保持锚点卡不动 + 脉冲高亮）
+import { usePrependAnchor } from '@/composables/usePrependAnchor'
 // Round33：检索参数构造（与首页搜索共用同一实现）
 import { buildOnlineSearchParams } from '@/utils/onlineSearchParams'
 // Round3-任务6：负向排除（在线端"抓取后本地丢弃"）
@@ -178,6 +180,15 @@ watch(
 const handleRefresh = () => {
   abortLocate()
   void initSearch()
+}
+
+// ─── Round36：「加载较新内容」滚动锚定 ───
+// 前置插入新一页后平移 scrollTop，让「加载前列表第一本」（= 上一次那页的最新一本）
+// 保持像素级原地不动，并给它加脉冲金框作为「新内容边界」标记：
+// 这样就能「点按钮 → 向上滑看新内容 → 再点按钮」地连续搜刮，不必回到上一页第一行。
+const { loadNewerKeepingPosition } = usePrependAnchor()
+const handleLoadBefore = () => {
+  void loadNewerKeepingPosition(() => onlineStore.loadBefore())
 }
 
 // Round34：定位循环（useBookmarkLocate）已接管「滚动到锚点 / 越界判定 / 失效兜底」，
@@ -348,11 +359,7 @@ onUnmounted(() => {
             </div>
 
             <div v-if="onlineStore.prevGid" class="top-load-bar">
-              <button
-                class="pill-btn"
-                :disabled="onlineStore.isLoading"
-                @click="onlineStore.loadBefore"
-              >
+              <button class="pill-btn" :disabled="onlineStore.isLoading" @click="handleLoadBefore">
                 ⬆️ {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>

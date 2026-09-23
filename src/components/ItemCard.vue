@@ -1195,4 +1195,11 @@ const comicSourceBadge = computed(() => {
     box-shadow: 0 0 0 14px rgba(255, 193, 7, 0.12);
   }
 }
+
+/* Round36：「加载较新内容」滚动锚定的锚点卡（加载前列表第一本）脉冲——
+   与书签定位脉冲同款视觉（复用同一组 keyframes），独立类名避免两者
+   各自 setTimeout 摘类时互相打断动画。类由 usePrependAnchor 直接加在 DOM 上。 */
+.item-card.load-anchor-pulse {
+  animation: bookmark-pulse 0.9s ease-in-out 3;
+}
 </style>

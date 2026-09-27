@@ -30,6 +30,7 @@ interface OfflineComicDTO {
   gid?: string
   sourceMode?: string
   onlineTags?: string
+  tags?: string
 }
 
 interface DedupItemDTO {
@@ -131,6 +132,25 @@ const hasChineseTag = (c: OfflineComicDTO) =>
 const hasDecensored = (c: OfflineComicDTO) =>
   (c.title || '').toLowerCase().includes('decensored') ||
   parseTags(c.onlineTags).some((t) => t.toLowerCase().includes('decensored'))
+
+// ── 决策标签（Round45）：一眼看出「该删谁」的质量标记 ──
+// 数据来源两处合并（任一命中即认为带该 tag）：onlineTags（E 站官方，Tag 维护刷新）
+// 与 tags（扫描/下载解析）。key 用 E 站官方写法，比对前做小写 + 下划线归一。
+// tone 语义：bad=倾向删除（渣翻/外部广告）、warn=有损但看情况（马赛克修正）、good=倾向保留（无修正）。
+const DECISION_TAGS = [
+  { key: 'other:rough translation', name: '渣翻', tone: 'bad' },
+  { key: 'other:extraneous ads', name: '外部广告', tone: 'bad' },
+  { key: 'other:mosaic censorship', name: '马赛克修正', tone: 'warn' },
+  { key: 'other:uncensored', name: '无修正', tone: 'good' },
+] as const
+
+const decisionTags = (c: OfflineComicDTO) => {
+  const raw = [...parseTags(c.onlineTags), ...parseTags(c.tags)].map((t) =>
+    t.trim().toLowerCase().replace(/_/g, ' '),
+  )
+  if (raw.length === 0) return []
+  return DECISION_TAGS.filter((d) => raw.includes(d.key))
+}
 
 const sizeRatio = (a?: number, b?: number) => {
   if (!a || !b || a <= 0 || b <= 0) return 1
@@ -877,6 +897,16 @@ onUnmounted(() => {
                             <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
                             <span>artist: {{ m.artist || 'null' }}</span>
                           </div>
+                          <div v-if="decisionTags(m.comic).length" class="decision-row">
+                            <span
+                              v-for="d in decisionTags(m.comic)"
+                              :key="d.key"
+                              class="decision-chip"
+                              :class="d.tone"
+                              :title="d.key"
+                              >{{ d.name }}</span
+                            >
+                          </div>
                           <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
                         </div>
                       </div>
@@ -910,6 +940,16 @@ onUnmounted(() => {
                         <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
                         <span>{{ m.pageCount || 0 }} 页</span>
                         <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                      </div>
+                      <div v-if="decisionTags(m.comic).length" class="decision-row">
+                        <span
+                          v-for="d in decisionTags(m.comic)"
+                          :key="d.key"
+                          class="decision-chip"
+                          :class="d.tone"
+                          :title="d.key"
+                          >{{ d.name }}</span
+                        >
                       </div>
                       <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
                       <div class="member-actions">
@@ -975,6 +1015,16 @@ onUnmounted(() => {
                             <span>📄 {{ m.pageCount }} 页</span>
                             <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
                             <span>artist: {{ m.artist || 'null' }}</span>
+                          </div>
+                          <div v-if="decisionTags(m.comic).length" class="decision-row">
+                            <span
+                              v-for="d in decisionTags(m.comic)"
+                              :key="d.key"
+                              class="decision-chip"
+                              :class="d.tone"
+                              :title="d.key"
+                              >{{ d.name }}</span
+                            >
                           </div>
                           <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
                         </div>
@@ -1685,6 +1735,37 @@ onUnmounted(() => {
   flex-wrap: wrap;
   font-size: 0.72rem;
   color: var(--app-text-3);
+}
+/* 决策标签（Round45：渣翻 / 外部广告 / 马赛克修正 / 无修正）——一眼看出该删谁 */
+.decision-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.decision-chip {
+  font-size: 0.7rem;
+  line-height: 1.5;
+  border-radius: 6px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: help;
+}
+.decision-chip.bad {
+  background: #2e1418;
+  border-color: #5c2430;
+  color: #ff9fae;
+}
+.decision-chip.warn {
+  background: #2a2414;
+  border-color: #4a3c14;
+  color: #f5d08a;
+}
+.decision-chip.good {
+  background: #12281f;
+  border-color: #1d5148;
+  color: #7fe0c4;
 }
 .lang-chip {
   border: 1px dashed var(--app-border-3);

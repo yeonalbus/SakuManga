@@ -117,7 +117,7 @@ const currentTitle = computed(() => taskState.value?.currentTitle || '')
 const keepItems = computed(() => items.value.filter((i) => i.keep))
 const removeItems = computed(() => items.value.filter((i) => !i.keep))
 
-// ── 标签 / 差异判定（纯前端，数据已在 clusters 内）──
+// ── 标签归一化 / 差异判定（纯前端，数据已在 clusters 内）──
 const parseTags = (raw?: string): string[] => {
   if (!raw) return []
   try {
@@ -127,29 +127,55 @@ const parseTags = (raw?: string): string[] => {
     return []
   }
 }
-const hasChineseTag = (c: OfflineComicDTO) =>
-  parseTags(c.onlineTags).some((t) => t.toLowerCase() === 'language:chinese')
-const hasDecensored = (c: OfflineComicDTO) =>
-  (c.title || '').toLowerCase().includes('decensored') ||
-  parseTags(c.onlineTags).some((t) => t.toLowerCase().includes('decensored'))
+
+// tagKeySet：合并两个来源并归一化，返回可判定的 key 集合。
+//   - 来源 1：onlineTags（E 站官方，Tag 维护刷新写入，最全，含 official 标记）
+//   - 来源 2：tags（扫描/下载时从 metadata 解析；可能缺 official tag —— 实机库中带
+//     [無修正] 的本子其 tags 里就没有 other:uncensored，两者差 5 本）
+// 归一化：小写 + 下划线转空格；完整写法（other:uncensored）原样收录，其 other 命名空间
+// 下的裸 key（uncensored）也收录，兼容源数据只写裸 key 的变体写法。
+// 仅 other 命名空间展开裸 key，避免跨命名空间同名 tag 误命中。
+const OTHER_NS = new Set(['other', 'o'])
+const tagKeySet = (c: OfflineComicDTO): Set<string> => {
+  const set = new Set<string>()
+  for (const raw of [...parseTags(c.onlineTags), ...parseTags(c.tags)]) {
+    const t = raw.trim().toLowerCase().replace(/_/g, ' ')
+    if (!t) continue
+    set.add(t)
+    const idx = t.indexOf(':')
+    if (idx <= 0) continue
+    const ns = t.slice(0, idx).trim()
+    const key = t.slice(idx + 1).trim()
+    if (key && OTHER_NS.has(ns)) set.add(key)
+  }
+  return set
+}
+
+const hasChineseTag = (c: OfflineComicDTO) => tagKeySet(c).has('language:chinese')
+
+// 「无修正 / 去码」：以 E 站官方 tag（other:uncensored）为准，标题关键词降为兜底。
+// 依据：EhTagTranslation 词典中已无 decensored 标签（实机库 onlineTags 命中 0 条），
+// 但仍有作品把 [Decensored] / [無修正] 写在标题里，故标题匹配保留为兜底。
+const UNCENSORED_TITLE_RE = /decensored|uncensored|無修正|无修正/i
+const hasDecensored = (c: OfflineComicDTO) => {
+  const keys = tagKeySet(c)
+  return keys.has('uncensored') || keys.has('decensored') || UNCENSORED_TITLE_RE.test(c.title || '')
+}
 
 // ── 决策标签（Round45）：一眼看出「该删谁」的质量标记 ──
-// 数据来源两处合并（任一命中即认为带该 tag）：onlineTags（E 站官方，Tag 维护刷新）
-// 与 tags（扫描/下载解析）。key 用 E 站官方写法，比对前做小写 + 下划线归一。
+// key 为 other 命名空间的裸 key（判定见上方 tagKeySet），tag 为 E 站完整写法（悬浮提示用）。
 // tone 语义：bad=倾向删除（渣翻/外部广告）、warn=有损但看情况（马赛克修正）、good=倾向保留（无修正）。
 const DECISION_TAGS = [
-  { key: 'other:rough translation', name: '渣翻', tone: 'bad' },
-  { key: 'other:extraneous ads', name: '外部广告', tone: 'bad' },
-  { key: 'other:mosaic censorship', name: '马赛克修正', tone: 'warn' },
-  { key: 'other:uncensored', name: '无修正', tone: 'good' },
+  { key: 'rough translation', tag: 'other:rough translation', name: '渣翻', tone: 'bad' },
+  { key: 'extraneous ads', tag: 'other:extraneous ads', name: '外部广告', tone: 'bad' },
+  { key: 'mosaic censorship', tag: 'other:mosaic censorship', name: '马赛克修正', tone: 'warn' },
+  { key: 'uncensored', tag: 'other:uncensored', name: '无修正', tone: 'good' },
 ] as const
 
 const decisionTags = (c: OfflineComicDTO) => {
-  const raw = [...parseTags(c.onlineTags), ...parseTags(c.tags)].map((t) =>
-    t.trim().toLowerCase().replace(/_/g, ' '),
-  )
-  if (raw.length === 0) return []
-  return DECISION_TAGS.filter((d) => raw.includes(d.key))
+  const keys = tagKeySet(c)
+  if (keys.size === 0) return []
+  return DECISION_TAGS.filter((d) => keys.has(d.key))
 }
 
 const sizeRatio = (a?: number, b?: number) => {
@@ -903,7 +929,7 @@ onUnmounted(() => {
                               :key="d.key"
                               class="decision-chip"
                               :class="d.tone"
-                              :title="d.key"
+                              :title="d.tag"
                               >{{ d.name }}</span
                             >
                           </div>
@@ -947,7 +973,7 @@ onUnmounted(() => {
                           :key="d.key"
                           class="decision-chip"
                           :class="d.tone"
-                          :title="d.key"
+                          :title="d.tag"
                           >{{ d.name }}</span
                         >
                       </div>
@@ -1022,7 +1048,7 @@ onUnmounted(() => {
                               :key="d.key"
                               class="decision-chip"
                               :class="d.tone"
-                              :title="d.key"
+                              :title="d.tag"
                               >{{ d.name }}</span
                             >
                           </div>

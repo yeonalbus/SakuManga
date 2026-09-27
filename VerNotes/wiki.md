@@ -243,12 +243,12 @@ E 站按 UTC 存储时间，程序按系统时区展示，存在时区差。检�
 **Q: 用官方镜像部署（推荐，最省事）**
 
 ```bash
-docker pull ghcr.io/yeonalbus/sakumanga:2.1.1
+docker pull ghcr.io/yeonalbus/sakumanga:2.2.0
 
 docker run -d --name sakumanga --restart unless-stopped \
   -p 8081:8081 \
   -v /volume1/docker/sakumanga:/app \
-  ghcr.io/yeonalbus/sakumanga:2.1.1
+  ghcr.io/yeonalbus/sakumanga:2.2.0
 ```
 
 访问 `http://<NAS_IP>:8081`，首次启动自动创建管理员 `admin` / `admin123`，登录后请尽快在「设置 → 账户」修改密码并绑定 E 站凭证。
@@ -256,11 +256,11 @@ docker run -d --name sakumanga --restart unless-stopped \
 容器内的程序以 **`--headless`（纯后端）模式**运行——该参数已写进镜像启动命令，`docker run` 时无需自己添加。`-v` 指定的目录是数据目录（不显式挂载时数据落在匿名卷里，不易管理）：`manga.db` / `config.json` / `data/` / `logs/` 都会落在其中。
 
 **Q: 官方镜像有哪些标签？怎么升级？**
-- 标签：`2.1.1`（精确版本，**生产建议用这个**）、`2.1`（同 minor 最新）、`latest`（最新发布）
+- 标签：`2.2.0`（精确版本，**生产建议用这个**）、`2.2`（同 minor 最新）、`latest`（最新发布）
 - 升级三步（数据在挂载目录里，不受影响）：
 
 ```bash
-docker pull ghcr.io/yeonalbus/sakumanga:2.1.1   # ① 拉新版本（换成新版号）
+docker pull ghcr.io/yeonalbus/sakumanga:2.2.0   # ① 拉新版本（换成新版号）
 docker rm -f sakumanga                          # ② 删掉旧容器
 # ③ 用上面同样的 docker run 命令重新启动（只改标签）
 ```
@@ -270,7 +270,7 @@ docker rm -f sakumanga                          # ② 删掉旧容器
 ```yaml
 services:
   sakumanga:
-    image: ghcr.io/yeonalbus/sakumanga:2.1.1
+    image: ghcr.io/yeonalbus/sakumanga:2.2.0
     container_name: sakumanga
     restart: unless-stopped
     ports:

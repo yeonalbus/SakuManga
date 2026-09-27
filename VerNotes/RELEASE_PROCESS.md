@@ -2,14 +2,14 @@
 
 > 每次发版必须按此清单执行。本文件为**固定流程**，记录从「敲定版本号」到「发布」的全部步骤，避免遗漏。
 >
-> 最近一次执行：v2.1.1（2026-09）
+> 最近一次执行：v2.2.0（2026-09）
 
 ---
 
 ## 0. 流程总览
 
 ```
-敲定版本号 → 更新版本号 → 整理改动清单 → 同步前端产物 → 维护 PROJECT_TREE → 维护 README
+敲定版本号 → 更新版本号 → 整理改动清单 → 同步前端产物 → 维护 PROJECT_TREE → 维护 README + CHANGELOG
     → 生成 Release Notes → 验证（测试/构建） → 打包冒烟（exe） → git 提交 + 推送
     → 创建 GitHub Release（含 tag） → Docker 镜像由 tag 自动构建 → 完成
 ```
@@ -40,6 +40,7 @@
 | `package-lock.json` | 顶部 `version` 与 `packages[""].version` 两处 | 历史遗留可能为 `0.0.0`，发版时一并对齐 |
 | `backend/internal/version/version.go` | `AppVersion` 常量 | 后端 `/api/v1/system/version` 返回的版本号，须与 package.json 一致 |
 | `VerNotes/RELEASE_NOTES_vX.Y.Z.md` | 标题 | 与本次版本号一致 |
+| `CHANGELOG.md` | 顶部「最新版本」区块 | 版本日志文档（跨版本一览），见第 6 节 |
 
 > ⚠️ 版本号变更后**必须重新构建前端产物**（`npm run build` 并同步 `backend/webui/dist/`，或直接跑一次 `build-release.bat`）——「关于」页版本号是构建时嵌进前端的，不重建会残留旧版本号（Docker 镜像同理）。
 
@@ -80,7 +81,7 @@ git log <上一tag>..HEAD --oneline --no-decorate   :: 列出本次发布涉及�
 
 更新 [`README.md`](../README.md)：
 
-- [ ] 「当前状态」：版本号 + 一句本期总结 + 功能亮点列表
+- [ ] 「当前状态」：**只保留当前版本的简述**——版本号 + 日期 + 一句本期总结 + 功能亮点列表；历史版本的简述不再堆在 README（统一归档到 [`CHANGELOG.md`](../CHANGELOG.md)，见第 6 节），保证 README 只讲「现在是什么样」
 - [ ] 「后续计划」：更新下一阶段方向
 - [ ] 「设置说明」表格：新增设置项（如偏好里的「默认收藏夹」「本地优先加载」）
 - [ ] 「项目结构图」：新增目录 / 文件
@@ -88,7 +89,19 @@ git log <上一tag>..HEAD --oneline --no-decorate   :: 列出本次发布涉及�
 
 ---
 
-## 6. 生成 Release Notes
+## 6. 维护 CHANGELOG.md
+
+[`CHANGELOG.md`](../CHANGELOG.md) 是**版本日志文档**，作为「项目更新状态」的唯一归档处：README 只写当前版本，历史版本一律记在这里。
+
+- [ ] 顶部「最新版本」区块：写入本次版本的简述（与 README「当前状态」同源，可稍详）
+- [ ] 历史版本按**倒序**排列：一次发布**只追加一个新版本区块**，不改动已发布版本的既有文字（勘误除外）
+- [ ] 每个版本区块：版本号 · 日期（`YYYY-MM`）+ 本期总结 + 分点亮点（新增功能 / 优化改进 / Bug 修复）
+- [ ] 与 Release Notes 的分工：CHANGELOG 是**跨版本一览**（每个版本几行，便于快速回看项目演进），`VerNotes/RELEASE_NOTES_vX.Y.Z.md` 是**单版本详述**（含使用说明与已知问题）——两者独立维护，措辞各自组织
+- [ ] 覆盖范围自 `v2.0.0`（项目更名 SakuManga）起；更早的 1.x 版本在文末保留一行指引，链接到 [`VerNotes/`](../VerNotes/)
+
+---
+
+## 7. 生成 Release Notes
 
 在 [`VerNotes/`](../VerNotes/) 下新建 `RELEASE_NOTES_vX.Y.Z.md`，按附录 A 模板撰写：
 
@@ -101,7 +114,7 @@ git log <上一tag>..HEAD --oneline --no-decorate   :: 列出本次发布涉及�
 
 ---
 
-## 7. 验证
+## 8. 验证
 
 发布前必须通过：
 
@@ -119,7 +132,7 @@ npm run build
 
 ---
 
-## 8. 打包与冒烟测试
+## 9. 打包与冒烟测试
 
 ```bat
 build-release.bat
@@ -133,7 +146,7 @@ build-release.bat
 
 ---
 
-## 9. git 提交 + 打 tag
+## 10. git 提交 + 打 tag
 
 ```bat
 git status && git diff --stat     :: 确认改动范围
@@ -146,13 +159,13 @@ tag 命名必须与历史一致（`SakuManga-1.0.0`、`SakuManga-1.1.0`、`SakuM
 
 ---
 
-## 10. 发布（GitHub Release + Docker 镜像）
+## 11. 发布（GitHub Release + Docker 镜像）
 
 ### ① 创建 GitHub Release（同时创建 tag）
 
 - [ ] 推送 tag：`git push origin SakuManga-X.Y.Z`（或在 Release 页面直接填写 tag 名，发布时自动创建）
 - [ ] 创建 Release：标题 `vX.Y.Z`，正文粘贴 `VerNotes/RELEASE_NOTES_vX.Y.Z.md` 全文
-- [ ] 附件：上传根目录 `SakuManga.exe`（由第 8 步打包生成）
+- [ ] 附件：上传根目录 `SakuManga.exe`（由第 9 步打包生成）
 
 ### ② Docker 镜像（v2.1.1 起提供，由 tag 自动构建）
 
@@ -207,7 +220,9 @@ tag 命名必须与历史一致（`SakuManga-1.0.0`、`SakuManga-1.1.0`、`SakuM
 - [ ] `git status` 仅含预期改动，无临时脚本 / 调试产物
 - [ ] 无敏感信息随发布（如 `backend/config.json` 代理地址，PROJECT_TREE 发布注意已提示）
 - [ ] Release Notes「已知问题」如实填写
-- [ ] 版本号一致：`package.json` / `package-lock.json` / `backend/internal/version/version.go` / Release Notes 标题
+- [ ] 版本号一致：`package.json` / `package-lock.json` / `backend/internal/version/version.go` / Release Notes 标题 / `CHANGELOG.md` 顶部区块
+- [ ] `CHANGELOG.md` 已追加本次版本区块（倒序），已发布版本的既有文字未被改写
+- [ ] README「当前状态」只含当前版本简述（历史版本简述已归档到 `CHANGELOG.md`）
 - [ ] **前端产物已同步** `backend/webui/dist`（版本号或前端改动后必做，否则 exe 与镜像内是旧前端）
 - [ ] Docker 工作流是否成功（打 tag 或手动触发后到 Actions 页面确认）
 - [ ] README 预览图是否需要更新（UI 大改时）

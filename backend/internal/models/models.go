@@ -58,6 +58,15 @@ type OfflineComic struct {
 	ParentCheckedAt int64  `json:"parentCheckedAt,omitempty"`              // 父画廊关系在线核对时间戳(ms)；>0=已核对（需求1 增量兜底，避免每次维护查重重复联网）
 	FileHash        string `gorm:"index" json:"fileHash,omitempty"`        // 归档文件 hash（完全相同查重）
 	SourceMode string `json:"sourceMode,omitempty"`              // gallery | archive（下载来源）
+
+	// ── 内容签名缓存基准（Round45：查重规则4 快路径，避免每次维护全量遍历文件夹）──
+	// SigDirMtime：算出当前 FileHash（文件夹内容签名）时该文件夹自身的 mtime。
+	// 目录 mtime 相等 = 目录条目未变（无文件新增/删除/改名）→ 直接复用签名，无需递归 stat。
+	// 盲区：目录内文件被「同名覆盖写」不改目录 mtime，由维护页「全量核对」强制重算兜底。
+	// 注意：不要再把文件夹的图片最大 mtime 写回 FileModifiedAt——该字段语义是本地文件修改
+	// 时间（离线列表排序用，handlers/comic.go 排序白名单），被查重覆盖会破坏排序口径。
+	SigDirMtime   time.Time `json:"sigDirMtime,omitempty"`
+	SigComputedAt int64     `json:"sigComputedAt,omitempty"` // 签名计算时间戳(ms)
 	NewGID     string `json:"newGID,omitempty"`                  // 检测到的新版本 GID
 	NewToken   string `json:"newToken,omitempty"`                // 检测到的新版本 Token
 	UpdateNote string `json:"updateNote,omitempty"`              // 更新提示文案

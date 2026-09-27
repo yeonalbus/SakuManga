@@ -781,6 +781,7 @@ var ErrComicNotFound = errors.New("未找到漫画记录")
 //   - 父画廊关系：旧版（父画廊）被新版取代，建议删除旧版（支持在线发现：磁盘元数据
 //     parent/child 关系为空，需联网核对详情页；ehService 为空或未绑账号时退化为纯本地）
 //   - 文件夹内容签名相同（无 gid/hash/parent 元数据的复制型重复）→ 删除复制项（问题3修复）
+//     （Round45：签名缓存以「目录 mtime」为基准，目录未变则跳过递归遍历）
 func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
 	return maintainDedupWithProgress(db, ehService, nil, true)
 }
@@ -1134,12 +1135,19 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			}
 		}
 	}
-	// ── 4. 文件夹内容签名查重（问题3修复）──
+	// ── 4. 文件夹内容签名查重（问题3修复；Round45：改以目录 mtime 为缓存基准）──
 	// 针对「无 gid/hash/parent 元数据的复制型文件夹重复」：
 	//   递归收集文件夹内所有图片的「相对路径|大小」生成内容签名，签名相同 = 内容完全一致。
 	//   签名缓存进 file_hash（与规则2的归档 hash 互斥：仅 gallery 形态使用）。
+	//
+	// Round45 性能修复：原快路径用「目录 mtime <= file_modified_at」判定，而 file_modified_at
+	// 被本规则写成了「目录内图片最大 mtime」——目录条目收尾写入（下载/解压收尾、非图片文件
+	// 落盘）让目录 mtime 恒略晚于图片 mtime，条件恒不成立。实测 4129 本仅 147 本命中（3.6%），
+	// 等于每次维护都递归 stat 全部文件夹（机械盘/网络盘上单本数百毫秒，全库数十分钟）。
+	// 现改为：把「算出签名时的目录 mtime」记入 sig_dir_mtime，目录 mtime 相等即复用签名。
 	sigGroups := map[string][]models.OfflineComic{}
 	sigTotal := 0
+	sigWarmup := 0
 	for i := range comics {
 		c := &comics[i]
 		if c.SourceMode == "archive" || !isFolderPath(c.LocalPath) {
@@ -1149,8 +1157,15 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			continue
 		}
 		sigTotal++
+		if c.FileHash == "" || c.SigDirMtime.IsZero() {
+			sigWarmup++ // 尚无签名缓存基准（存量数据 / 首次运行）→ 本本需重算一次
+		}
 	}
-	sigDone := 0
+	sigPhase := "文件夹内容签名校验"
+	if sigWarmup > 0 {
+		sigPhase = fmt.Sprintf("文件夹内容签名校验（首次预热 %d 本）", sigWarmup)
+	}
+	sigDone, sigReused, sigComputed := 0, 0, 0
 	for i := range comics {
 		// Round29：任务暂停/取消检查点（文件夹签名单本可能耗时，暂停在下一本开始前生效）
 		if err := OfflineTaskCheckpoint(); err != nil {
@@ -1165,26 +1180,38 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		}
 		sigDone++
 		if onProgress != nil {
-			onProgress(sigDone, sigTotal, c.Title, "文件夹内容签名")
+			onProgress(sigDone, sigTotal, c.Title, sigPhase)
 		}
-		// 快路径：已有签名且文件夹目录 mtime 未超过已记录的最新文件 mtime → 内容未变，直接复用
-		if c.FileHash != "" && !c.FileModifiedAt.IsZero() {
-			if fi, err := os.Stat(c.LocalPath); err == nil && !fi.ModTime().After(c.FileModifiedAt) {
+		// 快路径：已有签名且目录 mtime 与「上次算出该签名时的目录 mtime」一致
+		// → 目录条目未变，直接复用缓存签名，不做任何递归遍历（只一次 os.Stat）。
+		// forceFull（全量核对）时忽略缓存强制重算，用于兜底「同名覆盖写」盲区。
+		if !forceFull && c.FileHash != "" && !c.SigDirMtime.IsZero() {
+			if fi, err := os.Stat(c.LocalPath); err == nil && fi.ModTime().Equal(c.SigDirMtime) {
 				sigGroups[c.FileHash] = append(sigGroups[c.FileHash], *c)
+				sigReused++
 				continue
 			}
 		}
-		sig, maxMod, err := folderSignature(c.LocalPath)
+		sig, dirMtime, err := folderSignature(c.LocalPath)
 		if err != nil {
 			log.Printf("%s [maintain] 计算 %q 内容签名失败: %v", dlWarnTag, c.LocalPath, err)
 			continue
 		}
-		if c.FileHash != sig || maxMod.After(c.FileModifiedAt) {
-			c.FileHash = sig
-			c.FileModifiedAt = maxMod
-			_ = db.Model(c).Updates(map[string]interface{}{"file_hash": sig, "file_modified_at": maxMod})
-		}
+		c.FileHash = sig
+		c.SigDirMtime = dirMtime
+		c.SigComputedAt = time.Now().UnixMilli()
+		// 只更新签名与其缓存基准，不动 file_modified_at（保持离线列表排序口径）
+		_ = db.Model(c).Updates(map[string]interface{}{
+			"file_hash":       sig,
+			"sig_dir_mtime":   dirMtime,
+			"sig_computed_at": c.SigComputedAt,
+		})
+		sigComputed++
 		sigGroups[sig] = append(sigGroups[sig], *c)
+	}
+	if sigTotal > 0 {
+		log.Printf("%s [maintain] 文件夹内容签名：复用缓存 %d 本 ｜ 重算 %d 本（共 %d 本）",
+			dlLogTag, sigReused, sigComputed, sigTotal)
 	}
 	for sig, group := range sigGroups {
 		if len(group) < 2 {
@@ -1619,12 +1646,21 @@ func isFolderPath(p string) bool {
 
 // folderSignature 计算文件夹内容签名（问题3规则4）：
 // 递归收集文件夹内所有图片文件的「相对路径|字节大小」，排序后序列化再取 md5。
-// 两个内容完全一致的文件夹（含子目录结构）得到相同签名，从而可识别复制型重复；
-// 同时返回文件夹内最新文件的修改时间，作为后续增量缓存依据。
+// 两个内容完全一致的文件夹（含子目录结构）得到相同签名，从而可识别复制型重复。
+//
+// Round45：第二个返回值改为「目录自身的 mtime」（原为目录内图片最大 mtime）——
+// 它记录在 sig_dir_mtime，作为签名缓存的判定基准：目录 mtime 相等即视为目录条目未变，
+// 下次维护可直接复用签名而不必递归 stat。图片最大 mtime 与目录 mtime 天然存在毫秒级
+// 先后差，用它做基准会导致缓存恒失效（详见规则4 段落注释）。
 func folderSignature(path string) (string, time.Time, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	dirMtime := fi.ModTime()
+
 	var entries []string
-	var maxMod time.Time
-	err := filepath.Walk(path, func(p string, fi os.FileInfo, err error) error {
+	err = filepath.Walk(path, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil // 跳过无法访问的条目（权限/中断），不阻断整体
 		}
@@ -1636,13 +1672,10 @@ func folderSignature(path string) (string, time.Time, error) {
 			rel = p
 		}
 		entries = append(entries, fmt.Sprintf("%s|%d", filepath.ToSlash(rel), fi.Size()))
-		if fi.ModTime().After(maxMod) {
-			maxMod = fi.ModTime()
-		}
 		return nil
 	})
 	if err != nil {
-		return "", maxMod, err
+		return "", dirMtime, err
 	}
 	sort.Strings(entries)
 	h := md5.New()
@@ -1650,7 +1683,7 @@ func folderSignature(path string) (string, time.Time, error) {
 		_, _ = io.WriteString(h, e)
 		_, _ = io.WriteString(h, "\n")
 	}
-	return hex.EncodeToString(h.Sum(nil)), maxMod, nil
+	return hex.EncodeToString(h.Sum(nil)), dirMtime, nil
 }
 
 // shortHash 取签名前 8 位用于提示文案。

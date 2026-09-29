@@ -6,7 +6,7 @@
 
 - SakuManga：前端 Vue 3 + Vite，后端 Go，详见 `README.md` 与 `PROJECT_TREE.md`
 - 远程仓库：`https://github.com/yeonalbus/SakuManga.git`（默认分支 `main`）
-- 工作目录：`G:\EhentaiWebProject\Vue\SakuHentai`
+- 工作目录：`G:\SakuProjects\SakuManga`
 
 ## Git 工作流（每次任务收尾必做）
 

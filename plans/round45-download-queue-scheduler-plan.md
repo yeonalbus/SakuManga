@@ -51,12 +51,13 @@
 
 ### 目标
 
-1. **绝不自动降级**：归档下载失败一律 `error`（可重试），任务 `mode` 保持 `archive`，不再落地为画廊逐图。
+1. **普通下载绝不降级，更新任务保留降级开关**：
+   - 手动/批量发起的普通归档下载（`UpdateForComicID == ""`）失败一律 `error`（可重试），`mode` 保持 `archive`，不再落地为画廊逐图；
+   - **自动更新 / 更新下载任务（`UpdateForComicID != ""`）保留现有降级能力**，是否降级仍由设置项 `autoUpdateFallbackToGallery` 决定（默认关闭，用户开启后生效）。开关本身**保留且有效**，UI 不动。
 2. **失败分级**：网络层错误（超时/EOF/连接重置/5xx）标注为可重试并自动退避重试若干次；结构性错误（H@H 下载页 200 但解析不到直链）直接报错并给出明确文案。
 3. **队列不丢**：无界 pending 队列 + 统一调度器，任何 `queued` 任务都必达调度器；批量 1000+ 不丢一个。
 4. **等待不占执行线程**：并发窗口（`MaxArchiveConcurrency`）、线程配额（全局 10 线程）、优先级串并行门控全部前移到调度器判定，执行协程只在获牌后启动。
-5. **日志分类修正**：`[update]` 只用于真正的更新语义；分类改为「标签位置化解析」。
-6. **前端清理**：移除「无 H@H 时自动降级为画廊下载」开关（后端字段保留但废弃）。
+5. **日志分类修正**：`[update]` 只用于真正的更新语义（包括更新任务自身的降级日志）；分类改为「标签位置化解析」，正文出现 `[update]` 字样不再误分类。
 
 ### 非目标
 
@@ -172,10 +173,19 @@ func (m *DownloadManager) executeTask(task *models.DownloadTask) {
 - `pickNext`：出队前回查 DB 状态，非 `queued` 则丢弃（覆盖"用户暂停时任务仍在队列"）；
 - 1s ticker：即使信号丢失也能推进。
 
-### 3.4 归档失败：绝不降级
+### 3.4 降级范围收敛：普通下载绝不降级，更新任务保留开关
 
-1. 删除 `services/download.go:352-406` 的 `fallbackUpdateToGallery` / `fallbackArchiveToGallery`，删除 `runTask` 中的调用点。
-2. 删除 `errHathdlOnly` 的「降级」语义（`download_archive.go:566-568`），改为错误分类：
+**原则**：降级只属于「更新」语义 —— 更新任务把"新版本可用"退化成"至少拿到一份"；普通下载没有这个语义，失败就该报错重试。
+
+1. **普通下载（`UpdateForComicID == ""`）**：永久禁止降级。
+   - 删除 `download_archive.go:400-416` 中"任何 `errHathdlOnly` 都降级"的分支；
+   - 归档失败统一走 `g.fail(...)` / `g.failOrLock(...)`，`mode` 保持 `archive`，不生成画廊目录、不写 `download_scheme=gallery`。
+
+2. **更新任务（`UpdateForComicID != ""`）**：保留现状降级能力，仍由 `autoUpdateFallbackToGallery` 控制（默认关闭）。
+   - 保留 `fallbackArchiveToGallery`（`download.go:384-406`）与 `fallbackUpdateToGallery`（`download.go:352-378`），但**只允许更新任务调用**；在函数入口加 `task.UpdateForComicID == ""` 直接 return 的硬约束（防御未来误用）；
+   - 画质升级任务（`ForceDeleteOriginal=true`）继续不降级（现状保留）。
+
+3. **错误分级**（两条路径共用）：
 
 ```go
 var (
@@ -184,18 +194,27 @@ var (
 )
 ```
 
-3. `resolveHathdlDownloadURL`：
-   - 网络层错误（`net.Error` 超时、`io.EOF`、连接重置、5xx）：**先退避重试 2 次**（1s / 3s），仍失败 → `errArchiveNetworkRetryable`（任务 `error`，文案含「可重试」）；
-   - 页面 200 但 `#db > p > a` 解析不到 → `errArchiveHathdlStructure`（任务 `error`）；
+   - `resolveHathdlDownloadURL` 网络层错误（`net.Error` 超时、`io.EOF`、连接重置、5xx）：先退避重试 2 次（1s / 3s），仍失败 → `errArchiveNetworkRetryable`（`error`，文案含「可重试」）→ **任何任务都不因此降级**；
+   - 页面 200 但 `#db > p > a` 解析不到 → `errArchiveHathdlStructure`；
    - 归档仍在生成（6 次拿不到 `#continue > a`）→ 现有语义保留（`error`，可重试）。
-4. `run()`（`download_archive.go:240-300`）：
-   - 删除 `errHathdlOnly` 分支与 `fallbackArchiveToGallery` 调用；
-   - 统一 `g.fail(err.Error())` / `g.failOrLock(...)`（配额/限流仍走 `error_lock` 与自动解锁）；
-   - zip 校验失败重试逻辑（`retryResolveArchiveDownloadURL`）保留，失败同样不降级。
-5. 设置项 `autoUpdateFallbackToGallery`：
-   - 后端 `models.DownloadSetting` **保留字段**（避免列删除与 JSON 兼容问题），但**不再被任何代码读取**；
-   - `GetSettings` 对旧库该字段为 1 时按 0 归一（避免 UI 误显示）；
-   - 前端 `src/stores/downloadSettings.ts` 移除该 key（`SETTING_KEYS` 与类型），`UpdateScanSettings.vue` 删除对应开关条目；旧 localStorage 值由 `pickSetting` 白名单自然过滤。
+
+4. **`run()`（`download_archive.go:240-300`）分支收敛**：
+
+```
+resolveArchiveDownloadURL 失败
+  ├─ 网络/可重试类错误        → fail（不降级）
+  ├─ 结构性不可直链错误
+  │    ├─ 普通下载            → fail（不降级）
+  │    └─ 更新任务 + 开关开启  → fallbackArchiveToGallery（保留）
+  └─ 其余错误                 → fail / failOrLock（配额锁定走自动解锁）
+```
+
+5. **设置项 `autoUpdateFallbackToGallery`：保留且继续生效**，语义收窄为"仅自动更新任务"：
+   - 后端字段与读取逻辑保留（`download_archive.go:245/277`、`download.go:372`）；
+   - 前端开关保留（`src/components/settings/UpdateScanSettings.vue:91-100`），文案由
+     "仅限自动更新画廊任务：归档下载失败时回退到逐图下载；手动发起的归档下载不受此开关控制"
+     保持/微调为"仅对自动更新任务生效；手动下载的归档任务失败一律报错可重试"。
+
 
 ### 3.5 日志分类修正（`log_store.go`）
 
@@ -222,20 +241,19 @@ func classifyLogLine(line string) LogCategory {
 - 消息正文里出现 `[update]` 字样不再影响分类；
 - 单测 `log_store_test.go` 增加：正文含 `[update]` 的下载日志 → `LogDownload`；`[DOWNLOAD-WARN] [archive-fallback]` → `LogDownload`。
 
-### 3.6 前端（最小改动）
+### 3.6 前端（改动范围）
 
 | 文件 | 改动 |
 |------|------|
-| `src/stores/downloadSettings.ts` | 删除 `autoUpdateFallbackToGallery` 类型字段与 `SETTING_KEYS` 项 |
-| `src/components/settings/UpdateScanSettings.vue` | 删除「无 H@H 时自动降级为画廊下载」开关块（`:91-100`） |
+| `src/components/settings/UpdateScanSettings.vue` | 保留「无 H@H 时自动降级为画廊下载」开关；仅把副标题文案改准确（只对更新任务生效，普通下载失败一律报错可重试） |
 | `src/views/DownloadsView.vue` | 可选：新增「全部暂停 / 全部恢复 / 立即调度」按钮（见 3.7） |
 
 ### 3.7 可选增强（本轮统一评估，默认可砍）
 
-- 后端 `POST /api/v1/downloads/pause-all`、`/resume-all`、`/reschedule`（均仅管理员）：
-  - `reschedule`：把所有 `queued` 任务重新压入 pending 并 `Wake`（`RestoreTasks` 的轻量版）；
-  - 前端下载页顶部批量按钮，作为运维自救手段。
-- 若时间紧，本轮仅做 `reschedule`（后端 + 一个按钮），另两个后置。
+- 后端 `POST /api/v1/downloads/reschedule`（仅管理员）：
+  - 把所有 `queued` 任务重新压入 pending 并 `Wake`（`RestoreTasks` 的轻量版）；
+  - 前端下载页顶部一个「立即调度」按钮，作为运维观测/兜底手段。
+- `pause-all` / `resume-all` 后置，不在本轮。
 
 ---
 
@@ -245,27 +263,27 @@ func classifyLogLine(line string) LogCategory {
 |---|------|------|
 | 1 | `backend/internal/services/download_queue.go`（新增） | 无界 pending 队列 + 排序 + cond 信号 |
 | 2 | `backend/internal/services/download_scheduler.go` | 重写：`schedulerLoop` / `pickNext` / `tryReserve` / `releaseReservation` / 保留抢占 |
-| 3 | `backend/internal/services/download.go` | 删 `queue/workers/worker()`、`acquireSlot` 调用与无条件 `defer releaseSlot`；`Enqueue` 改入 pending；删两个 fallback 函数与调用；`runTask` 拆为 `executeTask` + 收尾函数 |
+| 3 | `backend/internal/services/download.go` | 删 `queue/workers/worker()`、`acquireSlot` 调用与无条件 `defer releaseSlot`；`Enqueue` 改入 pending；`fallbackArchiveToGallery` / `fallbackUpdateToGallery` 加「仅更新任务」硬约束；`runTask` 拆为 `executeTask` + 收尾函数 |
 | 4 | `backend/internal/services/archive_thread_pool.go` | 增 `tryArchiveSlot` / `tryAcquirePartial`（非阻塞）；阻塞版移除或仅测试用 |
-| 5 | `backend/internal/services/download_archive.go` | 删引擎内额度阻塞申请；`errHathdlOnly` → 错误分类 + 退避重试；删降级调用 |
+| 5 | `backend/internal/services/download_archive.go` | 删引擎内额度阻塞申请；`errHathdlOnly` → 错误分类 + 退避重试；普通下载删降级调用，更新任务保留「按开关降级」 |
 | 6 | `backend/internal/services/download_gallery.go` | 删 `acquirePartial` 阻塞申请，改用预留线程数 |
 | 7 | `backend/internal/services/log_store.go` | 标签位置化分类 |
-| 8 | `backend/internal/models/download.go` | 注释标记 `AutoUpdateFallbackToGallery` 废弃（字段保留） |
-| 9 | `backend/internal/services/download.go`（GetSettings） | 旧库降级开关归一为 0 |
-| 10 | `src/stores/downloadSettings.ts`、`src/components/settings/UpdateScanSettings.vue` | 删开关 |
+| 8 | `backend/internal/models/download.go` | `AutoUpdateFallbackToGallery` 注释改为「仅对更新任务生效」 |
+| 9 | `backend/internal/router/router.go` + `handlers/download.go` | 可选：新增 `POST /downloads/reschedule`（管理员） |
+| 10 | `src/components/settings/UpdateScanSettings.vue` | 保留开关，仅修正副标题文案 |
 | 11 | `backend/internal/services/log_store_test.go` | 新增分类用例 |
 | 12 | `backend/internal/services/download_queue_test.go`（新增） | 队列单测 |
 | 13 | `backend/internal/services/download_scheduler_test.go` | 适配新结构（`runningTasks` 由调度器维护）、新增并发窗口/优先级/批量回归 |
-| 14 | `backend/internal/services/download_nofallback_test.go`（新增） | 归档失败不降级回归 |
+| 14 | `backend/internal/services/download_nofallback_test.go`（新增） | 普通下载失败不降级 / 更新任务按开关降级的回归 |
 
 ---
 
 ## 五、实施步骤（分步提交，各自可回滚）
 
 1. **Step 1 — Bug1 修复（独立可发布）**
-   删降级路径 + 错误分类 + 退避重试 + 日志标签修正 + 前端删开关 + 单测。
+   普通下载禁止降级 + 更新任务保留开关降级 + 错误分类 + 退避重试 + 日志标签修正 + 开关文案 + 单测。
    验证：`cd backend && go test ./...`；`npm run type-check`。
-   提交：`fix(download): 归档失败不再自动降级为画廊并修正日志分类`。
+   提交：`fix(download): 普通下载归档失败不再降级，更新任务保留降级开关`。
 
 2. **Step 2 — Queue 层**
    新增 `download_queue.go` + 单测（无界、幂等、排序、移除）。
@@ -290,8 +308,10 @@ func classifyLogLine(line string) LogCategory {
 1. **不丢任务**：批量创建 1000 个任务后，全部处于 pending 或 running（日志无「入队失败（队列已满）」）；进程重启后仍全部推进。
 2. **不占线程**：`MaxArchiveConcurrency=1` 时只有 1 个任务 `downloading`，其余 `queued`；每完成 1 个，1s 内有下一个自动补位。
 3. **可中断**：任意任务暂停 / 取消 / 被抢占 / 重试后都能回到队列或被正确终止，无重复执行、无槽位泄漏（`runningTotal` 与 `archivePool.active` 在任务结束后归零）。
-4. **绝不降级**：模拟 H@H 直链超时 / EOF → 任务 `error`、`mode` 仍 `archive`、不生成 `<gid> - <标题>` 画廊目录、`download_scheme` 不写 `gallery`；错误文案含「可重试」。
-5. **日志分类**：普通下载任务不再出现在 `update_log`；`[update]` 仅出现在真实更新检测 / 自动更新 / 更新标记清理日志。
+4. **降级范围正确**：
+   - 普通下载模拟 H@H 直链超时 / EOF → 任务 `error`、`mode` 仍 `archive`、不生成 `<gid> - <标题>` 画廊目录、`download_scheme` 不写 `gallery`；错误文案含「可重试」；
+   - 更新任务同样场景且开关 `autoUpdateFallbackToGallery=true` → 仍按现有逻辑降级为画廊逐图（回归不破坏）。
+5. **日志分类**：普通下载任务不再出现在 `update_log`；`[update]` 仅出现在真实更新检测 / 自动更新 / 更新任务降级 / 更新标记清理日志。
 6. **质量门**：`cd backend && go test ./...` 全绿；`npm run type-check` 通过；生产构建可启动并自动恢复 704 个存量任务。
 
 ---
@@ -309,6 +329,6 @@ func classifyLogLine(line string) LogCategory {
 
 ## 八、待确认事项（默认按此执行，可否决）
 
-1. `autoUpdateFallbackToGallery` 字段**保留但废弃**（推荐，避免 GORM 删列与 JSON 契约变动）。
-2. 归档失败默认文案带「可重试」提示，不加自动重试按钮（用户手动「重试」即可）。
-3. 3.7 的批量操作接口：本轮只做 `reschedule`（重新调度），`pause-all/resume-all` 后置。
+1. `autoUpdateFallbackToGallery` **保留且继续生效**，语义收窄为「仅自动更新任务」；普通下载无条件不降级。
+2. 归档失败默认文案带「可重试」提示，不自动无限重试（退避 2 次后报错，由用户手动「重试」）。
+3. 3.7 的批量运维接口：本轮只做 `reschedule`（一键重新调度所有排队任务），`pause-all/resume-all` 后置。

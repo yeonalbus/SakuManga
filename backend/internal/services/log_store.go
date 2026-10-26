@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -144,28 +145,106 @@ func (w *logStoreWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// classifyLogLine 依据行内标签将日志行映射到四类。
-// 优先级：update > maintain > 明确归「其他」的内标签 > 下载类标签 > 默认其他。
+// classifyLogLine 依据**行首标签**将日志行映射到四类（Round45：不再按全文子串匹配）。
+//
+// 行首标签解析规则：
+//
+//	`2026/10/26 02:50:01 [DOWNLOAD-WARN] [update] 任务 ...`
+//	 → 首个标签是「级别」（[DOWNLOAD] / [DOWNLOAD-WARN] / [ARCHIVER] ...），
+//	   之后的连续标签是「内标签」；只有内标签才参与 update/maintain/other 判定。
+//
+// 正文里出现的方括号（如 "页面含 [update] 标记"）不会被当作标签，避免误分类。
+// 优先级：显式分类标签 > 内标签白名单 > 下载类标签 > 默认其他。
 func classifyLogLine(line string) LogCategory {
-	switch {
-	case strings.Contains(line, "[update]"):
-		return LogUpdate
-	case strings.Contains(line, "[maintain]"):
-		return LogMaintain
-	case strings.Contains(line, "[scan]") || strings.Contains(line, "[tagm]") ||
-		strings.Contains(line, "[offline]") || strings.Contains(line, "[client-log]") ||
-		strings.Contains(line, "[Toplist]") || strings.Contains(line, "[TagEngine]"):
-		return LogOther
-	case strings.Contains(line, "[DOWNLOAD]") || strings.Contains(line, "[DOWNLOAD-WARN]") ||
-		strings.Contains(line, "[DOWNLOAD-ERROR]") || strings.Contains(line, "[ARCHIVER]") ||
-		strings.Contains(line, "[gallery-engine]") || strings.Contains(line, "[archive-engine]") ||
-		strings.Contains(line, "[sched]") || strings.Contains(line, "[worker]") ||
-		strings.Contains(line, "[gallery]") || strings.Contains(line, "[archive]") ||
-		strings.Contains(line, "[archive-thread]") || strings.Contains(line, "[extract]"):
-		return LogDownload
-	default:
+	tags := logPrefixTags(line)
+	if len(tags) == 0 {
 		return LogOther
 	}
+	// ① 显式分类行（LogStore.Printf）：首标签即分类名（update / maintain / download / other）
+	if c, ok := categoryTagOf(tags[0]); ok {
+		return c
+	}
+	// ② 标准 log 行：首标签是级别，内标签从第二个开始判定
+	inner := tags[1:]
+	if len(tags) == 1 {
+		inner = tags
+	}
+	for _, t := range inner {
+		if c, ok := innerTagCategory(t); ok {
+			return c
+		}
+	}
+	// ③ 级别或引擎标签属于下载类
+	for _, t := range tags {
+		if isDownloadLogTag(t) {
+			return LogDownload
+		}
+	}
+	return LogOther
+}
+
+// logTimestampPrefixRe 匹配行首标准 log 时间戳（time 包默认格式，可能带 ~H 后缀）。
+var logTimestampPrefixRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:~H)?\s+`)
+
+// logTagRunRe 匹配紧贴行首（去时间戳后）的一段连续标签串。
+var logTagRunRe = regexp.MustCompile(`^(?:\[[^\]]+\]\s*)+`)
+
+// logSingleTagRe 从标签串中切出单个 [xxx]。
+var logSingleTagRe = regexp.MustCompile(`\[[^\]]+\]`)
+
+// logPrefixTags 提取行首时间戳之后的连续标签（去掉方括号）。
+// 无时间戳时按行首连续标签解析；正文中的方括号不参与（只取行首连续段）。
+func logPrefixTags(line string) []string {
+	rest := logTimestampPrefixRe.ReplaceAllString(line, "")
+	run := logTagRunRe.FindString(rest)
+	if run == "" {
+		return nil
+	}
+	found := logSingleTagRe.FindAllString(run, -1)
+	tags := make([]string, 0, len(found))
+	for _, t := range found {
+		tags = append(tags, strings.Trim(t, "[]"))
+	}
+	return tags
+}
+
+// categoryTagOf 判断标签本身是否为显式分类名（LogStore.Printf 的行首标签）。
+func categoryTagOf(tag string) (LogCategory, bool) {
+	switch tag {
+	case string(LogUpdate):
+		return LogUpdate, true
+	case string(LogMaintain):
+		return LogMaintain, true
+	case string(LogDownload):
+		return LogDownload, true
+	case string(LogOther):
+		return LogOther, true
+	}
+	return "", false
+}
+
+// innerTagCategory 内标签白名单（精确匹配，不做子串判定）。
+func innerTagCategory(tag string) (LogCategory, bool) {
+	switch tag {
+	case "update":
+		return LogUpdate, true
+	case "maintain":
+		return LogMaintain, true
+	case "scan", "tagm", "offline", "client-log", "Toplist", "TagEngine":
+		return LogOther, true
+	}
+	return "", false
+}
+
+// isDownloadLogTag 下载/归档/调度相关标签（级别标签或引擎标签）。
+func isDownloadLogTag(tag string) bool {
+	switch tag {
+	case "DOWNLOAD", "DOWNLOAD-WARN", "DOWNLOAD-ERROR", "ARCHIVER",
+		"gallery-engine", "archive-engine", "sched", "worker",
+		"gallery", "archive", "archive-thread", "extract":
+		return true
+	}
+	return false
 }
 
 // InitLogStore 初始化日志存储：清理过期归档 + 安装分流 writer。

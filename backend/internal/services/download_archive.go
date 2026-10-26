@@ -240,18 +240,9 @@ func (g *archiveDownloader) run() {
 	// 5. archiver.php 全流程：获取 H@H 下载链接
 	downloadURL, arcInfo, err := g.resolveArchiveDownloadURL()
 	if err != nil {
-		// 仅支持 H@H Downloader 的画廊：无法直接 HTTP 下载 zip，自动降级为画廊逐图下载
+		// 结构性不可直链：普通下载一律报错可重试（绝不降级）；更新任务按开关决定是否降级
 		if errors.Is(err, errHathdlOnly) {
-			if g.task.UpdateForComicID != "" && !g.m.GetSettings().AutoUpdateFallbackToGallery {
-				// 更新任务且用户关闭「归档失败降级为画廊」：按失败处理
-				g.fail(err.Error())
-				return
-			}
-			if g.stopped() {
-				log.Printf("%s [archive-engine] 任务 %s 已被取消/暂停，跳过降级", dlWarnTag, g.task.ID)
-				return
-			}
-			g.m.fallbackArchiveToGallery(g.task, err.Error())
+			g.handleHathdlOnly(err)
 			return
 		}
 		g.fail(err.Error())
@@ -272,17 +263,9 @@ func (g *archiveDownloader) run() {
 		log.Printf("%s [archive-engine] 任务 %s zip 校验失败，已清除缓存，重建归档会话后重新下载一次", dlWarnTag, g.task.ID)
 		newURL, arcInfo, resolveErr := g.retryResolveArchiveDownloadURL()
 		if resolveErr != nil {
-			// 与首次解析一致：仅 H@H 画廊降级为逐图下载；其余按失败处理
+			// 与首次解析一致：结构性不可直链按任务类型处理；其余按失败/锁定处理
 			if errors.Is(resolveErr, errHathdlOnly) {
-				if g.task.UpdateForComicID != "" && !g.m.GetSettings().AutoUpdateFallbackToGallery {
-					g.fail(resolveErr.Error())
-					return
-				}
-				if g.stopped() {
-					log.Printf("%s [archive-engine] 任务 %s 已被取消/暂停，跳过降级", dlWarnTag, g.task.ID)
-					return
-				}
-				g.m.fallbackArchiveToGallery(g.task, resolveErr.Error())
+				g.handleHathdlOnly(resolveErr)
 				return
 			}
 			g.failOrLock(resolveErr)
@@ -405,9 +388,15 @@ func (g *archiveDownloader) resolveArchiveDownloadURL() (string, *models.Archive
 				dlURL, err := g.resolveHathdlDownloadURL()
 				if err != nil {
 					if alreadyUnlocked {
-						// 已解锁变体解析失败：直接报错（非仅 H@H 画廊，不做画廊降级）
+						// 已解锁变体解析失败：直接报错（原画已解锁，不做画廊降级）
 						return "", nil, err
 					}
+					// 保留原始错误分类：网络层失败（errArchiveNetworkRetryable）与结构性失败
+					//（errHathdlOnly）由 run() 按任务类型分别处理（普通下载一律不降级）。
+					if errors.Is(err, errHathdlOnly) || errors.Is(err, errArchiveNetworkRetryable) {
+						return "", nil, err
+					}
+					// 其余错误（如归档生成超时）历史上视为「不可直链」，归结构性错误处理
 					return "", nil, fmt.Errorf("%w: %v", errHathdlOnly, err)
 				}
 				return dlURL, g.lastArchiveInfo, nil
@@ -563,9 +552,24 @@ func (g *archiveDownloader) findKeyForm(forms []archiverForm) *archiverForm {
 	return nil
 }
 
-// errHathdlOnly 标记「仅支持 H@H Downloader」的画廊在尝试直链下载失败后的降级信号：
-// 已优先尝试 H@H 下载页直链（#continue > a / #db > p > a），全部失败时降级为画廊逐图下载。
-var errHathdlOnly = errors.New("该画廊仅支持 H@H Downloader 且直链解析失败，降级为画廊逐图下载")
+// errHathdlOnly 标记「H@H 下载页可访问但结构上解析不到直链」的结构性错误。
+//
+// Round45 收窄语义：它只表示该画廊的归档只能走 H@H 下载页，且该页没有 #db > p > a 直链，
+// 属于「结构性不可直链」，与网络抖动无关（网络失败见 errArchiveNetworkRetryable）。
+// 是否降级为画廊逐图由调用方按任务类型决定（见 archiveDownloader.handleHathdlOnly）：
+//   - 普通下载（UpdateForComicID 为空）：一律 fail 报错可重试，绝不降级；
+//   - 更新任务：保留「按 autoUpdateFallbackToGallery 开关降级」的旧语义。
+var errHathdlOnly = errors.New("H@H 下载页无可解析直链（结构性，非网络问题）")
+
+// errArchiveNetworkRetryable 归档下载的网络层失败（超时/EOF/连接重置/5xx）。
+// 可重试，且任何任务都不会因此降级为画廊逐图（避免把隧道抖动固化成永久画质降级）。
+var errArchiveNetworkRetryable = errors.New("归档下载网络请求失败（可重试）")
+
+// hathdlFetchMaxAttempts H@H 下载页直链解析的网络层最大尝试次数（含首次）。
+const hathdlFetchMaxAttempts = 3
+
+// hathdlFetchRetryBackoff 网络层重试退避基数：第 n 次失败后等待 n × 该值。
+const hathdlFetchRetryBackoff = time.Second
 
 // errZipCorrupt 归档 zip 校验失败（下载数据损坏，非网络错误）。
 // 校验失败处会先删除损坏的 .part 与伴生位图 .bits，再由 run() 捕获后自动重下一次；
@@ -622,6 +626,34 @@ func (g *archiveDownloader) isAlreadyUnlockedPage() bool {
 	return false
 }
 
+// handleHathdlOnly 处理「结构性不可直链」错误（Round45：降级范围收敛）。
+//
+// 降级只属于「更新」语义——更新任务把「新版本可用」退化为「至少拿到一份」；
+// 普通下载没有这个语义，失败就该报错重试：
+//   - 普通下载（UpdateForComicID 为空）：报错可重试，绝不降级为画廊逐图；
+//   - 更新任务：保留旧语义，autoUpdateFallbackToGallery=true 时降级，否则报错。
+//
+// 网络层失败（errArchiveNetworkRetryable）不会走到这里，由 run() 走 fail（可重试）。
+func (g *archiveDownloader) handleHathdlOnly(err error) {
+	if g.task.UpdateForComicID == "" {
+		log.Printf("%s [archive-engine] 任务 %s 为普通下载，归档直链不可用时报错可重试（不降级为画廊）",
+			dlWarnTag, g.task.ID)
+		g.fail(fmt.Sprintf("归档直链解析失败（可重试）：%v", err))
+		return
+	}
+	if !g.m.GetSettings().AutoUpdateFallbackToGallery {
+		log.Printf("%s [update] 任务 %s 为更新任务，但 autoUpdateFallbackToGallery=false，不降级为画廊",
+			dlWarnTag, g.task.ID)
+		g.fail(err.Error())
+		return
+	}
+	if g.stopped() {
+		log.Printf("%s [archive-engine] 任务 %s 已被取消/暂停，跳过降级", dlWarnTag, g.task.ID)
+		return
+	}
+	g.m.fallbackArchiveToGallery(g.task, err.Error())
+}
+
 // resolveHathdlDownloadURL 通过「H@H 下载页直链」流程解析 zip 直链（与 JHentai 官方流程一致）：
 //
 //	① POST archiver.php(dltype/dlcheck) 创建/解锁归档
@@ -664,7 +696,8 @@ func (g *archiveDownloader) resolveHathdlDownloadURL() (string, error) {
 
 		resp, err := g.client.Do(req)
 		if err != nil {
-			return "", fmt.Errorf("H@H 解锁 POST 失败: %v", err)
+			// 网络层失败（超时/EOF/连接重置）：可重试，绝不因此降级为画廊
+			return "", fmt.Errorf("%w: H@H 解锁 POST 失败: %v", errArchiveNetworkRetryable, err)
 		}
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 		resp.Body.Close()
@@ -693,8 +726,8 @@ func (g *archiveDownloader) resolveHathdlDownloadURL() (string, error) {
 		return "", errors.New("多次提交后仍未获取 H@H 下载页 URL（归档生成超时，请稍后重试）")
 	}
 
-	// ③ GET 下载页解析 #db > p > a 直链路径
-	downloadPath, err := g.fetchHathdlDownloadPath(downloadPageURL)
+	// ③ GET 下载页解析 #db > p > a 直链路径（网络层失败自动退避重试）
+	downloadPath, err := g.fetchHathdlDownloadPathWithRetry(downloadPageURL)
 	if err != nil {
 		return "", err
 	}
@@ -721,6 +754,36 @@ func (g *archiveDownloader) resolveHathdlDownloadURL() (string, error) {
 	return dlURL.String(), nil
 }
 
+// fetchHathdlDownloadPathWithRetry 带网络退避重试的直链解析（覆盖隧道抖动导致的超时/EOF）。
+//
+// 仅对 errArchiveNetworkRetryable（超时/EOF/连接重置/5xx）重试；结构性问题（errHathdlOnly）
+// 立即返回，避免无谓等待。重试耗尽后返回最后一次错误（仍带网络类标记，供上层按「可重试」报错）。
+func (g *archiveDownloader) fetchHathdlDownloadPathWithRetry(pageURL string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= hathdlFetchMaxAttempts; attempt++ {
+		if g.stopped() {
+			return "", errTaskStopped
+		}
+		path, err := g.fetchHathdlDownloadPath(pageURL)
+		if err == nil {
+			return path, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errArchiveNetworkRetryable) {
+			return "", err // 结构性错误：不重试
+		}
+		if attempt < hathdlFetchMaxAttempts {
+			wait := time.Duration(attempt) * hathdlFetchRetryBackoff
+			log.Printf("%s [archive-engine] 任务 %s H@H 下载页请求失败（第 %d/%d 次）: %v；%v 后重试",
+				dlWarnTag, g.task.ID, attempt, hathdlFetchMaxAttempts, err, wait)
+			time.Sleep(wait)
+		}
+	}
+	log.Printf("%s [archive-engine] 任务 %s H@H 下载页请求重试 %d 次后仍失败: %v",
+		dlErrTag, g.task.ID, hathdlFetchMaxAttempts, lastErr)
+	return "", lastErr
+}
+
 // fetchHathdlDownloadPath GET H@H 下载页并解析 #db > p > a 的直链路径
 func (g *archiveDownloader) fetchHathdlDownloadPath(pageURL string) (string, error) {
 	req, err := http.NewRequest("GET", pageURL, nil)
@@ -732,16 +795,16 @@ func (g *archiveDownloader) fetchHathdlDownloadPath(pageURL string) (string, err
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("请求 H@H 下载页失败: %v", err)
+		return "", fmt.Errorf("%w: 请求 H@H 下载页失败: %v", errArchiveNetworkRetryable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("H@H 下载页返回状态码 %d", resp.StatusCode)
+		return "", fmt.Errorf("%w: H@H 下载页返回状态码 %d", errArchiveNetworkRetryable, resp.StatusCode)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("解析 H@H 下载页失败: %v", err)
+		return "", fmt.Errorf("%w: 解析 H@H 下载页失败: %v", errArchiveNetworkRetryable, err)
 	}
 	href, ok := doc.Find("#db > p > a").Attr("href")
 	if ok && href != "" {
@@ -749,7 +812,8 @@ func (g *archiveDownloader) fetchHathdlDownloadPath(pageURL string) (string, err
 		return href, nil
 	}
 	plain := strings.Join(strings.Fields(doc.Text()), " ")
-	return "", fmt.Errorf("H@H 下载页未找到 #db > p > a 直链，页面片段=%q", truncateForLog(plain, 200))
+	return "", fmt.Errorf("%w: H@H 下载页未找到 #db > p > a 直链，页面片段=%q",
+		errHathdlOnly, truncateForLog(plain, 200))
 }
 
 // createArchive POST 提交创建归档（gid/token/dltype/dlkey/form_uid/form_token）

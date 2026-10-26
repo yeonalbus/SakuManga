@@ -15,6 +15,11 @@ func TestClassifyLogLine(t *testing.T) {
 	}{
 		{"2026/08/07 10:00:00 [DOWNLOAD] [update] 开始更新检测：共 10 个离线漫画", LogUpdate},
 		{"2026/08/07 10:00:00 [DOWNLOAD-WARN] [update] 漫画详情拉取失败（跳过）", LogUpdate},
+		// Round45：正文里的方括号不参与分类（旧实现按全文子串匹配会误判为 update）
+		{"2026/10/26 02:50:01 [DOWNLOAD-WARN] 归档失败：页面含 [update] 标记", LogDownload},
+		{"2026/10/26 02:50:01 [DOWNLOAD] 任务 1 失败：响应体含 [maintain] 字样", LogDownload},
+		// 显式分类行（LogStore.Printf）：首标签即分类
+		{"2026/10/26 02:50:01 [update] 扫描完成", LogUpdate},
 		{"2026/08/07 10:00:00 [DOWNLOAD] [maintain] 维护查重完成：建议保留 5 项", LogMaintain},
 		{"2026/08/07 10:00:00 [DOWNLOAD] [maintain] 已删除本地文件", LogMaintain},
 		{"2026/08/07 10:00:00 [DOWNLOAD] [scan] 路径扫描完成：发现 3 本", LogOther},

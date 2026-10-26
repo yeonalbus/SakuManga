@@ -377,12 +377,21 @@ func (m *DownloadManager) fallbackUpdateToGallery(task *models.DownloadTask) {
 	m.fallbackArchiveToGallery(task, "归档下载失败，autoUpdateFallbackToGallery=true")
 }
 
-// fallbackArchiveToGallery 将归档下载任务降级为画廊逐图下载并重新入队。
-// 触发场景：
-//   - 仅支持 H@H Downloader 的画廊（无法直接 HTTP 下载 zip，见 archiveDownloader.run）
+// fallbackArchiveToGallery 将「更新任务」的归档下载降级为画廊逐图下载并重新入队。
+//
+// Round45 硬约束：降级只属于「更新」语义，普通下载（UpdateForComicID 为空）**一律拒绝**——
+// 失败即报错可重试，绝不静默把归档原图降成画廊逐图（否则用户还得再点一次画质升级）。
+// 触发场景（仅更新任务）：
+//   - H@H 下载页结构性不可直链且 autoUpdateFallbackToGallery=true（见 archiveDownloader.handleHathdlOnly）
 //   - 自动更新任务归档下载失败且 autoUpdateFallbackToGallery=true（见 fallbackUpdateToGallery）
 func (m *DownloadManager) fallbackArchiveToGallery(task *models.DownloadTask, reason string) {
 	if task == nil || task.Mode != models.DownloadModeArchive {
+		return
+	}
+	// 硬约束：普通下载永不降级（防未来从新路径误调）
+	if task.UpdateForComicID == "" {
+		log.Printf("%s [archive] 任务 %s 为普通下载，拒绝降级为画廊逐图（普通下载失败只报错可重试）",
+			dlWarnTag, task.ID)
 		return
 	}
 

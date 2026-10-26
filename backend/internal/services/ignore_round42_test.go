@@ -108,7 +108,10 @@ func TestDetectClustersIgnoreCompatLegacyKey(t *testing.T) {
 	}
 
 	// 兼容匹配 + 出现快照外的成员（且是忽略之后入库）→ 列出并标记新增
-	lc2.AddedAt = time.Now()
+	// 注意：AddedAt 必须**明确晚于**忽略创建时间。判定用毫秒级比较（isAddedAfter: >），
+	// 若用 time.Now() 会因 Windows 时钟精度（~15.6ms）与 CreateIgnore 落在同一毫秒，
+	// 被当成「忽略前已在库」而漏判新增（原先的偶发失败根因）。
+	lc2.AddedAt = time.Now().Add(time.Second)
 	comics2 := []models.OfflineComic{lc1, lc2}
 	idx2 := LoadIgnoreIndex(db)
 	for _, e := range idx2.titleEntries {

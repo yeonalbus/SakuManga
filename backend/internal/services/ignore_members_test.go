@@ -21,6 +21,14 @@ func newIgnoreMemberTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("打开内存库失败: %v", err)
 	}
+	// 内存库必须固定为单连接：glebarez/sqlite 的 :memory: 是「每连接独立库」，
+	// 若走连接池，迁移/写入的表现在其他连接上不可见（同包其他 db 辅助一致的处理）。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { sqlDB.Close() })
 	if err := db.AutoMigrate(&models.OfflineComic{}, &models.IgnoredIdentifier{}, &models.ExtraScanPath{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
@@ -82,7 +90,9 @@ func TestListIgnoresWithMembersLooseScope(t *testing.T) {
 	newComic := mkComic("m5", "[CIRCLE] テスト作品 第01話 (Chinese)", []string{"artist:tester", "language:chinese"}, 20)
 	newComic.Source = models.SourceOffline
 	newComic.LocalPath = "/nonexistent/m5"
-	newComic.AddedAt = time.Now() // 忽略之后入库
+	// 明确晚于忽略创建时间：新增判定用毫秒级比较（isAddedAfter: >），
+	// 直接用 time.Now() 会因 Windows 时钟精度（~15.6ms）与忽略创建落在同一毫秒而漏判。
+	newComic.AddedAt = time.Now().Add(time.Second) // 忽略之后入库
 	if err := db.Create(&newComic).Error; err != nil {
 		t.Fatalf("创建新增漫画失败: %v", err)
 	}

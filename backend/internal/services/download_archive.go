@@ -158,9 +158,11 @@ type archiveDownloader struct {
 	startedAt       time.Time
 }
 
-// runArchiveEngine 归档下载引擎入口（由任务管理器分派）
-func (m *DownloadManager) runArchiveEngine(task *models.DownloadTask) {
-	g := &archiveDownloader{m: m, task: task}
+// runArchiveEngine 归档下载引擎入口（由任务管理器分派）。
+// threads 为调度器已预留的线程额度（Round45：并发窗口与线程配额由调度器非阻塞预留，
+// 引擎内不再阻塞申请）。
+func (m *DownloadManager) runArchiveEngine(task *models.DownloadTask, threads int) {
+	g := &archiveDownloader{m: m, task: task, threads: threads}
 	m.registerArchive(g)
 	defer m.unregisterArchive(task.ID)
 	g.run()
@@ -229,13 +231,15 @@ func (g *archiveDownloader) run() {
 		_ = os.Remove(g.zipPath)
 	}
 
-	// 4. 全局线程配额：提前到 archiver.php 解锁之前获取——
-	//    额度不足时阻塞假死（不耗 GP），空位出现由 releaseArchive/wakeAll 唤醒；
-	//    解锁阶段（消耗 GP 的创建归档/提交 key）只在额度到手后才开始。
-	if !g.acquireSlot() {
-		return // 等待额度期间被暂停/取消
+	// 4. 线程额度：Round45 起由统一调度器在发牌前**非阻塞预留**（并发窗口 + 每归档配额），
+	//    引擎内不再阻塞等待（等待会占住执行协程、堵死队列消费）。
+	if g.threads <= 0 {
+		log.Printf("%s [archive-engine] 任务 %s 未获线程额度（调度器未预留），直接报错可重试",
+			dlWarnTag, g.task.ID)
+		g.fail("调度器未分配下载线程（可重试）")
+		return
 	}
-	defer g.releaseSlot()
+	log.Printf("%s [archive-engine] 任务 %s 使用调度器预留的 %d 个线程", dlLogTag, g.task.ID, g.threads)
 
 	// 5. archiver.php 全流程：获取 H@H 下载链接
 	downloadURL, arcInfo, err := g.resolveArchiveDownloadURL()

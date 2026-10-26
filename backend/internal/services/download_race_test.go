@@ -92,10 +92,10 @@ func TestPauseTaskWaitsEngineExitAndReleasesThreads(t *testing.T) {
 	}
 }
 
-// TestRunTaskMutualExclusionReenqueuesDuplicate 验证每任务互斥（Fix2）：
-// 同一任务 ID 已被某 worker 处理（旧 worker 尚未退出）时，新 worker 取出同一任务
-// 应检测到互斥并快速重新入队，而不是并发处理导致线程/槽位重复占用。
-func TestRunTaskMutualExclusionReenqueuesDuplicate(t *testing.T) {
+// TestRunTaskMutualExclusionSkipsRunning 验证同一任务不会被重复执行（Round45）：
+// 任务已在执行（reserved 集合有记录）时，重复 runTask 应快速跳过，
+// 不再次预留资源、不重复启动引擎。
+func TestRunTaskMutualExclusionSkipsRunning(t *testing.T) {
 	mgr := newTestDownloadManager(t)
 	task := &models.DownloadTask{
 		ID:     "mutex-1",
@@ -109,34 +109,28 @@ func TestRunTaskMutualExclusionReenqueuesDuplicate(t *testing.T) {
 		t.Fatalf("创建任务失败: %v", err)
 	}
 
-	// 模拟旧 worker 已占用该任务（暂停→快速恢复时旧 worker 尚未退出）
-	mgr.taskRunMu.Lock()
-	mgr.taskRunning[task.ID] = true
-	mgr.taskRunMu.Unlock()
+	// 模拟旧执行协程仍持有该任务的预留（暂停→快速恢复/抢占时的过渡态）
+	mgr.schedMu.Lock()
+	mgr.reserved[task.ID] = &reservation{taskID: task.ID, threads: 1, archive: true}
+	mgr.schedMu.Unlock()
 
-	// 新 worker 取出同一任务：应检测互斥并快速重新入队（不获取槽位/不分派引擎）
+	// 重复执行：应检测到预留标记并快速跳过（不获取槽位/不分派引擎）
 	start := time.Now()
 	mgr.runTask(task.ID)
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Errorf("互斥分支应快速返回，实际耗时 %v", elapsed)
 	}
 
-	// 旧 worker 仍持有标记（未被新 worker 覆盖/清除）
-	mgr.taskRunMu.Lock()
-	running := mgr.taskRunning[task.ID]
-	mgr.taskRunMu.Unlock()
+	// 旧执行的预留标记应保持（未被新执行覆盖/清除）
+	mgr.schedMu.Lock()
+	_, running := mgr.reserved[task.ID]
+	total := mgr.runningTotal
+	mgr.schedMu.Unlock()
 	if !running {
-		t.Error("旧 worker 的任务标记应保持 true")
+		t.Error("旧执行的任务预留标记应保持")
 	}
-
-	// 任务应被重新入队等待旧 worker 退出
-	select {
-	case id := <-mgr.queue:
-		if id != task.ID {
-			t.Errorf("队列应收到任务 %s，收到 %s", task.ID, id)
-		}
-	default:
-		t.Error("重复 worker 应把任务重新入队")
+	if total != 0 {
+		t.Errorf("重复执行不应占用槽位，runningTotal=%d，期望 0", total)
 	}
 }
 

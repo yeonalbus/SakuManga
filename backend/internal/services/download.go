@@ -97,25 +97,26 @@ type DownloadListParams struct {
 }
 
 // DownloadManager 下载任务管理器：
-//   - SQLite 持久化任务记录 + 内存 worker 队列（后端重启可恢复）
+//   - SQLite 持久化任务记录 + 内存无界待调度队列（后端重启可恢复）
 //   - 负责任务生命周期：queued → downloading → completed / error / error_lock / paused / cancelled
-//   - 引擎分派：gallery / archive 由第 2/3 步实现，当前为占位并在日志中明示
+//   - Round45：worker 池（chan 容量 256，满即丢弃）改为「无界 pending 队列 + 单一统一调度器」；
+//     并发窗口 / 线程配额由调度器**非阻塞预留**，等资源不再占用执行协程。
 type DownloadManager struct {
 	db        *gorm.DB
 	ehService *EHService
 
-	queue   chan string // 待执行任务 ID 队列
-	workers int
+	pending *pendingQueue // 无界待调度队列（Enqueue 永不失败）
+	wakeCh  chan struct{} // 调度唤醒信号（容量 1，非阻塞发送）
 	quit    chan struct{}
 	mu      sync.Mutex
 
 	// 调度门控：控制「同一优先级并发」
-	// 真实并发由调度器按下载设置决定，worker 池数量仅作上限兜底
 	schedMu        sync.Mutex
-	runningTotal   int         // 当前运行任务总数
-	runningArchive int         // 当前运行的归档任务数（仅统计/日志）
-	runningByPri   map[int]int // 各优先级正在运行的任务数
-	runningTasks   map[string]int // 任务ID -> 优先级（正在运行，供抢占式调度遍历）
+	runningTotal   int                     // 当前运行任务总数
+	runningArchive int                     // 当前运行的归档任务数（仅统计/日志）
+	runningByPri   map[int]int             // 各优先级正在运行的任务数
+	runningTasks   map[string]int          // 任务ID -> 优先级（正在运行，供抢占式调度遍历）
+	reserved       map[string]*reservation // 任务ID -> 已预留资源（运行中标记，防重复执行）
 
 	// 归档引擎运行时管理：全局线程配额池 + 正在运行的归档引擎（动态调整/立即中断）
 	archivePool    *archiveThreadPool
@@ -123,37 +124,37 @@ type DownloadManager struct {
 
 	// 画廊引擎运行时管理：正在运行的画廊引擎（暂停/取消/抢占时立即中断）
 	activeGalleries map[string]*galleryDownloader // 任务ID -> 正在运行的画廊引擎
+}
 
-	// 每任务互斥：同一任务 ID 同一时刻只允许一个 worker 处理。
-	// 暂停→快速恢复（或抢占→重试）时旧 worker 可能尚未完全退出（线程/槽位未释放），
-	// 若新 worker 已取出队列会并发处理同一任务，导致线程/槽位重复占用（"线程不足"）。
-	taskRunMu   sync.Mutex
-	taskRunning map[string]bool // 正在被 worker 处理的任务 ID 集合
-
+// reservation 调度器为任务预留的资源（线程额度 + 归档并发窗口）。
+type reservation struct {
+	taskID   string
+	priority int
+	threads  int  // 引擎可用线程数（归档分块线程 / 画廊逐图并发）
+	archive  bool // true=占用了归档并发窗口（释放时走 releaseArchive）
+	pooled   bool // true=占用了全局线程配额池（ControlArchiveConcurrency=false 时不占池）
 }
 
 // NewDownloadManager 构造下载任务管理器
 func NewDownloadManager(db *gorm.DB, ehService *EHService) *DownloadManager {
 	return &DownloadManager{
-		db:             db,
-		ehService:      ehService,
-		queue:          make(chan string, 256),
-		workers:        16, // worker 池仅作并发上限，实际并发由调度门控（downloadAllGalleriesSamePriority / 归档线程配额）控制
-		quit:           make(chan struct{}),
-		runningByPri:   make(map[int]int),
-		runningTasks:   make(map[string]int),
-		archivePool:    newArchiveThreadPool(defaultMaxArchiveThreads),
-		activeArchives: make(map[string]*archiveDownloader),
+		db:              db,
+		ehService:       ehService,
+		pending:         newPendingQueue(),
+		wakeCh:          make(chan struct{}, 1),
+		quit:            make(chan struct{}),
+		runningByPri:    make(map[int]int),
+		runningTasks:    make(map[string]int),
+		reserved:        make(map[string]*reservation),
+		archivePool:     newArchiveThreadPool(defaultMaxArchiveThreads),
+		activeArchives:  make(map[string]*archiveDownloader),
 		activeGalleries: make(map[string]*galleryDownloader),
-		taskRunning:    make(map[string]bool),
 	}
 }
 
-// Start 启动 worker 池，并按设置恢复未完成任务
+// Start 启动统一调度器，并按设置恢复未完成任务
 func (m *DownloadManager) Start() {
-	for i := 0; i < m.workers; i++ {
-		go m.worker(i)
-	}
+	go m.schedulerLoop()
 
 	setting := m.GetSettings()
 	if setting.AutoResumeTasks {
@@ -166,27 +167,15 @@ func (m *DownloadManager) Start() {
 		log.Printf("%s 自动恢复任务未开启（autoResumeTasks=false），启动时不恢复历史任务", dlLogTag)
 	}
 
-	log.Printf("%s 下载任务管理器已启动（worker=%d，队列容量=256）", dlLogTag, m.workers)
-}
-
-// worker 从队列取出任务并执行
-func (m *DownloadManager) worker(id int) {
-	log.Printf("%s worker#%d 已就绪", dlLogTag, id)
-	for {
-		select {
-		case <-m.quit:
-			log.Printf("%s worker#%d 退出", dlLogTag, id)
-			return
-		case taskID := <-m.queue:
-			m.runTask(taskID)
-		}
-	}
+	log.Printf("%s 下载任务管理器已启动（统一调度器 + 无界队列）", dlLogTag)
 }
 
 // Round11-Opt2：下载完成后不再自动全库维护查重（原 idle 机制已移除）。
 // 下载完成入库由 ScanAndSaveDirectory 负责；全库维护查重改为用户在离线更新页手动「开始检测」触发。
 
-// runTask 执行单个任务（状态机入口）
+// runTask 执行单个任务（兼容入口：测试与内部直接调用）。
+// 调度器正常路径为 dispatch → tryReserve → executeTask；本函数补齐「校验 + 预留」两步，
+// 并保证同一任务不会被执行两次（reserved 集合互斥）。
 func (m *DownloadManager) runTask(taskID string) {
 	var task models.DownloadTask
 	if err := m.db.First(&task, "id = ?", taskID).Error; err != nil {
@@ -199,95 +188,91 @@ func (m *DownloadManager) runTask(taskID string) {
 		return
 	}
 
-	// 每任务互斥：同一任务 ID 同一时刻只允许一个 worker 处理。
-	// 暂停→快速恢复（或抢占→重试）时旧 worker 可能尚未完全退出（线程/槽位未释放），
-	// 若此时新 worker 已取出队列，会并发处理同一任务导致 "线程不足"；此处让后者重新入队等待。
-	m.taskRunMu.Lock()
-	if m.taskRunning[taskID] {
-		m.taskRunMu.Unlock()
-		log.Printf("%s [worker] 任务 %s 已有 worker 在处理，稍后重新入队", dlWarnTag, taskID)
-		m.Enqueue(taskID)
+	// 互斥：同一任务已在执行（已预留）时跳过，避免并发处理同一任务导致线程/槽位重复占用。
+	m.schedMu.Lock()
+	_, running := m.reserved[task.ID]
+	m.schedMu.Unlock()
+	if running {
+		log.Printf("%s [worker] 任务 %s 已在执行中，跳过重复执行", dlWarnTag, taskID)
 		return
 	}
-	m.taskRunning[taskID] = true
-	m.taskRunMu.Unlock()
+
+	res, ok := m.tryReserve(&task)
+	if !ok {
+		log.Printf("%s [sched] 任务 %s 资源不足，留在队列等待调度", dlWarnTag, taskID)
+		m.pending.Push(&task)
+		return
+	}
+	m.pending.Remove(task.ID)
+	m.executeTask(&task, res)
+}
+
+// executeTask 执行已获牌任务：置 downloading → 分派引擎 → 收尾。
+// 调用方须先通过 tryReserve 预留资源（res 非 nil），函数结束时释放。
+func (m *DownloadManager) executeTask(task *models.DownloadTask, res *reservation) {
+	defer m.releaseReservation(res)
 	defer func() {
-		m.taskRunMu.Lock()
-		delete(m.taskRunning, taskID)
-		m.taskRunMu.Unlock()
+		if r := recover(); r != nil {
+			log.Printf("%s [worker] 任务 %s 执行 panic: %v", dlErrTag, task.ID, r)
+			m.failTask(task, fmt.Sprintf("下载执行异常: %v", r))
+		}
 	}()
 
-	log.Printf("%s [worker] 开始处理任务 id=%s gid=%s title=%q mode=%s",
-		dlLogTag, task.ID, task.GID, task.Title, task.Mode)
-
-	// 调度门控：按设置等待可执行槽位（优先级并发 / 归档并发上限）
-	m.acquireSlot(&task)
-	defer m.releaseSlot(&task)
-
-	// 等待槽位期间任务可能被用户暂停/取消，重新校验状态避免覆盖用户操作
-	var latest models.DownloadTask
-	if err := m.db.First(&latest, "id = ?", taskID).Error; err != nil {
-		log.Printf("%s [worker] 任务 %s 等待槽位期间不存在或已被删除: %v", dlErrTag, taskID, err)
-		return
-	}
-	if latest.Status != models.DownloadQueued {
-		log.Printf("%s [worker] 任务 %s 等待槽位期间状态变为 %s，放弃执行", dlWarnTag, taskID, latest.Status)
-		return
-	}
-	task = latest
-
-	if err := m.markRunning(&task); err != nil {
+	if err := m.markRunning(task); err != nil {
 		return
 	}
 
 	// 抢占让位：markRunning 与引擎启动之间可能被高优先级任务抢占（DB 状态已被置回 queued），
 	// 此时让位退出，由抢占流程负责重新入队，避免低优先级任务在抢占后仍启动引擎。
 	var chk models.DownloadTask
-	if err := m.db.First(&chk, "id = ?", taskID).Error; err == nil && chk.Status != models.DownloadDownloading {
-		log.Printf("%s [sched] 任务 %s 在引擎启动前被抢占（状态=%s），让位", dlWarnTag, taskID, chk.Status)
+	if err := m.db.First(&chk, "id = ?", task.ID).Error; err == nil && chk.Status != models.DownloadDownloading {
+		log.Printf("%s [sched] 任务 %s 在引擎启动前被抢占（状态=%s），让位", dlWarnTag, task.ID, chk.Status)
 		return
 	}
-	task = chk
+	task = &chk
 
-	m.dispatchEngine(&task)
+	m.dispatchEngine(task, res)
 
 	// 离线更新任务收尾：下载成功后按设置清理旧版
-	m.finalizeUpdate(&task)
+	m.finalizeUpdate(task)
 
-	// 无 H@H 自动降级：归档更新任务失败（非配额锁定）时按设置改用画廊引擎重试
-	m.fallbackUpdateToGallery(&task)
+	// 更新任务归档失败按开关降级（普通下载已在引擎内直接 fail，不会走到这里）
+	m.fallbackUpdateToGallery(task)
 
-	// 需求2：任何下载任务完成后，主动清除更新列表中同 GID 的更新标记。
-	// 覆盖：手动下载标记需更新的漫画本体（gid 匹配）+ 下载检测到的新版本时父画廊的标记（new_gid 匹配）。
-	if task.Status == models.DownloadCompleted && task.GID != "" {
-		if _, err := ClearOfflineUpdateByGID(m.db, task.GID); err != nil {
-			log.Printf("%s [update] 下载完成 gid=%s 清除更新标记失败: %v", dlErrTag, task.GID, err)
-		}
-	}
-
-	// 需求3(1)：下载完成后主动对账数据库（GID 去重 / ParentGID 回写 / PageCount 校正 / Aged 复位）。
-	// 依赖 ScanAndSaveDirectory 已入库的本地记录与其落地目录/压缩包内 metadata，做轻量比对。
-	if task.Status == models.DownloadCompleted && task.GID != "" {
-		if _, err := ReconcileOfflineAfterDownload(m.db, &task); err != nil {
-			log.Printf("%s [reconcile] 下载完成 gid=%s 数据对账失败: %v", dlErrTag, task.GID, err)
-		}
-	}
-
-	// 需求4：任何下载完成后记录书库变更时间戳（新增/替换漫画均改变本地书库），
-	// 供「队列空闲>1min」自动触发增量维护查重时做变更去重判断。
-	if task.Status == models.DownloadCompleted {
-		MarkLibraryChanged()
-	}
+	// 需求2/3/4：下载完成后的收尾（清更新标记 / 对账 / 书库变更）
+	m.postDownloadBookkeeping(task)
 
 	// 抢占恢复：任务被高优先级任务抢占后 DB 状态被置回 queued（进度保留，可断点续传），
 	// 自动重新入队以再次调度。降级路径（fallbackArchiveToGallery 会改 Mode + 自行入队）排除在外。
 	var post models.DownloadTask
-	if err := m.db.First(&post, "id = ?", taskID).Error; err == nil &&
+	if err := m.db.First(&post, "id = ?", task.ID).Error; err == nil &&
 		post.Mode == task.Mode && post.Status == models.DownloadQueued {
 		log.Printf("%s [sched] 任务 %s 被抢占后重新入队（优先级=%d 进度=%d/%d）",
-			dlLogTag, taskID, post.Priority, post.DoneFiles, post.TotalFiles)
-		m.Enqueue(taskID)
+			dlLogTag, post.ID, post.Priority, post.DoneFiles, post.TotalFiles)
+		m.Enqueue(post.ID)
 	}
+}
+
+// postDownloadBookkeeping 下载成功后的数据收尾（原 runTask 内联逻辑）。
+func (m *DownloadManager) postDownloadBookkeeping(task *models.DownloadTask) {
+	if task == nil || task.Status != models.DownloadCompleted {
+		return
+	}
+	// 需求2：任何下载任务完成后，主动清除更新列表中同 GID 的更新标记。
+	// 覆盖：手动下载标记需更新的漫画本体（gid 匹配）+ 下载检测到的新版本时父画廊的标记（new_gid 匹配）。
+	if task.GID != "" {
+		if _, err := ClearOfflineUpdateByGID(m.db, task.GID); err != nil {
+			log.Printf("%s [update] 下载完成 gid=%s 清除更新标记失败: %v", dlErrTag, task.GID, err)
+		}
+	}
+	// 需求3(1)：下载完成后主动对账数据库（GID 去重 / ParentGID 回写 / PageCount 校正 / Aged 复位）。
+	if task.GID != "" {
+		if _, err := ReconcileOfflineAfterDownload(m.db, task); err != nil {
+			log.Printf("%s [reconcile] 下载完成 gid=%s 数据对账失败: %v", dlErrTag, task.GID, err)
+		}
+	}
+	// 需求4：任何下载完成后记录书库变更时间戳（新增/替换漫画均改变本地书库）。
+	MarkLibraryChanged()
 }
 
 // finalizeUpdate 离线更新任务完成后处理旧版漫画（按 AutoUpdateDeleteOriginal 设置）
@@ -427,15 +412,19 @@ func (m *DownloadManager) markRunning(task *models.DownloadTask) error {
 	return nil
 }
 
-// dispatchEngine 按模式分派到具体下载引擎
-func (m *DownloadManager) dispatchEngine(task *models.DownloadTask) {
+// dispatchEngine 按模式分派到具体下载引擎（res 为调度器预留的线程额度）
+func (m *DownloadManager) dispatchEngine(task *models.DownloadTask, res *reservation) {
+	threads := 0
+	if res != nil {
+		threads = res.threads
+	}
 	switch task.Mode {
 	case models.DownloadModeGallery:
-		log.Printf("%s [gallery] 任务 %s 进入画廊下载引擎", dlLogTag, task.ID)
-		m.runGalleryEngine(task)
+		log.Printf("%s [gallery] 任务 %s 进入画廊下载引擎（预留并发=%d）", dlLogTag, task.ID, threads)
+		m.runGalleryEngine(task, threads)
 	case models.DownloadModeArchive:
-		log.Printf("%s [archive] 任务 %s 进入归档下载引擎", dlLogTag, task.ID)
-		m.runArchiveEngine(task)
+		log.Printf("%s [archive] 任务 %s 进入归档下载引擎（预留线程=%d）", dlLogTag, task.ID, threads)
+		m.runArchiveEngine(task, threads)
 	default:
 		m.failTask(task, "未知下载模式: "+string(task.Mode))
 	}
@@ -561,16 +550,25 @@ func (m *DownloadManager) CreateTasksBatch(p BatchCreateParams) *BatchCreateResu
 	return res
 }
 
-// Enqueue 将任务 ID 放入队列
+// Enqueue 将任务加入无界待调度队列（Round45：永不失败、幂等）。
+// 仅排队中的任务会入队；已在执行/已终结的任务直接忽略。
 func (m *DownloadManager) Enqueue(taskID string) {
-	select {
-	case m.queue <- taskID:
-		log.Printf("%s 任务 %s 已入队", dlLogTag, taskID)
-		// 需求4：新任务入队 → 队列重新非空，取消空闲检查定时器（顺延自动增量查重）
-	
-	default:
-		log.Printf("%s 任务 %s 入队失败（队列已满），任务保持 queued 等待后续处理", dlWarnTag, taskID)
+	if taskID == "" {
+		return
 	}
+	var task models.DownloadTask
+	if err := m.db.First(&task, "id = ?", taskID).Error; err != nil {
+		log.Printf("%s [sched] 入队跳过：任务 %s 不存在或已删除: %v", dlWarnTag, taskID, err)
+		return
+	}
+	if task.Status != models.DownloadQueued {
+		log.Printf("%s [sched] 入队跳过：任务 %s 状态为 %s（非 queued）", dlWarnTag, taskID, task.Status)
+		return
+	}
+	if m.pending.Push(&task) {
+		log.Printf("%s 任务 %s 已入队（队列长度=%d）", dlLogTag, taskID, m.pending.Len())
+	}
+	m.Wake()
 }
 
 // PauseTask 暂停任务（queued / downloading / error_lock → paused）
@@ -589,6 +587,8 @@ func (m *DownloadManager) PauseTask(taskID string) (*models.DownloadTask, error)
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
 	}
+	// 从待调度队列移除（防止调度器已经取出候选后仍发牌）
+	m.pending.Remove(taskID)
 	// 立即中断运行中的归档下载（分块 Range 请求取消，.part 保留供恢复续传）
 	m.stopArchiveDownload(taskID)
 	// 同时中断运行中的画廊下载（图片请求取消，.part 保留供恢复续传）
@@ -651,6 +651,8 @@ func (m *DownloadManager) CancelTask(taskID string) (*models.DownloadTask, error
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
 	}
+	// 从待调度队列移除（防止调度器已经取出候选后仍发牌）
+	m.pending.Remove(taskID)
 	// 立即中断运行中的归档下载（分块 Range 请求取消）
 	m.stopArchiveDownload(taskID)
 	// 同时中断运行中的画廊下载（图片请求取消）
@@ -1089,6 +1091,8 @@ func (m *DownloadManager) SaveSettings(s *models.DownloadSetting) (*models.Downl
 		s.MaxArchiveConcurrency != old.MaxArchiveConcurrency {
 		m.notifyArchiveThreadsChange(s.ArchiveThreads)
 	}
+	// Round45：并发/串并行/线程配置变化后让调度器按新额度重新发牌
+	m.Wake()
 	return s, nil
 }
 
@@ -1208,6 +1212,8 @@ func (m *DownloadManager) notifyArchiveThreadsChange(newThreads int) {
 	}
 	// 唤醒排队任务重新竞争：线程数/并发上限变化后重算额度（计划书 5.6）
 	m.archivePool.wakeAll()
+	// Round45：调度器按新额度重新发牌（线程调大后可能立即能多跑一个任务）
+	m.Wake()
 }
 
 // ─────────────────────────────────────────────────────────────

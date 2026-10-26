@@ -9,102 +9,185 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// 调度门控：控制「同一优先级并发」
+// 统一调度器（Round45）
 //
-// 语义与 E-Hentai 官方一致：
-//   - downloadAllGalleriesSamePriority=false：全局串行，同一时刻仅下载 1 个画廊（含归档）
-//   - downloadAllGalleriesSamePriority=true：同一优先级可并行；低优先级任务需等待更高优先级任务结束
+// 取代旧的「16 个 worker + 容量 256 的 channel」模型：
+//   - 任务入队 = 进入无界 pendingQueue（永不丢弃，Enqueue 无失败分支）；
+//   - 单一调度协程按「优先级降序 → 创建时间升序」挑候选，**非阻塞**预留资源后才发牌；
+//   - 资源 = 优先级串并行门控 + 归档并发窗口（MaxArchiveConcurrency）+ 全局线程配额（10）；
+//     资源不足则本轮停下等唤醒信号（任务释放 / 设置变更 / 1s 兜底），不占用执行协程；
+//   - 执行协程只负责跑引擎与收尾，结束即释放预留并唤醒调度器。
 //
-// 归档任务的「线程并发」不在此门控：由 archive_thread_pool 全局线程配额池统一管理
-//（controlArchiveConcurrency=true 时，归档任务需先获取全局线程配额，不足则排队等待）。
-//
-// worker 池数量（NewDownloadManager 的 workers）仅作并发上限兜底，
-// 真实并发由这里按下载设置决定。
+// 并发语义（与 E-Hentai 官方一致）：
+//   - downloadAllGalleriesSamePriority=false：全局串行，同一时刻仅 1 个任务；
+//   - true：同一优先级可并行；低优先级任务等待所有更高优先级任务结束。
 // ─────────────────────────────────────────────────────────────
 
-// acquireSlot 按下载设置等待可执行槽位（阻塞轮询）。
-// 等待期间若任务被用户暂停/取消/删除（状态不再是 queued），立即返回且不占用槽位，
-// 避免占着 worker 空等；调用方在拿到槽位后仍会重新校验任务状态。
-// 每次轮询重读任务记录：SetTaskPriority 修改优先级后，等待中的任务按新优先级重新判断
-//（实现计划书 5.5.1「出队排序」的等效语义——高优先级任务优先竞争槽位）。
-func (m *DownloadManager) acquireSlot(task *models.DownloadTask) {
+// schedulerIdlePoll 调度器兜底轮询间隔（防唤醒信号丢失导致停滞）
+const schedulerIdlePoll = time.Second
+
+// schedulerLoop 统一调度主循环
+func (m *DownloadManager) schedulerLoop() {
+	log.Printf("%s [sched] 统一调度器已启动", dlLogTag)
 	for {
-		// 重读任务：状态/优先级可能被暂停/取消/SetTaskPriority 修改
-		var latest models.DownloadTask
-		if err := m.db.First(&latest, "id = ?", task.ID).Error; err != nil {
-			log.Printf("%s [sched] 任务 %s 不存在或已被删除: %v", dlWarnTag, task.ID, err)
+		m.dispatch()
+		select {
+		case <-m.wakeCh:
+		case <-m.quit:
+			log.Printf("%s [sched] 调度器退出", dlLogTag)
 			return
+		case <-time.After(schedulerIdlePoll):
 		}
-		if latest.Status != models.DownloadQueued {
-			log.Printf("%s [sched] 任务 %s 等待槽位期间状态变为 %s，放弃获取槽位", dlWarnTag, task.ID, latest.Status)
-			return
-		}
-		task = &latest // 用最新记录（含修改后的优先级）
-
-		setting := m.GetSettings()
-
-		m.schedMu.Lock()
-		ok := m.slotAvailable(task, setting)
-		if ok {
-			m.runningTotal++
-			if task.Mode == models.DownloadModeArchive {
-				m.runningArchive++
-			}
-			m.runningByPri[task.Priority]++
-			m.runningTasks[task.ID] = task.Priority // 记录运行中任务（供抢占）
-			m.schedMu.Unlock()
-
-			log.Printf("%s [sched] 任务 %s 获取槽位（优先级=%d mode=%s runningTotal=%d runningArchive=%d）",
-				dlLogTag, task.ID, task.Priority, task.Mode, m.runningTotal, m.runningArchive)
-			return
-		}
-		m.schedMu.Unlock()
-
-		time.Sleep(400 * time.Millisecond)
 	}
 }
 
-// releaseSlot 释放任务占用的槽位（defer 调用，须在 acquireSlot 成功后使用）
-func (m *DownloadManager) releaseSlot(task *models.DownloadTask) {
+// Wake 唤醒调度器（非阻塞，容量 1 合并重复信号）
+func (m *DownloadManager) Wake() {
+	select {
+	case m.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// dispatch 尽量发牌：队首任务拿到资源就执行，拿不到就停（等下次唤醒）。
+func (m *DownloadManager) dispatch() {
+	for {
+		cand, ok := m.pending.Peek()
+		if !ok {
+			return
+		}
+		// 快照可能过期（用户暂停/取消/抢占改状态）：回查 DB 后自愈清理
+		var latest models.DownloadTask
+		if err := m.db.First(&latest, "id = ?", cand.ID).Error; err != nil {
+			m.pending.Remove(cand.ID)
+			continue
+		}
+		if latest.Status != models.DownloadQueued {
+			log.Printf("%s [sched] 任务 %s 状态为 %s（非 queued），移出待调度队列",
+				dlWarnTag, latest.ID, latest.Status)
+			m.pending.Remove(latest.ID)
+			continue
+		}
+
+		res, ok := m.tryReserve(&latest)
+		if !ok {
+			return // 资源不足：任务保留在队列，等释放信号
+		}
+		m.pending.Remove(latest.ID)
+		go m.executeTask(&latest, res)
+	}
+}
+
+// tryReserve 非阻塞预留资源（优先级门控 + 归档并发窗口 + 全局线程配额）。
+// 成功返回 reservation 并完成运行中记账；失败返回 false（任务保留在队列）。
+func (m *DownloadManager) tryReserve(task *models.DownloadTask) (*reservation, bool) {
+	if task == nil {
+		return nil, false
+	}
+	setting := m.GetSettings()
+
 	m.schedMu.Lock()
 	defer m.schedMu.Unlock()
 
+	// 防重复：同一任务已在执行中
+	if _, running := m.reserved[task.ID]; running {
+		return nil, false
+	}
+
+	// ① 优先级串并行门控
+	if !m.slotAvailable(task, setting) {
+		return nil, false
+	}
+
+	// ② 线程额度：归档受并发窗口限制；画廊尽力取余量（最少 1）
+	res := &reservation{taskID: task.ID, priority: task.Priority}
+	if task.Mode == models.DownloadModeArchive {
+		res.archive = true
+		threads := setting.ArchiveThreads
+		if threads < 1 {
+			threads = 1
+		}
+		if setting.ControlArchiveConcurrency {
+			got := m.archivePool.tryArchiveSlot(task.ID, threads, setting.MaxArchiveConcurrency)
+			if got <= 0 {
+				return nil, false
+			}
+			res.threads = got
+			res.pooled = true
+		} else {
+			// 不受控：按旧行为拿满线程，不占全局配额池
+			res.threads = threads
+		}
+	} else {
+		want := setting.ConcurrentImageDownloads
+		if want <= 0 {
+			want = 1
+		}
+		got := m.archivePool.tryAcquirePartial(task.ID, want)
+		if got <= 0 {
+			return nil, false
+		}
+		res.threads = got
+		res.pooled = true
+	}
+
+	// ③ 运行中记账
+	m.runningTotal++
+	if task.Mode == models.DownloadModeArchive {
+		m.runningArchive++
+	}
+	m.runningByPri[task.Priority]++
+	m.runningTasks[task.ID] = task.Priority
+	m.reserved[task.ID] = res
+	log.Printf("%s [sched] 任务 %s 预留成功（优先级=%d mode=%s 线程=%d runningTotal=%d runningArchive=%d）",
+		dlLogTag, task.ID, task.Priority, task.Mode, res.threads, m.runningTotal, m.runningArchive)
+	return res, true
+}
+
+// releaseReservation 释放预留资源并唤醒调度器（任务结束/让位/失败统一走这里）。
+func (m *DownloadManager) releaseReservation(res *reservation) {
+	if res == nil {
+		return
+	}
+	m.schedMu.Lock()
+	if res.pooled {
+		if res.archive {
+			m.archivePool.releaseArchive(res.taskID)
+		} else {
+			m.archivePool.releaseAll(res.taskID)
+		}
+	}
 	if m.runningTotal > 0 {
 		m.runningTotal--
 	}
-	if task.Mode == models.DownloadModeArchive && m.runningArchive > 0 {
+	if res.archive && m.runningArchive > 0 {
 		m.runningArchive--
 	}
-	if n := m.runningByPri[task.Priority]; n > 0 {
+	if n := m.runningByPri[res.priority]; n > 0 {
 		if n == 1 {
-			delete(m.runningByPri, task.Priority)
+			delete(m.runningByPri, res.priority)
 		} else {
-			m.runningByPri[task.Priority] = n - 1
+			m.runningByPri[res.priority] = n - 1
 		}
 	}
-	delete(m.runningTasks, task.ID)
+	delete(m.runningTasks, res.taskID)
+	delete(m.reserved, res.taskID)
+	m.schedMu.Unlock()
 
-	log.Printf("%s [sched] 任务 %s 释放槽位（优先级=%d mode=%s runningTotal=%d runningArchive=%d）",
-		dlLogTag, task.ID, task.Priority, task.Mode, m.runningTotal, m.runningArchive)
+	log.Printf("%s [sched] 任务 %s 释放预留（优先级=%d 线程=%d runningTotal=%d）",
+		dlLogTag, res.taskID, res.priority, res.threads, m.runningTotal)
+	m.Wake()
 }
 
-// slotAvailable 判断任务当前是否可执行（须在持有 schedMu 时调用）
+// slotAvailable 判断任务当前是否可执行（须在持有 schedMu 时调用）。
+// 归档任务的「线程并发」由全局线程配额池管理，此处不按归档线程数限制任务数。
 func (m *DownloadManager) slotAvailable(task *models.DownloadTask, setting *models.DownloadSetting) bool {
-	// 归档任务的线程并发由 archiveThreadPool 全局配额池管理（不足时在引擎内排队等待），
-	// 此处不再按 archiveThreads 限制同时运行的归档任务数，多个归档任务可并发启动。
-
 	if setting.DownloadAllGalleriesSamePriority {
 		// 并行模式：低优先级任务必须等待所有更高优先级任务结束
-		if task.Priority < m.maxRunningPriority() {
-			return false
-		}
-	} else {
-		// 串行模式：同一时刻仅运行 1 个任务
-		if m.runningTotal > 0 {
-			return false
-		}
+		return task.Priority >= m.maxRunningPriority()
 	}
-	return true
+	// 串行模式：同一时刻仅运行 1 个任务
+	return m.runningTotal == 0
 }
 
 // maxRunningPriority 返回当前正在运行任务中的最高优先级（无运行任务时返回 math.MinInt）
@@ -123,8 +206,7 @@ func (m *DownloadManager) maxRunningPriority() int {
 //
 // 触发时机：新任务入队（CreateTask / ResumeTask / RetryTask / UnlockTask）或
 // 优先级提升（SetTaskPriority）时调用 preemptLowerPriority(newPriority)。
-// 被抢占任务状态置回 queued（进度保留，可断点续传），由 worker 在 runTask 退出时
-// 自动重新入队；释放的全局线程额度经 wakeAll 唤醒排队任务竞争空位。
+// 被抢占任务状态置回 queued（进度保留，可断点续传），由 preemptOne 重新入队。
 // ─────────────────────────────────────────────────────────────
 
 // preemptLowerPriority 停止所有正在运行且优先级低于 newPriority 的任务。
@@ -147,8 +229,9 @@ func (m *DownloadManager) preemptLowerPriority(newPriority int) {
 	for _, id := range victims {
 		m.preemptOne(id)
 	}
-	// 释放的线程额度唤醒排队任务（含新入队的高优先级任务）竞争空位
+	// 释放的线程额度唤醒调度器重新分配
 	m.archivePool.wakeAll()
+	m.Wake()
 }
 
 // preemptOne 将单个正在运行的任务置回 queued 并立即中断引擎（进度保留）。
@@ -159,7 +242,7 @@ func (m *DownloadManager) preemptOne(taskID string) {
 		return
 	}
 	if task.Status != models.DownloadDownloading {
-		return // 仅抢占正在下载的任务（等待槽位/排队中的任务无需打断）
+		return // 仅抢占正在下载的任务（排队中的任务无需打断）
 	}
 	task.Status = models.DownloadQueued
 	task.UpdatedAt = time.Now()
@@ -176,4 +259,6 @@ func (m *DownloadManager) preemptOne(taskID string) {
 	// 仍占用线程配额导致其排队等待（"线程不足"）。
 	m.waitArchiveStopped(taskID)
 	m.waitGalleryStopped(taskID)
+	// 重新入队：旧执行协程退出时释放预留，调度器随后重新分配
+	m.Enqueue(taskID)
 }

@@ -249,6 +249,71 @@ func (p *archiveThreadPool) releaseArchive(taskID string) {
 	p.mu.Unlock()
 }
 
+// tryArchiveSlot 非阻塞版归档额度申请（Round45：由统一调度器调用）。
+// 并发窗口已满或线程不足时立即返回 0（不阻塞、不排队），任务留在待调度队列等下次唤醒。
+// 语义与 archiveSlot 一致（并发窗口 + 每归档配额），仅去掉 cond.Wait。
+func (p *archiveThreadPool) tryArchiveSlot(taskID string, threads, maxConcurrency int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	eff := archiveEffConcurrency(threads, maxConcurrency)
+	idx := -1
+	for i, id := range p.archives {
+		if id == taskID {
+			idx = i
+			break
+		}
+	}
+	added := false
+	if idx < 0 {
+		if len(p.archives) >= eff {
+			return 0 // 并发窗口已满
+		}
+		p.archives = append(p.archives, taskID)
+		idx = len(p.archives) - 1
+		added = true
+	}
+	need := archiveQuota(threads, maxConcurrency, idx)
+	if need <= 0 {
+		need = 1
+	}
+	if p.active+need > p.max {
+		if added {
+			// 回滚：刚占的窗口名额要还回去，否则窗口被永久占用
+			p.archives = append(p.archives[:idx], p.archives[idx+1:]...)
+		}
+		return 0 // 线程不足
+	}
+	p.active += need
+	p.perTask[taskID] += need
+	log.Printf("%s [archive-thread] 任务 %s 预留归档额度 %d 线程（并发窗口 %d/%d，active=%d/%d）",
+		dlLogTag, taskID, need, idx+1, eff, p.active, p.max)
+	return need
+}
+
+// tryAcquirePartial 非阻塞版画廊额度申请（Round45：由统一调度器调用）。
+// 取 min(n, 全局余量)；余量为 0 时返回 0（任务留在待调度队列等下次唤醒）。
+func (p *archiveThreadPool) tryAcquirePartial(taskID string, n int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	avail := p.max - p.active
+	if avail <= 0 {
+		return 0
+	}
+	got := n
+	if got > avail {
+		got = avail
+	}
+	if got <= 0 {
+		return 0
+	}
+	p.active += got
+	p.perTask[taskID] += got
+	log.Printf("%s [archive-thread] 画廊任务 %s 预留额度 %d（active=%d/%d）", dlLogTag, taskID, got, p.active, p.max)
+	return got
+}
+
 // acquirePartial 画廊任务尽力获取额度：取 min(n, 余量)；余量为 0 时阻塞（假死）等待空位。
 // stop 返回 true 时立即放弃并返回 0。画廊用返回值作为内部逐图并发信号量上限。
 func (p *archiveThreadPool) acquirePartial(taskID string, n int, stop func() bool) int {

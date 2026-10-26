@@ -44,18 +44,21 @@ type galleryDownloader struct {
 	destDir string // 落地目录（singleImageSavePath/gid - 本子名）
 	referer string // 图片下载 Referer（图床校验用）
 	limiter *rateLimiter
+	quota   int // 调度器预留的逐图并发额度（0=未预留，回退到全局池阻塞申请）
 
-	mu         sync.Mutex // 保护 task 进度字段与并发计数
-	startedAt  time.Time  // 开始时间（速度计算基准）
-	lockFailed bool       // 是否检测到配额/限流（决定 error_lock 还是 error）
+	mu         sync.Mutex  // 保护 task 进度字段与并发计数
+	startedAt  time.Time   // 开始时间（速度计算基准）
+	lockFailed bool        // 是否检测到配额/限流（决定 error_lock 还是 error）
 	stopFlag   atomic.Bool // 本地停止标记（暂停/取消/抢占时置位，避免频繁回查 DB）
 	ctx        context.Context
 	cancel     context.CancelFunc
 }
 
-// runGalleryEngine 画廊下载引擎入口（由任务管理器分派）
-func (m *DownloadManager) runGalleryEngine(task *models.DownloadTask) {
-	g := &galleryDownloader{m: m, task: task}
+// runGalleryEngine 画廊下载引擎入口（由任务管理器分派）。
+// quota 为调度器已预留的逐图并发额度（Round45：全局线程配额由调度器非阻塞预留，
+// 引擎内不再阻塞申请）。quota<=0 时回退旧行为（测试/直接调用场景）。
+func (m *DownloadManager) runGalleryEngine(task *models.DownloadTask, quota int) {
+	g := &galleryDownloader{m: m, task: task, quota: quota}
 	m.registerGallery(g)
 	defer m.unregisterGallery(task.ID)
 	g.run()
@@ -146,17 +149,20 @@ func (g *galleryDownloader) downloadAll(urls []string, detail *GalleryDetailResu
 		concurrency = 1
 	}
 
-	// 接入全局线程配额池：多画廊并行总线程 ≤ 10（修复路径一 N×10 超限）。
-	// acquirePartial 取 min(ConcurrentImageDownloads, 全局余量)；全局额度不足时阻塞（假死，不耗 GP），
-	// 暂停/取消/抢占时通过 stop 回调返回 0 放弃（配合 stopGalleryDownload + wakeAll）。
-	g.initContext()
-	got := g.m.archivePool.acquirePartial(g.task.ID, concurrency, func() bool { return g.stopped() })
-	defer g.m.archivePool.releaseAll(g.task.ID)
-	if got <= 0 {
-		log.Printf("%s [gallery-engine] 任务 %s 等待额度期间被暂停/取消，中止下载", dlWarnTag, g.task.ID)
-		return
+	// Round45：并发额度由统一调度器预留（非阻塞）；未预留时回退旧行为：
+	// acquirePartial 取 min(ConcurrentImageDownloads, 全局余量)，额度不足阻塞（假死，不耗 GP）。
+	if g.quota > 0 {
+		concurrency = g.quota
+	} else {
+		g.initContext()
+		got := g.m.archivePool.acquirePartial(g.task.ID, concurrency, func() bool { return g.stopped() })
+		defer g.m.archivePool.releaseAll(g.task.ID)
+		if got <= 0 {
+			log.Printf("%s [gallery-engine] 任务 %s 等待额度期间被暂停/取消，中止下载", dlWarnTag, g.task.ID)
+			return
+		}
+		concurrency = got
 	}
-	concurrency = got
 
 	// 文件名位数：<100 用 3 位，<1000 用 4 位，否则 5 位
 	width := 3

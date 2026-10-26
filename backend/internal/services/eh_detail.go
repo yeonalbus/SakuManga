@@ -24,8 +24,7 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 	}
 
 	baseURL := GetBaseURL(account, setting)
-	
-	tags := make([]string, 0)
+
 	previewPages := make([]PreviewPageDTO, 0)
 	comments := make([]CommentDTO, 0)
 
@@ -103,19 +102,11 @@ func (s *EHService) FetchGalleryDetail(account *models.AccountSetting, gid, toke
 		}
 	}
 
-	doc.Find("#taglist tr").Each(func(i int, tr *goquery.Selection) {
-		ns := strings.TrimSuffix(strings.TrimSpace(tr.Find("td.tc").Text()), ":")
-		if ns == "" {
-			ns = "other"
-		}
-		tr.Find("div[id^='ta_'], div.gt, div.gtl").Each(func(_ int, tagNode *goquery.Selection) {
-			rawText := strings.TrimSpace(tagNode.Text())
-			if rawText != "" {
-				cleanKey := strings.ReplaceAll(rawText, "_", " ")
-				tags = append(tags, fmt.Sprintf("%s:%s", ns, cleanKey))
-			}
-		})
-	})
+	// 标签解析（Round46）：只取规范 tag（"|" 左侧）。
+	// E-H 的 <a> 显示文本可能带 " | 别名/wiki 提示"（如 "japanese | definition revised please read the wiki"、
+	// "cure answer | anna akechi"），而规范 tag 身份在 id/href/onclick 中；把显示文本当 key 会导致
+	// 词典翻译全 miss、f_search 拼出 `ns:"key | alias$"` 搜不到内容。详见 parseGalleryTags。
+	tags := parseGalleryTags(doc)
 
 	doc.Find(".c1").Each(func(i int, s *goquery.Selection) {
 		user := strings.TrimSpace(s.Find(".c3 a").First().Text())

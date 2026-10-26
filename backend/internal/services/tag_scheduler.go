@@ -31,6 +31,15 @@ func StartTagMaintainScheduler(db *gorm.DB, svc *TagMaintainService) {
 		if _, err := MigrateLegacyTags(db); err != nil {
 			log.Printf("%s [tagm] 旧 Tags 迁移失败: %v", dlErrTag, err)
 		}
+		// Round46：清洗历史 Tag 别名后缀（旧解析把 E-H 显示文本当 key，
+		// 如 "japanese | definition revised please read the wiki"、"cure answer | anna akechi"）。
+		// 幂等：仅处理含 "|" 的项，无变更时不写库。
+		if comicsFixed, tagsFixed, err := repairTagAliasSuffix(db); err != nil {
+			log.Printf("%s [tagm] Tag 别名后缀清洗失败: %v", dlErrTag, err)
+		} else if comicsFixed > 0 {
+			log.Printf("%s [tagm] Tag 别名后缀清洗完成：修复 %d 个漫画 / %d 个 tag", dlLogTag, comicsFixed, tagsFixed)
+			XpRebuildAsync("Tag 别名后缀清洗")
+		}
 		for {
 			next := nextTagMaintainTrigger(db)
 			log.Printf("%s [tagm] 下次 Tag 维护触发: %s（%s）", dlLogTag,

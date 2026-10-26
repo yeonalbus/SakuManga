@@ -162,6 +162,43 @@ func TestPauseRemovesFromPending(t *testing.T) {
 	}
 }
 
+// TestRestoreTasksEnqueuesAllQueued 重启恢复：DB 中所有 queued/downloading 全部进入待调度队列，
+// 不再受旧的 256 容量上限影响（704 个存量任务的回归场景）。
+func TestRestoreTasksEnqueuesAllQueued(t *testing.T) {
+	mgr := newTestDownloadManager(t)
+
+	const queuedCount = 300
+	for i := 0; i < queuedCount; i++ {
+		task := newSchedTask(t, mgr, fmt.Sprintf("restore-%03d", i), models.DownloadModeArchive, 0)
+		// 模拟进程重启前的中断状态
+		if err := mgr.db.Model(&models.DownloadTask{}).Where("id = ?", task.ID).
+			Update("status", models.DownloadDownloading).Error; err != nil {
+			t.Fatalf("更新任务状态失败: %v", err)
+		}
+	}
+	// 非活动任务不应被恢复
+	for i := 0; i < 5; i++ {
+		done := &models.DownloadTask{
+			ID:     fmt.Sprintf("done-%d", i),
+			Status: models.DownloadCompleted,
+		}
+		if err := mgr.db.Create(done).Error; err != nil {
+			t.Fatalf("创建完成态任务失败: %v", err)
+		}
+	}
+
+	n, err := mgr.RestoreTasks()
+	if err != nil {
+		t.Fatalf("RestoreTasks 失败: %v", err)
+	}
+	if n != queuedCount {
+		t.Fatalf("应恢复 %d 个任务，得到 %d", queuedCount, n)
+	}
+	if got := mgr.pending.Len(); got != queuedCount {
+		t.Fatalf("待调度队列应有 %d 个任务（无上限），得到 %d", queuedCount, got)
+	}
+}
+
 // TestDispatchLeavesQueueAndReleases dispatch 发牌后任务离开队列；
 // 执行协程失败（未绑定账号）后释放预留，计数归零。
 func TestDispatchLeavesQueueAndReleases(t *testing.T) {

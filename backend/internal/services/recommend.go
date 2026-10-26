@@ -81,6 +81,10 @@ type RankedComic struct {
 // RecommendService 本地偏好推荐服务
 type RecommendService struct {
 	xp *XpCloudService
+
+	// rng 可选随机源：nil 时每次采样用时间种子（生产并发安全）；
+	// 测试注入固定种子以获得确定性结果（仅测试使用，勿在生产共享该字段）。
+	rng *rand.Rand
 }
 
 // NewRecommendService 构造推荐服务（复用阶段一的统计服务权重表与其缓存）
@@ -128,7 +132,7 @@ func (s *RecommendService) Recommend(userID uint, candidates []models.OfflineCom
 	if count > len(ranked) {
 		count = len(ranked)
 	}
-	return sampleRanked(ranked, count, opts), nil
+	return sampleRanked(ranked, count, opts, s.rng), nil
 }
 
 // ScoreComic 单本打分：Σ w'(t) / |tags|^γ，并返回贡献最高的前 3 个 tag 作为命中理由
@@ -177,9 +181,12 @@ func ScoreComic(tags []string, table *XpWeightTable, opts RecommendOptions) (flo
 	return score, top
 }
 
-// sampleRanked 温度采样 + 探索率混合 + 多样性限流（不放回抽取）
-func sampleRanked(ranked []RankedComic, count int, opts RecommendOptions) []RankedComic {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+// sampleRanked 温度采样 + 探索率混合 + 多样性限流（不放回抽取）。
+// rng 为 nil 时用时间种子新建（生产路径）；测试可注入固定种子以获得确定性结果。
+func sampleRanked(ranked []RankedComic, count int, opts RecommendOptions, rng *rand.Rand) []RankedComic {
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
 
 	// 温度权重：减去 max 防止 exp 溢出
 	maxScore := ranked[0].Score

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 
 	"SakuManga/internal/models"
@@ -89,6 +90,8 @@ func TestRecommendPrefersHighWeight(t *testing.T) {
 	db := newXpTestDB(t)
 	xp := NewXpCloudService(db)
 	reco := NewRecommendService(xp)
+	// 固定随机种子：采样结果确定，避免概率断言偶发越界（原实现每次用时间种子）
+	reco.rng = rand.New(rand.NewSource(20261026))
 
 	user := models.User{Username: "u1"}
 	if err := db.Create(&user).Error; err != nil {
@@ -160,6 +163,8 @@ func TestRecommendExploreFlattensDistribution(t *testing.T) {
 	db := newXpTestDB(t)
 	xp := NewXpCloudService(db)
 	reco := NewRecommendService(xp)
+	// 固定随机种子：采样结果确定，避免概率断言偶发越界（原实现每次用时间种子）
+	reco.rng = rand.New(rand.NewSource(20261026))
 
 	user := models.User{Username: "u1"}
 	if err := db.Create(&user).Error; err != nil {

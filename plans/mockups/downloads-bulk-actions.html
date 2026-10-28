@@ -286,6 +286,19 @@
     flex-wrap: wrap;
   }
 
+  .filter-top-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .seg-label {
+    flex: none;
+    color: var(--app-text-3);
+    font-size: 0.72rem;
+  }
+
   .seg {
     display: inline-flex;
     gap: 2px;
@@ -450,6 +463,11 @@
     --bulk-soft: var(--st-downloading-soft);
   }
 
+  .bulk-bar[data-bulk='unlock'] {
+    --bulk: var(--st-lock);
+    --bulk-soft: var(--st-lock-soft);
+  }
+
   .bulk-bar[data-bulk='cancel'] {
     --bulk: var(--st-error);
     --bulk-soft: var(--st-error-soft);
@@ -546,7 +564,17 @@
     color: #0c2006;
   }
 
+  .bulk-btn.unlock {
+    background: var(--st-lock);
+    border-color: var(--st-lock);
+    color: #231604;
+  }
+
   :root[data-theme='light'] .bulk-btn.resume {
+    color: #fff;
+  }
+
+  :root[data-theme='light'] .bulk-btn.unlock {
     color: #fff;
   }
 
@@ -1238,6 +1266,15 @@
     line-height: 1.6;
   }
 
+  .modal-warn.warn {
+    border-color: rgba(230, 162, 60, 0.35);
+    background: var(--st-lock-soft);
+  }
+
+  .modal-warn.warn .warn-icon {
+    color: var(--st-lock);
+  }
+
   .modal-warn .warn-icon {
     flex: none;
   }
@@ -1274,7 +1311,28 @@
     font-weight: 600;
   }
 
+  .btn-primary {
+    background: var(--app-accent);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .btn-lock {
+    background: var(--st-lock);
+    color: #231604;
+    font-weight: 600;
+  }
+
+  :root[data-theme='light'] .btn-lock {
+    color: #fff;
+  }
+
   .btn-danger:hover {
+    filter: brightness(1.08);
+  }
+
+  .btn-primary:hover,
+  .btn-lock:hover {
     filter: brightness(1.08);
   }
 
@@ -1636,8 +1694,9 @@
     <div class="mock-banner-text">
       <span class="mock-badge">SAMPLE</span>
       <span>
-        <b>下载列表 · 批量操作 UI 样稿</b> · 演示数据，不连后端。可点击：切换状态页签 / 执行批量操作 /
-        查看取消确认弹窗 / 暂停与恢复 / 深浅主题；把窗口拖窄可预览窄屏。
+        <b>下载列表 · 批量操作 UI 样稿</b> · 演示数据，不连后端。已按确认口径更新：
+        删除「全部」状态页签、锁定页新增「全部解锁」、操作量 &gt; 20 才二次确认（取消始终确认）。
+        可点击：切换页签 / 执行批量操作 / 查看确认弹窗 / 深浅主题；拖窄窗口可预览窄屏。
       </span>
     </div>
     <div class="mock-controls">
@@ -1658,7 +1717,10 @@
 
   <section class="filter-card" aria-label="下载筛选">
     <div class="filter-top">
-      <div class="seg" id="mode-seg" role="group" aria-label="下载模式"></div>
+      <div class="filter-top-left">
+        <span class="seg-label">模式</span>
+        <div class="seg" id="mode-seg" role="group" aria-label="下载模式"></div>
+      </div>
       <span class="filter-hint">状态页签带任务数量；批量操作随页签变化</span>
     </div>
     <div class="tabs-wrap">
@@ -1675,64 +1737,73 @@
 <!-- 设计说明：给评审看的，不属于产品 UI -->
 <section class="notes">
   <div class="notes-head">
-    <h2>设计说明与待确认项</h2>
-    <span>样稿文件：plans/mockups/downloads-bulk-actions.html · 53 条演示任务 · 每页 8 条（实际沿用 20 条/页）</span>
+    <h2>设计说明与已确认口径</h2>
+    <span>样稿文件：plans/mockups/downloads-bulk-actions.html · 102 条演示任务 · 每页 8 条（实际沿用 20 条/页）</span>
   </div>
 
   <div class="note-grid">
     <div class="note-card">
       <h3>这一版改了什么</h3>
       <ul>
-        <li><b>状态页签化</b>：从「一排可切换的胶囊」改为带数量的页签，当前视图与任务规模一眼可见。</li>
-        <li><b>上下文批量条</b>：只在有意义的页签出现，按钮组合随状态变化，标题直接写明数量与模式范围。</li>
-        <li><b>三态反馈</b>：确认（仅取消）→ 执行进度（逐条推进）→ 结果 toast；执行期间暂停轮询。</li>
-        <li><b>卡片信息重整</b>：状态徽标移到标题右侧、错误独立成行、左侧状态色条；优先级与单条操作收进底栏。</li>
-        <li><b>空态与窄屏</b>：操作后当前页签可能瞬间清空，提供空态与「查看全部任务」；窄屏页签横滑、按钮整行。</li>
+        <li><b>删除「全部」状态页签</b>：状态只保留子类页签，默认落在「下载中」；模式筛选的「全部」保留（维度不同）。</li>
+        <li><b>锁定页补上「全部解锁」</b>：解锁会重新排队并再次消耗 GP，批量条与确认弹窗都常驻提示。</li>
+        <li><b>二次确认按操作量分级</b>：暂停 / 恢复 / 重试 / 解锁在 &gt; 20 时提醒；「全部取消」始终提醒。</li>
+        <li><b>页签化</b>：下载中 / 排队中 / 已暂停 / 出错 / 锁定 / 完成 / 已取消，带数量，直观查子类。</li>
+        <li><b>三态反馈</b>：确认 → 执行进度 → 结果 toast；执行期间暂停轮询；操作后当前页签可能清空，显示空态。</li>
+        <li><b>作用范围</b>：跨分页处理当前筛选结果的全部任务，不提供「仅本页」，减少心智决策。</li>
       </ul>
     </div>
 
     <div class="note-card">
-      <h3>批量按钮出现规则</h3>
+      <h3>各页签的批量按钮</h3>
       <div class="table-scroll">
         <table class="matrix">
           <thead>
-            <tr><th>页签</th><th>全部暂停</th><th>全部恢复</th><th>全部重试</th><th>全部取消</th></tr>
+            <tr><th>页签</th><th>批量按钮</th><th>二次确认</th></tr>
           </thead>
           <tbody>
-            <tr><td>排队中</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
-            <tr><td>下载中</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
-            <tr><td>已暂停</td><td class="no">—</td><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td></tr>
-            <tr><td>出错</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-            <tr><td>锁定（error_lock）</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
-            <tr><td>全部 / 完成 / 已取消</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+            <tr><td>下载中</td><td>全部暂停、全部取消</td><td>暂停 &gt; 20 确认；取消始终确认</td></tr>
+            <tr><td>排队中</td><td>全部暂停、全部取消</td><td>暂停 &gt; 20 确认；取消始终确认</td></tr>
+            <tr><td>已暂停</td><td>全部恢复、全部取消</td><td>恢复 &gt; 20 确认；取消始终确认</td></tr>
+            <tr><td>出错</td><td>全部重试、全部取消</td><td>重试 &gt; 20 确认；取消始终确认</td></tr>
+            <tr><td>锁定（error_lock）</td><td>全部解锁、全部取消</td><td>解锁 &gt; 20 确认（含 GP 提示）；取消始终确认</td></tr>
+            <tr><td>完成 / 已取消</td><td class="no">无</td><td class="no">—</td></tr>
           </tbody>
         </table>
       </div>
-      <p style="margin-top:8px">规则来源：你的四条要求；「锁定」是 error_lock 的独立页签，任务不能直接重试，只能逐条解锁。</p>
+      <p style="margin-top:8px">「出错」重试不额外消耗 GP；「锁定」是 GP / 配额问题，解锁后再次下载会重复消耗 GP，所以两者不合并。</p>
     </div>
   </div>
 
   <div class="note-card">
-    <h3>需要你拍板的点</h3>
-    <ol class="q-list">
-      <li><b>命名</b>：你在需求清单里写「全部重启」，规则 3 又写「全部恢复」；样稿按语义采用「全部恢复」（对应后端 resume）。要改叫「全部重启」也只需换文案。</li>
-      <li><b>锁定页签</b>：是否保留独立页签？样稿保留，且只给「全部取消」。是否需要再加「全部解锁」？</li>
-      <li><b>“全部”页签</b>：样稿不显示任何批量按钮（混合状态容易误操作）。是否要给快捷入口，例如「暂停下载中 4 / 恢复已暂停 12」？</li>
-      <li><b>二次确认</b>：样稿只有「全部取消」弹确认；暂停/恢复/重试直接执行。重试量大时是否也要确认？</li>
-      <li><b>作用范围</b>：样稿按「当前筛选结果的全部任务」执行，跨分页生效（不是只处理当前页）。确认这个口径吗？</li>
-      <li><b>按钮数量</b>：数量显示在批量条标题里，按钮本身不重复数字。是否希望按钮写成「全部暂停 (9)」？</li>
-      <li><b>窄屏位置</b>：样稿批量条在页签下方（随页面滚动）。是否希望在窄屏改成吸附底部的操作条？</li>
-      <li><b>出错与锁定</b>：是否合并成一个「出错」页签？合并后「全部重试」只能作用于可重试任务，容易造成数量歧义。</li>
-    </ol>
+    <h3>2026-10-28 已确认口径</h3>
+    <div class="table-scroll">
+      <table class="matrix">
+        <thead>
+          <tr><th>#</th><th>决策点</th><th>确认结论</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>命名</td><td>统一为「全部恢复」（对应后端 resume）</td></tr>
+          <tr><td>2</td><td>锁定页签</td><td>保留独立页签，新增「全部解锁」</td></tr>
+          <tr><td>3</td><td>「全部」页签</td><td>删除；默认「下载中」；模式筛选的「全部」保留</td></tr>
+          <tr><td>4</td><td>二次确认</td><td>操作量 &gt; 20：暂停 / 恢复 / 重试 / 解锁弹确认；「全部取消」始终弹确认</td></tr>
+          <tr><td>5</td><td>作用范围</td><td>跨分页生效；不提供「仅本页」</td></tr>
+          <tr><td>6</td><td>按钮数量</td><td>不显示</td></tr>
+          <tr><td>7</td><td>窄屏位置</td><td>批量条在页签下方、随页面滚动（不吸附底部）</td></tr>
+          <tr><td>8</td><td>出错 / 锁定</td><td>不合并（GP 代价不同）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:8px">补充默认：页签顺序为 下载中 → 排队中 → 已暂停 → 出错 → 锁定 → 完成 → 已取消；初始进入「下载中」。</p>
   </div>
 
   <div class="note-card">
-    <h3>确认后的施工清单（预估）</h3>
+    <h3>施工清单（确认后）</h3>
     <ul>
-      <li><b>前端</b>：重构 <code>DownloadsView.vue</code> 为「模式分段 + 状态页签 + 上下文批量条」；批量执行期间暂停 2s 轮询；复用 toast；取消确认建议扩展 <code>useUI.modal.confirm</code> 支持危险按钮与自定义确认文案。</li>
+      <li><b>前端</b>：重构 <code>DownloadsView.vue</code> 为「模式分段 + 7 个状态页签 + 上下文批量条」；默认「下载中」；批量执行期间暂停 2s 轮询；确认弹窗支持暂停 / 恢复 / 重试 / 解锁 / 取消五种动作与 &gt; 20 阈值。</li>
       <li><b>后端</b>：新增 <code>GET /api/v1/downloads/stats?mode=</code>（按当前用户权限聚合各状态数量）；新增 <code>POST /api/v1/downloads/batch-action</code>（按 <code>status + mode</code> 批量 pause/resume/retry/cancel/unlock，逐条复用管理器方法并返回 affected / failed；取消沿用损坏压缩包清理逻辑）。</li>
       <li><b>口径</b>：普通用户只能操作自己发起的任务，管理员可操作全部；批量接口必须逐条复核权限与来源状态，避免与轮询竞态时误伤。</li>
-      <li><b>测试</b>：五个状态页签的按钮组合、0 条数据空态、跨页执行、执行中状态变化、非法来源状态跳过、取消含损坏压缩包、窄屏可操作性。</li>
+      <li><b>测试</b>：7 个页签的按钮组合、&gt; 20 确认边界（20 不弹 / 21 弹）、0 条数据空态、跨页执行、执行中状态变化、非法来源状态跳过、取消含损坏压缩包、解锁 GP 提示、窄屏可操作性。</li>
     </ul>
   </div>
 </section>
@@ -1748,78 +1819,101 @@
        演示数据
        ===================================================================== */
 
-    const TITLES = [
-      '[Mizutama] Sakura Canvas',
-      '[Yuki no Koe] Silent Snow',
+    const CIRCLES = [
+      'Mizutama',
+      'Yuki no Koe',
+      'Aoi Tori',
+      'Hoshizora',
+      'Tsukimi',
+      'Kohaku',
+      'Shiro',
+      'Ame',
+      'Lemon',
+      'Kaze',
+      'Niji',
+      'Kumo',
+      'Hikari',
+      'Yozora',
+      'Mizu',
+      'Tsuki',
+      'Hotaru',
+      'Sakura',
+      'Nagi',
+      'Tsubaki',
+    ];
+
+    const SHORT_TITLES = [
+      'Sakura Canvas',
+      'Silent Snow',
       'Paper Moon',
       'Marine Bloom',
       'Summer Frame',
-      '[Aoi Tori] Blue Horizon',
+      'Blue Horizon',
       'Midnight Library',
       'Kimi no Sketch',
-      '[Hoshizora] Starlight Parade',
+      'Starlight Parade',
       'Cafe Terrace',
       'Sora no Iro',
-      '[Tsukimi] Moonlit Garden',
+      'Moonlit Garden',
       'Aozora Step',
       'Hinata Note',
-      '[Kohaku] Glass Heart',
+      'Glass Heart',
       'Yume no Tsuzuki',
       'Little Planet',
       'Sound of Waves',
-      '[Shiro] Winter Letter',
+      'Winter Letter',
       'Cherry Ribbon',
       'After School',
-      '[Ame] Rainy Day Memory',
+      'Rainy Day Memory',
       'Twilight Train',
       'Melody Box',
       'Sunny Side',
-      '[Lemon] Lemon Soda',
+      'Lemon Soda',
       'Wind Chime',
       'Night Market',
       'Morning Glory',
-      '[Kaze] Coastline',
+      'Coastline',
       'Sweet Memory',
       'Snowdrop',
-      '[Hotaru] Firefly Night',
+      'Firefly Night',
       'Tsubasa',
       'Orange Peel',
       'Secret Base',
-      '[Niji] Niji no Hashi',
+      'Niji no Hashi',
       'Bookmark',
       'First Light',
       'Futari no Kyori',
-      '[Sakura] Hanami Days',
+      'Hanami Days',
       'Blue Hour',
-      '[Kumo] Cloud Nine',
+      'Cloud Nine',
       'Nostalgia',
-      '[Hikari] Prism',
+      'Prism',
       'Sunday Market',
       'Kokoro no Oto',
-      '[Yozora] Star Map',
+      'Star Map',
       'Tiny Garden',
-      '[Mizu] Aquarium',
+      'Aquarium',
       'Last Summer',
-      '[Tsuki] Tsukiakari',
+      'Tsukiakari',
       'Encore',
     ];
 
     const PLAN = [
-      { status: 'queued', gallery: 5, archive: 4 },
       { status: 'downloading', gallery: 3, archive: 1 },
-      { status: 'paused', gallery: 7, archive: 5 },
+      { status: 'queued', gallery: 13, archive: 11 },
+      { status: 'paused', gallery: 14, archive: 12 },
       { status: 'error', gallery: 3, archive: 2 },
-      { status: 'error_lock', gallery: 1, archive: 1 },
+      { status: 'error_lock', gallery: 11, archive: 11 },
       { status: 'completed', gallery: 10, archive: 5 },
       { status: 'cancelled', gallery: 4, archive: 2 },
     ];
 
     const TABS = [
       {
-        key: 'all',
-        label: '全部',
-        taskLabel: '全部',
-        glyph: '📋',
+        key: 'downloading',
+        label: '下载中',
+        taskLabel: '下载中',
+        glyph: '⬇',
         dark: '#5cb8ff',
         light: '#0066b8',
         darkSoft: 'rgba(92,184,255,.16)',
@@ -1834,16 +1928,6 @@
         light: '#5f6670',
         darkSoft: 'rgba(154,164,171,.16)',
         lightSoft: 'rgba(95,102,112,.10)',
-      },
-      {
-        key: 'downloading',
-        label: '下载中',
-        taskLabel: '下载中',
-        glyph: '⬇',
-        dark: '#5cb8ff',
-        light: '#0066b8',
-        darkSoft: 'rgba(92,184,255,.16)',
-        lightSoft: 'rgba(0,102,184,.10)',
       },
       {
         key: 'paused',
@@ -1912,7 +1996,7 @@
       resume: { label: '全部恢复', verb: '恢复', glyph: '▶', cls: 'resume' },
       retry: { label: '全部重试', verb: '重试', glyph: '↻', cls: 'retry' },
       cancel: { label: '全部取消', verb: '取消', glyph: '✕', cls: 'cancel' },
-      unlock: { label: '全部解锁', verb: '解锁', glyph: '🔓', cls: 'retry' },
+      unlock: { label: '全部解锁', verb: '解锁', glyph: '🔓', cls: 'unlock' },
     };
 
     const FROM = {
@@ -1924,14 +2008,15 @@
     };
 
     const BULK_BY_STATUS = {
-      queued: ['pause', 'cancel'],
       downloading: ['pause', 'cancel'],
+      queued: ['pause', 'cancel'],
       paused: ['resume', 'cancel'],
       error: ['retry', 'cancel'],
-      error_lock: ['cancel'],
+      error_lock: ['unlock', 'cancel'],
     };
 
     const CANCELLABLE = FROM.cancel;
+    const CONFIRM_THRESHOLD = 20;
 
     /* =====================================================================
        工具函数
@@ -1994,7 +2079,6 @@
        ===================================================================== */
 
     function buildTasks() {
-      let ti = 0;
       let uid = 0;
       let errorArchiveSeen = 0;
       const out = [];
@@ -2064,8 +2148,11 @@
             speed = 600 * 1024 + ((i * 317) % 5000) * 1024;
           }
 
-          const title = TITLES[ti] || 'Untitled ' + (ti + 1);
-          ti += 1;
+          const title =
+            '[' +
+            CIRCLES[i % CIRCLES.length] +
+            '] ' +
+            SHORT_TITLES[(i * 7) % SHORT_TITLES.length];
 
           out.push({
             id: 't' + String(uid + 1).padStart(3, '0'),
@@ -2100,7 +2187,7 @@
     const state = {
       theme: 'dark',
       mode: 'all',
-      status: 'all',
+      status: 'downloading',
       page: 1,
       pageSize: 8,
       tasks: [],
@@ -2112,11 +2199,10 @@
       state.tasks.filter((t) => state.mode === 'all' || t.mode === state.mode);
 
     const viewTasks = () =>
-      scopedTasks().filter((t) => state.status === 'all' || t.status === state.status);
+      scopedTasks().filter((t) => t.status === state.status);
 
     const counts = () => {
       const c = {
-        all: 0,
         queued: 0,
         downloading: 0,
         paused: 0,
@@ -2126,7 +2212,6 @@
         cancelled: 0,
       };
       for (const t of scopedTasks()) {
-        c.all += 1;
         c[t.status] += 1;
       }
       return c;
@@ -2168,7 +2253,7 @@
         const active = state.status === t.key;
         const color = state.theme === 'dark' ? t.dark : t.light;
         const soft = state.theme === 'dark' ? t.darkSoft : t.lightSoft;
-        const dot = t.key === 'all' ? '' : '<span class="tab-dot" style="background:' + color + '"></span>';
+        const dot = '<span class="tab-dot" style="background:' + color + '"></span>';
         return (
           '<button type="button" class="tab' +
           (active ? ' active' : '') +
@@ -2205,6 +2290,12 @@
       const modeLabel =
         state.mode === 'all' ? '全部模式' : state.mode === 'gallery' ? '画廊模式' : '归档模式';
 
+      let sub =
+        status === 'error_lock'
+          ? '解锁后任务重新排队，会再次消耗 GP；批量操作跨页生效'
+          : '批量操作作用于当前筛选下的全部任务，跨页生效';
+      if (count > CONFIRM_THRESHOLD) sub += '；操作量较大，执行前会再次确认';
+
       const buttons = actions
         .map((a, idx) => {
           const meta = ACTIONS[a];
@@ -2240,7 +2331,9 @@
         '</b> 个<span class="bulk-mode">· ' +
         modeLabel +
         '</span></div>' +
-        '<div class="bulk-sub">批量操作作用于当前筛选下的全部任务，跨页生效</div>' +
+        '<div class="bulk-sub">' +
+        sub +
+        '</div>' +
         '</div>' +
         '</div>' +
         '<div class="bulk-actions">' +
@@ -2309,19 +2402,17 @@
 
     function renderEmpty() {
       const tab = TABS.find((x) => x.key === state.status);
-      const filtered = state.status !== 'all' || state.mode !== 'all';
+      const modeHint =
+        state.mode === 'all' ? '' : '，或把模式切回「全部」查看另一类';
       return (
         '<div class="empty-state">' +
         '<div class="empty-icon">🗂️</div>' +
-        '<h3>' +
-        (filtered ? '「' + tab.label + '」下暂无任务' : '暂无下载任务') +
-        '</h3>' +
-        '<p>' +
-        (filtered ? '切换模式或状态页签看看其它任务。' : '在在线画廊页面点击下载即可加入队列。') +
-        '</p>' +
-        (filtered
-          ? '<button type="button" class="ghost-btn" data-act="reset-filter">查看全部任务</button>'
-          : '') +
+        '<h3>「' +
+        tab.label +
+        '」下暂无任务</h3>' +
+        '<p>切换上方页签查看其它状态' +
+        modeHint +
+        '。</p>' +
         '</div>'
       );
     }
@@ -2338,7 +2429,7 @@
         '<div class="task-list">' +
         pageItems.map(renderCard).join('') +
         '</div>' +
-        renderPagination(total, pages)
+        (pages > 1 ? renderPagination(total, pages) : '')
       );
     }
 
@@ -2584,7 +2675,7 @@
       const t = findTask(id);
       if (!t) return;
       if (op === 'cancel') {
-        openCancelModal([t], 'task');
+        openConfirmModal('cancel', [t], 'task');
         return;
       }
       if (!(FROM[op] || []).includes(t.status)) return;
@@ -2594,12 +2685,16 @@
       toast('success', '已' + verb + '《' + t.title + '》');
     }
 
+    function needsConfirm(action, count) {
+      return action === 'cancel' || count > CONFIRM_THRESHOLD;
+    }
+
     function onBulk(action) {
       if (state.bulk) return;
       const targets = viewTasks().filter((t) => (FROM[action] || []).includes(t.status));
       if (!targets.length) return;
-      if (action === 'cancel') {
-        openCancelModal(targets, 'bulk');
+      if (needsConfirm(action, targets.length)) {
+        openConfirmModal(action, targets, 'bulk');
         return;
       }
       startBulk(action, targets);
@@ -2635,6 +2730,7 @@
       if (action === 'retry') message = '已重新排队 ' + total + ' 个任务';
       if (action === 'resume') message = '已恢复 ' + total + ' 个任务，任务已回到排队中';
       if (action === 'pause') message = '已暂停 ' + total + ' 个任务';
+      if (action === 'unlock') message = '已解锁 ' + total + ' 个任务，已重新排队';
       if (action === 'cancel' && corrupt) {
         message += '，其中 ' + corrupt + ' 个损坏压缩包已删除';
       }
@@ -2646,37 +2742,67 @@
       }, 1500);
     }
 
-    function openCancelModal(targets, kind) {
+    function openConfirmModal(action, targets, kind) {
+      const count = targets.length;
       const corrupt = targets.filter((t) => t.corrupt).length;
       const pages = Math.max(1, Math.ceil(viewTasks().length / state.pageSize));
       const statusLabel = TABS.find((x) => x.key === state.status).label;
+      const scope =
+        '「' +
+        statusLabel +
+        '」视图下的全部 ' +
+        count +
+        ' 个任务' +
+        (pages > 1 ? '（跨 ' + pages + ' 页）' : '');
 
-      const title = kind === 'bulk' ? '取消 ' + targets.length + ' 个任务？' : '取消下载？';
-      const message =
-        kind === 'bulk'
-          ? '即将取消「' +
-            statusLabel +
-            '」视图下的全部 ' +
-            targets.length +
-            ' 个任务' +
-            (pages > 1 ? '（跨 ' + pages + ' 页）' : '') +
-            '。取消后任务将移入「已取消」，无法继续下载。'
-          : '确定取消下载《' +
-            escapeHtml(targets[0].title) +
-            '》吗？取消后任务将移入「已取消」，无法继续下载。';
+      let title = '确认操作？';
+      let message = '';
+      let warning = '';
+      let warningTone = '';
+      let confirmText = '确认';
+      let buttonClass = 'btn-primary';
 
-      const warning = corrupt
-        ? kind === 'bulk'
-          ? '其中 ' +
-            corrupt +
-            ' 个归档任务解压失败：取消后将删除损坏的压缩包与半解压文件，下次需要重新下载。'
-          : '该任务解压失败（压缩包已损坏）：取消将删除损坏的压缩包与半解压文件，下次下载需重新下载。'
-        : '';
+      if (action === 'cancel') {
+        title = kind === 'bulk' ? '取消 ' + count + ' 个任务？' : '取消下载？';
+        message =
+          kind === 'bulk'
+            ? '即将取消' + scope + '。取消后任务将移入「已取消」，无法继续下载。'
+            : '确定取消下载《' +
+              escapeHtml(targets[0].title) +
+              '》吗？取消后任务将移入「已取消」，无法继续下载。';
+        if (corrupt) {
+          warning =
+            kind === 'bulk'
+              ? '其中 ' +
+                corrupt +
+                ' 个归档任务解压失败：取消后将删除损坏的压缩包与半解压文件，下次需要重新下载。'
+              : '该任务解压失败（压缩包已损坏）：取消将删除损坏的压缩包与半解压文件，下次下载需重新下载。';
+        }
+        confirmText = kind === 'bulk' ? '确认取消 ' + count + ' 个' : '确认取消';
+        buttonClass = 'btn-danger';
+      } else if (action === 'pause') {
+        title = '暂停 ' + count + ' 个任务？';
+        message = '即将暂停' + scope + '。暂停会释放下载线程，可随时恢复。';
+        confirmText = '确认暂停';
+      } else if (action === 'resume') {
+        title = '恢复 ' + count + ' 个任务？';
+        message = '即将恢复' + scope + '。恢复后任务会重新排队并继续下载。';
+        confirmText = '确认恢复';
+      } else if (action === 'retry') {
+        title = '重试 ' + count + ' 个任务？';
+        message =
+          '即将重试' + scope + '。重试会重新发起下载请求，若仍失败会再次进入出错。';
+        confirmText = '确认重试';
+      } else if (action === 'unlock') {
+        title = '解锁 ' + count + ' 个任务？';
+        message = '即将解锁' + scope + '。解锁后任务会重新排队。';
+        warning = '解锁会重复消耗 GP 配额，请确认当前 GP 余额充足。';
+        warningTone = 'warn';
+        confirmText = '确认解锁';
+        buttonClass = 'btn-lock';
+      }
 
-      const confirmText =
-        kind === 'bulk' ? '确认取消 ' + targets.length + ' 个' : '确认取消';
-
-      state.modal = { targets, kind };
+      state.modal = { action, targets, kind };
 
       $('#modal-slot').innerHTML =
         '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
@@ -2690,11 +2816,17 @@
         message +
         '</p>' +
         (warning
-          ? '<div class="modal-warn"><span class="warn-icon">⚠️</span><div>' + warning + '</div></div>'
+          ? '<div class="modal-warn' +
+            (warningTone ? ' ' + warningTone : '') +
+            '"><span class="warn-icon">⚠️</span><div>' +
+            warning +
+            '</div></div>'
           : '') +
         '<div class="modal-actions">' +
         '<button type="button" class="btn btn-ghost" data-act="modal-close">再想想</button>' +
-        '<button type="button" class="btn btn-danger" data-act="modal-confirm">' +
+        '<button type="button" class="btn ' +
+        buttonClass +
+        '" data-act="modal-confirm">' +
         confirmText +
         '</button>' +
         '</div>' +
@@ -2711,9 +2843,23 @@
     function confirmModal() {
       const modal = state.modal;
       if (!modal) return;
-      const targets = modal.targets.slice();
+      const { action, targets, kind } = modal;
+      const pending = targets.slice();
       closeModal();
-      startBulk('cancel', targets);
+      if (kind === 'task') {
+        const task = pending[0];
+        applyAction(task, action);
+        render();
+        toast(
+          'success',
+          '已取消《' +
+            task.title +
+            '》' +
+            (task.corrupt ? '，损坏压缩包已删除' : ''),
+        );
+        return;
+      }
+      startBulk(action, pending);
     }
 
     /* =====================================================================
@@ -2730,13 +2876,6 @@
         else if (act === 'page') changePage(Number(el.dataset.dir));
         else if (act === 'task') onTaskAction(el.dataset.op, el.dataset.id);
         else if (act === 'prio') setPriority(el.dataset.id, Number(el.dataset.dir));
-        else if (act === 'reset-filter') {
-          state.mode = 'all';
-          state.status = 'all';
-          state.page = 1;
-          render();
-          centerActiveTab();
-        }
         return;
       }
       if (e.target.closest('.task-card')) {
@@ -2769,7 +2908,7 @@
       if (state.bulk) return;
       state.tasks = buildTasks();
       state.mode = 'all';
-      state.status = 'all';
+      state.status = 'downloading';
       state.page = 1;
       state.bulk = null;
       closeModal();

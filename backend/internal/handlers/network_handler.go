@@ -161,10 +161,16 @@ func TestClashHandler(c *gin.Context) {
 
 	saved := services.GetNetworkSetting(database.DB)
 	controller := strings.TrimSpace(req.Controller)
-	secret := req.Secret
+	secret := strings.TrimSpace(req.Secret)
+
+	// 未提供密钥时，只要地址没变就沿用已保存密钥：
+	// 前端保存后会保留掩码，但刷新页面/重新进入时输入框为空，
+	// 此时点「测试连接」也应能直接工作，不必让用户重输一遍。
+	if secret == "" && (controller == "" || controller == strings.TrimSpace(saved.ClashController)) {
+		secret = saved.ClashSecret
+	}
 	if controller == "" {
 		controller = saved.ClashController
-		secret = saved.ClashSecret
 	}
 	client := services.NewClashClient(controller, secret)
 

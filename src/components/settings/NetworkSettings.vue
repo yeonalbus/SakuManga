@@ -163,14 +163,14 @@
         <div class="item-info">
           <div class="item-title">控制面密钥（Secret）</div>
           <div class="item-subtext">
-            {{ saved.hasSecret ? '已设置密钥；留空表示不修改' : 'Clash 未设置密钥时留空' }}
+            {{ saved.hasSecret ? '已设置密钥（显示为掩码）；需要修改时重新输入，留空表示保持不变' : 'Clash 未设置密钥时留空' }}
           </div>
         </div>
         <input
           v-model="secretInput"
           class="text-input"
           type="password"
-          :placeholder="saved.hasSecret ? '已设置（留空保持不变）' : '可留空'"
+          :placeholder="saved.hasSecret ? '已设置（留空保持不变，可直接测试连接）' : '可留空'"
         />
       </div>
 
@@ -378,7 +378,8 @@ const handleSave = async () => {
       groupEGalleryEx: advanced.groupEGalleryEx.trim(),
       groupHath: advanced.groupHath.trim(),
     })
-    secretInput.value = ''
+    // 保存成功后**不清空密钥输入框**：type=password 会继续显示为掩码，
+    // 用户既能确认自己填过密码，也能直接点「测试连接」而不用重新输入。
     await fetchAdvanced()
     toast.success('高级代理设置已保存')
     if (result.warning) {

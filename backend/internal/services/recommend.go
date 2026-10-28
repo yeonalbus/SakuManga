@@ -16,7 +16,7 @@ import (
 // 定位：推荐 = 「带偏好的随机抽卡」，只作用于本地库（在线部分保持纯随机，决策 D1）。
 // 数据源：阶段一的 XP 权重表（XpCloudService.WeightTable），不重复维护统计口径。
 //
-// 算法（详见 plans/round32-xp-cloud-recommend-plan.md）：
+// 算法（详见 DSPlans/plans/round32-xp-cloud-recommend-plan.md）：
 //   1. 打分  score(c) = Σ_{t∈tags(c)} w'(t) / |tags(c)|^γ
 //      w'(t) = [(1-θ)·libNorm(t) + θ·readNorm(t)] · IDF(t)   （θ=偏好侧重，IDF=泛化抑制）
 //   2. 采样  p(c) ∝ exp((score(c) - max) / T)                 （温度 T 越大越平缓）

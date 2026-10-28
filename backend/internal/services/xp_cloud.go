@@ -25,7 +25,7 @@ import (
 //   2. 对外提供词云查询（分组 / 库藏·阅读双视图 / 画师 Top）
 //   3. 向阶段二推荐输出统一权重表（w'(t) = 融合权重 × 泛化抑制）
 //
-// 口径（与 plans/round32-xp-cloud-recommend-plan.md 一致）：
+// 口径（与 DSPlans/plans/round32-xp-cloud-recommend-plan.md 一致）：
 //   有效 tag = MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)（三态全空回退 Tags），
 //              剔除 language / reclass，namespace 归一分组
 //   库藏侧   lib(c) = 1

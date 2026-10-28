@@ -7,7 +7,7 @@ import { openComicDetailInNewTab } from '@/utils/detailNav'
 // ─────────────────────────────────────────────────────────────
 // Round44：本地书库维护 v3
 //
-// 设计要点（珱垣拍板，见 plans/round44-offline-maintain-ui-plan.md）：
+// 设计要点（珱垣拍板，见 DSPlans/plans/round44-offline-maintain-ui-plan.md）：
 //   - 目标「彻底清零」：主列表只显示待处理项，已忽略内容移出（忽略清单独立页）；
 //   - 分组折叠总览：按「两本差在哪」分 6 类，默认只展开「高度相似」；
 //   - 成员级动作统一为「移除这本」（选删除谁）；「保留」只有组级「都留（不再提示）」；

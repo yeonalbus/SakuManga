@@ -19,6 +19,8 @@ coverage
 .vscode/*
 !.vscode/extensions.json
 .idea
+# Obsidian 工作区配置（个人编辑器状态：布局/插件开关，勿入库）
+.obsidian/
 *.suo
 *.ntvs*
 *.njsproj

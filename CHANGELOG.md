@@ -2,7 +2,7 @@
 
 > 本文件是 SakuManga 的**版本日志文档**，记录各版本的更新状态（跨版本一览）——[`README.md`](README.md) 的「当前状态」只写当前版本，历史版本请看这里。
 >
-> - **单版本详述**（含使用说明与已知问题）：见 [`VerNotes/`](VerNotes/) 下对应的 `RELEASE_NOTES_vX.Y.Z.md`
+> - **单版本详述**（含使用说明与已知问题）：见 [`DSPlans/VerNotes/`](DSPlans/VerNotes/) 下对应的 `RELEASE_NOTES_vX.Y.Z.md`
 > - **覆盖范围**：自 `v2.0.0`（项目更名 SakuManga）起；更早的 `v1.x` 见文末
 > - **维护约定**：每次发布在**顶部追加**一个新版本区块，已发布版本的既有文字不改写（勘误除外）
 
@@ -99,7 +99,7 @@
 
 ### 🛠️ 优化改进
 
-- 常见问题手册（[`VerNotes/wiki.md`](VerNotes/wiki.md)）新增「九、Docker 部署」，README 补充 Docker 部署入口
+- 常见问题手册（[`DSPlans/VerNotes/wiki.md`](DSPlans/VerNotes/wiki.md)）新增「九、Docker 部署」，README 补充 Docker 部署入口
 
 ---
 
@@ -170,5 +170,5 @@
 
 ## v1.x 及更早
 
-- `v1.2.0` ~ `v1.4.0` 的发布说明见 [`VerNotes/`](VerNotes/)：`RELEASE_NOTES_v1.2.0.md`、`v1.3.0`、`v1.3.1`、`v1.3.2`、`v1.4.0`（`v1.0.0` / `v1.1.0` 无独立说明文档）
+- `v1.2.0` ~ `v1.4.0` 的发布说明见 [`DSPlans/VerNotes/`](DSPlans/VerNotes/)：`RELEASE_NOTES_v1.2.0.md`、`v1.3.0`、`v1.3.1`、`v1.3.2`、`v1.4.0`（`v1.0.0` / `v1.1.0` 无独立说明文档）
 - `v1.x` 时期的项目名为 **SakuHentai**，tag 前缀 `SakuHentai-`

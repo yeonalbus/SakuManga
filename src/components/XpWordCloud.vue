@@ -4,7 +4,7 @@
  *
  * 自研 Canvas 阿基米德螺旋（归一化椭圆）+ 空间网格加速矩形碰撞检测，无第三方依赖。
  *
- * 视觉要点（详见 plans/round32-xp-cloud-recommend-plan.md 第十一章）：
+ * 视觉要点（详见 DSPlans/plans/round32-xp-cloud-recommend-plan.md 第十一章）：
  * - 碰撞盒留白：词间保留缝隙（lineRatio 1.45 / padX 0.3），解决旧版"密不透风"
  * - 椭圆轮廓：螺旋按归一化椭圆扩散，边缘自然收拢，不再矩形锯齿
  * - 字号分段 + 长词降档：前 N 名占高档区间形成焦点；长名降档避免占满半行

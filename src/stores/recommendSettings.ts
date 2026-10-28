@@ -2,7 +2,7 @@
  * 偏好推荐设置 Store（Round32 阶段二）
  *
  * 「随机抽卡 → ✨ 偏好推荐」的采样参数，持久化到 localStorage 跨会话复用。
- * 参数语义见 plans/round32-xp-cloud-recommend-plan.md（决策 D2：参数暴露给用户）。
+ * 参数语义见 DSPlans/plans/round32-xp-cloud-recommend-plan.md（决策 D2：参数暴露给用户）。
  *
  * 注意：缺省值必须与后端 services/recommend.go 的默认常量保持一致，
  * 前端只在用户显式调整后才下发参数，未调整时由后端取默认。

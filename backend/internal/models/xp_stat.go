@@ -10,7 +10,7 @@ import "time"
 //   XpTagStat    tag 聚合权重（按 namespace+key，词云展示与偏好推荐的数据源）
 //   XpMeta       统计元信息（公式版本 / 全量重建时间 / 脏标记）
 //
-// 口径（详见 plans/round32-xp-cloud-recommend-plan.md）：
+// 口径（详见 DSPlans/plans/round32-xp-cloud-recommend-plan.md）：
 //   有效 tag = MergeTags(onlineTags, offlineAddTags, offlineRemoveTags)（三态全空回退 Tags）
 //   库藏侧   lib(c) = 1
 //   阅读侧   r(c)   = 0.60·log1p(readCount) + 0.25·exp(-Δdays/90) + 0.15·(rating-1)/9

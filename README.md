@@ -15,7 +15,7 @@ SakuManga 用一套开箱即用的程序，打通**资源刮削 → 本地存储
 
 [!NOTE]  
 **项目更新状态（Project Status）**  
-历史版本的更新状态见 [`CHANGELOG.md`](CHANGELOG.md)（跨版本一览）；本版发布详述见 [`VerNotes/RELEASE_NOTES_v2.2.0.md`](VerNotes/RELEASE_NOTES_v2.2.0.md)。
+历史版本的更新状态见 [`CHANGELOG.md`](CHANGELOG.md)（跨版本一览）；本版发布详述见 [`DSPlans/VerNotes/RELEASE_NOTES_v2.2.0.md`](DSPlans/VerNotes/RELEASE_NOTES_v2.2.0.md)。
 
 **v2.2.0**（2026-09）：自 v2.1.1 以来共 67 个提交——**本地库维护查重大版本**：离线查重算法升级（双字段池 + 方括号版本标记 + 作者硬否决 + 多字段打分分档），名称级疑似重复由 10 簇提升至 82 簇（标定集正样本召回 16/16、负样本误报 0）；维护结果持久化（进入页面秒开、本地判重先行、联网复核默认关闭）；维护界面 v3 重构（按「两本差在哪」6 类分组、待处理数可真正清零、忽略清单独立页、忽略升级为「直到有变化为止」的成员快照 + 新增感知、疑似重复支持删除）。同时新增**书架墙总览页**（未读可视化 + 整架导入阅读清单 + 手动指定封面）、**书签拖动排序与失效检测 / 时间锚自动迁移**、在线详情页「📚 本地副本」直达、**「加载较新内容」滚动锚定**；修复标签中文翻译失效与「假开关」、日志监控长时停留卡死、离线搜索漏日文原名、iPad 竖屏阅读器汉堡按钮遮挡返回等问题。数据库结构由启动时 AutoMigrate 平滑迁移，升级仅需替换 exe 或换镜像标签。
 
@@ -73,7 +73,7 @@ docker run -d --name sakumanga --restart unless-stopped \
   ghcr.io/yeonalbus/sakumanga:2.2.0
 ```
 
-镜像同时提供 `linux/amd64` 与 `linux/arm64`（群晖 / 树莓派 / Apple Silicon 均可直接运行），标签策略为 `2.2.0` / `2.2` / `latest`。数据（`manga.db` / `config.json` / `data/` / `logs/`）全部保存在挂载目录，升级 = 换镜像标签重建容器。推送 `SakuManga-X.Y.Z` tag 时由 GitHub Actions 自动构建发布，也可在仓库 Actions 页面手动触发；本机想自己构建用 `build-docker.bat`。完整说明见 [`VerNotes/wiki.md`](VerNotes/wiki.md)「九、Docker 部署」。
+镜像同时提供 `linux/amd64` 与 `linux/arm64`（群晖 / 树莓派 / Apple Silicon 均可直接运行），标签策略为 `2.2.0` / `2.2` / `latest`。数据（`manga.db` / `config.json` / `data/` / `logs/`）全部保存在挂载目录，升级 = 换镜像标签重建容器。推送 `SakuManga-X.Y.Z` tag 时由 GitHub Actions 自动构建发布，也可在仓库 Actions 页面手动触发；本机想自己构建用 `build-docker.bat`。完整说明见 [`DSPlans/VerNotes/wiki.md`](DSPlans/VerNotes/wiki.md)「九、Docker 部署」。
 
 **开发模式：**
 
@@ -158,12 +158,14 @@ SakuManga/
 │   └── main.ts                  # 前端入口
 ├── public/                      # PWA 静态资源（favicon / manifest）
 ├── scripts/                     # 构建辅助脚本（verify-round*.mjs 回归验证、E2E 搜索回归）
-├── plans/                       # 功能开发方案文档（Round1~33 + 路线图与 Backlog）
-├── VerNotes/                    # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程
+├── DSPlans/                     # AI 文档区（仅 AI 编写）：方案 / 问题处理 / 发布文案
+│   ├── plans/                   # 功能开发方案文档（Round1~47 + 路线图与早期规划）
+│   ├── Problems/                # 问题反馈处理记录（群友反馈 + 修复说明）
+│   └── VerNotes/                # 版本发布说明 + 发布流程 + 用户 FAQ
+├── YeonPlans/                   # 用户文档区（仅用户编写）：学习笔记 / 个人决策
+│   └── 学习笔记/                 # Vue / 前端学习笔记
 ├── CHANGELOG.md                 # 更新日志（跨版本更新状态一览，README 只写当前版本）
 ├── testdata_eh/                 # E 站抓取测试样本（HTML）
-├── 学习笔记/                     # 个人学习笔记（已弃用）
-├── 计划书/                       # 早期规划文档（已弃用）
 ├── vite.config.ts / package.json / tsconfig*.json   # 前端工程配置（package.json 为版本号唯一来源）
 ├── build-release.bat            # 一键打包单 exe（版本号自动读取）
 └── README.md                    # 项目说明文档

@@ -16,7 +16,7 @@ import (
 //   GET  /api/v1/offline/xp-cloud          词云查询（登录可用）
 //   POST /api/v1/offline/xp-cloud/rebuild  全量重算（仅管理员）
 //
-// 统计口径与增量维护见 services/xp_cloud.go 与 plans/round32-xp-cloud-recommend-plan.md。
+// 统计口径与增量维护见 services/xp_cloud.go 与 DSPlans/plans/round32-xp-cloud-recommend-plan.md。
 // ─────────────────────────────────────────────────────────────
 
 // XpCloudHandler XP 词云处理器

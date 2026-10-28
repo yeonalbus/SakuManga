@@ -300,7 +300,7 @@ func TestDetectClustersNoArtistTag(t *testing.T) {
 
 // ─────────────────────────────────────────────────────────────
 // Round42：方括号版本标记 / 空括号残留 / 跨字段池 / 作者硬否决
-// 依据：plans/round42-dedup-calibration-set.md（人工确认结论）
+// 依据：DSPlans/plans/round42-dedup-calibration-set.md（人工确认结论）
 // ─────────────────────────────────────────────────────────────
 
 // mkComicFull 构造带日文原名（TitleJpn）的测试漫画

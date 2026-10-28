@@ -13,11 +13,15 @@ SakuManga/
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / verify-round*.mjs 回归验证）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── plans/                          # 功能开发方案文档（Round1~44）
-├── VerNotes/                       # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程
+├── DSPlans/                        # AI 文档区（仅 AI 编写）：方案 / 问题处理 / 发布文案
+│   ├── plans/                      # 功能开发方案文档（Round1~47 + 路线图与早期规划）
+│   ├── Problems/                   # 问题反馈处理记录（群友反馈 + 修复说明 + 答疑话术）
+│   ├── VerNotes/                   # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程 + 用户 FAQ
+│   └── readme.md                   # DSPlans 目录规则
+├── YeonPlans/                      # 用户文档区（仅用户编写）：学习笔记 / 个人决策
+│   ├── 学习笔记/                    # Vue / 前端学习笔记
+│   └── 注意.md                      # YeonPlans 目录规则
 ├── CHANGELOG.md                    # 更新日志（跨版本更新状态一览；README 只写当前版本）
-├── 计划书/                          # 项目规划文档（已弃用）
-├── 学习笔记/                        # 学习笔记（已弃用）
 ├── .roo/                           # Roo 自定义配置
 ├── package.json                    # 前端依赖与脚本 + 【版本号唯一来源】（About/打包脚本自动读取）
 ├── vite.config.ts                  # Vite 构建与代理配置
@@ -373,7 +377,7 @@ backend/
 | 改阅读清单                                        | `src/views/ReadingListView.vue`、`stores/readingStore.ts`                                                                  |
 | 改历史记录                                        | `stores/historyStore.ts`、`views/online/OnlineHistory.vue`、`views/offline/OfflineHistory.vue`、`views/MemberHistory.vue`  |
 | 改书架                                            | `stores/bookshelfStore.ts`、`views/offline/OfflineBookshelf.vue`、`components/OfflineSidebar.vue`                          |
-| 改书架利用率（Round38：未读仪表盘 + 导入清单 + 指定封面） | `views/offline/OfflineBookshelfWall.vue`、`components/ShelfCoverPickerOverlay.vue`、`composables/useShelfStats.ts`、`composables/useShelfImport.ts`、`stores/bookshelfStore.ts`、`components/OfflineSidebar.vue`、`backend/internal/handlers/library.go`（/bookshelves 返回 unreadCount+coverUrl、PUT /bookshelves/:id/cover）、`models/models.go`（CoverComicID）、`services/comic_refs.go`（封面引用迁移）、`plans/round38-bookshelf-utilization-plan.md` |
+| 改书架利用率（Round38：未读仪表盘 + 导入清单 + 指定封面） | `views/offline/OfflineBookshelfWall.vue`、`components/ShelfCoverPickerOverlay.vue`、`composables/useShelfStats.ts`、`composables/useShelfImport.ts`、`stores/bookshelfStore.ts`、`components/OfflineSidebar.vue`、`backend/internal/handlers/library.go`（/bookshelves 返回 unreadCount+coverUrl、PUT /bookshelves/:id/cover）、`models/models.go`（CoverComicID）、`services/comic_refs.go`（封面引用迁移）、`DSPlans/plans/round38-bookshelf-utilization-plan.md` |
 | 改批量下载                                        | `src/composables/useBatchSelection.ts`、`components/BatchDownloadBar.vue`                                                  |
 | 改登录/会话                                       | `views/LoginView.vue`、`stores/userStore.ts`、`main.ts`（会话恢复）、`utils/request.ts`（401）                             |
 | 改请求封装/接口地址                               | `src/utils/request.ts`、`src/config/api.ts`、`src/api/comic.ts`、`src/api/download.ts`                                     |
@@ -390,7 +394,7 @@ backend/
 | 改离线历史 gid 合并去重/孤儿剔除                   | `stores/historyStore.ts`、`backend/internal/handlers/library.go`、`services/comic_refs.go`                                |
 | 改书架 404 自愈/弹窗粘滞                           | `views/ComicReader.vue`、`views/offline/OfflineDetail.vue`、`stores/comicStore.ts`、`router/index.ts`                     |
 | 改画质升级（/upgrade）                             | `views/UpgradeView.vue`、`backend/internal/handlers/upgrade.go`、`services/upgrade.go`                                   |
-| 改搜刮书签（Round27~37）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`components/SidebarGroupHeader.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`plans/round27-scrape-bookmark-plan.md`、`plans/round37-bookmark-reorder-plan.md` |
+| 改搜刮书签（Round27~37）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`components/SidebarGroupHeader.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`DSPlans/plans/round27-scrape-bookmark-plan.md`、`DSPlans/plans/round37-bookmark-reorder-plan.md` |
 | 改书签失效检测 / 时间锚迁移（Round42）             | `src/composables/useBookmarkCheck.ts`、`useBookmarkLocate.ts`、`src/utils/bookmarkTimeAnchor.ts`、`bookmarkScope.ts`、`onlineSearchParams.ts`、`backend/internal/services/scrape_bookmark_check.go`、`handlers/scrape_bookmark.go`、`stores/scrapeBookmarksStore.ts`、`stores/onlineStore.ts`（loadMore 返回值 / clearAnchorFailed） |
 | 改「加载较新内容」滚动锚定                         | `src/composables/usePrependAnchor.ts`、`views/online/OnlineHome.vue`、`OnlineSub.vue`、`OnlineFavorites.vue` |
 | 改在线详情「本地副本」跳转                         | `src/views/online/OnlineDetail.vue`、`components/OnlineDetailPanel.vue`、`backend/internal/handlers/online.go`（DTO 回填 localId）、`services/eh_gallery.go` |
@@ -420,14 +424,14 @@ backend/
 | 改维护查重/忽略标记（O2） | `backend/internal/handlers/offline.go`（ignore 三接口）、`services/ignore.go`、`models/ignore.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改「忽略/删除后即时生效」（Round33） | `services/offline_task.go`（`SyncMaintainDedupClusters` / `InvalidateMaintainDedupResult`）、`services/maintain_auto.go`（`StoreMaintainDedupResult`）、`handlers/offline.go`（ignore/restore/remove 三入口）、`maintain_result_sync_test.go`、`src/views/offline/OfflineMaintain.vue` |
 | 改疑似重复聚类（O3）      | `services/dedup_title.go`（清洗/判定/决策 + 簇）、`dedup_title_test.go`、`offline_dedup_e2e_test.go`、`src/views/offline/OfflineMaintain.vue` |
-| 改离线查重算法（Round42） | `services/dedup_title.go`（Tier1 双字段池 / 方括号版本标记 / 作者硬否决）、`services/dedup_match.go`（Tier2 blocking + 多字段打分分档）、`dedup_match_test.go`、`plans/round42-offline-dedup-algorithm-plan.md`、`plans/round42-dedup-calibration-set.md` |
+| 改离线查重算法（Round42） | `services/dedup_title.go`（Tier1 双字段池 / 方括号版本标记 / 作者硬否决）、`services/dedup_match.go`（Tier2 blocking + 多字段打分分档）、`dedup_match_test.go`、`DSPlans/plans/round42-offline-dedup-algorithm-plan.md`、`DSPlans/plans/round42-dedup-calibration-set.md` |
 | 改联网复核 / 查重设置项（Round42） | `services/dedup_verify.go`、`models/dedup_setting.go`、`handlers/offline.go`、`src/components/settings/DedupSettings.vue` |
 | 改维护结果持久化（Round42） | `services/maintain_snapshot.go`、`models/maintain_snapshot.go`、`services/maintain_auto.go`、`handlers/offline.go`、`maintain_snapshot_test.go`、`src/views/offline/OfflineMaintain.vue` |
-| 改日志 tail / 监控性能（Round41） | `backend/internal/handlers/log.go`（尾部反向增量 + limit 安全阀）、`log_tail_test.go`、`src/components/settings/LogSettings.vue`、`plans/round41-log-monitor-perf-plan.md` |
+| 改日志 tail / 监控性能（Round41） | `backend/internal/handlers/log.go`（尾部反向增量 + limit 安全阀）、`log_tail_test.go`、`src/components/settings/LogSettings.vue`、`DSPlans/plans/round41-log-monitor-perf-plan.md` |
 | 改标签中文化设置持久化    | `backend/internal/handlers/tag.go`（/tags/settings）、`services/tag_engine.go`（ApplySettings）、`services/proxy.go`（config.json tagEngine 段读-改-写）、`tag_engine_settings_test.go`、`src/components/settings/TagMaintainSettings.vue`、`stores/tagStore.ts`（ensureDictionary / resetDictionary） |
 | 改封面缓存回收            | `backend/internal/services/cover_cache_gc.go`、`cover.go`、`cover_cache_gc_test.go` |
 | 改疑似重复删除（Round43） | `src/views/offline/OfflineMaintain.vue`（勾选批量 / 单卡删除）、`src/views/offline/OfflineCompare.vue`（对比页删除 + 原地占位）、`services/maintain_result_sync_test.go`（删至剩 1 本即消失） |
-| 改维护界面 v3 / 忽略新增感知（Round44） | `src/views/offline/OfflineMaintain.vue`（差异分组 / 逐本移除 / 都留 / 含文件勾选 / 舒适紧凑）、`src/views/offline/OfflineIgnore.vue`（忽略清单独立页）、`src/components/settings/DedupSettings.vue`、`services/ignore.go`（成员快照 + `CountNewMembers` + `ListIgnoresWithMembers` + `AckIgnoreSnapshot` + `BackfillIgnoreSnapshots`）、`services/dedup_title.go` / `dedup_match.go`（忽略过滤改「有新增才列出」）、`models/ignore.go`（`SeenComicIDs`）、`models/dedup_setting.go`（`DeleteFileDefault`）、`handlers/offline.go`（list 带成员 + `:id/ack`）、`main.go`（启动回填快照）、`ignore_members_test.go`、`plans/round44-offline-maintain-ui-plan.md` |
+| 改维护界面 v3 / 忽略新增感知（Round44） | `src/views/offline/OfflineMaintain.vue`（差异分组 / 逐本移除 / 都留 / 含文件勾选 / 舒适紧凑）、`src/views/offline/OfflineIgnore.vue`（忽略清单独立页）、`src/components/settings/DedupSettings.vue`、`services/ignore.go`（成员快照 + `CountNewMembers` + `ListIgnoresWithMembers` + `AckIgnoreSnapshot` + `BackfillIgnoreSnapshots`）、`services/dedup_title.go` / `dedup_match.go`（忽略过滤改「有新增才列出」）、`models/ignore.go`（`SeenComicIDs`）、`models/dedup_setting.go`（`DeleteFileDefault`）、`handlers/offline.go`（list 带成员 + `:id/ack`）、`main.go`（启动回填快照）、`ignore_members_test.go`、`DSPlans/plans/round44-offline-maintain-ui-plan.md` |
 | 改 E 站请求限流           | `backend/internal/services/eh_ratelimit.go`（自适应：成功提速/失败退避）                              |
 | 改服务端日志               | `backend/internal/handlers/log.go`、`services/log_store.go`                                           |
 | 改书架/历史/评分/阅读清单  | `backend/internal/handlers/library.go`                                                                |
@@ -470,11 +474,11 @@ backend/
 ## 六、发布注意（v2.2.0）
 
 - **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.2.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
-- **更新日志**：[`CHANGELOG.md`](CHANGELOG.md) 是跨版本更新状态归档（自 v2.0.0 起），README「当前状态」**只写当前版本**；每次发布在 CHANGELOG **顶部追加**新版本区块，历史区块不改写。维护要求见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md) 第 5~6 节。
+- **更新日志**：[`CHANGELOG.md`](CHANGELOG.md) 是跨版本更新状态归档（自 v2.0.0 起），README「当前状态」**只写当前版本**；每次发布在 CHANGELOG **顶部追加**新版本区块，历史区块不改写。维护要求见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md) 第 5~6 节。
 - **Docker 镜像（v2.1.1 起）**：推送 `SakuManga-X.Y.Z` tag 时由 `.github/workflows/docker-publish.yml` 自动构建 `linux/amd64` + `linux/arm64` 并推送到 `ghcr.io/yeonalbus/sakumanga`（标签 `X.Y.Z` / `X.Y` / `latest`）；也可在仓库 Actions 页面手动触发（`Docker Image (GHCR)` → Run workflow），无需任何 Secrets（用自带 `GITHUB_TOKEN` + `permissions: packages: write`）。本地构建用 `build-docker.bat`（本地测试）/ `build-docker.bat push`（多架构推 GHCR）。
   ⚠️ 镜像构建阶段不跑 Node，用的是仓库里已提交的 `backend/webui/dist`；**前端源码改动后必须先 `npm run build` 并同步产物再打 tag**，否则镜像内是旧前端（「关于」页版本号也会是旧的）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuManga.exe --headless` 纯后端运行。
-- **发布流程**：完整发布检查清单见 [`VerNotes/RELEASE_PROCESS.md`](VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README + CHANGELOG → Release Notes → 验证 → 打包 → 提交 + tag）。
+- **发布流程**：完整发布检查清单见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README + CHANGELOG → Release Notes → 验证 → 打包 → 提交 + tag）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
 - `manga.db`、`data/` 为**运行时数据**，已加入 `.gitignore`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。

@@ -17,7 +17,7 @@ func newTagDoc(t *testing.T, html string) *goquery.Document {
 	return doc
 }
 
-// 真实页面结构（见 plans/round46）：显示文本可带 " | 别名/wiki 提示"，
+// 真实页面结构（见 DSPlans/plans/round46）：显示文本可带 " | 别名/wiki 提示"，
 // 规范 tag 身份在 <a id="ta_ns:key"> / href / onclick 中，必须取 "|" 左侧。
 func TestParseGalleryTagsUsesCanonicalKey(t *testing.T) {
 	const page = `<html><body><div id="taglist"><table>

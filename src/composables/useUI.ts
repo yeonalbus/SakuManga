@@ -26,13 +26,25 @@ function showToast(message: string, type: ToastType = 'info', duration = 3000) {
 // ==========================================
 // 2. Modal 对话框 (阻塞式替代 alert / confirm / prompt)
 // ==========================================
-export interface ModalOptions {
+/** 确认按钮 / 警告区的语义色（Round47：下载批量操作的五种确认动作） */
+export type ModalTone = 'primary' | 'danger' | 'warn'
+
+export interface ModalConfirmOptions {
+  confirmText?: string
+  cancelText?: string
+  /** 确认按钮语义色：普通蓝 / 破坏性红 / 解锁等需注意橙 */
+  tone?: ModalTone
+  /** 正文下方的附加警告（如损坏压缩包、GP 重复消耗），纯文本渲染 */
+  details?: string
+  /** 警告区语义色 */
+  detailsTone?: 'danger' | 'warn'
+}
+
+export interface ModalOptions extends ModalConfirmOptions {
   title?: string
   message: string
   defaultValue?: string // 供 prompt 模式下的输入默认值
   mode?: 'alert' | 'confirm' | 'prompt'
-  confirmText?: string
-  cancelText?: string
 }
 
 type ModalResolve = (value: unknown) => void
@@ -45,6 +57,9 @@ const modalState = reactive({
   mode: 'alert' as 'alert' | 'confirm' | 'prompt',
   confirmText: '确定',
   cancelText: '取消',
+  tone: 'primary' as ModalTone,
+  details: '',
+  detailsTone: 'warn' as 'danger' | 'warn',
   resolve: null as ModalResolve | null,
 })
 
@@ -66,6 +81,9 @@ function openModal<T = string | boolean | null>(options: ModalOptions): Promise<
     modalState.mode = options.mode || 'alert'
     modalState.confirmText = options.confirmText || '确定'
     modalState.cancelText = options.cancelText || '取消'
+    modalState.tone = options.tone || 'primary'
+    modalState.details = options.details || ''
+    modalState.detailsTone = options.detailsTone || 'warn'
     modalState.resolve = resolve as ModalResolve
     modalState.isOpen = true
   })
@@ -111,8 +129,8 @@ export function useUI() {
     modal: {
       alert: (msg: string, title?: string) =>
         openModal<boolean>({ message: msg, title, mode: 'alert' }),
-      confirm: (msg: string, title?: string) =>
-        openModal<boolean>({ message: msg, title, mode: 'confirm' }),
+      confirm: (msg: string, title?: string, options?: ModalConfirmOptions) =>
+        openModal<boolean>({ message: msg, title, mode: 'confirm', ...options }),
       prompt: (msg: string, defaultValue = '', title?: string) =>
         openModal<string>({ message: msg, defaultValue, title, mode: 'prompt' }),
     },

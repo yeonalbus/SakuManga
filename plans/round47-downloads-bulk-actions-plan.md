@@ -1,9 +1,42 @@
 # Round47：下载列表批量操作（全部取消 / 暂停 / 恢复 / 解锁 / 重试）
 
-> 状态：**口径已于 2026-10-28 确认；样稿已同步更新；待施工，本阶段不改 Vue / Go 代码。**
+> 状态：**已施工完成（2026-10-28），待用户实机验收。**
 > 样稿：`plans/mockups/downloads-bulk-actions.html`（自包含 HTML，双击用浏览器打开即可交互）
 > 演示数据：102 条任务（下载中 4 / 排队中 24 / 已暂停 26 / 出错 5 / 锁定 22 / 完成 15 / 已取消 6），每页 8 条；其中 1 条归档任务为「解压失败」，用于演示取消确认的额外警告。
 > 起因：用户要求下载列表支持批量操作，并明确按钮只在对应状态视图出现；现有筛选区没有承载批量操作的上下文，因此先重排整页信息层级，再施工。
+
+---
+
+## 〇、实施记录（2026-10-28）
+
+### 代码落点
+
+| 层 | 文件 | 内容 |
+|----|------|------|
+| 前端页面 | `src/views/DownloadsView.vue` | 7 个状态页签 + 数量、模式分段、默认下载中、上下文批量条、确认弹窗、执行态、空态、卡片层级、单页隐藏分页、窄屏适配 |
+| 前端 API | `src/api/download.ts` | `DownloadStatus` / `DownloadStats` / `BatchActionResult` 类型；`fetchDownloadStats` / `batchDownloadAction` |
+| 全局弹窗 | `src/composables/useUI.ts`、`src/components/common/GlobalModal.vue` | confirm 支持 `tone`（蓝/红/橙）、`details` 警告区、自定义确认文案；原有调用保持兼容 |
+| 后端服务 | `backend/internal/services/download_batch.go` | `TaskStats`、`BatchAction`、按用户分组批量解锁（一次配额校验） |
+| 后端解锁 | `backend/internal/services/download.go` | 抽取 `unlockTaskAfterQuotaCheck`，单任务与批量共用 |
+| 后端接口 | `backend/internal/handlers/download.go`、`backend/internal/router/router.go` | `GET /downloads/stats`、`POST /downloads/batch-action` 与路由注册 |
+| 测试 | `backend/internal/services/download_batch_test.go`、`backend/internal/handlers/download_batch_handler_test.go` | 状态统计、权限隔离、五种批量动作、模式过滤、非法参数、无 E 站服务的解锁失败路径 |
+
+### 实现口径补充
+
+- 批量执行采用**一次批量接口**，执行态显示 spinner + 不确定进度条（而非样稿的逐条 `3 / 24`），完成后 toast 汇总并刷新列表/统计。逐条进度仅为样稿交互示意。
+- `全部取消` 与单卡取消始终确认；其余动作 > 20 才确认（20 及以下直接执行）。
+- 批量取消的损坏压缩包警告只在「出错 + 非纯画廊模式」时出现在确认弹窗中；单个损坏任务取消仍显示专属警告。
+- 批量解锁按任务发起者分组，每组只请求一次 `/eh/status` 校验 GP，再逐任务取消旧归档 Session、清缓存并重新入队；避免 20+ 次配额请求。
+- 执行期间暂停 2s 轮询，接口返回后刷新 stats + 列表并恢复轮询。
+- 单页隐藏分页；分页大小沿用 20。
+
+### 验证记录
+
+- `npm run type-check`：通过。
+- `npm run build`：通过（根 `dist/`）。
+- `go test ./...`：通过（含新增 service / handler 测试）。
+- Playwright 实机 UI 验证（Vite dev + 内存 Mock API，不连真实后端）：7 个页签、默认下载中、24 个任务暂停确认、22 个任务解锁确认 + GP 警告、3 个任务重试不确认、4 个任务取消始终确认、空态、浅色/深色、390px 窄屏；无业务类 console 错误。
+- 实机后端接口契约：handler 测试覆盖 200 / 400 / 403 与用户隔离。
 
 ---
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -172,6 +173,75 @@ func (h *DownloadHandler) ListDownloads(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tasks": tasks, "total": total, "page": p.Page, "size": p.Size})
+}
+
+// GetDownloadStats 下载任务状态统计 GET /api/v1/downloads/stats?mode=
+// 页签徽标与页头「活动」数量使用；权限 / 用户隔离与 ListDownloads 一致。
+func (h *DownloadHandler) GetDownloadStats(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if user.Role != services.RoleAdmin && !user.AllowDownload {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无下载权限，请联系管理员开启"})
+		return
+	}
+
+	var userID uint
+	if user.Role != services.RoleAdmin {
+		userID = user.ID
+	}
+	stats, err := h.manager.TaskStats(c.Query("mode"), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
+}
+
+// BatchAction 批量操作 POST /api/v1/downloads/batch-action
+// body: { action: pause|resume|retry|cancel|unlock, status, mode }
+// 作用域为当前用户可访问的「指定状态 + 指定模式」全部任务（跨分页）。
+func (h *DownloadHandler) BatchAction(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if !requireDownloadPermission(c) {
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+		Status string `json:"status"`
+		Mode   string `json:"mode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
+		return
+	}
+
+	var userID uint
+	if user.Role != services.RoleAdmin {
+		userID = user.ID
+	}
+	result, err := h.manager.BatchAction(services.BatchActionParams{
+		Action: req.Action,
+		Status: req.Status,
+		Mode:   req.Mode,
+		UserID: userID,
+	})
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidBatchAction) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // GetDownload 单个任务详情 GET /api/v1/downloads/:id

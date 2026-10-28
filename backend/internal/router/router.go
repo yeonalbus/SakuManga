@@ -245,7 +245,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 下载任务与 GP 面板（许可校验在 handler 内：admin 或 allowDownload）
 		api.POST("/downloads", downloadHandler.CreateDownload)
 		api.GET("/downloads", downloadHandler.ListDownloads)
+		api.GET("/downloads/stats", downloadHandler.GetDownloadStats)
 		api.POST("/downloads/batch", downloadHandler.BatchCreateDownload)
+		api.POST("/downloads/batch-action", downloadHandler.BatchAction)
 		api.GET("/downloads/gp-info", downloadHandler.GetGPInfo)
 		api.GET("/downloads/settings", downloadHandler.GetDownloadSettings)
 		// POST /downloads/settings 保存与 POST /downloads/restore 恢复为系统级操作，见下方 admin 分组

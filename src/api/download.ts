@@ -89,6 +89,43 @@ export async function batchCreateDownloads(
 // 任务契约与优先级
 // ─────────────────────────────────────────────────────────────
 
+/** 下载任务状态（7 态） */
+export type DownloadStatus =
+  'queued' | 'downloading' | 'paused' | 'completed' | 'error' | 'error_lock' | 'cancelled'
+
+/** 模式筛选（all = 画廊 + 归档） */
+export type DownloadModeFilter = 'all' | 'gallery' | 'archive'
+
+/** 批量操作类型 */
+export type BatchAction = 'pause' | 'resume' | 'retry' | 'cancel' | 'unlock'
+
+/** 各状态任务数量（GET /downloads/stats） */
+export interface DownloadCounts {
+  queued: number
+  downloading: number
+  paused: number
+  completed: number
+  error: number
+  error_lock: number
+  cancelled: number
+}
+
+/** 下载列表状态统计 */
+export interface DownloadStats {
+  counts: DownloadCounts
+  total: number
+  /** 未结束任务：排队 + 下载 + 暂停 + 出错 + 锁定 */
+  active: number
+}
+
+/** 批量操作聚合结果（POST /downloads/batch-action） */
+export interface BatchActionResult {
+  affected: number
+  failed: number
+  skipped: number
+  errors: string[]
+}
+
 /** 后端 DownloadTask 契约（GET /downloads 列表项；POST /downloads/:id/priority 返回更新后的任务） */
 export interface DownloadTask {
   id: string
@@ -98,7 +135,7 @@ export interface DownloadTask {
   coverUrl?: string
   mode: 'gallery' | 'archive'
   archiveType?: 'original' | 'resample'
-  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'error' | 'error_lock' | 'cancelled'
+  status: DownloadStatus
   priority: number
   group?: string
   totalFiles: number
@@ -126,5 +163,34 @@ export async function setTaskPriority(id: string, priority: number): Promise<Dow
   return await http<DownloadTask>(`/downloads/${id}/priority`, {
     method: 'POST',
     body: JSON.stringify({ priority }),
+  })
+}
+
+/**
+ * 获取各状态任务数量（页签徽标 + 页头总览）
+ * mode=all 时后端不过滤模式。
+ */
+export async function fetchDownloadStats(mode: DownloadModeFilter): Promise<DownloadStats> {
+  return await http<DownloadStats>('/downloads/stats', {
+    params: { mode: mode === 'all' ? '' : mode },
+  })
+}
+
+/**
+ * 批量操作（跨分页作用于当前用户可访问的「status + mode」全部任务）
+ * @throws 后端参数校验/权限错误（调用方 toast 展示）
+ */
+export async function batchDownloadAction(
+  action: BatchAction,
+  status: DownloadStatus,
+  mode: DownloadModeFilter,
+): Promise<BatchActionResult> {
+  return await http<BatchActionResult>('/downloads/batch-action', {
+    method: 'POST',
+    body: JSON.stringify({
+      action,
+      status,
+      mode: mode === 'all' ? '' : mode,
+    }),
   })
 }

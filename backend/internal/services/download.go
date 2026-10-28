@@ -43,22 +43,23 @@ const (
 
 // errTaskAlreadyExists：批量创建下载任务时用于区分「gid 去重跳过」与「真正失败」的错误哨兵
 var errTaskAlreadyExists = errors.New("task already exists")
+
 // errAlreadyDownloaded：该 gid 已在本地离线库下载过（非更新任务），拒绝重复下载
 var errAlreadyDownloaded = errors.New("gallery already downloaded")
 
 // CreateDownloadParams 创建下载任务的入参（前端 POST /api/v1/downloads）
 type CreateDownloadParams struct {
-	GID              string              `json:"gid"`
-	Token            string              `json:"token"`
-	Title            string              `json:"title"`
-	CoverURL         string              `json:"coverUrl"`
-	Mode             models.DownloadMode `json:"mode"`
-	ArchiveType      models.ArchiveType  `json:"archiveType"`
-	Priority         int                 `json:"priority"`
-	Group            string              `json:"group"`
-	UpdateForComicID string              `json:"updateForComicId,omitempty"` // 离线更新下载：被更新漫画 ID
-	ForceDeleteOriginal bool             `json:"forceDeleteOriginal,omitempty"` // 画质升级：完成后无条件删除旧版（不跟随 autoUpdateDeleteOriginal）
-	UserID           uint                `json:"userId"`                      // 任务发起者（决定执行时使用谁的 E 站凭证）
+	GID                 string              `json:"gid"`
+	Token               string              `json:"token"`
+	Title               string              `json:"title"`
+	CoverURL            string              `json:"coverUrl"`
+	Mode                models.DownloadMode `json:"mode"`
+	ArchiveType         models.ArchiveType  `json:"archiveType"`
+	Priority            int                 `json:"priority"`
+	Group               string              `json:"group"`
+	UpdateForComicID    string              `json:"updateForComicId,omitempty"`    // 离线更新下载：被更新漫画 ID
+	ForceDeleteOriginal bool                `json:"forceDeleteOriginal,omitempty"` // 画质升级：完成后无条件删除旧版（不跟随 autoUpdateDeleteOriginal）
+	UserID              uint                `json:"userId"`                        // 任务发起者（决定执行时使用谁的 E 站凭证）
 }
 
 // BatchCreateParams 批量创建下载任务入参（前端 POST /api/v1/downloads/batch）
@@ -481,21 +482,21 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 
 	setting := m.GetSettings()
 	task := &models.DownloadTask{
-		ID:               newTaskID(),
-		GID:              p.GID,
-		Token:            p.Token,
-		Title:            p.Title,
-		CoverURL:         p.CoverURL,
-		Mode:             p.Mode,
-		ArchiveType:      p.ArchiveType,
-		Status:           models.DownloadQueued,
-		Priority:         p.Priority,
-		Group:            p.Group,
-		ArchivePath:      setting.ArchivePath,
-		ExtractPath:      setting.ExtractPath,
-		UpdateForComicID: p.UpdateForComicID,
+		ID:                  newTaskID(),
+		GID:                 p.GID,
+		Token:               p.Token,
+		Title:               p.Title,
+		CoverURL:            p.CoverURL,
+		Mode:                p.Mode,
+		ArchiveType:         p.ArchiveType,
+		Status:              models.DownloadQueued,
+		Priority:            p.Priority,
+		Group:               p.Group,
+		ArchivePath:         setting.ArchivePath,
+		ExtractPath:         setting.ExtractPath,
+		UpdateForComicID:    p.UpdateForComicID,
 		ForceDeleteOriginal: p.ForceDeleteOriginal,
-		UserID:           p.UserID, // 任务发起者（执行时加载其 E 站凭证）
+		UserID:              p.UserID, // 任务发起者（执行时加载其 E 站凭证）
 	}
 
 	if err := m.db.Create(task).Error; err != nil {
@@ -784,24 +785,41 @@ func (m *DownloadManager) UnlockTask(taskID string) (*models.DownloadTask, error
 	log.Printf("%s 解锁任务 %s：GP=%s Credits=%s Hath=%s 配额 %d/%d",
 		dlLogTag, taskID, status.AssetGP, status.AssetCredits, status.AssetHath, status.CurrentQuota, status.MaxQuota)
 
-	// 归档任务：先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁
+	if err := m.unlockTaskAfterQuotaCheck(&task); err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// unlockTaskAfterQuotaCheck 在 GP / 配额校验通过后执行单个锁定任务的状态迁移。
+// 单任务 UnlockTask 与批量解锁共用，批量解锁按用户分组只做一次配额校验，
+// 避免 20+ 个任务逐个请求 /eh/status 造成长时间阻塞与限流。
+func (m *DownloadManager) unlockTaskAfterQuotaCheck(task *models.DownloadTask) error {
+	if task == nil {
+		return errors.New("任务不存在")
+	}
+	if task.Status != models.DownloadErrorLock {
+		return fmt.Errorf("当前状态 %s 不允许解锁（仅 error_lock 可解锁）", task.Status)
+	}
+	// 归档任务：先取消原服务端 Session（IP 变更 / 多 IP 触发封锁），再从当前 IP 重新解锁
 	if task.Mode == models.DownloadModeArchive {
-		m.cancelArchiveSessionForTask(&task)
+		m.cancelArchiveSessionForTask(task)
 		// 会话重建：旧 .part/.bits 来自旧会话（可能已耗尽配额，数据不可信），清除强制从零重下
-		clearArchivePartialCache(&task)
+		clearArchivePartialCache(task)
 	}
 
 	task.Status = models.DownloadQueued
 	task.Error = ""
 	task.AutoUnlockCount = 0 // 手动解锁后重置自动解锁计数，重新获得自动解锁机会
 	task.UpdatedAt = time.Now()
-	if err := m.db.Save(&task).Error; err != nil {
-		return nil, err
+	if err := m.db.Save(task).Error; err != nil {
+		return err
 	}
-	m.Enqueue(taskID)
+	m.Enqueue(task.ID)
 	// 解锁的高优先级任务入队时抢占正在运行的低优先级任务（计划书 5.5.2）
 	m.preemptLowerPriority(task.Priority)
-	return &task, nil
+	log.Printf("%s 解锁任务 %s（gid=%s）成功，已重新入队", dlLogTag, task.ID, task.GID)
+	return nil
 }
 
 // autoUnlockArchiveTask 自动 GP 解锁（需求：归档任务遇锁且设置开启时，自动解锁重试）。
@@ -994,20 +1012,20 @@ func (m *DownloadManager) RestoreTasks() (int, error) {
 // defaultDownloadSetting 默认下载设置（与前端 downloadSettings 默认值保持一致）
 func defaultDownloadSetting() models.DownloadSetting {
 	return models.DownloadSetting{
-		ArchivePath:                   `downloads\Archive`,
-		ExtractPath:                   `downloads\Gallery`,
-		SingleImageSavePath:           `downloads\Gallery`,
-		DefaultDownloadScheme:         models.DefaultSchemeArchiveOriginal,
-		ConcurrentImageDownloads:      10,
-		SpeedLimitImages:              99,
-		SpeedLimitInterval:            "1s",
+		ArchivePath:                      `downloads\Archive`,
+		ExtractPath:                      `downloads\Gallery`,
+		SingleImageSavePath:              `downloads\Gallery`,
+		DefaultDownloadScheme:            models.DefaultSchemeArchiveOriginal,
+		ConcurrentImageDownloads:         10,
+		SpeedLimitImages:                 99,
+		SpeedLimitInterval:               "1s",
 		DownloadAllGalleriesSamePriority: true,
-		ArchiveThreads:                10,
-		ControlArchiveConcurrency:     true,
-		MaxArchiveConcurrency:         1,
-		DeleteZipAfterArchiveDownload: true,
-		AutoReduceThreadsOnEOF:        true,
-		AutoResumeTasks:               true,
+		ArchiveThreads:                   10,
+		ControlArchiveConcurrency:        true,
+		MaxArchiveConcurrency:            1,
+		DeleteZipAfterArchiveDownload:    true,
+		AutoReduceThreadsOnEOF:           true,
+		AutoResumeTasks:                  true,
 	}
 }
 
@@ -1055,21 +1073,21 @@ func (m *DownloadManager) GetSettings() *models.DownloadSetting {
 		if err := m.db.Save(&setting).Error; err != nil {
 			log.Printf("%s 迁移默认下载配置失败: %v", dlErrTag, err)
 		} else {
-				log.Printf("%s 已迁移旧下载设置：默认下载配置=%s", dlLogTag, setting.DefaultDownloadScheme)
-			}
+			log.Printf("%s 已迁移旧下载设置：默认下载配置=%s", dlLogTag, setting.DefaultDownloadScheme)
 		}
-	
-		// 旧数据迁移：maxArchiveConcurrency 为新增字段（默认 1），旧记录为 0 时补齐默认值
-		if setting.MaxArchiveConcurrency == 0 {
-			setting.MaxArchiveConcurrency = 1
-			setting.UpdatedAt = time.Now()
-			if err := m.db.Save(&setting).Error; err != nil {
-				log.Printf("%s 迁移 maxArchiveConcurrency 默认值失败: %v", dlErrTag, err)
-			} else {
-				log.Printf("%s 已迁移下载设置：maxArchiveConcurrency=1", dlLogTag)
-			}
+	}
+
+	// 旧数据迁移：maxArchiveConcurrency 为新增字段（默认 1），旧记录为 0 时补齐默认值
+	if setting.MaxArchiveConcurrency == 0 {
+		setting.MaxArchiveConcurrency = 1
+		setting.UpdatedAt = time.Now()
+		if err := m.db.Save(&setting).Error; err != nil {
+			log.Printf("%s 迁移 maxArchiveConcurrency 默认值失败: %v", dlErrTag, err)
+		} else {
+			log.Printf("%s 已迁移下载设置：maxArchiveConcurrency=1", dlLogTag)
 		}
-		return &setting
+	}
+	return &setting
 }
 
 // SaveSettings 保存下载设置

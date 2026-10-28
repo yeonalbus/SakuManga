@@ -23,6 +23,11 @@ useGamepad({
         <h3 class="modal-title">{{ modalState.title }}</h3>
         <p class="modal-message">{{ modalState.message }}</p>
 
+        <div v-if="modalState.details" class="modal-details" :class="modalState.detailsTone">
+          <span class="details-icon">⚠</span>
+          <span>{{ modalState.details }}</span>
+        </div>
+
         <div v-if="modalState.mode === 'prompt'" class="modal-input-wrapper">
           <input
             v-model="modalState.inputValue"
@@ -38,7 +43,7 @@ useGamepad({
           <button v-if="modalState.mode !== 'alert'" class="btn btn-cancel" @click="handleCancel">
             {{ modalState.cancelText }}
           </button>
-          <button class="btn btn-confirm" @click="handleConfirm">
+          <button class="btn btn-confirm" :class="modalState.tone" @click="handleConfirm">
             {{ modalState.confirmText }}
           </button>
         </div>
@@ -61,7 +66,7 @@ useGamepad({
 
 .modal-card {
   width: 90%;
-  max-width: 400px;
+  max-width: 430px;
   background: var(--app-surface-3);
   border: 1px solid var(--app-border-3);
   border-radius: 12px;
@@ -80,6 +85,42 @@ useGamepad({
   font-size: 14px;
   color: var(--app-text-2);
   line-height: 1.5;
+}
+
+/* Round47：确认弹窗的附加警告（损坏压缩包 / GP 重复消耗） */
+.modal-details {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: -4px 0 16px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--app-text-2);
+}
+
+.modal-details.danger {
+  border: 1px solid rgba(230, 57, 70, 0.32);
+  background: rgba(230, 57, 70, 0.1);
+}
+
+.modal-details.warn {
+  border: 1px solid rgba(230, 162, 60, 0.34);
+  background: rgba(230, 162, 60, 0.1);
+}
+
+.modal-details .details-icon {
+  flex: none;
+  line-height: 1.5;
+}
+
+.modal-details.danger .details-icon {
+  color: #ff6b6b;
+}
+
+.modal-details.warn .details-icon {
+  color: #e6a23c;
 }
 
 .modal-input-wrapper {
@@ -127,6 +168,15 @@ useGamepad({
 .btn-confirm {
   background: #007acc;
   color: #fff;
+}
+
+.btn-confirm.danger {
+  background: #c62828;
+}
+
+.btn-confirm.warn {
+  background: #e6a23c;
+  color: #231604;
 }
 
 .fade-enter-active,

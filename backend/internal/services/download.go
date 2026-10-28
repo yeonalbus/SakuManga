@@ -749,6 +749,8 @@ func (m *DownloadManager) RetryTask(taskID string) (*models.DownloadTask, error)
 	if err := m.db.Save(&task).Error; err != nil {
 		return nil, err
 	}
+	// Round48：手动重试视为用户已介入（可能换了节点/修好了网络），解除组级熔断
+	ArchiveCircuit().Reset()
 	// 归档任务 error_lock：先取消原服务端 Session（IP 变更/多 IP 触发封锁），再从当前 IP 重新解锁
 	if wasLocked && task.Mode == models.DownloadModeArchive {
 		m.cancelArchiveSessionForTask(&task)
@@ -818,6 +820,8 @@ func (m *DownloadManager) unlockTaskAfterQuotaCheck(task *models.DownloadTask) e
 	m.Enqueue(task.ID)
 	// 解锁的高优先级任务入队时抢占正在运行的低优先级任务（计划书 5.5.2）
 	m.preemptLowerPriority(task.Priority)
+	// Round48：用户手动解锁视为已介入，解除组级熔断
+	ArchiveCircuit().Reset()
 	log.Printf("%s 解锁任务 %s（gid=%s）成功，已重新入队", dlLogTag, task.ID, task.GID)
 	return nil
 }

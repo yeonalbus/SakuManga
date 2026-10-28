@@ -76,3 +76,7 @@ backend/ziprangecheck_out/
 
 # 调研产出（含 E 站批量下载优化等敏感内容与实测日志分析，勿入库）
 DSPlans/Research/
+
+# 敏感方案文档（E 站批量下载优化实施细节，勿入库）
+YeonPlans/关于大批量下载优化方案*.md
+DSPlans/YeonPlans-dsedit/

@@ -2,6 +2,7 @@ package services
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,6 +156,7 @@ type archiveDownloader struct {
 	stopFlag        atomic.Bool             // 本地停止标记（暂停/取消时置位，避免频繁回查 DB）
 	lastArchiveInfo *models.ArchiveInfo     // 最近一次解析到的归档报价（含 SizeBytes 预估）
 	lastPlain       string              // 最近一次 archiver.php 页面去标签文本（用于识别「已解锁」变体）
+	restoreAttempted bool               // Round48：本任务已尝试切回绑定节点（防递归）
 	mu              sync.Mutex
 	startedAt       time.Time
 }
@@ -242,6 +245,12 @@ func (g *archiveDownloader) run() {
 	log.Printf("%s [archive-engine] 任务 %s 使用调度器预留的 %d 个线程", dlLogTag, g.task.ID, g.threads)
 
 	// 5. archiver.php 全流程：获取 H@H 下载链接
+	// Round48：代理组熔断（连续 3 个画廊网络类失败）→ 不再做无效尝试，直接判错
+	if ArchiveCircuit().Tripped() {
+		log.Printf("%s [archive-engine] 任务 %s 跳过：代理组已判定失效（连续多个画廊无法解锁）", dlWarnTag, g.task.ID)
+		g.fail("当前代理组连续多个画廊无法解锁，已判定失效（请切换节点或更换代理组后重试）")
+		return
+	}
 	downloadURL, arcInfo, err := g.resolveArchiveDownloadURL()
 	if err != nil {
 		// 结构性不可直链：普通下载一律报错可重试（绝不降级）；更新任务按开关决定是否降级
@@ -249,8 +258,20 @@ func (g *archiveDownloader) run() {
 			g.handleHathdlOnly(err)
 			return
 		}
-		g.fail(err.Error())
-		return
+		// Round48 阶梯 1：网络类失败 → 测一次全组延迟，换节点后重试。
+		// 可行性测试只发 GET 报价，不重复创建归档（不重复扣 GP）。
+		if retryURL, retryInfo, rerr := g.retryAfterSwitchingNode(err); rerr == nil {
+			downloadURL, arcInfo = retryURL, retryInfo
+		} else if errors.Is(rerr, errHathdlOnly) {
+			g.handleHathdlOnly(rerr)
+			return
+		} else {
+			g.fail(rerr.Error())
+			return
+		}
+	} else {
+		// 成功解锁 → 打断熔断连续性
+		ArchiveCircuit().Record(g.task.GID, false)
 	}
 	if arcInfo != nil && arcInfo.SizeBytes > 0 {
 		g.task.TotalBytes = arcInfo.SizeBytes
@@ -373,10 +394,17 @@ func (g *archiveDownloader) resolveArchiveDownloadURL() (string, *models.Archive
 	// ③ 若表单已含 archiver_key → 归档已创建，直接走下载
 	keyForm := target
 	if keyForm.inputs["archiver_key"] == "" {
+		// Round48：本次需要 POST 创建归档（会扣 GP）。
+		// 若这个画廊之前在别的节点上解锁过，先尝试切回原节点，恢复到免费状态再创建（省一次 GP）。
+		if g.tryRestoreBoundNode() {
+			return g.resolveArchiveDownloadURL()
+		}
 		// 先 POST 创建归档
 		if err := g.createArchive(*target, base); err != nil {
 			return "", nil, err
 		}
+		// Round48：扣费已发生 → 记录「归档 ↔ 节点」绑定，供后续重试切回
+		g.recordArchiveBinding()
 		// 重新 GET，找到含 archiver_key 的表单
 		forms2, err := g.fetchArchiverForms(base + query)
 		if err != nil {
@@ -436,8 +464,39 @@ func (g *archiveDownloader) retryResolveArchiveDownloadURL() (string, *models.Ar
 	return url, info, nil
 }
 
-// fetchArchiverForms GET archiver.php 并解析全部表单
+// archiverRetryBackoff 阶梯 0：archiver.php 原地重试的退避序列（仅网络类错误）
+var archiverRetryBackoff = []time.Duration{300 * time.Millisecond, 900 * time.Millisecond}
+
+// fetchArchiverForms GET archiver.php 并解析全部表单；网络类错误原地重试（阶梯 0）。
+//
+// 为什么不直接交给上层换节点：绝大多数失败是并发满载时隧道被批量掐断，
+// 原地重试成本为零、风险为零，能救掉其中一部分，避免"每个失败都大动干戈换节点"。
 func (g *archiveDownloader) fetchArchiverForms(archiverURL string) ([]archiverForm, error) {
+	var lastErr error
+	for attempt := 0; attempt <= len(archiverRetryBackoff); attempt++ {
+		if attempt > 0 {
+			if g.stopped() {
+				return nil, lastErr
+			}
+			wait := archiverRetryBackoff[attempt-1]
+			log.Printf("%s [archive-engine] 任务 %s archiver.php 请求失败（第 %d/%d 次）：%v；%s 后原地重试",
+				dlWarnTag, g.task.ID, attempt, len(archiverRetryBackoff), lastErr, wait)
+			time.Sleep(wait)
+		}
+		forms, err := g.fetchArchiverFormsOnce(archiverURL)
+		if err == nil {
+			return forms, nil
+		}
+		lastErr = err
+		if !isArchiveNetworkFailure(err) {
+			return nil, err // 非网络类（403/404/结构异常）不重试
+		}
+	}
+	return nil, lastErr
+}
+
+// fetchArchiverFormsOnce 单次 GET archiver.php 并解析全部表单
+func (g *archiveDownloader) fetchArchiverFormsOnce(archiverURL string) ([]archiverForm, error) {
 	req, err := http.NewRequest("GET", archiverURL, nil)
 	if err != nil {
 		return nil, err
@@ -1386,6 +1445,309 @@ func (g *archiveDownloader) failOrLock(err error) {
 		return
 	}
 	g.fail(err.Error())
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round48：高级代理联动（阶梯 0-3 / 绑定恢复）
+// ─────────────────────────────────────────────────────────────
+
+// archiveSwitchMaxCandidates 单次换节点最多尝试的候选数量（避免把整组 60+ 节点全试一遍）
+const archiveSwitchMaxCandidates = 5
+
+// isArchiveNetworkFailure 判断错误是否属于「网络类」（可换节点重试 / 可计入熔断）。
+// 画廊自身问题（403/404/页面结构异常/解压失败）不算。
+func isArchiveNetworkFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errArchiveNetworkRetryable) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{
+		"eof", "context deadline exceeded", "timeout", "timed out",
+		"connection reset", "wsarecv", "forcibly closed",
+		"connection refused", "network is unreachable", "no route to host",
+	} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// proxyGroupName 返回当前站点应使用的代理组名（里站/表站分别配置）。
+func (g *archiveDownloader) proxyGroupName(setting *models.NetworkSetting) string {
+	if setting == nil {
+		return ""
+	}
+	return setting.GroupForSite(strings.Contains(g.referer, "exhentai"))
+}
+
+// probeURL delay 测试的目标地址：用 E 站自身，而不是默认的 generate_204（那只证明能上谷歌）。
+func (g *archiveDownloader) probeURL() string {
+	if strings.Contains(g.referer, "exhentai") {
+		return "https://exhentai.org/"
+	}
+	return "https://e-hentai.org/"
+}
+
+// persistNodeName 记录当前任务使用的节点名（展示在下载条目上）。
+func (g *archiveDownloader) persistNodeName(node string) {
+	if node == "" {
+		return
+	}
+	g.mu.Lock()
+	g.task.NodeName = node
+	g.mu.Unlock()
+	if err := g.m.db.Model(&models.DownloadTask{}).
+		Where("id = ?", g.task.ID).
+		Update("node_name", node).Error; err != nil {
+		log.Printf("%s 任务 %s 保存节点名失败：%v", clashLogTag, g.task.ID, err)
+	}
+}
+
+// probeArchiverPage 快速可行性测试：只 GET 一次 archiver.php，确认能拿到报价页。
+//
+// ⚠️ 绝不 POST 创建归档 —— 否则每测一个节点就扣一次 GP。
+// 报价是 Free! 还是 GP 都算「该节点链路可用」，GP 只是说明该出口 IP 未解锁该画廊。
+func (g *archiveDownloader) probeArchiverPage(archiverURL string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiverURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", ehReaderUserAgent)
+	req.Header.Set("Referer", g.referer)
+
+	client := &http.Client{Transport: getSharedTransport(), Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	if len(parseArchiverForms(doc)) == 0 {
+		return errors.New("页面结构异常（未解析到归档表单）")
+	}
+	return nil
+}
+
+// topNodesByDelay 按延迟升序取前 limit 个可用节点。
+// 测不出延迟的节点不在 map 里 → 天然完成「假节点过滤」（信息节点、死节点）。
+func topNodesByDelay(delayMap map[string]int, limit int, exclude string) []string {
+	type nodeDelay struct {
+		node string
+		ms   int
+	}
+	list := make([]nodeDelay, 0, len(delayMap))
+	for name, ms := range delayMap {
+		if name == exclude {
+			continue
+		}
+		list = append(list, nodeDelay{node: name, ms: ms})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ms < list[j].ms })
+	if limit > 0 && len(list) > limit {
+		list = list[:limit]
+	}
+	out := make([]string, 0, len(list))
+	for _, e := range list {
+		out = append(out, e.node)
+	}
+	return out
+}
+
+// tryRestoreBoundNode 报价需要扣费时，尝试切回「当初解锁这个画廊的节点」，恢复到免费状态。
+//
+// 返回 true 表示已切回并重置了连接池，调用方应重新走一遍解析流程。
+// 只尝试一次（restoreAttempted 防递归）。
+func (g *archiveDownloader) tryRestoreBoundNode() bool {
+	if g.restoreAttempted {
+		return false
+	}
+	client, setting, enabled := ActiveClash(g.m.db)
+	if !enabled {
+		return false
+	}
+	binding, err := FindActiveBinding(g.m.db, g.task.GID, g.task.UserID)
+	if err != nil || binding == nil || binding.Node == "" {
+		return false
+	}
+	groupName := g.proxyGroupName(setting)
+	if groupName == "" {
+		return false
+	}
+	if binding.Group != "" && binding.Group != groupName {
+		return false // 组已变更：不做跨组切回
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	group, err := client.Group(ctx, groupName)
+	if err != nil {
+		return false
+	}
+	if group.Now == binding.Node {
+		return false // 已经是原节点，无需切换
+	}
+	if !containsString(group.All, binding.Node) {
+		log.Printf("%s 任务 %s 原解锁节点 %q 已不在组 %s 内，放弃切回",
+			clashLogTag, g.task.ID, binding.Node, groupName)
+		return false
+	}
+
+	g.restoreAttempted = true
+	if err := client.SetNode(ctx, groupName, binding.Node); err != nil {
+		log.Printf("%s 任务 %s 切回原节点 %q 失败：%v", clashLogTag, g.task.ID, binding.Node, err)
+		return false
+	}
+	resetSharedTransports()
+	log.Printf("%s 任务 %s 报价需扣费，已切回原解锁节点 %q 并重置连接池", clashLogTag, g.task.ID, binding.Node)
+	g.persistNodeName(binding.Node)
+	return true
+}
+
+// recordArchiveBinding 创建归档成功（已扣 GP）后记录「归档 ↔ 节点」绑定。
+func (g *archiveDownloader) recordArchiveBinding() {
+	client, setting, enabled := ActiveClash(g.m.db)
+	if !enabled {
+		return
+	}
+	groupName := g.proxyGroupName(setting)
+	if groupName == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	group, err := client.Group(ctx, groupName)
+	if err != nil || group.Now == "" {
+		return
+	}
+
+	gpCost := ""
+	if g.lastArchiveInfo != nil {
+		want := "original"
+		if g.task.ArchiveType == models.ArchiveTypeResample {
+			want = "resample"
+		}
+		for _, opt := range g.lastArchiveInfo.Options {
+			if opt.Label == want {
+				gpCost = opt.Cost
+				break
+			}
+		}
+	}
+
+	binding := &models.ArchiveBinding{
+		GID: g.task.GID, UserID: g.task.UserID,
+		Group: groupName, Node: group.Now, GPCost: gpCost,
+	}
+	if err := UpsertArchiveBinding(g.m.db, binding); err != nil {
+		return
+	}
+	g.persistNodeName(group.Now)
+
+	// 出口 IP 异步探测（可选增强；失败不影响主流程，仅少一条审计信息）
+	go func() {
+		ipCtx, ipCancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer ipCancel()
+		ip := DetectExitIP(ipCtx)
+		if ip == "" {
+			return
+		}
+		if err := g.m.db.Model(&models.ArchiveBinding{}).
+			Where("g_id = ? AND user_id = ?", g.task.GID, g.task.UserID).
+			Update("ip", ip).Error; err != nil {
+			log.Printf("%s 任务 %s 保存出口 IP 失败：%v", clashLogTag, g.task.ID, err)
+		}
+	}()
+}
+
+// retryAfterSwitchingNode 阶梯 1：网络类失败后换节点重试。
+//
+// 流程：测一次全组延迟 → 过滤假节点 → 按延迟升序取前 5 → 逐个切换（重置连接池）→
+// 只发 GET 报价做可行性测试 → 找到可用节点后固定它并重走完整解析（此时才可能创建归档一次）。
+func (g *archiveDownloader) retryAfterSwitchingNode(cause error) (string, *models.ArchiveInfo, error) {
+	client, setting, enabled := ActiveClash(g.m.db)
+	if !enabled || !isArchiveNetworkFailure(cause) {
+		return "", nil, cause
+	}
+	groupName := g.proxyGroupName(setting)
+	if groupName == "" {
+		return "", nil, cause
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	delayMap, err := client.GroupDelay(ctx, groupName, g.probeURL(), 5000)
+	if err != nil {
+		log.Printf("%s 任务 %s 测组延迟失败（%s）：%v", clashLogTag, g.task.ID, groupName, err)
+		ArchiveCircuit().Record(g.task.GID, true)
+		return "", nil, cause
+	}
+	if len(delayMap) == 0 {
+		log.Printf("%s 任务 %s 组 %s 内没有可用节点（全部测不出延迟）", clashLogTag, g.task.ID, groupName)
+		ArchiveCircuit().Record(g.task.GID, true)
+		return "", nil, cause
+	}
+
+	currentNode := ""
+	if group, gerr := client.Group(ctx, groupName); gerr == nil {
+		currentNode = group.Now
+	}
+	candidates := topNodesByDelay(delayMap, archiveSwitchMaxCandidates, currentNode)
+	log.Printf("%s 任务 %s 组 %s 可用节点 %d 个，按延迟取前 %d 个尝试（当前节点 %q 已跳过）",
+		clashLogTag, g.task.ID, groupName, len(delayMap), len(candidates), currentNode)
+
+	archiverURL := g.archiverBase() + "?gid=" + g.task.GID + "&token=" + g.task.Token
+	for i, node := range candidates {
+		if g.stopped() {
+			return "", nil, cause
+		}
+		log.Printf("%s 任务 %s 尝试换节点（%d/%d）：%q", clashLogTag, g.task.ID, i+1, len(candidates), node)
+		if err := client.SetNode(ctx, groupName, node); err != nil {
+			log.Printf("%s 任务 %s 切换节点 %q 失败：%v", clashLogTag, g.task.ID, node, err)
+			continue
+		}
+		// 关键：切换后必须重置连接池，否则 keep-alive 连接仍走旧节点、出口 IP 根本没变
+		resetSharedTransports()
+		log.Printf("%s 任务 %s 已切换节点 %q 并重置连接池", clashLogTag, g.task.ID, node)
+
+		if perr := g.probeArchiverPage(archiverURL); perr != nil {
+			log.Printf("%s 任务 %s 节点 %q 探测报价页失败：%v", clashLogTag, g.task.ID, node, perr)
+			continue
+		}
+
+		// 该节点可用：固定节点名后重新走完整解析（此时才可能 POST 创建归档，且只创建一次）
+		g.persistNodeName(node)
+		url, info, rerr := g.resolveArchiveDownloadURL()
+		if rerr != nil {
+			if errors.Is(rerr, errHathdlOnly) {
+				return "", nil, rerr
+			}
+			log.Printf("%s 任务 %s 换到节点 %q 后仍解析失败：%v", clashLogTag, g.task.ID, node, rerr)
+			continue
+		}
+		ArchiveCircuit().Record(g.task.GID, false)
+		log.Printf("%s 任务 %s 换节点 %q 后成功解锁归档", clashLogTag, g.task.ID, node)
+		return url, info, nil
+	}
+
+	// 前 N 个节点全部不可用 → 该画廊判错 + 计入熔断
+	log.Printf("%s 任务 %s 前 %d 个节点均无法解锁该画廊，判定该画廊出错",
+		clashLogTag, g.task.ID, len(candidates))
+	ArchiveCircuit().Record(g.task.GID, true)
+	return "", nil, cause
 }
 
 // ─────────────────────────────────────────────────────────────

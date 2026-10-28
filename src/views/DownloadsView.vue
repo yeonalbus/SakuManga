@@ -655,6 +655,9 @@ onUnmounted(() => {
               <span v-if="userStore.isAdmin && task.username" class="chip user">
                 发起者：{{ task.username }}
               </span>
+              <span v-if="task.nodeName" class="chip node" :title="`归档解锁时使用的出口节点：${task.nodeName}`">
+                🌐 {{ task.nodeName }}
+              </span>
             </div>
 
             <div v-if="task.error" class="task-error" :title="displayTaskError(task)">

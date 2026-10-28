@@ -1,5 +1,8 @@
 <template>
   <div class="network-settings">
+    <!-- ───────── 基础代理设置 ───────── -->
+    <div class="section-title">基础代理设置</div>
+
     <!-- 🟢 代理服务器配置项（真实生效：后端 config.json + 系统代理自动兜底） -->
     <div class="setting-item clickable" @click="handleProxySetting">
       <div class="item-info">
@@ -51,24 +54,184 @@
     <div class="reset-row">
       <button class="reset-btn" @click="handleReset">恢复默认设置</button>
     </div>
+
+    <!-- ───────── 高级代理设置 ───────── -->
+    <div class="section-title with-divider">
+      高级代理设置
+      <span class="section-tag">Clash 联动</span>
+    </div>
+
+    <div class="setting-item hint-soft">
+      <div class="item-info">
+        <div class="item-title">⚠️ 高级功能说明</div>
+        <div class="item-subtext">
+          用于优化大批量归档下载：遇到「请求 archiver.php 失败」时自动更换出口节点重试。<br />
+          不开不影响日常使用；开启后可能因反复解锁画廊产生额外 <b>GP 开销</b>。<br />
+          该设置影响本实例上的<b>所有用户与所有下载任务</b>。
+        </div>
+      </div>
+    </div>
+
+    <!-- 总开关（始终可点，不受下面的置灰影响） -->
+    <div class="setting-item">
+      <div class="item-info">
+        <div class="item-title">启用高级代理联动</div>
+        <div class="item-subtext">
+          {{ advanced.enabled ? '已启用：归档下载失败时会自动测延迟并切换节点' : '已关闭：所有联动逻辑不生效' }}
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" v-model="advanced.enabled" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- 可编辑区域：关闭时置灰并禁止交互 -->
+    <div class="advanced-body" :class="{ 'is-disabled': !advanced.enabled }">
+      <div v-if="!advanced.enabled" class="disabled-mask">开启上方开关后可编辑</div>
+
+      <!-- 代理组配置 -->
+      <div class="group-title">代理组配置</div>
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">e-hentai.org 所走的代理组 <span class="required">*</span></div>
+          <div class="item-subtext">
+            在 Clash Verge 的「订阅 - 编辑规则 - DOMAIN-SUFFIX」里为 e-hentai.org 指定的代理策略组名
+          </div>
+        </div>
+        <input
+          v-model="advanced.groupEGallery"
+          class="text-input"
+          list="clash-groups"
+          placeholder="例如：Ehentai"
+        />
+      </div>
+
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">exhentai.org 所走的代理组 <span class="required">*</span></div>
+          <div class="item-subtext">里站所走的代理组名；若与表站相同，填同一个即可</div>
+        </div>
+        <input
+          v-model="advanced.groupEGalleryEx"
+          class="text-input"
+          list="clash-groups"
+          placeholder="例如：Ehentai"
+        />
+      </div>
+
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">hath.network 所走的代理组（可选）</div>
+          <div class="item-subtext">
+            留空 = H@H 请求不参与联动切换，保持现状（推荐，H@H 常走 DIRECT 即可）
+          </div>
+        </div>
+        <input
+          v-model="advanced.groupHath"
+          class="text-input"
+          list="clash-groups"
+          placeholder="留空表示不联动"
+        />
+      </div>
+
+      <!-- 代理连接配置 -->
+      <div class="group-title">代理连接配置</div>
+      <div class="setting-item hint-soft">
+        <div class="item-info">
+          <div class="item-subtext">
+            适配任何 <b>mihomo 内核</b>（Clash Verge Rev / Mihomo Party / OpenClash 等）。<br />
+            要填的是 <b>「外部控制端口」</b>（如 <code>9090</code>），<b>不是</b>代理端口（如 <code>7897</code>）——
+            填错会永远连不上。
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">控制面地址</div>
+          <div class="item-subtext">external-controller 的 host:port</div>
+        </div>
+        <input
+          v-model="advanced.controller"
+          class="text-input"
+          placeholder="127.0.0.1:9090"
+        />
+      </div>
+
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">控制面密钥（Secret）</div>
+          <div class="item-subtext">
+            {{ saved.hasSecret ? '已设置密钥；留空表示不修改' : 'Clash 未设置密钥时留空' }}
+          </div>
+        </div>
+        <input
+          v-model="secretInput"
+          class="text-input"
+          type="password"
+          :placeholder="saved.hasSecret ? '已设置（留空保持不变）' : '可留空'"
+        />
+      </div>
+
+      <!-- 连通性测试 -->
+      <div class="setting-item column">
+        <div class="item-info">
+          <div class="item-title">连通性测试</div>
+          <div class="item-subtext">验证控制面可达 + 代理组存在 + 节点能连上 E 站</div>
+        </div>
+        <div class="test-row">
+          <button class="action-btn" :disabled="testing" @click="handleTest">
+            {{ testing ? '测试中…' : '测试连接' }}
+          </button>
+          <button class="action-btn ghost" :disabled="loadingGroups" @click="loadGroups">
+            {{ loadingGroups ? '读取中…' : '读取候选组' }}
+          </button>
+        </div>
+        <div v-if="testResult" class="test-result" :class="{ bad: !testResult.ok }">
+          {{ testResult.message }}
+        </div>
+      </div>
+
+      <!-- 保存 -->
+      <div class="save-row">
+        <button class="save-btn" :disabled="saving" @click="handleSave">
+          {{ saving ? '保存中…' : '保存高级代理设置' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 候选组 datalist（后端枚举，避免手填错名） -->
+    <datalist id="clash-groups">
+      <option v-for="g in groupCandidates" :key="g.name" :value="g.name">
+        {{ g.type }} · 当前 {{ g.now }} · {{ g.options }} 个选项
+      </option>
+    </datalist>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { networkSettings, resetNetworkSettings } from '@/stores/networkSettings'
+import {
+  fetchAdvancedProxy,
+  saveAdvancedProxy,
+  testClashConnection,
+  fetchClashGroups,
+  type AdvancedProxySetting,
+  type ClashGroupItem,
+  type ClashTestResult,
+} from '@/api/network'
 
 const { toast, modal } = useUI()
 
-// 代理地址来自后端 API（/network/proxy），不存入本地 store
+// ── 基础代理设置 ──
 const proxyAddress = ref('')
-// 实际生效代理（手动优先，未配置时自动采用系统代理）与其来源：manual / system / none
 const effectiveProxy = ref('')
 const effectiveSource = ref<'manual' | 'system' | 'none'>('none')
 
-// 设置项副标题文案
 const effectiveLabel = computed(() => {
   if (effectiveSource.value === 'manual') {
     return `手动配置: ${effectiveProxy.value || proxyAddress.value || '（空）'}`
@@ -79,7 +242,6 @@ const effectiveLabel = computed(() => {
   return '未设置 (直连模式)'
 })
 
-// 获取后端当前设置的代理
 const fetchProxyConfig = async () => {
   try {
     const data = await http<{
@@ -95,7 +257,6 @@ const fetchProxyConfig = async () => {
   }
 }
 
-// 弹出输入框配置代理地址
 const handleProxySetting = async () => {
   const input = await modal.prompt(
     '请输入 HTTP / SOCKS5 代理地址（如 http://127.0.0.1:7897，留空表示自动跟随系统代理）：',
@@ -106,20 +267,15 @@ const handleProxySetting = async () => {
   if (input !== null) {
     const newProxy = input.trim()
     try {
-      // 🟢 使用 http 发起 POST 请求
       await http('/network/proxy', {
         method: 'POST',
         body: JSON.stringify({ proxy: newProxy }),
       })
-
-      // 能走到这一步，说明后端响应了 200 OK（设置成功）
       proxyAddress.value = newProxy
       effectiveProxy.value = newProxy
       effectiveSource.value = newProxy ? 'manual' : 'system'
       toast.success(newProxy ? `代理成功更新为: ${newProxy}` : '已切换为自动跟随系统代理')
     } catch (err: unknown) {
-      // 🔴 无论是网络连不上，还是后端返回了 400 错误（如“无效的代理格式”），
-      // http 都会自动把后端的报错文字放入 err.message 中
       toast.error(err instanceof Error ? err.message : '设置失败')
     }
   }
@@ -130,19 +286,159 @@ const handleReset = () => {
   toast.success('已恢复默认网络设置')
 }
 
+// ── 高级代理设置 ──
+const advanced = reactive<AdvancedProxySetting>({
+  enabled: false,
+  controller: '127.0.0.1:9090',
+  hasSecret: false,
+  groupEGallery: '',
+  groupEGalleryEx: '',
+  groupHath: '',
+})
+// saved 保存"上次从后端读到的状态"，用于密钥 keepSecret 判断与占位提示
+const saved = reactive({ hasSecret: false })
+const secretInput = ref('')
+const testing = ref(false)
+const saving = ref(false)
+const loadingGroups = ref(false)
+const testResult = ref<ClashTestResult | null>(null)
+const groupCandidates = ref<ClashGroupItem[]>([])
+
+const fetchAdvanced = async () => {
+  try {
+    const data = await fetchAdvancedProxy()
+    Object.assign(advanced, data)
+    saved.hasSecret = data.hasSecret
+  } catch (err) {
+    console.error('获取高级代理设置失败:', err)
+  }
+}
+
+const handleTest = async () => {
+  testing.value = true
+  testResult.value = null
+  try {
+    const result = await testClashConnection({
+      controller: advanced.controller,
+      secret: secretInput.value || undefined,
+    })
+    testResult.value = result
+    if (result.ok) {
+      const parts = [`mihomo ${result.version ?? ''}`]
+      if (result.group) parts.push(`组：${result.group}`)
+      if (result.now) parts.push(`当前：${result.now}`)
+      if (result.bestDelayMs) parts.push(`最优延迟 ${result.bestDelayMs}ms`)
+      if (typeof result.usable === 'number') parts.push(`可用 ${result.usable}/${result.options ?? '?'}`)
+      testResult.value = { ...result, message: parts.join(' · ') }
+    }
+  } catch (err: unknown) {
+    testResult.value = { ok: false, message: err instanceof Error ? err.message : '测试失败' }
+  } finally {
+    testing.value = false
+  }
+}
+
+const loadGroups = async () => {
+  loadingGroups.value = true
+  try {
+    const data = await fetchClashGroups()
+    groupCandidates.value = data.groups ?? []
+    if (groupCandidates.value.length === 0) {
+      toast.error('未读取到任何策略组，请确认控制面地址与密钥')
+    } else {
+      toast.success(`已读取 ${groupCandidates.value.length} 个策略组，可在输入框下拉选择`)
+    }
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '读取策略组失败')
+  } finally {
+    loadingGroups.value = false
+  }
+}
+
+const handleSave = async () => {
+  if (advanced.enabled) {
+    if (!advanced.groupEGallery.trim() || !advanced.groupEGalleryEx.trim()) {
+      toast.error('请先填写 e-hentai.org 与 exhentai.org 的代理组名称（或关闭高级代理设置）')
+      return
+    }
+    if (!advanced.controller.trim()) {
+      toast.error('请填写 Clash 控制面地址（如 127.0.0.1:9090）')
+      return
+    }
+  }
+
+  saving.value = true
+  try {
+    const result = await saveAdvancedProxy({
+      enabled: advanced.enabled,
+      controller: advanced.controller.trim(),
+      secret: secretInput.value,
+      keepSecret: secretInput.value === '' && saved.hasSecret,
+      groupEGallery: advanced.groupEGallery.trim(),
+      groupEGalleryEx: advanced.groupEGalleryEx.trim(),
+      groupHath: advanced.groupHath.trim(),
+    })
+    secretInput.value = ''
+    await fetchAdvanced()
+    toast.success('高级代理设置已保存')
+    if (result.warning) {
+      toast.warning(result.warning)
+    }
+  } catch (err: unknown) {
+    toast.error(err instanceof Error ? err.message : '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 onMounted(() => {
   fetchProxyConfig()
+  fetchAdvanced()
 })
 </script>
 
 <style scoped>
-/* 样式部分保持不变 */
 .network-settings {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+/* ── 板块标题 ── */
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text-2);
+  letter-spacing: 0.5px;
+  padding: 4px 2px;
+}
+
+.section-title.with-divider {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: #ff7588;
+  border: 1px solid rgba(255, 117, 136, 0.4);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-3);
+  padding: 6px 2px 0;
+}
+
+/* ── 基础设置项（沿用原有视觉） ── */
 .setting-item {
   display: flex;
   align-items: center;
@@ -152,6 +448,12 @@ onMounted(() => {
   border-radius: 8px;
   border: 1px solid var(--app-border-2);
   transition: background-color 0.2s ease;
+}
+
+.setting-item.column {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .setting-item.clickable {
@@ -177,10 +479,21 @@ onMounted(() => {
 .item-subtext {
   font-size: 13px;
   color: var(--app-text-3);
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
-/* 系统代理自动兜底 / 直连提示卡片 */
+.item-subtext code {
+  background: var(--app-surface-1, rgba(0, 0, 0, 0.15));
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.required {
+  color: #ff7588;
+}
+
+/* 提示卡片 */
 .setting-item.hint {
   background-color: var(--app-surface-2);
   border-color: rgba(255, 117, 136, 0.25);
@@ -190,34 +503,18 @@ onMounted(() => {
   color: #ff7588;
 }
 
+.setting-item.hint-soft {
+  background-color: var(--app-surface-2);
+  border-style: dashed;
+}
+
 .arrow-icon {
   font-size: 20px;
   color: var(--app-text-muted);
   margin-left: 8px;
 }
 
-.setting-select {
-  background-color: transparent;
-  color: var(--app-text-strong);
-  border: none;
-  font-size: 14px;
-  padding: 4px 8px;
-  cursor: pointer;
-  outline: none;
-  border-bottom: 1px solid var(--app-border-3);
-  text-align-last: right;
-  transition: border-color 0.2s;
-}
-
-.setting-select:focus {
-  border-bottom-color: #ff7588;
-}
-
-.setting-select option {
-  background-color: var(--app-surface-2);
-  color: var(--app-text-strong);
-}
-
+/* ── 输入 ── */
 .input-inline {
   display: flex;
   align-items: center;
@@ -243,6 +540,27 @@ onMounted(() => {
   border-bottom-color: #ff7588;
 }
 
+.text-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--app-surface-1, transparent);
+  border: 1px solid var(--app-border-3);
+  border-radius: 6px;
+  color: var(--app-text-strong);
+  font-size: 14px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.text-input:focus {
+  border-color: #ff7588;
+}
+
+.text-input::placeholder {
+  color: var(--app-text-muted);
+}
+
 .unit {
   font-size: 13px;
   color: var(--app-text-strong);
@@ -254,11 +572,13 @@ onMounted(() => {
   margin-left: 4px;
 }
 
+/* ── 开关 ── */
 .toggle-switch {
   position: relative;
   display: inline-block;
   width: 44px;
   height: 24px;
+  flex-shrink: 0;
 }
 
 .toggle-switch input {
@@ -300,6 +620,111 @@ input:checked + .slider:before {
   background-color: #ffffff;
 }
 
+/* ── 高级区域置灰 ── */
+.advanced-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+
+.advanced-body.is-disabled {
+  filter: grayscale(0.9);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+.disabled-mask {
+  position: absolute;
+  inset: -8px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+  font-size: 12px;
+  color: var(--app-text-3);
+  background: linear-gradient(
+    180deg,
+    var(--app-surface-1, rgba(0, 0, 0, 0.2)) 0%,
+    transparent 40%
+  );
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+/* ── 操作按钮 ── */
+.test-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-strong);
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  border-color: #ff7588;
+  color: #ff7588;
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-btn.ghost {
+  color: var(--app-text-2);
+}
+
+.test-result {
+  font-size: 13px;
+  color: #4caf82;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.test-result.bad {
+  color: #ff7588;
+}
+
+.save-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.save-btn {
+  background: rgba(255, 117, 136, 0.14);
+  border: 1px solid rgba(255, 117, 136, 0.5);
+  color: #ff7588;
+  font-size: 13px;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: rgba(255, 117, 136, 0.24);
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 底部重置 ── */
 .reset-row {
   display: flex;
   justify-content: center;

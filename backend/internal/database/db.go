@@ -44,6 +44,8 @@ func InitDB() {
 		&models.XpMeta{},                // Round32：XP 词云 — 统计元信息
 		&models.MaintainDedupSnapshot{}, // Round42 D6：维护查重结果快照（重启后免重扫）
 		&models.DedupSetting{},          // Round42 D2：查重设置（联网复核默认关闭）
+		&models.NetworkSetting{},        // Round48：高级代理设置（Clash 控制面 + 代理组）
+		&models.ArchiveBinding{},        // Round48：归档 ↔ 节点绑定（重试时切回原节点省 GP）
 	)
 
 	migrateFavoriteStateTable()

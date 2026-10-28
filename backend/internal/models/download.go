@@ -68,6 +68,8 @@ type DownloadTask struct {
 	// ForceDeleteOriginal 升级任务标记：画质升级（重下为归档原图）完成后无条件删除旧版，
 	// 不跟随 autoUpdateDeleteOriginal 设置（升级=用户已确认的替换语义）。
 	ForceDeleteOriginal bool `json:"forceDeleteOriginal,omitempty"`
+	// NodeName 归档解锁时使用的出口节点名（高级代理联动开启时写入，仅展示用；AutoMigrate 自动加列）
+	NodeName string `json:"nodeName,omitempty"`
 	// Username 发起者用户名（仅展示用，非数据库字段；管理员管理多用户任务时标识发起者）
 	Username string `gorm:"-" json:"username,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`

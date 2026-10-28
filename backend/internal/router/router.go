@@ -301,6 +301,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/network/proxy", handlers.GetProxyHandler)
 			admin.POST("/network/proxy", handlers.SetProxyHandler)
 
+			// Round48：高级代理设置（Clash 控制面 + 代理组，系统级，仅管理员）
+			admin.GET("/network/advanced", handlers.GetAdvancedProxyHandler)
+			admin.POST("/network/advanced", handlers.SaveAdvancedProxyHandler)
+			admin.POST("/network/clash/test", handlers.TestClashHandler)
+			admin.GET("/network/clash/groups", handlers.ListClashGroupsHandler)
+
 			// Tag 引擎数据同步（系统级，仅管理员）
 			admin.POST("/tags/sync/translation", handlers.SyncTagTranslation)
 			admin.POST("/tags/sync/count", handlers.SyncTagCount)

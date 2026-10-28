@@ -149,6 +149,8 @@ export interface DownloadTask {
   updateForComicId?: string
   // 任务发起者用户名（仅管理员可见；后端由 ListTasks 批量填充，非持久化字段）
   username?: string
+  // Round48：归档解锁时使用的出口节点名（高级代理联动开启时才写入）
+  nodeName?: string
   createdAt: string
   updatedAt: string
 }

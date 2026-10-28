@@ -1,0 +1,2791 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下载列表 · 批量操作 UI 样稿</title>
+<style>
+  /* =====================================================================
+     下载列表批量操作 · 静态交互样稿
+     - 主题变量复刻 App.vue（深色默认 / 浅色 data-theme=light）
+     - 数据全部为演示数据，不连后端；所有操作只改内存
+     ===================================================================== */
+
+  :root {
+    --app-bg: #121212;
+    --app-fg: #e0e0e0;
+    --app-surface: #1a1a1a;
+    --app-surface-hover: #2a2a2a;
+    --app-border: #2a2a2a;
+    --app-accent: #007acc;
+    --app-bg-deep: #0d0d0f;
+    --app-bg-alt: #121214;
+    --app-surface-2: #1a1a1e;
+    --app-surface-2-hover: #222226;
+    --app-surface-3: #242428;
+    --app-surface-3-hover: #2e2e33;
+    --app-input-bg: #121214;
+    --app-text-strong: #ffffff;
+    --app-text-2: #aaa;
+    --app-text-3: #888;
+    --app-text-muted: #666;
+    --app-border-2: #26262a;
+    --app-border-3: #38383e;
+
+    --st-queued: #9aa4ab;
+    --st-queued-soft: rgba(154, 164, 171, 0.15);
+    --st-downloading: #5cb8ff;
+    --st-downloading-soft: rgba(0, 122, 204, 0.17);
+    --st-paused: #d9a441;
+    --st-paused-soft: rgba(217, 164, 65, 0.14);
+    --st-error: #ff6b6b;
+    --st-error-soft: rgba(230, 57, 70, 0.16);
+    --st-lock: #e6a23c;
+    --st-lock-soft: rgba(230, 162, 60, 0.15);
+    --st-completed: #67c23a;
+    --st-completed-soft: rgba(103, 194, 58, 0.15);
+    --st-cancelled: #8a8a92;
+    --st-cancelled-soft: rgba(138, 138, 146, 0.14);
+
+    --toast-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+
+  :root[data-theme='light'] {
+    --app-bg: #f5f5f7;
+    --app-fg: #1c1c1e;
+    --app-surface: #ffffff;
+    --app-surface-hover: #ececef;
+    --app-border: #e2e2e6;
+    --app-accent: #0066b8;
+    --app-bg-deep: #ececef;
+    --app-bg-alt: #f0f0f2;
+    --app-surface-2: #ffffff;
+    --app-surface-2-hover: #f0f0f3;
+    --app-surface-3: #f5f5f7;
+    --app-surface-3-hover: #e8e8ec;
+    --app-input-bg: #ffffff;
+    --app-text-strong: #1c1c1e;
+    --app-text-2: #55555a;
+    --app-text-3: #6b6b72;
+    --app-text-muted: #8a8a92;
+    --app-border-2: #dcdce0;
+    --app-border-3: #d0d0d5;
+
+    --st-queued: #5f6670;
+    --st-queued-soft: rgba(95, 102, 112, 0.09);
+    --st-downloading: #0066b8;
+    --st-downloading-soft: rgba(0, 102, 184, 0.1);
+    --st-paused: #946200;
+    --st-paused-soft: rgba(148, 98, 0, 0.1);
+    --st-error: #c62828;
+    --st-error-soft: rgba(198, 40, 40, 0.08);
+    --st-lock: #946200;
+    --st-lock-soft: rgba(148, 98, 0, 0.1);
+    --st-completed: #2e7d32;
+    --st-completed-soft: rgba(46, 125, 50, 0.1);
+    --st-cancelled: #6b6b72;
+    --st-cancelled-soft: rgba(107, 107, 114, 0.09);
+
+    --toast-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--app-bg);
+    color: var(--app-fg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC',
+      'Hiragino Sans GB', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 48px;
+  }
+
+  button {
+    font-family: inherit;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  ::selection {
+    background: rgba(0, 122, 204, 0.35);
+  }
+
+  /* ── 样稿说明条（不属于产品 UI） ── */
+  .mock-banner {
+    max-width: 1000px;
+    margin: 18px auto 0;
+    padding: 0 20px;
+  }
+
+  .mock-banner-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border: 1px dashed var(--app-border-3);
+    border-radius: 12px;
+    background: var(--app-surface-2);
+  }
+
+  .mock-banner-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: 0.8rem;
+    color: var(--app-text-3);
+    line-height: 1.5;
+  }
+
+  .mock-badge {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--st-paused);
+    border-radius: 999px;
+    color: var(--st-paused);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+
+  .mock-banner-text b {
+    color: var(--app-text-strong);
+    font-weight: 600;
+  }
+
+  .mock-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ctrl-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--app-border-3);
+    border-radius: 7px;
+    background: var(--app-surface-3);
+    color: var(--app-text-2);
+    font-size: 0.76rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .ctrl-btn:hover {
+    border-color: var(--app-accent);
+    color: var(--app-text-strong);
+  }
+
+  /* ── 页面骨架 ── */
+  .page {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 18px 20px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .page-title {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: var(--app-text-strong);
+  }
+
+  .page-title .t-emoji {
+    font-size: 1.05rem;
+  }
+
+  .page-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    color: var(--app-text-3);
+  }
+
+  .page-meta b {
+    color: var(--app-text-strong);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 12px;
+    border-left: 1px solid var(--app-border-2);
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--st-completed);
+    box-shadow: 0 0 0 0 var(--st-completed-soft);
+    animation: live-pulse 2s ease-out infinite;
+  }
+
+  @keyframes live-pulse {
+    0% {
+      box-shadow: 0 0 0 0 var(--st-completed-soft);
+    }
+    70% {
+      box-shadow: 0 0 0 5px transparent;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  /* ── 筛选卡 ── */
+  .filter-card {
+    padding: 12px 14px 2px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 12px;
+    background: var(--app-surface-2);
+    box-shadow: var(--card-shadow);
+  }
+
+  .filter-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 9px;
+    background: var(--app-input-bg);
+  }
+
+  .seg button {
+    padding: 5px 14px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--app-text-3);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }
+
+  .seg button:hover {
+    color: var(--app-text-strong);
+  }
+
+  .seg button.active {
+    background: var(--app-surface-3);
+    color: var(--app-text-strong);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+
+  .filter-hint {
+    font-size: 0.72rem;
+    color: var(--app-text-muted);
+  }
+
+  .tabs-scroll {
+    margin-top: 11px;
+    padding-top: 4px;
+    border-top: 1px solid var(--app-border-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tabs-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs-wrap {
+    position: relative;
+  }
+
+  .tabs-wrap::before,
+  .tabs-wrap::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    display: none;
+    width: 18px;
+    pointer-events: none;
+  }
+
+  .tabs-wrap::before {
+    left: 0;
+    background: linear-gradient(90deg, var(--app-surface-2), transparent);
+  }
+
+  .tabs-wrap::after {
+    right: 0;
+    background: linear-gradient(270deg, var(--app-surface-2), transparent);
+  }
+
+  .tabs {
+    display: flex;
+    min-width: max-content;
+    gap: 2px;
+  }
+
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 11px 9px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 7px 7px 0 0;
+    background: transparent;
+    color: var(--app-text-3);
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }
+
+  .tab:hover {
+    color: var(--app-text-2);
+    background: var(--app-surface-2-hover);
+  }
+
+  .tab.active {
+    color: var(--app-text-strong);
+    border-bottom-color: var(--taccent);
+  }
+
+  .tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .tab-badge {
+    min-width: 20px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--app-surface-3);
+    color: var(--app-text-3);
+    font-size: 0.68rem;
+    line-height: 1.35;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tab.active .tab-badge {
+    background: var(--taccent-soft);
+    color: var(--taccent);
+    font-weight: 700;
+  }
+
+  /* ── 批量操作条 ── */
+  .bulk-bar {
+    --bulk: var(--app-accent);
+    --bulk-soft: rgba(0, 122, 204, 0.14);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 11px 14px;
+    border: 1px solid var(--app-border-2);
+    border-left: 3px solid var(--bulk);
+    border-radius: 10px;
+    background: var(--app-surface-2);
+    box-shadow: var(--card-shadow);
+  }
+
+  .bulk-bar[data-bulk='pause'] {
+    --bulk: var(--st-downloading);
+    --bulk-soft: var(--st-downloading-soft);
+  }
+
+  .bulk-bar[data-bulk='resume'] {
+    --bulk: var(--st-completed);
+    --bulk-soft: var(--st-completed-soft);
+  }
+
+  .bulk-bar[data-bulk='retry'] {
+    --bulk: var(--st-downloading);
+    --bulk-soft: var(--st-downloading-soft);
+  }
+
+  .bulk-bar[data-bulk='cancel'] {
+    --bulk: var(--st-error);
+    --bulk-soft: var(--st-error-soft);
+  }
+
+  .bulk-info {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+  }
+
+  .bulk-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: var(--bulk-soft);
+    color: var(--bulk);
+    font-size: 1rem;
+  }
+
+  .bulk-text {
+    min-width: 0;
+  }
+
+  .bulk-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--app-text-strong);
+    line-height: 1.4;
+  }
+
+  .bulk-title b {
+    color: var(--bulk);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bulk-mode {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--app-text-3);
+  }
+
+  .bulk-sub {
+    margin-top: 1px;
+    font-size: 0.71rem;
+    color: var(--app-text-3);
+  }
+
+  .bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+
+  .bulk-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 15px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: filter 0.15s, background 0.15s, border-color 0.15s;
+  }
+
+  .bulk-btn .bglyph {
+    font-size: 0.8rem;
+    line-height: 1;
+  }
+
+  .bulk-btn.pause,
+  .bulk-btn.retry {
+    background: var(--app-accent);
+    border-color: var(--app-accent);
+    color: #fff;
+  }
+
+  .bulk-btn.resume {
+    background: var(--st-completed);
+    border-color: var(--st-completed);
+    color: #0c2006;
+  }
+
+  :root[data-theme='light'] .bulk-btn.resume {
+    color: #fff;
+  }
+
+  .bulk-btn.cancel {
+    background: transparent;
+    border-color: var(--st-error);
+    color: var(--st-error);
+  }
+
+  .bulk-btn:hover {
+    filter: brightness(1.08);
+  }
+
+  .bulk-btn.cancel:hover {
+    background: var(--st-error-soft);
+    filter: none;
+  }
+
+  .bulk-btn:active {
+    transform: translateY(1px);
+  }
+
+  .bulk-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .bulk-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--app-border-3);
+  }
+
+  .bulk-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 220px;
+    max-width: 320px;
+    flex: 1;
+    justify-content: flex-end;
+    font-size: 0.75rem;
+    color: var(--app-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-track {
+    flex: 1;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--app-border-2);
+    overflow: hidden;
+  }
+
+  .progress-track i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--bulk);
+    transition: width 0.1s linear;
+  }
+
+  .bulk-counter {
+    flex: none;
+    color: var(--bulk);
+    font-weight: 700;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    border: 2px solid var(--app-border-3);
+    border-top-color: var(--bulk, var(--app-accent));
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* ── 任务列表 ── */
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .task-card {
+    --st: var(--st-queued);
+    position: relative;
+    display: flex;
+    gap: 14px;
+    padding: 12px 14px 12px 17px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 10px;
+    background: var(--app-surface-2);
+    box-shadow: var(--card-shadow);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .task-card[data-status='downloading'] {
+    --st: var(--st-downloading);
+  }
+  .task-card[data-status='paused'] {
+    --st: var(--st-paused);
+  }
+  .task-card[data-status='error'] {
+    --st: var(--st-error);
+  }
+  .task-card[data-status='error_lock'] {
+    --st: var(--st-lock);
+  }
+  .task-card[data-status='completed'] {
+    --st: var(--st-completed);
+  }
+  .task-card[data-status='cancelled'] {
+    --st: var(--st-cancelled);
+  }
+
+  .task-card::before {
+    content: '';
+    position: absolute;
+    top: 13px;
+    bottom: 13px;
+    left: 0;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--st);
+    opacity: 0.8;
+  }
+
+  .task-card:hover {
+    border-color: rgba(0, 122, 204, 0.55);
+    background: var(--app-surface-2-hover);
+  }
+
+  .cover {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 56px;
+    height: 76px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: linear-gradient(
+      145deg,
+      hsl(var(--h1) 34% 32%),
+      hsl(var(--h2) 38% 17%)
+    );
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  .cover-initial {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1.45rem;
+    font-weight: 700;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+
+  .task-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .task-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .task-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--app-text-strong);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .speed {
+    flex: none;
+    color: var(--st-downloading);
+    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.74rem;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.69rem;
+    line-height: 1.45;
+    white-space: nowrap;
+  }
+
+  .status-badge .sdot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .status-badge[data-status='queued'] {
+    color: var(--st-queued);
+    background: var(--st-queued-soft);
+  }
+  .status-badge[data-status='downloading'] {
+    color: var(--st-downloading);
+    background: var(--st-downloading-soft);
+  }
+  .status-badge[data-status='paused'] {
+    color: var(--st-paused);
+    background: var(--st-paused-soft);
+  }
+  .status-badge[data-status='error'] {
+    color: var(--st-error);
+    background: var(--st-error-soft);
+  }
+  .status-badge[data-status='error_lock'] {
+    color: var(--st-lock);
+    background: var(--st-lock-soft);
+  }
+  .status-badge[data-status='completed'] {
+    color: var(--st-completed);
+    background: var(--st-completed-soft);
+  }
+  .status-badge[data-status='cancelled'] {
+    color: var(--st-cancelled);
+    background: var(--st-cancelled-soft);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .chip {
+    padding: 1px 8px;
+    border: 1px solid var(--app-border-3);
+    border-radius: 999px;
+    color: var(--app-text-2);
+    font-size: 0.69rem;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+
+  .chip.mode.gallery {
+    border-color: rgba(92, 184, 255, 0.4);
+    color: var(--st-downloading);
+  }
+
+  .chip.mode.archive {
+    border-color: rgba(230, 162, 60, 0.42);
+    color: var(--st-paused);
+  }
+
+  .chip.priority {
+    border-color: rgba(230, 162, 60, 0.42);
+    color: var(--st-paused);
+  }
+
+  .chip.priority.zero {
+    border-color: var(--app-border-3);
+    color: var(--app-text-3);
+  }
+
+  .chip.update {
+    border-color: rgba(255, 117, 136, 0.42);
+    color: #ff7588;
+  }
+
+  :root[data-theme='light'] .chip.update {
+    color: #c2185b;
+    border-color: rgba(194, 24, 91, 0.3);
+  }
+
+  .chip.user {
+    border-color: rgba(171, 71, 188, 0.42);
+    color: #ab47bc;
+  }
+
+  :root[data-theme='light'] .chip.user {
+    color: #7b1fa2;
+  }
+
+  .task-error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 8px;
+    border: 1px solid rgba(230, 57, 70, 0.28);
+    border-radius: 6px;
+    background: var(--st-error-soft);
+    color: var(--st-error);
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .task-error .err-icon {
+    flex: none;
+  }
+
+  .task-error .err-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .progress-bar {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--app-border-2);
+    overflow: hidden;
+  }
+
+  .progress-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--st);
+    transition: width 0.25s ease;
+  }
+
+  .task-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .progress-info {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--app-text-3);
+    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.73rem;
+  }
+
+  .progress-info b {
+    color: var(--app-text-2);
+    font-weight: 600;
+  }
+
+  .card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: none;
+  }
+
+  .prio {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 1px 3px;
+    border: 1px solid rgba(230, 162, 60, 0.35);
+    border-radius: 6px;
+    color: var(--st-paused);
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+
+  .prio.locked {
+    opacity: 0.55;
+  }
+
+  .prio button {
+    width: 18px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .prio button:hover:not(:disabled) {
+    background: var(--st-paused-soft);
+  }
+
+  .prio button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .prio-val {
+    min-width: 18px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-btn {
+    padding: 3px 10px;
+    border: 1px solid;
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .card-btn.pause,
+  .card-btn.retry {
+    border-color: var(--app-accent);
+    color: var(--st-downloading);
+  }
+
+  .card-btn.pause:hover,
+  .card-btn.retry:hover {
+    background: var(--st-downloading-soft);
+  }
+
+  .card-btn.resume {
+    border-color: var(--st-completed);
+    color: var(--st-completed);
+  }
+
+  .card-btn.resume:hover {
+    background: var(--st-completed-soft);
+  }
+
+  .card-btn.lock {
+    border-color: var(--st-lock);
+    color: var(--st-lock);
+  }
+
+  .card-btn.lock:hover {
+    background: var(--st-lock-soft);
+  }
+
+  .card-btn.cancel {
+    border-color: rgba(230, 57, 70, 0.6);
+    color: var(--st-error);
+  }
+
+  .card-btn.cancel:hover {
+    background: var(--st-error-soft);
+  }
+
+  /* ── 空态 / 分页 ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 54px 20px;
+    border: 1px dashed var(--app-border-3);
+    border-radius: 12px;
+    background: var(--app-surface-2);
+    text-align: center;
+  }
+
+  .empty-icon {
+    font-size: 1.9rem;
+    opacity: 0.85;
+  }
+
+  .empty-state h3 {
+    margin: 0;
+    color: var(--app-text-strong);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .empty-state p {
+    margin: 0;
+    color: var(--app-text-3);
+    font-size: 0.78rem;
+  }
+
+  .ghost-btn {
+    margin-top: 6px;
+    padding: 6px 14px;
+    border: 1px solid var(--app-border-3);
+    border-radius: 7px;
+    background: var(--app-surface-3);
+    color: var(--app-text-2);
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .ghost-btn:hover {
+    border-color: var(--app-accent);
+    color: var(--app-text-strong);
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding-top: 4px;
+  }
+
+  .page-btn {
+    padding: 6px 16px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 6px;
+    background: var(--app-surface-2);
+    color: var(--app-text-2);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .page-btn:hover:not(:disabled) {
+    border-color: var(--app-accent);
+    color: var(--app-text-strong);
+  }
+
+  .page-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .page-info {
+    color: var(--app-text-3);
+    font-size: 0.78rem;
+  }
+
+  .page-info b {
+    color: var(--app-text-strong);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Toast ── */
+  .toast-container {
+    position: fixed;
+    top: 22px;
+    right: 22px;
+    z-index: 2100;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 210px;
+    max-width: 360px;
+    padding: 11px 16px;
+    border: 1px solid var(--app-border-3);
+    border-left: 4px solid var(--app-accent);
+    border-radius: 8px;
+    background: var(--app-surface-3);
+    color: var(--app-text-strong);
+    font-size: 0.8rem;
+    box-shadow: var(--toast-shadow);
+    transition: opacity 0.3s, transform 0.3s;
+  }
+
+  .toast.success {
+    border-left-color: var(--st-completed);
+  }
+  .toast.error {
+    border-left-color: var(--st-error);
+  }
+  .toast.info {
+    border-left-color: var(--app-accent);
+  }
+
+  .toast-icon {
+    flex: none;
+    font-weight: 700;
+  }
+  .toast.success .toast-icon {
+    color: var(--st-completed);
+  }
+  .toast.error .toast-icon {
+    color: var(--st-error);
+  }
+  .toast.info .toast-icon {
+    color: var(--st-downloading);
+  }
+
+  .toast.out {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  /* ── 取消确认弹窗 ── */
+  .modal-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-card {
+    width: 100%;
+    max-width: 430px;
+    max-height: calc(100vh - 36px);
+    overflow-y: auto;
+    padding: 20px 22px;
+    border: 1px solid var(--app-border-3);
+    border-radius: 14px;
+    background: var(--app-surface-3);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .modal-head h3 {
+    margin: 0;
+    color: var(--app-text-strong);
+    font-size: 1.02rem;
+    line-height: 1.4;
+  }
+
+  .modal-x {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    margin: -4px -6px 0 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--app-text-3);
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .modal-x:hover {
+    background: var(--app-surface-2-hover);
+    color: var(--app-text-strong);
+  }
+
+  .modal-msg {
+    margin: 10px 0 0;
+    color: var(--app-text-2);
+    font-size: 0.82rem;
+    line-height: 1.65;
+  }
+
+  .modal-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 9px 11px;
+    border: 1px solid rgba(230, 57, 70, 0.3);
+    border-radius: 8px;
+    background: var(--st-error-soft);
+    color: var(--app-text-2);
+    font-size: 0.76rem;
+    line-height: 1.6;
+  }
+
+  .modal-warn .warn-icon {
+    flex: none;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: filter 0.15s, background 0.15s;
+  }
+
+  .btn-ghost {
+    border-color: var(--app-border-3);
+    background: transparent;
+    color: var(--app-text-2);
+  }
+
+  .btn-ghost:hover {
+    background: var(--app-surface-2-hover);
+  }
+
+  .btn-danger {
+    background: #c62828;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .btn-danger:hover {
+    filter: brightness(1.08);
+  }
+
+  /* ── 设计说明（不属于产品 UI） ── */
+  .notes {
+    max-width: 1000px;
+    margin: 26px auto 0;
+    padding: 0 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .notes-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .notes-head h2 {
+    margin: 0;
+    color: var(--app-text-strong);
+    font-size: 1.05rem;
+  }
+
+  .notes-head span {
+    color: var(--app-text-3);
+    font-size: 0.76rem;
+  }
+
+  .note-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: start;
+    min-width: 0;
+  }
+
+  .note-card {
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 10px;
+    background: var(--app-surface-2);
+  }
+
+  .note-card h3 {
+    margin: 0 0 9px;
+    color: var(--app-text-strong);
+    font-size: 0.86rem;
+  }
+
+  .note-card ul,
+  .note-card ol {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--app-text-2);
+    font-size: 0.76rem;
+    line-height: 1.8;
+  }
+
+  .note-card li b {
+    color: var(--app-text-strong);
+  }
+
+  .note-card p {
+    margin: 0;
+    color: var(--app-text-2);
+    font-size: 0.76rem;
+    line-height: 1.7;
+  }
+
+  .note-card code {
+    padding: 1px 5px;
+    border: 1px solid var(--app-border-2);
+    border-radius: 4px;
+    background: var(--app-bg-alt);
+    color: var(--app-text-2);
+    font-size: 0.72rem;
+  }
+
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.73rem;
+    color: var(--app-text-2);
+  }
+
+  .matrix th,
+  .matrix td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--app-border-2);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .matrix th {
+    color: var(--app-text-3);
+    font-weight: 500;
+  }
+
+  .matrix td.yes {
+    color: var(--st-completed);
+    font-weight: 700;
+  }
+
+  .matrix td.no {
+    color: var(--app-text-muted);
+  }
+
+  .q-list {
+    counter-reset: q;
+    list-style: none;
+    padding-left: 0 !important;
+  }
+
+  .q-list li {
+    position: relative;
+    padding-left: 24px;
+    margin-bottom: 7px;
+  }
+
+  .q-list li::before {
+    counter-increment: q;
+    content: 'Q' counter(q);
+    position: absolute;
+    left: 0;
+    top: 2px;
+    padding: 0 4px;
+    border: 1px solid var(--app-border-3);
+    border-radius: 4px;
+    color: var(--app-text-3);
+    font-size: 0.62rem;
+    line-height: 1.5;
+  }
+
+  .q-list li b {
+    color: var(--st-paused);
+  }
+
+  /* ── 窄屏 ── */
+  @media (max-width: 1024px) {
+    .mock-banner,
+    .notes {
+      padding: 0 12px;
+    }
+
+    .mock-banner {
+      margin-top: 12px;
+    }
+
+    .page {
+      padding: 14px 12px 6px;
+      gap: 12px;
+    }
+
+    .page-title {
+      font-size: 1.15rem;
+    }
+
+    .live {
+      padding-left: 0;
+      border-left: 0;
+    }
+
+    .filter-card {
+      padding: 10px 10px 2px;
+    }
+
+    .seg button {
+      padding: 5px 11px;
+      font-size: 0.76rem;
+    }
+
+    .filter-hint {
+      display: none;
+    }
+
+    .tab {
+      padding: 8px 9px 9px;
+      font-size: 0.78rem;
+    }
+
+    /* 窄屏页签横滑时左右渐隐，提示还有更多页签 */
+    .tabs-wrap::before,
+    .tabs-wrap::after {
+      display: block;
+    }
+
+    .bulk-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 10px 12px;
+    }
+
+    .bulk-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .bulk-btn {
+      flex: 1;
+      padding: 9px 10px;
+    }
+
+    .bulk-divider {
+      display: none;
+    }
+
+    .bulk-progress {
+      max-width: none;
+      min-width: 0;
+      justify-content: space-between;
+    }
+
+    .bulk-progress .progress-track {
+      flex: 1;
+    }
+
+    .task-card {
+      gap: 10px;
+      padding: 10px 10px 10px 14px;
+    }
+
+    .cover {
+      width: 46px;
+      height: 62px;
+    }
+
+    .cover-initial {
+      font-size: 1.2rem;
+    }
+
+    .task-title {
+      font-size: 0.84rem;
+    }
+
+    .status-badge {
+      font-size: 0.65rem;
+      padding: 2px 7px;
+    }
+
+    .chip {
+      font-size: 0.66rem;
+    }
+
+    .chip.user,
+    .chip.priority {
+      display: none;
+    }
+
+    .task-foot {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 7px;
+    }
+
+    .progress-info {
+      white-space: normal;
+    }
+
+    .card-actions {
+      justify-content: flex-start;
+    }
+
+    .card-btn {
+      padding: 4px 12px;
+      font-size: 0.74rem;
+    }
+
+    .note-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .notes {
+      margin-top: 20px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .page-header {
+      align-items: flex-start;
+    }
+
+    .page-meta {
+      gap: 8px;
+    }
+
+    .live {
+      font-size: 0.72rem;
+    }
+
+    .task-head {
+      flex-wrap: wrap;
+      gap: 4px 8px;
+    }
+
+    .task-title {
+      flex-basis: 100%;
+    }
+
+    .speed {
+      order: 2;
+    }
+
+    .status-badge {
+      order: 3;
+      margin-left: auto;
+    }
+
+    .pagination {
+      gap: 8px;
+    }
+
+    .page-btn {
+      padding: 6px 11px;
+    }
+
+    .modal-card {
+      padding: 18px;
+    }
+
+    .bulk-title {
+      font-size: 0.82rem;
+    }
+
+    /* 说明区矩阵在窄屏压缩而不是横向溢出（说明文字允许换行） */
+    .matrix th,
+    .matrix td {
+      padding: 4px 5px;
+      font-size: 0.68rem;
+      white-space: normal;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- 样稿说明条：仅用于评审，不进入正式页面 -->
+<div class="mock-banner">
+  <div class="mock-banner-inner">
+    <div class="mock-banner-text">
+      <span class="mock-badge">SAMPLE</span>
+      <span>
+        <b>下载列表 · 批量操作 UI 样稿</b> · 演示数据，不连后端。可点击：切换状态页签 / 执行批量操作 /
+        查看取消确认弹窗 / 暂停与恢复 / 深浅主题；把窗口拖窄可预览窄屏。
+      </span>
+    </div>
+    <div class="mock-controls">
+      <button type="button" class="ctrl-btn" id="theme-btn">☀️ 浅色预览</button>
+      <button type="button" class="ctrl-btn" id="reset-btn">↺ 重置演示数据</button>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="page">
+  <header class="page-header">
+    <h1 class="page-title"><span class="t-emoji">⬇️</span>下载任务列表</h1>
+    <div class="page-meta">
+      <span>共 <b id="stat-total">0</b> 个任务 · 活动 <b id="stat-active">0</b></span>
+      <span class="live"><span class="live-dot"></span>每 2 秒自动刷新</span>
+    </div>
+  </header>
+
+  <section class="filter-card" aria-label="下载筛选">
+    <div class="filter-top">
+      <div class="seg" id="mode-seg" role="group" aria-label="下载模式"></div>
+      <span class="filter-hint">状态页签带任务数量；批量操作随页签变化</span>
+    </div>
+    <div class="tabs-wrap">
+      <div class="tabs-scroll">
+        <div class="tabs" id="tabs" role="tablist" aria-label="下载状态"></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="bulk-slot"></div>
+  <div id="list-slot"></div>
+</div>
+
+<!-- 设计说明：给评审看的，不属于产品 UI -->
+<section class="notes">
+  <div class="notes-head">
+    <h2>设计说明与待确认项</h2>
+    <span>样稿文件：plans/mockups/downloads-bulk-actions.html · 53 条演示任务 · 每页 8 条（实际沿用 20 条/页）</span>
+  </div>
+
+  <div class="note-grid">
+    <div class="note-card">
+      <h3>这一版改了什么</h3>
+      <ul>
+        <li><b>状态页签化</b>：从「一排可切换的胶囊」改为带数量的页签，当前视图与任务规模一眼可见。</li>
+        <li><b>上下文批量条</b>：只在有意义的页签出现，按钮组合随状态变化，标题直接写明数量与模式范围。</li>
+        <li><b>三态反馈</b>：确认（仅取消）→ 执行进度（逐条推进）→ 结果 toast；执行期间暂停轮询。</li>
+        <li><b>卡片信息重整</b>：状态徽标移到标题右侧、错误独立成行、左侧状态色条；优先级与单条操作收进底栏。</li>
+        <li><b>空态与窄屏</b>：操作后当前页签可能瞬间清空，提供空态与「查看全部任务」；窄屏页签横滑、按钮整行。</li>
+      </ul>
+    </div>
+
+    <div class="note-card">
+      <h3>批量按钮出现规则</h3>
+      <div class="table-scroll">
+        <table class="matrix">
+          <thead>
+            <tr><th>页签</th><th>全部暂停</th><th>全部恢复</th><th>全部重试</th><th>全部取消</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>排队中</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+            <tr><td>下载中</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+            <tr><td>已暂停</td><td class="no">—</td><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td></tr>
+            <tr><td>出错</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td>锁定（error_lock）</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+            <tr><td>全部 / 完成 / 已取消</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:8px">规则来源：你的四条要求；「锁定」是 error_lock 的独立页签，任务不能直接重试，只能逐条解锁。</p>
+    </div>
+  </div>
+
+  <div class="note-card">
+    <h3>需要你拍板的点</h3>
+    <ol class="q-list">
+      <li><b>命名</b>：你在需求清单里写「全部重启」，规则 3 又写「全部恢复」；样稿按语义采用「全部恢复」（对应后端 resume）。要改叫「全部重启」也只需换文案。</li>
+      <li><b>锁定页签</b>：是否保留独立页签？样稿保留，且只给「全部取消」。是否需要再加「全部解锁」？</li>
+      <li><b>“全部”页签</b>：样稿不显示任何批量按钮（混合状态容易误操作）。是否要给快捷入口，例如「暂停下载中 4 / 恢复已暂停 12」？</li>
+      <li><b>二次确认</b>：样稿只有「全部取消」弹确认；暂停/恢复/重试直接执行。重试量大时是否也要确认？</li>
+      <li><b>作用范围</b>：样稿按「当前筛选结果的全部任务」执行，跨分页生效（不是只处理当前页）。确认这个口径吗？</li>
+      <li><b>按钮数量</b>：数量显示在批量条标题里，按钮本身不重复数字。是否希望按钮写成「全部暂停 (9)」？</li>
+      <li><b>窄屏位置</b>：样稿批量条在页签下方（随页面滚动）。是否希望在窄屏改成吸附底部的操作条？</li>
+      <li><b>出错与锁定</b>：是否合并成一个「出错」页签？合并后「全部重试」只能作用于可重试任务，容易造成数量歧义。</li>
+    </ol>
+  </div>
+
+  <div class="note-card">
+    <h3>确认后的施工清单（预估）</h3>
+    <ul>
+      <li><b>前端</b>：重构 <code>DownloadsView.vue</code> 为「模式分段 + 状态页签 + 上下文批量条」；批量执行期间暂停 2s 轮询；复用 toast；取消确认建议扩展 <code>useUI.modal.confirm</code> 支持危险按钮与自定义确认文案。</li>
+      <li><b>后端</b>：新增 <code>GET /api/v1/downloads/stats?mode=</code>（按当前用户权限聚合各状态数量）；新增 <code>POST /api/v1/downloads/batch-action</code>（按 <code>status + mode</code> 批量 pause/resume/retry/cancel/unlock，逐条复用管理器方法并返回 affected / failed；取消沿用损坏压缩包清理逻辑）。</li>
+      <li><b>口径</b>：普通用户只能操作自己发起的任务，管理员可操作全部；批量接口必须逐条复核权限与来源状态，避免与轮询竞态时误伤。</li>
+      <li><b>测试</b>：五个状态页签的按钮组合、0 条数据空态、跨页执行、执行中状态变化、非法来源状态跳过、取消含损坏压缩包、窄屏可操作性。</li>
+    </ul>
+  </div>
+</section>
+
+<div class="toast-container" id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="modal-mask" id="modal-slot" hidden></div>
+
+<script>
+  (() => {
+    'use strict';
+
+    /* =====================================================================
+       演示数据
+       ===================================================================== */
+
+    const TITLES = [
+      '[Mizutama] Sakura Canvas',
+      '[Yuki no Koe] Silent Snow',
+      'Paper Moon',
+      'Marine Bloom',
+      'Summer Frame',
+      '[Aoi Tori] Blue Horizon',
+      'Midnight Library',
+      'Kimi no Sketch',
+      '[Hoshizora] Starlight Parade',
+      'Cafe Terrace',
+      'Sora no Iro',
+      '[Tsukimi] Moonlit Garden',
+      'Aozora Step',
+      'Hinata Note',
+      '[Kohaku] Glass Heart',
+      'Yume no Tsuzuki',
+      'Little Planet',
+      'Sound of Waves',
+      '[Shiro] Winter Letter',
+      'Cherry Ribbon',
+      'After School',
+      '[Ame] Rainy Day Memory',
+      'Twilight Train',
+      'Melody Box',
+      'Sunny Side',
+      '[Lemon] Lemon Soda',
+      'Wind Chime',
+      'Night Market',
+      'Morning Glory',
+      '[Kaze] Coastline',
+      'Sweet Memory',
+      'Snowdrop',
+      '[Hotaru] Firefly Night',
+      'Tsubasa',
+      'Orange Peel',
+      'Secret Base',
+      '[Niji] Niji no Hashi',
+      'Bookmark',
+      'First Light',
+      'Futari no Kyori',
+      '[Sakura] Hanami Days',
+      'Blue Hour',
+      '[Kumo] Cloud Nine',
+      'Nostalgia',
+      '[Hikari] Prism',
+      'Sunday Market',
+      'Kokoro no Oto',
+      '[Yozora] Star Map',
+      'Tiny Garden',
+      '[Mizu] Aquarium',
+      'Last Summer',
+      '[Tsuki] Tsukiakari',
+      'Encore',
+    ];
+
+    const PLAN = [
+      { status: 'queued', gallery: 5, archive: 4 },
+      { status: 'downloading', gallery: 3, archive: 1 },
+      { status: 'paused', gallery: 7, archive: 5 },
+      { status: 'error', gallery: 3, archive: 2 },
+      { status: 'error_lock', gallery: 1, archive: 1 },
+      { status: 'completed', gallery: 10, archive: 5 },
+      { status: 'cancelled', gallery: 4, archive: 2 },
+    ];
+
+    const TABS = [
+      {
+        key: 'all',
+        label: '全部',
+        taskLabel: '全部',
+        glyph: '📋',
+        dark: '#5cb8ff',
+        light: '#0066b8',
+        darkSoft: 'rgba(92,184,255,.16)',
+        lightSoft: 'rgba(0,102,184,.10)',
+      },
+      {
+        key: 'queued',
+        label: '排队中',
+        taskLabel: '排队中',
+        glyph: '⏳',
+        dark: '#9aa4ab',
+        light: '#5f6670',
+        darkSoft: 'rgba(154,164,171,.16)',
+        lightSoft: 'rgba(95,102,112,.10)',
+      },
+      {
+        key: 'downloading',
+        label: '下载中',
+        taskLabel: '下载中',
+        glyph: '⬇',
+        dark: '#5cb8ff',
+        light: '#0066b8',
+        darkSoft: 'rgba(92,184,255,.16)',
+        lightSoft: 'rgba(0,102,184,.10)',
+      },
+      {
+        key: 'paused',
+        label: '已暂停',
+        taskLabel: '已暂停',
+        glyph: '⏸',
+        dark: '#d9a441',
+        light: '#946200',
+        darkSoft: 'rgba(217,164,65,.14)',
+        lightSoft: 'rgba(148,98,0,.10)',
+      },
+      {
+        key: 'error',
+        label: '出错',
+        taskLabel: '出错',
+        glyph: '⚠',
+        dark: '#ff6b6b',
+        light: '#c62828',
+        darkSoft: 'rgba(255,107,107,.16)',
+        lightSoft: 'rgba(198,40,40,.08)',
+      },
+      {
+        key: 'error_lock',
+        label: '锁定',
+        taskLabel: '锁定',
+        glyph: '🔒',
+        dark: '#e6a23c',
+        light: '#946200',
+        darkSoft: 'rgba(230,162,60,.15)',
+        lightSoft: 'rgba(148,98,0,.10)',
+      },
+      {
+        key: 'completed',
+        label: '完成',
+        taskLabel: '已完成',
+        glyph: '✓',
+        dark: '#67c23a',
+        light: '#2e7d32',
+        darkSoft: 'rgba(103,194,58,.15)',
+        lightSoft: 'rgba(46,125,50,.10)',
+      },
+      {
+        key: 'cancelled',
+        label: '已取消',
+        taskLabel: '已取消',
+        glyph: '✕',
+        dark: '#8a8a92',
+        light: '#6b6b72',
+        darkSoft: 'rgba(138,138,146,.14)',
+        lightSoft: 'rgba(107,107,114,.09)',
+      },
+    ];
+
+    const STATUS_LABEL = {
+      queued: '排队中',
+      downloading: '下载中',
+      paused: '已暂停',
+      error: '出错',
+      error_lock: 'GP/配额锁定',
+      completed: '完成',
+      cancelled: '已取消',
+    };
+
+    const ACTIONS = {
+      pause: { label: '全部暂停', verb: '暂停', glyph: '⏸', cls: 'pause' },
+      resume: { label: '全部恢复', verb: '恢复', glyph: '▶', cls: 'resume' },
+      retry: { label: '全部重试', verb: '重试', glyph: '↻', cls: 'retry' },
+      cancel: { label: '全部取消', verb: '取消', glyph: '✕', cls: 'cancel' },
+      unlock: { label: '全部解锁', verb: '解锁', glyph: '🔓', cls: 'retry' },
+    };
+
+    const FROM = {
+      pause: ['queued', 'downloading'],
+      resume: ['paused'],
+      retry: ['error'],
+      cancel: ['queued', 'downloading', 'paused', 'error', 'error_lock'],
+      unlock: ['error_lock'],
+    };
+
+    const BULK_BY_STATUS = {
+      queued: ['pause', 'cancel'],
+      downloading: ['pause', 'cancel'],
+      paused: ['resume', 'cancel'],
+      error: ['retry', 'cancel'],
+      error_lock: ['cancel'],
+    };
+
+    const CANCELLABLE = FROM.cancel;
+
+    /* =====================================================================
+       工具函数
+       ===================================================================== */
+
+    const $ = (sel, root = document) => root.querySelector(sel);
+
+    const escapeHtml = (s = '') =>
+      String(s).replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[ch]));
+
+    const fmtBytes = (bytes) => {
+      if (!bytes) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      const mb = bytes / 1024 / 1024;
+      if (mb < 1024) return mb.toFixed(1) + ' MB';
+      return (mb / 1024).toFixed(2) + ' GB';
+    };
+
+    const fmtSpeed = (speed) => {
+      if (!speed) return '0 KB/s';
+      if (speed < 1024 * 1024) return (speed / 1024).toFixed(1) + ' KB/s';
+      return (speed / 1024 / 1024).toFixed(2) + ' MB/s';
+    };
+
+    const initialOf = (title) => {
+      const cleaned = title.replace(/^\[[^\]]+\]\s*/, '');
+      return (cleaned || title).trim().charAt(0).toUpperCase();
+    };
+
+    const percentOf = (t) => {
+      if (t.totalBytes > 0) {
+        return Math.min(100, Math.round((t.doneBytes / t.totalBytes) * 100));
+      }
+      if (t.totalFiles > 0) {
+        return Math.min(100, Math.round((t.doneFiles / t.totalFiles) * 100));
+      }
+      return t.status === 'completed' ? 100 : 0;
+    };
+
+    const displayError = (t) => {
+      const raw = t.error || '';
+      if (t.mode === 'archive' && /429|限流/.test(raw) && !raw.includes('并发数太多')) {
+        return (
+          '⚠️ 并发数太多：H@H 节点限流，请降低归档下载线程数或减少同时下载的归档任务数后重试（' +
+          raw +
+          '）'
+        );
+      }
+      return raw;
+    };
+
+    /* =====================================================================
+       数据构造
+       ===================================================================== */
+
+    function buildTasks() {
+      let ti = 0;
+      let uid = 0;
+      let errorArchiveSeen = 0;
+      const out = [];
+
+      for (const seg of PLAN) {
+        let g = seg.gallery;
+        let a = seg.archive;
+        let pickArchive = false;
+        const modes = [];
+        while (g > 0 || a > 0) {
+          if ((pickArchive && a > 0) || g === 0) {
+            modes.push('archive');
+            a -= 1;
+          } else {
+            modes.push('gallery');
+            g -= 1;
+          }
+          pickArchive = !pickArchive;
+        }
+
+        for (const mode of modes) {
+          const i = out.length;
+          const status = seg.status;
+          const isArchive = mode === 'archive';
+
+          let totalBytes;
+          if (isArchive) {
+            totalBytes = (900 + ((i * 173) % 2100)) * 1024 * 1024;
+          } else {
+            totalBytes = (60 + ((i * 41) % 360)) * 1024 * 1024;
+          }
+          const totalFiles = isArchive ? 0 : 24 + ((i * 7) % 90);
+
+          let pct = 0;
+          if (status === 'queued') pct = i % 4 === 0 ? 0 : 6 + ((i * 11) % 40);
+          else if (status === 'downloading') pct = 18 + ((i * 17) % 67);
+          else if (status === 'paused') pct = 8 + ((i * 19) % 79);
+          else if (status === 'error') pct = 5 + ((i * 23) % 70);
+          else if (status === 'error_lock') pct = 0;
+          else if (status === 'completed') pct = 100;
+          else if (status === 'cancelled') pct = (i % 5) * 8;
+
+          let error = '';
+          let corrupt = false;
+          if (status === 'error') {
+            if (isArchive) {
+              errorArchiveSeen += 1;
+              if (errorArchiveSeen === 1) {
+                error = '解压失败：压缩包损坏（CRC 校验失败）';
+                corrupt = true;
+              } else {
+                error = '分块 ' + (2 + (i % 4)) + ' 返回状态码 429（未获 206）';
+              }
+            } else {
+              error = [
+                '网络超时：连接 e-hentai.org 超时（分块 3/12）',
+                'HTTP 502 Bad Gateway（e-hentai.org）',
+                '读取响应失败：unexpected EOF',
+              ][i % 3];
+            }
+          } else if (status === 'error_lock') {
+            error = 'GP 不足或配额锁定：请明日再试，或点击「解锁」重新排队';
+          }
+
+          let speed = 0;
+          if (status === 'downloading') {
+            speed = 600 * 1024 + ((i * 317) % 5000) * 1024;
+          }
+
+          const title = TITLES[ti] || 'Untitled ' + (ti + 1);
+          ti += 1;
+
+          out.push({
+            id: 't' + String(uid + 1).padStart(3, '0'),
+            title,
+            mode,
+            archiveType: isArchive ? (i % 2 === 0 ? 'original' : 'resample') : '',
+            status,
+            priority: i === 6 ? 0 : 5 + ((i * 13) % 80),
+            group: i % 3 === 0 ? ['A', 'B', 'C'][i % 3] : '',
+            updateForComicId: i % 11 === 3 ? 'comic-' + i : '',
+            username: i % 7 === 0 ? ['alice', 'bob', 'carol'][i % 3] : '',
+            totalBytes,
+            totalFiles,
+            doneBytes: Math.round((totalBytes * pct) / 100),
+            doneFiles: Math.round((totalFiles * pct) / 100),
+            speed,
+            error,
+            corrupt,
+            hue: (i * 47) % 360,
+          });
+          uid += 1;
+        }
+      }
+
+      return out;
+    }
+
+    /* =====================================================================
+       状态
+       ===================================================================== */
+
+    const state = {
+      theme: 'dark',
+      mode: 'all',
+      status: 'all',
+      page: 1,
+      pageSize: 8,
+      tasks: [],
+      bulk: null,
+      modal: null,
+    };
+
+    const scopedTasks = () =>
+      state.tasks.filter((t) => state.mode === 'all' || t.mode === state.mode);
+
+    const viewTasks = () =>
+      scopedTasks().filter((t) => state.status === 'all' || t.status === state.status);
+
+    const counts = () => {
+      const c = {
+        all: 0,
+        queued: 0,
+        downloading: 0,
+        paused: 0,
+        error: 0,
+        error_lock: 0,
+        completed: 0,
+        cancelled: 0,
+      };
+      for (const t of scopedTasks()) {
+        c.all += 1;
+        c[t.status] += 1;
+      }
+      return c;
+    };
+
+    const activeCount = (c) =>
+      c.queued + c.downloading + c.paused + c.error + c.error_lock;
+
+    const findTask = (id) => state.tasks.find((t) => t.id === id);
+
+    /* =====================================================================
+       渲染
+       ===================================================================== */
+
+    function renderModeSeg() {
+      const modes = [
+        { key: 'all', label: '全部' },
+        { key: 'gallery', label: '🖼️ 画廊' },
+        { key: 'archive', label: '🗜️ 归档' },
+      ];
+      return modes
+        .map(
+          (m) =>
+            '<button type="button" class="' +
+            (state.mode === m.key ? 'active' : '') +
+            '" data-act="mode" data-mode="' +
+            m.key +
+            '" role="tab" aria-selected="' +
+            (state.mode === m.key) +
+            '">' +
+            m.label +
+            '</button>',
+        )
+        .join('');
+    }
+
+    function renderTabs(c) {
+      return TABS.map((t) => {
+        const active = state.status === t.key;
+        const color = state.theme === 'dark' ? t.dark : t.light;
+        const soft = state.theme === 'dark' ? t.darkSoft : t.lightSoft;
+        const dot = t.key === 'all' ? '' : '<span class="tab-dot" style="background:' + color + '"></span>';
+        return (
+          '<button type="button" class="tab' +
+          (active ? ' active' : '') +
+          '" data-act="tab" data-status="' +
+          t.key +
+          '" role="tab" aria-selected="' +
+          active +
+          '" style="--taccent:' +
+          color +
+          ';--taccent-soft:' +
+          soft +
+          '">' +
+          dot +
+          '<span>' +
+          t.label +
+          '</span><span class="tab-badge">' +
+          (c[t.key] || 0) +
+          '</span></button>'
+        );
+      }).join('');
+    }
+
+    function renderBulk(c) {
+      if (state.bulk) return renderBulkRunning();
+
+      const status = state.status;
+      const actions = BULK_BY_STATUS[status];
+      const count = c[status] || 0;
+      if (!actions || count === 0) return '';
+
+      const tab = TABS.find((x) => x.key === status);
+      const primary = actions[0];
+      const primaryMeta = ACTIONS[primary];
+      const modeLabel =
+        state.mode === 'all' ? '全部模式' : state.mode === 'gallery' ? '画廊模式' : '归档模式';
+
+      const buttons = actions
+        .map((a, idx) => {
+          const meta = ACTIONS[a];
+          const divider = idx > 0 ? '<span class="bulk-divider"></span>' : '';
+          return (
+            divider +
+            '<button type="button" class="bulk-btn ' +
+            meta.cls +
+            '" data-act="bulk" data-bulk="' +
+            a +
+            '"><span class="bglyph">' +
+            meta.glyph +
+            '</span>' +
+            meta.label +
+            '</button>'
+          );
+        })
+        .join('');
+
+      return (
+        '<section class="bulk-bar" data-bulk="' +
+        primaryMeta.cls +
+        '" aria-label="批量操作">' +
+        '<div class="bulk-info">' +
+        '<span class="bulk-icon">' +
+        tab.glyph +
+        '</span>' +
+        '<div class="bulk-text">' +
+        '<div class="bulk-title">' +
+        tab.taskLabel +
+        '任务 <b>' +
+        count +
+        '</b> 个<span class="bulk-mode">· ' +
+        modeLabel +
+        '</span></div>' +
+        '<div class="bulk-sub">批量操作作用于当前筛选下的全部任务，跨页生效</div>' +
+        '</div>' +
+        '</div>' +
+        '<div class="bulk-actions">' +
+        buttons +
+        '</div>' +
+        '</section>'
+      );
+    }
+
+    function renderBulkRunning() {
+      const { action, total, done, phase } = state.bulk;
+      const meta = ACTIONS[action];
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      const isDone = phase === 'done';
+      const icon = isDone ? '<span class="done-mark">✓</span>' : '<span class="spinner"></span>';
+      return (
+        '<section class="bulk-bar" data-bulk="' +
+        meta.cls +
+        '" aria-live="polite">' +
+        '<div class="bulk-info">' +
+        '<span class="bulk-icon">' +
+        icon +
+        '</span>' +
+        '<div class="bulk-text">' +
+        '<div class="bulk-title">' +
+        (isDone ? '已' + meta.verb + ' ' + total + ' 个任务' : '正在' + meta.verb + ' ' + total + ' 个任务') +
+        '</div>' +
+        '<div class="bulk-sub">' +
+        (isDone ? '结果已刷新，可切换页签查看任务去向' : '执行期间暂停自动刷新，完成后自动恢复') +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '<div class="bulk-progress">' +
+        '<div class="progress-track"><i style="width:' +
+        pct +
+        '%"></i></div>' +
+        '<span class="bulk-counter">' +
+        done +
+        ' / ' +
+        total +
+        '</span>' +
+        '</div>' +
+        '</section>'
+      );
+    }
+
+    function renderPagination(total, pages) {
+      return (
+        '<div class="pagination">' +
+        '<button type="button" class="page-btn" data-act="page" data-dir="-1"' +
+        (state.page <= 1 ? ' disabled' : '') +
+        '>‹ 上一页</button>' +
+        '<span class="page-info">第 <b>' +
+        state.page +
+        '</b> / ' +
+        pages +
+        ' 页 · 共 ' +
+        total +
+        ' 个任务</span>' +
+        '<button type="button" class="page-btn" data-act="page" data-dir="1"' +
+        (state.page >= pages ? ' disabled' : '') +
+        '>下一页 ›</button>' +
+        '</div>'
+      );
+    }
+
+    function renderEmpty() {
+      const tab = TABS.find((x) => x.key === state.status);
+      const filtered = state.status !== 'all' || state.mode !== 'all';
+      return (
+        '<div class="empty-state">' +
+        '<div class="empty-icon">🗂️</div>' +
+        '<h3>' +
+        (filtered ? '「' + tab.label + '」下暂无任务' : '暂无下载任务') +
+        '</h3>' +
+        '<p>' +
+        (filtered ? '切换模式或状态页签看看其它任务。' : '在在线画廊页面点击下载即可加入队列。') +
+        '</p>' +
+        (filtered
+          ? '<button type="button" class="ghost-btn" data-act="reset-filter">查看全部任务</button>'
+          : '') +
+        '</div>'
+      );
+    }
+
+    function renderList() {
+      const list = viewTasks();
+      const total = list.length;
+      const pages = Math.max(1, Math.ceil(total / state.pageSize));
+      if (state.page > pages) state.page = pages;
+      const start = (state.page - 1) * state.pageSize;
+      const pageItems = list.slice(start, start + state.pageSize);
+      if (!pageItems.length) return renderEmpty();
+      return (
+        '<div class="task-list">' +
+        pageItems.map(renderCard).join('') +
+        '</div>' +
+        renderPagination(total, pages)
+      );
+    }
+
+    function renderCard(t) {
+      const pct = percentOf(t);
+      const locked = t.status === 'completed' || t.status === 'cancelled';
+      const canPrio = !locked;
+
+      const chips = [];
+      if (t.mode === 'archive') {
+        chips.push(
+          '<span class="chip mode archive">🗜️ 归档' +
+            (t.archiveType === 'resample' ? '·压缩' : '·原图') +
+            '</span>',
+        );
+      } else {
+        chips.push('<span class="chip mode gallery">🖼️ 画廊</span>');
+      }
+      if (t.group) chips.push('<span class="chip">分组 ' + t.group + '</span>');
+      chips.push(
+        '<span class="chip priority' +
+          (t.priority === 0 ? ' zero' : '') +
+          '">⭐ 优先级 ' +
+          t.priority +
+          '</span>',
+      );
+      if (t.updateForComicId) chips.push('<span class="chip update">🔄 离线更新</span>');
+      if (t.username) chips.push('<span class="chip user">发起者：' + escapeHtml(t.username) + '</span>');
+
+      let actions = '';
+      if (t.status === 'error_lock') {
+        actions += taskBtn(t, 'unlock', '解锁', 'lock');
+      } else if (t.status === 'error') {
+        actions += taskBtn(t, 'retry', '重试', 'retry');
+      }
+      if (t.status === 'queued' || t.status === 'downloading') {
+        actions += taskBtn(t, 'pause', '暂停', 'pause');
+      } else if (t.status === 'paused') {
+        actions += taskBtn(t, 'resume', '恢复', 'resume');
+      }
+      if (CANCELLABLE.includes(t.status)) {
+        actions += taskBtn(t, 'cancel', '取消', 'cancel');
+      }
+
+      const prio =
+        '<span class="prio' +
+        (canPrio ? '' : ' locked') +
+        '" title="下载优先级，数字越大越优先（0-99）">' +
+        '<button type="button" data-act="prio" data-dir="-1" data-id="' +
+        t.id +
+        '" aria-label="降低优先级"' +
+        (!canPrio || t.priority <= 0 ? ' disabled' : '') +
+        '>−</button>' +
+        '<span class="prio-val">' +
+        t.priority +
+        '</span>' +
+        '<button type="button" data-act="prio" data-dir="1" data-id="' +
+        t.id +
+        '" aria-label="提高优先级"' +
+        (!canPrio || t.priority >= 99 ? ' disabled' : '') +
+        '>＋</button>' +
+        '</span>';
+
+      const speed =
+        t.status === 'downloading' && t.speed
+          ? '<span class="speed">' + fmtSpeed(t.speed) + '</span>'
+          : '';
+
+      const errorRow = t.error
+        ? '<div class="task-error" title="' +
+          escapeHtml(displayError(t)) +
+          '"><span class="err-icon">⚠</span><span class="err-text">' +
+          escapeHtml(displayError(t)) +
+          '</span></div>'
+        : '';
+
+      let progressExtra = '';
+      if (t.totalBytes > 0) {
+        progressExtra = ' · ' + fmtBytes(t.doneBytes) + ' / ' + fmtBytes(t.totalBytes);
+      } else if (t.totalFiles > 0) {
+        progressExtra = ' · ' + t.doneFiles + ' / ' + t.totalFiles + ' 文件';
+      }
+
+      return (
+        '<article class="task-card" data-status="' +
+        t.status +
+        '" data-id="' +
+        t.id +
+        '" title="点击查看《' +
+        escapeHtml(t.title) +
+        '》在线详情">' +
+        '<div class="cover" style="--h1:' +
+        t.hue +
+        ';--h2:' +
+        ((t.hue + 40) % 360) +
+        '"><span class="cover-initial">' +
+        escapeHtml(initialOf(t.title)) +
+        '</span></div>' +
+        '<div class="task-main">' +
+        '<div class="task-head">' +
+        '<h3 class="task-title" title="' +
+        escapeHtml(t.title) +
+        '">' +
+        escapeHtml(t.title) +
+        '</h3>' +
+        speed +
+        '<span class="status-badge" data-status="' +
+        t.status +
+        '"><span class="sdot"></span>' +
+        STATUS_LABEL[t.status] +
+        '</span>' +
+        '</div>' +
+        '<div class="chips">' +
+        chips.join('') +
+        '</div>' +
+        errorRow +
+        '<div class="progress-bar" data-status="' +
+        t.status +
+        '"><i style="width:' +
+        pct +
+        '%"></i></div>' +
+        '<div class="task-foot">' +
+        '<span class="progress-info"><b>' +
+        pct +
+        '%</b>' +
+        progressExtra +
+        '</span>' +
+        '<div class="card-actions">' +
+        prio +
+        actions +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '</article>'
+      );
+    }
+
+    function taskBtn(t, op, label, cls) {
+      return (
+        '<button type="button" class="card-btn ' +
+        cls +
+        '" data-act="task" data-op="' +
+        op +
+        '" data-id="' +
+        t.id +
+        '">' +
+        label +
+        '</button>'
+      );
+    }
+
+    function render() {
+      const c = counts();
+      $('#stat-total').textContent = scopedTasks().length;
+      $('#stat-active').textContent = activeCount(c);
+      $('#mode-seg').innerHTML = renderModeSeg();
+      $('#tabs').innerHTML = renderTabs(c);
+      $('#bulk-slot').innerHTML = renderBulk(c);
+      $('#list-slot').innerHTML = renderList();
+      $('#theme-btn').textContent = state.theme === 'dark' ? '☀️ 浅色预览' : '🌙 深色预览';
+    }
+
+    // 窄屏页签可横滑：切换后把当前页签居中（只动横向滚动，不带动页面）
+    function centerActiveTab() {
+      const active = document.querySelector('.tab.active');
+      const scroller = active && active.closest('.tabs-scroll');
+      if (!active || !scroller) return;
+      const centered =
+        active.offsetLeft + active.offsetWidth / 2 - scroller.clientWidth / 2;
+      const max = scroller.scrollWidth - scroller.clientWidth;
+      scroller.scrollLeft = Math.max(0, Math.min(centered, max));
+    }
+
+    /* =====================================================================
+       交互
+       ===================================================================== */
+
+    function toast(type, message) {
+      const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.innerHTML =
+        '<span class="toast-icon">' +
+        icon +
+        '</span><span>' +
+        escapeHtml(message) +
+        '</span>';
+      $('#toasts').appendChild(el);
+      window.setTimeout(() => el.classList.add('out'), 2600);
+      window.setTimeout(() => el.remove(), 3000);
+    }
+
+    function setPriority(id, delta) {
+      const t = findTask(id);
+      if (!t || t.status === 'completed' || t.status === 'cancelled') return;
+      const next = Math.max(0, Math.min(99, t.priority + delta));
+      if (next === t.priority) return;
+      t.priority = next;
+      render();
+      toast('success', '已设置优先级 ' + next);
+    }
+
+    function switchTab(key) {
+      if (state.bulk) return;
+      state.status = key;
+      state.page = 1;
+      render();
+      centerActiveTab();
+    }
+
+    function switchMode(mode) {
+      if (state.bulk) return;
+      state.mode = mode;
+      state.page = 1;
+      render();
+    }
+
+    function changePage(dir) {
+      if (state.bulk) return;
+      const pages = Math.max(1, Math.ceil(viewTasks().length / state.pageSize));
+      const next = state.page + dir;
+      if (next < 1 || next > pages) return;
+      state.page = next;
+      render();
+    }
+
+    function applyAction(t, action) {
+      const to = {
+        pause: 'paused',
+        resume: 'queued',
+        retry: 'queued',
+        cancel: 'cancelled',
+        unlock: 'queued',
+      }[action];
+      if (!to) return;
+      t.status = to;
+      t.speed = 0;
+      if (action === 'retry' || action === 'unlock' || action === 'cancel') t.error = '';
+    }
+
+    function onTaskAction(op, id) {
+      if (state.bulk) return;
+      const t = findTask(id);
+      if (!t) return;
+      if (op === 'cancel') {
+        openCancelModal([t], 'task');
+        return;
+      }
+      if (!(FROM[op] || []).includes(t.status)) return;
+      applyAction(t, op);
+      render();
+      const verb = ACTIONS[op].verb;
+      toast('success', '已' + verb + '《' + t.title + '》');
+    }
+
+    function onBulk(action) {
+      if (state.bulk) return;
+      const targets = viewTasks().filter((t) => (FROM[action] || []).includes(t.status));
+      if (!targets.length) return;
+      if (action === 'cancel') {
+        openCancelModal(targets, 'bulk');
+        return;
+      }
+      startBulk(action, targets);
+    }
+
+    function startBulk(action, targets) {
+      const corrupt = targets.filter((t) => t.corrupt).length;
+      state.bulk = { action, total: targets.length, done: 0, phase: 'running', corrupt };
+      render();
+      let i = 0;
+      const step = () => {
+        if (i >= targets.length) {
+          finishBulk();
+          return;
+        }
+        applyAction(targets[i], action);
+        i += 1;
+        state.bulk.done = i;
+        render();
+        window.setTimeout(step, 90);
+      };
+      window.setTimeout(step, 300);
+    }
+
+    function finishBulk() {
+      const { action, total, corrupt } = state.bulk;
+      state.bulk.phase = 'done';
+      state.bulk.done = total;
+      render();
+
+      const meta = ACTIONS[action];
+      let message = '已' + meta.verb + ' ' + total + ' 个任务';
+      if (action === 'retry') message = '已重新排队 ' + total + ' 个任务';
+      if (action === 'resume') message = '已恢复 ' + total + ' 个任务，任务已回到排队中';
+      if (action === 'pause') message = '已暂停 ' + total + ' 个任务';
+      if (action === 'cancel' && corrupt) {
+        message += '，其中 ' + corrupt + ' 个损坏压缩包已删除';
+      }
+      toast('success', message);
+
+      window.setTimeout(() => {
+        state.bulk = null;
+        render();
+      }, 1500);
+    }
+
+    function openCancelModal(targets, kind) {
+      const corrupt = targets.filter((t) => t.corrupt).length;
+      const pages = Math.max(1, Math.ceil(viewTasks().length / state.pageSize));
+      const statusLabel = TABS.find((x) => x.key === state.status).label;
+
+      const title = kind === 'bulk' ? '取消 ' + targets.length + ' 个任务？' : '取消下载？';
+      const message =
+        kind === 'bulk'
+          ? '即将取消「' +
+            statusLabel +
+            '」视图下的全部 ' +
+            targets.length +
+            ' 个任务' +
+            (pages > 1 ? '（跨 ' + pages + ' 页）' : '') +
+            '。取消后任务将移入「已取消」，无法继续下载。'
+          : '确定取消下载《' +
+            escapeHtml(targets[0].title) +
+            '》吗？取消后任务将移入「已取消」，无法继续下载。';
+
+      const warning = corrupt
+        ? kind === 'bulk'
+          ? '其中 ' +
+            corrupt +
+            ' 个归档任务解压失败：取消后将删除损坏的压缩包与半解压文件，下次需要重新下载。'
+          : '该任务解压失败（压缩包已损坏）：取消将删除损坏的压缩包与半解压文件，下次下载需重新下载。'
+        : '';
+
+      const confirmText =
+        kind === 'bulk' ? '确认取消 ' + targets.length + ' 个' : '确认取消';
+
+      state.modal = { targets, kind };
+
+      $('#modal-slot').innerHTML =
+        '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+        '<div class="modal-head">' +
+        '<h3 id="modal-title">' +
+        title +
+        '</h3>' +
+        '<button type="button" class="modal-x" data-act="modal-close" aria-label="关闭">×</button>' +
+        '</div>' +
+        '<p class="modal-msg">' +
+        message +
+        '</p>' +
+        (warning
+          ? '<div class="modal-warn"><span class="warn-icon">⚠️</span><div>' + warning + '</div></div>'
+          : '') +
+        '<div class="modal-actions">' +
+        '<button type="button" class="btn btn-ghost" data-act="modal-close">再想想</button>' +
+        '<button type="button" class="btn btn-danger" data-act="modal-confirm">' +
+        confirmText +
+        '</button>' +
+        '</div>' +
+        '</div>';
+      $('#modal-slot').hidden = false;
+    }
+
+    function closeModal() {
+      state.modal = null;
+      $('#modal-slot').hidden = true;
+      $('#modal-slot').innerHTML = '';
+    }
+
+    function confirmModal() {
+      const modal = state.modal;
+      if (!modal) return;
+      const targets = modal.targets.slice();
+      closeModal();
+      startBulk('cancel', targets);
+    }
+
+    /* =====================================================================
+       事件绑定
+       ===================================================================== */
+
+    $('#page').addEventListener('click', (e) => {
+      const el = e.target.closest('[data-act]');
+      if (el) {
+        const act = el.dataset.act;
+        if (act === 'tab') switchTab(el.dataset.status);
+        else if (act === 'mode') switchMode(el.dataset.mode);
+        else if (act === 'bulk') onBulk(el.dataset.bulk);
+        else if (act === 'page') changePage(Number(el.dataset.dir));
+        else if (act === 'task') onTaskAction(el.dataset.op, el.dataset.id);
+        else if (act === 'prio') setPriority(el.dataset.id, Number(el.dataset.dir));
+        else if (act === 'reset-filter') {
+          state.mode = 'all';
+          state.status = 'all';
+          state.page = 1;
+          render();
+          centerActiveTab();
+        }
+        return;
+      }
+      if (e.target.closest('.task-card')) {
+        toast('info', '样稿：点击卡片会打开在线详情（此处不跳转）');
+      }
+    });
+
+    $('#modal-slot').addEventListener('click', (e) => {
+      if (e.target === $('#modal-slot')) {
+        closeModal();
+        return;
+      }
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      if (el.dataset.act === 'modal-close') closeModal();
+      else if (el.dataset.act === 'modal-confirm') confirmModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state.modal) closeModal();
+    });
+
+    $('#theme-btn').addEventListener('click', () => {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = state.theme;
+      render();
+    });
+
+    $('#reset-btn').addEventListener('click', () => {
+      if (state.bulk) return;
+      state.tasks = buildTasks();
+      state.mode = 'all';
+      state.status = 'all';
+      state.page = 1;
+      state.bulk = null;
+      closeModal();
+      render();
+      centerActiveTab();
+      toast('info', '演示数据已重置');
+    });
+
+    /* =====================================================================
+       启动
+       ===================================================================== */
+
+    state.tasks = buildTasks();
+    render();
+    centerActiveTab();
+  })();
+</script>
+</body>
+</html>

@@ -1092,7 +1092,7 @@ onUnmounted(() => {
 
 <style scoped>
 /* ─────────────────────────────────────────────────────────────
-   Round44 维护页 v3 样式（布局对齐 Test/mockups 样稿）
+   Round44 维护页 v3 样式（布局对齐 _local/Test/mockups 样稿）
    ───────────────────────────────────────────────────────────── */
 .maintenance-page {
   display: flex;

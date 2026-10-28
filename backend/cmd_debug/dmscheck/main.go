@@ -4,7 +4,7 @@
 // parent_ / child_ / #gdd Parent 行的完整结构与**顺序**，用于确认更新链的罗列方向
 // （从旧到新还是从新到旧），以决定更新检测应取第一个还是最后一个新版本。
 //
-// 用法：cd backend && go run ./cmd_debug/dmscheck ../MangaExamlpe/Page/3990907.html
+// 用法：cd backend && go run ./cmd_debug/dmscheck ../_local/MangaExamlpe/Page/3990907.html
 package main
 
 import (

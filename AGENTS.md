@@ -22,8 +22,9 @@
 
 ## 不可入库清单（.gitignore 已覆盖）
 
-- 运行时数据：`manga.db*`、`/data/`、`backend/data/*`、`backend/cover_cache/`、`/Server/`
-- 测试素材/账号：`/MangaExamlpe`、`/Test`、`/JHentai`、`SakuManga测试账号,网站与Ehentai账户.md`
+- 运行时数据：`manga.db*`、`/data/`、`backend/data/*`、`backend/cover_cache/`
+- 本地资产：`/_local/`（测试素材 `MangaExamlpe`、参考源码 `JHentai`、本机实例 `Test`/`Server`、图标备份 `icon`）
+- 测试账号：`SakuManga测试账号,网站与Ehentai账户.md`
 - 构建产物：`/dist`（根目录）、`/SakuManga*.exe`、`*.tsbuildinfo`、`logs/`
 - 工具目录：`.dsh/`（含 skill 与脱敏清单，仅本机使用，不入库）
 - 调试输出：`backend/ziprangecheck_out/`

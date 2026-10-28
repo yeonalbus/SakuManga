@@ -3,7 +3,7 @@
  *
  * 词云的排版与配色参数，持久化到 localStorage，用户可在词云面板的「⚙️ 词云参数」里自行调节。
  * 默认值与 DSPlans/plans/round32-xp-cloud-recommend-plan.md 第十一章（视觉改版）一致，
- * 也与验收样板 Test/pw-bug/xp-mock/wordcloud-mock.html 的参数保持一致。
+ * 也与验收样板 _local/Test/pw-bug/xp-mock/wordcloud-mock.html 的参数保持一致。
  */
 import { reactive, watch } from 'vue'
 import { loadStorage, saveStorage } from '@/utils/storage'

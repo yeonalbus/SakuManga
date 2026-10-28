@@ -59,20 +59,14 @@ backend/data/*.tmp
 /SakuManga.exe
 /SakuManga-*.exe
 
-# 测试用漫画
-/MangaExamlpe
-/Test
-/JHentai
-SakuManga测试账号,网站与Ehentai账户.md
+# 本地资产：测试素材 / 参考源码 / 本机实例 / 图标备份（勿入库）
+/_local/
 
-# 备份文件
-/icon
+# 测试账号文档
+SakuManga测试账号,网站与Ehentai账户.md
 
 # DSH 工作目录（工具生成，勿入库）
 .dsh/
-
-# 服务器部署实例（运行时数据与可执行文件，勿提交）
-/Server/
 
 # 后端运行时封面缓存
 backend/cover_cache/

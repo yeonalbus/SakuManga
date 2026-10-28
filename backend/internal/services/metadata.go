@@ -16,7 +16,7 @@ import (
 )
 
 // 1. ComicInfo.xml 结构体映射
-// 字段对齐 JHentai/ComicInfo/comic_info.dart 的 EHGalleryComicInfo 输出
+// 字段对齐 _local/JHentai/ComicInfo/comic_info.dart 的 EHGalleryComicInfo 输出
 // （Title/Series/AlternateSeries/Writer/Penciller/Genre/Tags/Web/PageCount/
 //   LanguageISO/BlackAndWhite/Manga/Characters/Locations/AgeRating/CommunityRating）。
 // 可选字段使用 omitempty：仅在非空时输出，与 JHentai 的 isEmptyOrNull 判断一致。

@@ -331,7 +331,7 @@ var addedAtRegex = regexp.MustCompile(`added\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})
 
 // parseGalleryRelations 解析详情页中的画廊关系：父画廊 / 更新版列表 / 子画廊。
 //
-// 说明（基于 MangaExamlpe/Page 真实详情页验证）：
+// 说明（基于 _local/MangaExamlpe/Page 真实详情页验证）：
 //  1. 父画廊：<a id="parent_0" href="/g/..."> 或 #gdd 元数据表中标签为 "Parent:" 的行。
 //  2. 更新版列表：真实页面中 "There are newer versions of this gallery available:" 横幅
 //     直接位于 <div id="gnd"> 内部（旧版 E 站页面也可能用 #dms 容器），它罗列**所有**更新版本，

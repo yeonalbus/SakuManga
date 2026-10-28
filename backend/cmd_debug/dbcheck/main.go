@@ -1,4 +1,4 @@
-// Package main 调试工具：查询 Test/manga.db 中 offline_comics 的关系字段现状
+// Package main 调试工具：查询 _local/Test/manga.db 中 offline_comics 的关系字段现状
 // （验证 查重/更新检测 返回 0 时，DB 中 parent_g_id / needs_update 等字段的真实值）
 package main
 
@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "../Test/manga.db", "sqlite 数据库路径（相对 backend/ 目录）")
+	dbPath := flag.String("db", "../_local/Test/manga.db", "sqlite 数据库路径（相对 backend/ 目录）")
 	flag.Parse()
 
 	if _, err := os.Stat(*dbPath); err != nil {

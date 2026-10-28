@@ -1,6 +1,6 @@
 // Package main 更新检测 + 维护查重 判定逻辑离线仿真验证工具
 //
-// 不联网、不依赖账号：用 MangaExamlpe/Page 下的真实详情页 HTML + Test/manga.db 的真实
+// 不联网、不依赖账号：用 _local/MangaExamlpe/Page 下的真实详情页 HTML + _local/Test/manga.db 的真实
 // 漫画记录，逐行复刻 services.CheckUpdates（A1/A2/A3 + B）与 services.MaintainDedup（3a/3b）
 // 的判定逻辑，确定性验证 4019697→4051934 子孙对能否被正确检出。
 //
@@ -22,8 +22,8 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "../Test/manga.db", "sqlite 数据库路径（相对 backend/）")
-	pageDir := flag.String("page", "../MangaExamlpe/Page", "详情页 HTML 目录")
+	dbPath := flag.String("db", "../_local/Test/manga.db", "sqlite 数据库路径（相对 backend/）")
+	pageDir := flag.String("page", "../_local/MangaExamlpe/Page", "详情页 HTML 目录")
 	flag.Parse()
 
 	db, err := gorm.Open(sqlite.Open(*dbPath), &gorm.Config{})

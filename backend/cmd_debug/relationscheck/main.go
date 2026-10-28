@@ -1,11 +1,11 @@
 // Package main 画廊关系选择器离线验证工具
 //
-// 读取用户从 E 站抓取的真实详情页 HTML（MangaExamlpe/Page/*.html），
+// 读取用户从 E 站抓取的真实详情页 HTML（_local/MangaExamlpe/Page/*.html），
 // 调用 services.ParseGalleryRelationsFromHTML 复用与在线流程完全一致的选择器逻辑，
 // 验证 #dms（更新版横幅）/ #gnd（子画廊）/ #gdd-Parent / a[id^='parent_'] / a[id^='child_']
 // 在真实 DOM 上能否命中。
 //
-// 用法：cd backend && go run ./cmd_debug/relationscheck -dir ../MangaExamlpe/Page
+// 用法：cd backend && go run ./cmd_debug/relationscheck -dir ../_local/MangaExamlpe/Page
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "../MangaExamlpe/Page", "存放详情页 HTML 的目录")
+	dir := flag.String("dir", "../_local/MangaExamlpe/Page", "存放详情页 HTML 的目录")
 	flag.Parse()
 
 	files, err := filepath.Glob(filepath.Join(*dir, "*.html"))

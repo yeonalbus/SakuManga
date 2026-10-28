@@ -1,7 +1,7 @@
 // Package main 归档下载 404 诊断工具
 //
 // 目的：更新下载失败（archiver.php 返回 404）的根因定位。
-// 用 Test/manga.db 中的 admin 账号凭证，分别请求表站 / 里站的：
+// 用 _local/Test/manga.db 中的 admin 账号凭证，分别请求表站 / 里站的：
 //
 //	① 画廊详情页 /g/{gid}/{token}/     → 判断画廊是否存在 / 是否 Ex-only / token 是否有效
 //	② archiver.php?gid=&token=        → 判断归档是否可访问（404 根因）
@@ -30,7 +30,7 @@ import (
 const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 func main() {
-	dbPath := flag.String("db", "../Test/manga.db", "sqlite 数据库路径（相对 backend/）")
+	dbPath := flag.String("db", "../_local/Test/manga.db", "sqlite 数据库路径（相对 backend/）")
 	gid := flag.String("gid", "4086937", "要检查的画廊 gid")
 	token := flag.String("token", "c9967316cd", "要检查的画廊 token")
 	flag.Parse()

@@ -73,3 +73,6 @@ backend/cover_cache/
 
 # 调试工具输出目录
 backend/ziprangecheck_out/
+
+# 调研产出（含 E 站批量下载优化等敏感内容与实测日志分析，勿入库）
+DSPlans/Research/

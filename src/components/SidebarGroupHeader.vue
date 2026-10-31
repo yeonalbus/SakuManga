@@ -7,30 +7,40 @@
  * 本组件把标题行统一到书架口径：
  *   [标题][角标][actions 插槽] ← 伸缩空隙 → [❯]
  * 整行可点击切换折叠，箭头展开时旋转 90°；actions 区点击不冒泡（避免误触折叠）。
+ *
+ * Round49：新增 `collapsible=false` 变体——书签组恒定平铺、不显示箭头，
+ * 整行点击改为 emit('activate')（进入书签页）。书架仍走默认折叠模式，行为不变。
  */
-defineProps<{
+const props = defineProps<{
   /** 标题文字（如「书架」「书签」） */
   title: string
-  /** 展开状态（驱动箭头旋转） */
-  open: boolean
+  /** 展开状态（折叠模式下驱动箭头旋转；collapsible=false 时忽略） */
+  open?: boolean
+  /** 是否可折叠：false = 恒定平铺、无箭头，点击整行触发 activate */
+  collapsible?: boolean
   /** 计数角标（如折叠时的书签总数），不传则不渲染 */
   badge?: number | string
   /** 角标 hover 提示 */
   badgeTitle?: string
 }>()
 
-const emit = defineEmits<{ toggle: [] }>()
+const emit = defineEmits<{ toggle: []; activate: [] }>()
+
+const handleClick = () => {
+  if (props.collapsible === false) emit('activate')
+  else emit('toggle')
+}
 </script>
 
 <template>
-  <div class="fold-header" @click="emit('toggle')">
+  <div class="fold-header" @click="handleClick">
     <span class="fh-title">{{ title }}</span>
     <span v-if="badge !== undefined && badge !== ''" class="fh-badge" :title="badgeTitle">{{ badge }}</span>
-    <!-- 操作区：@click.stop 防止点「🔎 检测 / 🧹 清理」时连带折叠分组 -->
+    <!-- 操作区：@click.stop 防止点分区按钮时连带折叠分组 -->
     <span class="fh-actions" @click.stop>
       <slot name="actions" />
     </span>
-    <span class="arrow" :class="{ open }">❯</span>
+    <span v-if="collapsible !== false" class="arrow" :class="{ open }">❯</span>
   </div>
 </template>
 

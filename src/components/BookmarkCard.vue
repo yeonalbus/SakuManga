@@ -210,7 +210,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   border: 1px solid var(--app-border-3);
   border-radius: 10px;
   cursor: pointer;
-  overflow: hidden;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;

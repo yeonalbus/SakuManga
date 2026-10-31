@@ -15,7 +15,7 @@ import (
 )
 
 // FetchWatchedList 抓取 E 站订阅列表 (/watched)
-func (s *EHService) FetchWatchedList(account *models.AccountSetting, params SearchParams,setting *models.EHSetting) (*OnlineComicResult, error) {
+func (s *EHService) FetchWatchedList(account *models.AccountSetting, params SearchParams, setting *models.EHSetting) (*OnlineComicResult, error) {
 	// 1. 订阅（Watched）页面强依赖 E 站 Cookie，必须先校验账号登录状态
 	if account == nil || account.IPBMemberID == "" || account.IPBPassHash == "" {
 		return nil, errors.New("未登录 E 站账号或 Cookie 无效，无法获取订阅列表")
@@ -29,7 +29,9 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 	// 2. 指向 /watched 端点
 	// Round15-Bug2：订阅（Watched）是 E 站表站功能，EX 站 /watched 无内容（返回首页/空），
 	// 固定指向 e-hentai.org（ex 账号 Cookie 访问表站 /watched 仍能读取订阅列表）。
-	reqURL, _ := url.Parse("https://e-hentai.org/")
+	// Round49：修正——此前这里漏写路径，请求的其实是表站首页，于是「订阅页实则是首页」，
+	// 用户误以为 E 站订阅功能不生效。改为真正的 /watched 端点。
+	reqURL, _ := url.Parse("https://e-hentai.org/watched")
 	q := reqURL.Query()
 
 	// 3. 拼接搜索关键词
@@ -87,6 +89,15 @@ func (s *EHService) FetchWatchedList(account *models.AccountSetting, params Sear
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("E 站订阅页响应状态异常: %d", resp.StatusCode)
+	}
+
+	// Round49：防「静默退回首页」——若 E 站把 /watched 重定向到首页（未登录 / 无关注标签等），
+	// 绝不能把首页列表当作订阅列表返回（此前正是这个假象让用户以为"订阅不生效"）。
+	if resp.Request != nil && resp.Request.URL != nil &&
+		!strings.HasPrefix(resp.Request.URL.Path, "/watched") {
+		return nil, fmt.Errorf(
+			"E 站未返回订阅页（被重定向到 %s，可能未登录或尚未关注任何标签）",
+			resp.Request.URL.Path)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)

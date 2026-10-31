@@ -1,10 +1,15 @@
 /**
- * 书签备注的输入限制（Round49 修正）
+ * 书签备注的输入限制（Round49 修正 v2）
  *
- * 规则（与卡片显示区一致，用户实测）：
+ * 规则（与名片显示区一致）：
  *   - 总宽度：110 个半角单位 = 55 个中文字符（1 个中文字符 = 2 个半角字符宽度）
- *   - 行数：最多 3 行
- *   - 每行：最多 19 个中文字符（38 半角单位）——对应当前名片宽度下的一行容量
+ *   - 显示行数：最多 3 行（按「每行 19 个中文字符 = 38 半角单位」折算，
+ *     含浏览器自动折行；显式换行与自动折行一视同仁）
+ *
+ * 为什么不再按「显式行」卡每行 19 字：textarea 会自动软换行，
+ * 用户没按回车时文本里根本没有 \n，按显式行校验会把一整段误报成「每行超限」。
+ * 正确判据是「折行后总行数 ≤ 3」：
+ *   每段占行数 = ceil(该段宽度 / 38)，空段也算 1 行，各段求和。
  *
  * 超限一律「报错并拒绝保存」，不做静默截断（用户明确要求）。
  */
@@ -13,11 +18,11 @@
 export const NOTE_MAX_CN_CHARS = 55
 /** 备注上限（半角宽度单位）= 110 */
 export const NOTE_MAX_WIDTH = NOTE_MAX_CN_CHARS * 2
-/** 最多行数 */
+/** 最多显示行数 */
 export const NOTE_MAX_LINES = 3
-/** 每行上限：19 个中文字符 */
+/** 每行容量：19 个中文字符 */
 export const NOTE_MAX_LINE_CN_CHARS = 19
-/** 每行上限（半角宽度单位）= 38 */
+/** 每行容量（半角宽度单位）= 38 */
 export const NOTE_MAX_LINE_WIDTH = NOTE_MAX_LINE_CN_CHARS * 2
 
 /**
@@ -34,48 +39,48 @@ export interface NoteValidation {
   width: number
   /** 折算为中文字符数（width / 2，保留一位小数） */
   cnChars: number
-  /** 行数 */
+  /** 显式行数（按 \n 切分） */
   lines: number
+  /** 折算后的显示行数（含自动折行） */
+  displayLines: number
   overWidth: boolean
   overLines: boolean
-  overLineWidth: boolean
   ok: boolean
   /** 超限原因（ok 时为空串） */
   error: string
 }
 
-/** 校验备注文本：超限原因优先按「行数 → 单行 → 总宽」顺序给出 */
+/** 校验备注文本 */
 export const validateNote = (text: string): NoteValidation => {
-  const lines = (text ?? '').split('\n')
+  const segments = (text ?? '').split('\n')
   let width = 0
-  let overLineWidth = false
-  for (const line of lines) {
-    let lineWidth = 0
-    for (const ch of line) {
+  let displayLines = 0
+  for (const seg of segments) {
+    let segWidth = 0
+    for (const ch of seg) {
       const w = charDisplayWidth(ch)
-      lineWidth += w
+      segWidth += w
       width += w
     }
-    if (lineWidth > NOTE_MAX_LINE_WIDTH) overLineWidth = true
+    // 每段按「每行 38 半角」折算显示行数；空段也占 1 行
+    displayLines += Math.max(1, Math.ceil(segWidth / NOTE_MAX_LINE_WIDTH))
   }
   const overWidth = width > NOTE_MAX_WIDTH
-  const overLines = lines.length > NOTE_MAX_LINES
-  const ok = !overWidth && !overLines && !overLineWidth
+  const overLines = displayLines > NOTE_MAX_LINES
+  const ok = !overWidth && !overLines
   let error = ''
   if (overLines) {
-    error = `最多 ${NOTE_MAX_LINES} 行`
-  } else if (overLineWidth) {
-    error = `每行最多 ${NOTE_MAX_LINE_CN_CHARS} 个中文字符`
+    error = `最多 ${NOTE_MAX_LINES} 行（含自动折行）`
   } else if (overWidth) {
     error = '输入超出限制'
   }
   return {
     width,
     cnChars: Math.round((width / 2) * 10) / 10,
-    lines: lines.length,
+    lines: segments.length,
+    displayLines,
     overWidth,
     overLines,
-    overLineWidth,
     ok,
     error,
   }

@@ -404,7 +404,7 @@ const (
 
 // ErrBookmarkNoteInvalid 备注超出限制
 var ErrBookmarkNoteInvalid = errors.New(
-	"备注超出限制（最多 110 个半角字符 / 约 55 个中文字符，3 行，每行 19 个中文字符）")
+	"备注超出限制（最多 110 个半角字符 / 约 55 个中文字符、最多 3 行（含自动折行））")
 
 // noteDisplayWidth 备注显示宽度：中文 / 全角 / emoji 计 2，其余计 1；换行不计宽度。
 func noteDisplayWidth(s string) int {
@@ -423,20 +423,30 @@ func noteDisplayWidth(s string) int {
 }
 
 // validateScrapeBookmarkNote 校验备注；空串放行。
+//
+// 显示行数按「每行 38 半角单位」折算：每段 ceil(段宽/38)，空段也算 1 行。
+// 不再按显式 \n 逐行卡 19 字——textarea 的自动软换行会让「一整段」被误判成
+// 「每行超限」，真实判据应是「折行后总行数 ≤ 3」。
 func validateScrapeBookmarkNote(note string) error {
 	if note == "" {
 		return nil
 	}
-	if strings.Count(note, "\n")+1 > noteMaxLines {
-		return ErrBookmarkNoteInvalid
-	}
-	if noteDisplayWidth(note) > noteMaxWidth {
-		return ErrBookmarkNoteInvalid
-	}
-	for _, line := range strings.Split(note, "\n") {
-		if noteDisplayWidth(line) > noteMaxLineWidth {
-			return ErrBookmarkNoteInvalid
+	width := 0
+	displayLines := 0
+	for _, seg := range strings.Split(note, "\n") {
+		segWidth := noteDisplayWidth(seg)
+		width += segWidth
+		lines := (segWidth + noteMaxLineWidth - 1) / noteMaxLineWidth
+		if lines < 1 {
+			lines = 1
 		}
+		displayLines += lines
+	}
+	if displayLines > noteMaxLines {
+		return ErrBookmarkNoteInvalid
+	}
+	if width > noteMaxWidth {
+		return ErrBookmarkNoteInvalid
 	}
 	return nil
 }

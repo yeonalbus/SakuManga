@@ -1,0 +1,2 @@
+var e=e=>(e.codePointAt(0)??0)>=4352?2:1,t=t=>{let n=(t??``).split(`
+`),r=0,i=0;for(let t of n){let n=0;for(let i of t){let t=e(i);n+=t,r+=t}i+=Math.max(1,Math.ceil(n/38))}let a=r>110,o=i>3,s=!a&&!o,c=``;return o?c=`最多 3 行（含自动折行）`:a&&(c=`输入超出限制`),{width:r,cnChars:Math.round(r/2*10)/10,lines:n.length,displayLines:i,overWidth:a,overLines:o,ok:s,error:c}},n=e=>`${e.width}/110`;export{t as n,n as t};

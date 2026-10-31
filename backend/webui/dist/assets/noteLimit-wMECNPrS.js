@@ -1,2 +1,0 @@
-var e=e=>(e.codePointAt(0)??0)>=4352?2:1,t=t=>{let n=(t??``).split(`
-`),r=0,i=!1;for(let t of n){let n=0;for(let i of t){let t=e(i);n+=t,r+=t}n>38&&(i=!0)}let a=r>110,o=n.length>3,s=!a&&!o&&!i,c=``;return o?c=`最多 3 行`:i?c=`每行最多 19 个中文字符`:a&&(c=`输入超出限制`),{width:r,cnChars:Math.round(r/2*10)/10,lines:n.length,overWidth:a,overLines:o,overLineWidth:i,ok:s,error:c}},n=e=>`${e.width}/110`;export{t as n,n as t};

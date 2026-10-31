@@ -61,6 +61,10 @@ func (h *ScrapeBookmarkHandler) Create(c *gin.Context) {
 	}
 	item, err := services.CreateScrapeBookmark(h.db, user.ID, in)
 	if err != nil {
+		if errors.Is(err, services.ErrBookmarkNoteInvalid) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建书签失败: " + err.Error()})
 		return
 	}
@@ -135,6 +139,10 @@ func (h *ScrapeBookmarkHandler) Update(c *gin.Context) {
 				return
 			}
 			if errors.Is(err, services.ErrBookmarkPinLimit) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, services.ErrBookmarkNoteInvalid) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

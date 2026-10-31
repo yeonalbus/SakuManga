@@ -154,6 +154,11 @@ func nextBookmarkSortKey(db *gorm.DB, userID uint) float64 {
 // CreateScrapeBookmark 新增书签，返回带 id 的完整结构
 func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*ScrapeBookmarkDTO, error) {
 	name, typ, config, anchor := normalizeScrapeBookmark(in)
+	// Round49：备注超限一律拒绝（不静默截断）
+	note := strings.TrimSpace(in.Note)
+	if err := validateScrapeBookmarkNote(note); err != nil {
+		return nil, err
+	}
 	var bulkDoneAt int64
 	if in.BulkDone {
 		bulkDoneAt = time.Now().UnixMilli()
@@ -170,7 +175,7 @@ func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*Sc
 
 		// Round49：创建时可直接带上的书签项配置（pinned 只能由书签页手动设置）
 		Role:        normalizeRole(in.Role),
-		Note:        strings.TrimSpace(in.Note),
+		Note:        note,
 		UpdateWatch: in.UpdateWatch,
 		BulkDone:    in.BulkDone,
 		BulkDoneAt:  bulkDoneAt,
@@ -328,7 +333,11 @@ func UpdateScrapeBookmarkFields(db *gorm.DB, userID uint, id uint, p ScrapeBookm
 		updates["role"] = normalizeRole(*p.Role)
 	}
 	if p.Note != nil {
-		updates["note"] = strings.TrimSpace(*p.Note)
+		note := strings.TrimSpace(*p.Note)
+		if err := validateScrapeBookmarkNote(note); err != nil {
+			return err
+		}
+		updates["note"] = note
 	}
 	if p.UpdateWatch != nil {
 		updates["update_watch"] = *p.UpdateWatch
@@ -375,6 +384,59 @@ func UpdateScrapeBookmarkFields(db *gorm.DB, userID uint, id uint, p ScrapeBookm
 	}
 	if res.RowsAffected == 0 {
 		return ErrBookmarkNotFound
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round49：备注长度校验（与前端 src/utils/noteLimit.ts 同一规则，防绕过）
+//
+// 规则：总宽度 ≤ 110 半角单位（= 55 个中文字符，1 中文 = 2 半角）、
+// 最多 3 行、每行 ≤ 19 个中文字符（38 半角单位）。
+// 超限返回 ErrBookmarkNoteInvalid，handler 映射 400；绝不静默截断。
+// ─────────────────────────────────────────────────────────────
+
+const (
+	noteMaxWidth     = 110 // 55 个中文字符
+	noteMaxLines     = 3
+	noteMaxLineWidth = 38 // 19 个中文字符
+)
+
+// ErrBookmarkNoteInvalid 备注超出限制
+var ErrBookmarkNoteInvalid = errors.New(
+	"备注超出限制（最多 110 个半角字符 / 约 55 个中文字符，3 行，每行 19 个中文字符）")
+
+// noteDisplayWidth 备注显示宽度：中文 / 全角 / emoji 计 2，其余计 1；换行不计宽度。
+func noteDisplayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r == '\n' {
+			continue
+		}
+		if r >= 0x1100 {
+			w += 2
+		} else {
+			w++
+		}
+	}
+	return w
+}
+
+// validateScrapeBookmarkNote 校验备注；空串放行。
+func validateScrapeBookmarkNote(note string) error {
+	if note == "" {
+		return nil
+	}
+	if strings.Count(note, "\n")+1 > noteMaxLines {
+		return ErrBookmarkNoteInvalid
+	}
+	if noteDisplayWidth(note) > noteMaxWidth {
+		return ErrBookmarkNoteInvalid
+	}
+	for _, line := range strings.Split(note, "\n") {
+		if noteDisplayWidth(line) > noteMaxLineWidth {
+			return ErrBookmarkNoteInvalid
+		}
 	}
 	return nil
 }

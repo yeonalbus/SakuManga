@@ -11,6 +11,7 @@
 // - 点击卡片 = 跳转到对应在线列表并定位锚点（沿用 `/online/home?bm=<id>` 链路）
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import BookmarkNoteModal from '@/components/BookmarkNoteModal.vue'
 import {
   sortedBookmarks,
   scrapeBookmarks,
@@ -80,11 +81,16 @@ const toggleBulk = async (bm: ScrapeBookmark) => {
   if (ok) toast.success(bm.bulkDone ? '已取消已囤货标记' : '已标记为已囤货')
 }
 
-/** 备注编辑（40 中文字符上限） */
-const editNote = async (bm: ScrapeBookmark) => {
-  const val = await modal.prompt('备注（最多 40 个中文字符）', bm.note, '编辑备注')
-  if (val === null || val === undefined) return
-  const ok = await updateBookmarkFields(bm.id, { note: val.slice(0, 40) })
+/** 备注编辑：打开专用弹窗（3 行矩形输入框 + 宽度/行数校验，超限拒绝保存） */
+const noteEditing = ref<ScrapeBookmark | null>(null)
+const editNote = (bm: ScrapeBookmark) => {
+  noteEditing.value = bm
+}
+const saveNote = async (note: string) => {
+  const bm = noteEditing.value
+  if (!bm) return
+  noteEditing.value = null
+  const ok = await updateBookmarkFields(bm.id, { note })
   if (ok) toast.success('备注已保存')
 }
 
@@ -202,6 +208,14 @@ onMounted(() => {
         </article>
       </div>
     </div>
+
+    <!-- Round49：备注编辑弹窗（3 行矩形输入框 + 宽度/行数校验，超限拒绝保存） -->
+    <BookmarkNoteModal
+      :show="!!noteEditing"
+      :value="noteEditing?.note || ''"
+      @close="noteEditing = null"
+      @save="saveNote"
+    />
   </div>
 </template>
 
@@ -418,12 +432,14 @@ onMounted(() => {
   color: #e6b800;
 }
 
-/* 备注：固定三行高度，空备注也占位（防卡片高度不一） */
+/* 备注：固定三行高度，空备注也占位（防卡片高度不一）
+   宽度锁定 19em（约 19 个中文字符/行），与备注输入限制（每行 19 字）对齐 */
 .bm-card-note {
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--app-text-2);
   height: calc(1.45em * 3);
+  max-width: 19em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;

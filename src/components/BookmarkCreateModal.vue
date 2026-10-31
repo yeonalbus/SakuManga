@@ -5,8 +5,9 @@
 //   · 名称默认留空（留空时侧栏展示「位置 + 发布时间」）
 //   · 「确认」保存；「取消」回到拾取模式（可改锚定其他卡片）
 // 样式沿用 DateJumpModal 的 overlay/panel 暗色主题结构
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ScrapeBookmarkRole } from '@/types/comic'
+import { noteCounterText, validateNote } from '@/utils/noteLimit'
 
 const props = defineProps<{
   show: boolean
@@ -41,6 +42,12 @@ const note = ref('')
 const updateWatch = ref(false)
 const bulkDone = ref(false)
 
+/** 备注校验（宽度 110 半角 / 3 行 / 每行 19 中文字符；超限拒绝保存，不静默截断） */
+const noteValidation = computed(() => validateNote(note.value))
+const noteCounter = computed(() => noteCounterText(noteValidation.value))
+/** 点过「确定」后才展示备注错误提示 */
+const noteError = ref(false)
+
 const roleOptions: { value: ScrapeBookmarkRole; label: string; hint: string }[] = [
   { value: 'newest', label: '追新', hint: '标记上次搜刮到的最新位置' },
   { value: 'oldest', label: '续扫', hint: '标记上次搜刮到的最旧位置，下次继续向下扫' },
@@ -55,6 +62,7 @@ watch(
       name.value = ''
       role.value = 'newest'
       note.value = ''
+      noteError.value = false
       updateWatch.value = false
       bulkDone.value = false
     }
@@ -62,10 +70,15 @@ watch(
 )
 
 const handleConfirm = () => {
+  // 备注超限：报错并拒绝保存（不静默截断）
+  if (!noteValidation.value.ok) {
+    noteError.value = true
+    return
+  }
   emit('create', {
     name: name.value.trim(),
     role: role.value,
-    note: note.value.trim().slice(0, 40),
+    note: note.value.trim(),
     updateWatch: updateWatch.value,
     bulkDone: bulkDone.value,
   })
@@ -129,17 +142,23 @@ const handleConfirm = () => {
               </div>
             </div>
 
-            <label class="bm-field">
-              <span class="bm-label">备注（可选，最多 40 字）</span>
-              <input
+            <div class="bm-field">
+              <div class="bm-label-row">
+                <span class="bm-label">备注（可选，上限 110 个半角字符 · 约 55 个中文字符 · 3 行）</span>
+                <span class="bm-counter" :class="{ over: !noteValidation.ok }">{{ noteCounter }}</span>
+              </div>
+              <textarea
                 v-model="note"
-                type="text"
-                class="bm-input"
+                class="bm-textarea"
+                :class="{ invalid: noteError && !noteValidation.ok }"
+                rows="3"
                 placeholder="例如：2026-10 已筛完这批"
-                maxlength="40"
-                @keyup.enter="handleConfirm"
+                @input="noteError = false"
               />
-            </label>
+              <span v-if="noteError && !noteValidation.ok" class="bm-error">
+                {{ noteValidation.error }}（未保存）
+              </span>
+            </div>
 
             <div class="bm-toggles">
               <label class="bm-toggle">
@@ -409,5 +428,52 @@ const handleConfirm = () => {
 }
 .bm-toggle input {
   accent-color: #00a896;
+}
+
+/* Round49：备注 3 行矩形输入框 + 字数计数 + 超限错误提示 */
+.bm-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bm-counter {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-muted);
+  transition: color 0.15s ease;
+}
+.bm-counter.over {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.bm-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 84px;
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  color: var(--app-text-strong);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s ease;
+}
+.bm-textarea:focus {
+  border-color: #00a896;
+}
+.bm-textarea.invalid {
+  border-color: #ef4444;
+}
+
+.bm-error {
+  font-size: 0.72rem;
+  color: #ef4444;
 }
 </style>

@@ -58,12 +58,18 @@ export const extractBookmarkTagKey = (
 export type TagTranslateFn = (raw: string) => { name: string; key: string }
 
 /**
- * 书签主标题：
- *   自定义名称 > 标准 tag 翻译名 > (artist 类) tag key 本身 > 副标题内容
+ * 无翻译时直接显示 tag key 本身的命名空间。
  *
- * artist 豁免说明：画师名的"正确显示"经常就是原名（英文 ID / 日文名 / 中文昵称都可能），
- * 词典没有翻译时直接显示 tag key（如 `jndfh`、`toraisi666`），不回退成
- * `搜索: artist:"jndfh$"` 这种长串；有翻译时仍优先用翻译名（如 asanagi → 朝凪）。
+ * - artist：画师名的"正确显示"经常就是原名（英文 ID / 日文名 / 中文昵称都可能）；
+ * - uploader：E 站上传者名，词典里没有该命名空间，且 `formatFSearchTag` 生成的是
+ *   `uploader:"Jean Lenegre$"` / `uploader:someuser$` 形式，同样不应退化成
+ *   `搜索: uploader:"Jean Lenegre$"` 长串。
+ */
+const KEY_SELF_DISPLAY_NAMESPACES = ['artist', 'uploader']
+
+/**
+ * 书签主标题：
+ *   自定义名称 > 标准 tag 翻译名 > (artist / uploader) tag key 本身 > 副标题内容
  */
 export const bookmarkTitleWith = (
   bm: Pick<ScrapeBookmark, 'name' | 'keyword' | 'config' | 'type'>,
@@ -75,8 +81,9 @@ export const bookmarkTitleWith = (
   if (tag) {
     const item = translate(tag)
     if (item.name && item.name !== item.key) return item.name
-    // artist 类无翻译：显示画师名/ID 本身
-    if (tag.startsWith('artist:')) return tag.slice('artist:'.length)
+    // artist / uploader 类无翻译：显示名字本身（如 jndfh、Jean Lenegre）
+    const ns = tag.slice(0, tag.indexOf(':'))
+    if (KEY_SELF_DISPLAY_NAMESPACES.includes(ns)) return tag.slice(tag.indexOf(':') + 1)
   }
   return bookmarkDisplayTitle(bm)
 }

@@ -82,16 +82,12 @@
         <option :value="800">800ms（宽松）</option>
       </select>
     </div>
-
-    <!-- 临时诊断：打印浏览器层手柄可见性，用于定位「检测不到手柄」 -->
-    <GamepadProbe />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
-import GamepadProbe from './GamepadProbe.vue'
 import { useUI } from '@/composables/useUI'
 import { readerSettings, GAMEPAD_BUTTONS } from '@/stores/readerSettings'
 

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>书签页 · Round49 样板 v3（待审核）</title>
+<style>
+  :root {
+    --bg: #141414;
+    --surface: #1e1e1e;
+    --surface-2: #262626;
+    --surface-3: #2f2f2f;
+    --border: #3a3a3a;
+    --border-2: #2c2c2c;
+    --text: #e6e6e6;
+    --text-2: #b0b0b0;
+    --muted: #7a7a7a;
+    --gold: #e6b800;
+    --role-newest: #4fa3e3;
+    --role-oldest: #4cc38a;
+    --bulk: #e6b800;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 80px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 6px; }
+  h2 { font-size: 0.9rem; margin: 34px 0 10px; color: var(--text-2); font-weight: 600; }
+  h3 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--text-2); }
+  .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.7; max-width: 900px; }
+  .hint b { color: var(--text-2); }
+  .hint code { background: #222; padding: 1px 5px; border-radius: 4px; color: var(--text-2); }
+
+  /* ─── 书签页网格 ─── */
+  .page {
+    width: 1180px; max-width: 100%;
+    background: var(--bg);
+    padding: 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  /* 置顶区 / 普通区之间的分隔线 */
+  .zone-divider {
+    height: 1px; background: var(--border);
+    margin: 18px 2px;
+  }
+
+  /* ─── 名片（固定高度 160，内容区四段固定高度）─── */
+  .card {
+    position: relative;
+    display: flex; gap: 10px;
+    height: 184px;                 /* = 封面 160 + 上下 padding 12×2 */
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .card.updated { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(230, 184, 0, 0.18); }
+
+  .cover {
+    flex-shrink: 0;
+    width: 120px; height: 160px;   /* 3:4，固定 */
+    border-radius: 6px;
+    background: linear-gradient(160deg, #2a2a2a, #222);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; color: #555;
+  }
+
+  /* 内容列：四段固定高度 a / b / c / d */
+  .body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* a：标题行（主标题 + 右上角 ⚙） */
+  .title-row { height: 24px; display: flex; align-items: flex-start; gap: 6px; }
+  .title {
+    flex: 1; min-width: 0;
+    font-size: 1.02rem; font-weight: 700; line-height: 20px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .menu-btn {
+    flex-shrink: 0; width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 5px; background: transparent;
+    color: var(--muted); font-size: 0.9rem; cursor: pointer;
+  }
+  .menu-btn:hover { background: var(--surface-3); color: var(--text); }
+
+  /* b：副标题（位置 + 非默认筛选，1 行） */
+  .subtitle {
+    height: 18px; margin-top: 3px;
+    font-size: 0.74rem; line-height: 18px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* c：徽章行（状态展示） */
+  .badges { height: 22px; margin-top: 7px; display: flex; align-items: center; gap: 5px; overflow: hidden; }
+  .badge {
+    font-size: 0.68rem; line-height: 1.5; padding: 0 5px;
+    border-radius: 4px; border: 1px solid var(--border);
+    color: var(--text-2); white-space: nowrap; flex-shrink: 0;
+  }
+  .badge.role-newest { border-color: rgba(79, 163, 227, 0.45); color: var(--role-newest); }
+  .badge.role-oldest { border-color: rgba(76, 195, 138, 0.45); color: var(--role-oldest); }
+  .badge.bulk { border-color: rgba(230, 184, 0, 0.4); color: var(--bulk); }
+  .badge.watch { border-color: var(--border); color: var(--text-2); }
+
+  /* d：备注框（固定 76px，3 行） */
+  .note-box {
+    position: relative;
+    height: 76px; margin-top: 8px;
+    padding: 7px 30px 7px 9px;
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 0.75rem; line-height: 1.55; color: var(--text-2);
+    word-break: break-all;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .note-box.empty { color: var(--muted); }
+  .note-edit {
+    position: absolute; top: 3px; right: 3px;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 5px; background: transparent;
+    color: var(--muted); font-size: 0.75rem; cursor: pointer;
+  }
+  .note-edit:hover { background: var(--surface-3); color: var(--text); }
+
+  /* 配置菜单（展开态） */
+  .menu {
+    position: absolute; top: 42px; right: 12px;
+    width: 190px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    padding: 4px; z-index: 5;
+  }
+  .menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 5px;
+    font-size: 0.8rem; color: var(--text-2); cursor: pointer; white-space: nowrap;
+  }
+  .menu-item:hover { background: var(--surface-3); color: var(--text); }
+  .menu-item .ico { width: 16px; text-align: center; flex-shrink: 0; }
+  .menu-sep { height: 1px; background: var(--border-2); margin: 4px 6px; }
+  .menu-item.danger { color: var(--danger); }
+  .menu-item.danger:hover { background: rgba(239, 68, 68, 0.14); color: var(--danger); }
+
+  /* ─── 侧栏书签子项 ─── */
+  .sidebar {
+    width: 300px; padding: 10px 12px;
+    background: var(--bg); border: 1px solid var(--border-2); border-radius: 8px;
+  }
+  .sb-group { font-size: 0.9rem; color: var(--text-2); padding: 6px 4px; }
+  .sb-children { display: flex; flex-direction: column; gap: 2px; padding-left: 32px; }
+  .sb-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-radius: 4px;
+    border: 1px solid transparent;
+    font-size: 0.8rem; color: var(--muted); cursor: pointer;
+  }
+  .sb-item:hover { background: var(--surface-3); color: var(--text-2); }
+  /* 有更新的侧栏置顶书签：金色框 */
+  .sb-item.updated { border-color: var(--gold); color: var(--text-2); }
+  .sb-item.updated .sb-title { font-weight: 600; }
+  .sb-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sb-probe {
+    box-sizing: border-box; width: 100%;
+    margin: 2px 0 4px; padding: 5px 10px;
+    border-radius: 4px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-2);
+    font-size: 0.78rem; font-family: inherit; text-align: left; cursor: pointer;
+  }
+  .sb-probe:hover { border-color: #007acc; color: #007acc; }
+
+  /* 标注 */
+  .anno { display: flex; gap: 12px; align-items: flex-start; }
+  .anno-tag {
+    flex-shrink: 0; margin-top: 14px;
+    font-size: 0.72rem; color: var(--muted);
+    border-left: 2px solid var(--border); padding-left: 10px; width: 210px; line-height: 1.6;
+  }
+  .zone-label {
+    display: inline-block; margin: 12px 0 8px;
+    font-size: 0.72rem; color: var(--muted); letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+
+<h1>🔖 书签页 · Round49 样板 v3（待审核）</h1>
+<p class="hint">
+  本轮改动：<b>有更新 = 金色框</b>（不再用红点）；<b>置顶靠"置顶区"表达</b>（取消 📌 与卡片金框）；
+  置顶区与普通区用分隔线隔开；<b>区域内把有更新的卡片提到最前</b>；侧栏置顶书签同样"有更新→置前 + 金框"。
+  卡片内四个区域（标题 a / 副标题 b / 徽章 c / 备注 d）<b>固定高度</b>，内容变化不推动卡片上下位移。
+</p>
+
+<!-- ═══════════════ 书签页整体 ═══════════════ -->
+<h2>① 书签页布局（置顶区 → 分隔线 → 普通区）</h2>
+<span class="zone-label">置顶区（最多 5 条，内部按名称序；有更新的排最前并加金框）</span>
+<div class="page">
+  <div class="grid">
+    <!-- 置顶区：有更新的排第一（金框） -->
+    <div class="card updated">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">巨乳</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">搜索: female:"big breasts" · 中文</div>
+        <div class="badges">
+          <span class="badge role-newest">追新</span>
+          <span class="badge bulk">🧾 已囤货</span>
+          <span class="badge watch">🔔</span>
+        </div>
+        <div class="note-box">2026-10 已筛完这批，剩下两张等重下</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">首页 · 仅删除</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">首页 · 仅删除</div>
+        <div class="badges"><span class="badge role-newest">追新</span></div>
+        <div class="note-box empty">（暂无备注）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">想补完的画师合集</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">搜索: gohan pakupaku · 中文</div>
+        <div class="badges"><span class="badge role-oldest">续扫</span></div>
+        <div class="note-box empty">（暂无备注）</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page"><div class="zone-divider"></div></div>
+
+<span class="zone-label">普通区（名称序；有更新的排最前并加金框）</span>
+<div class="page">
+  <div class="grid">
+    <div class="card updated">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">搜索: artist:"fan no hitori$" · 中文</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">搜索: artist:"fan no hitori$" · 中文</div>
+        <div class="badges"><span class="badge role-newest">追新</span></div>
+        <div class="note-box empty">（暂无备注）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">搜索: gohan pakupaku · 中文</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">搜索: gohan pakupaku · 中文</div>
+        <div class="badges"><span class="badge role-oldest">续扫</span></div>
+        <div class="note-box empty">（暂无备注）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="cover">🖼</div>
+      <div class="body">
+        <div class="title-row">
+          <div class="title">首页</div>
+          <button class="menu-btn">⚙</button>
+        </div>
+        <div class="subtitle">首页</div>
+        <div class="badges"><span class="badge role-interest">兴趣</span></div>
+        <div class="note-box empty">（暂无备注）</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ 名片细节 ═══════════════ -->
+<h2>② 名片细节：四个区域固定高度（a / b / c / d）</h2>
+<div class="anno">
+  <div class="card updated">
+    <div class="cover">🖼</div>
+    <div class="body">
+      <div class="title-row">
+        <div class="title">巨乳</div>
+        <button class="menu-btn">⚙</button>
+      </div>
+      <div class="subtitle">搜索: female:"big breasts" · 中文</div>
+      <div class="badges">
+        <span class="badge role-newest">追新</span>
+        <span class="badge bulk">🧾 已囤货</span>
+        <span class="badge watch">🔔</span>
+      </div>
+      <div class="note-box">2026-10 已筛完这批，剩下两张等重下</div>
+    </div>
+  </div>
+  <div class="anno-tag">
+    <b>a = 24px</b> 标题行（1 行，超长省略）<br>
+    <b>b = 18px</b> 副标题（1 行，超长省略）<br>
+    <b>c = 22px</b> 徽章行（固定高度，内容少也不塌陷）<br>
+    <b>d = 76px</b> 备注框（3 行，空备注也占位）<br>
+    封面固定 120×160；卡片总高固定 184<br>
+    → 任何内容变化都不会推动卡片上下位移
+  </div>
+</div>
+
+<h2>③ 配置菜单展开态（右上角 ⚙）</h2>
+<div class="anno">
+  <div class="card updated">
+    <div class="cover">🖼</div>
+    <div class="body">
+      <div class="title-row">
+        <div class="title">巨乳</div>
+        <button class="menu-btn" style="background:#2f2f2f;color:#e6e6e6">⚙</button>
+      </div>
+      <div class="subtitle">搜索: female:"big breasts" · 中文</div>
+      <div class="badges">
+        <span class="badge role-newest">追新</span>
+        <span class="badge bulk">🧾 已囤货</span>
+        <span class="badge watch">🔔</span>
+      </div>
+      <div class="note-box">2026-10 已筛完这批，剩下两张等重下</div>
+    </div>
+    <div class="menu">
+      <div class="menu-item"><span class="ico">✏️</span>修改名称</div>
+      <div class="menu-item"><span class="ico">📌</span>取消置顶</div>
+      <div class="menu-item"><span class="ico">🔔</span>关闭更新探测</div>
+      <div class="menu-item"><span class="ico">🧾</span>取消已囤货</div>
+      <div class="menu-item"><span class="ico">🏷️</span>修改书签标记</div>
+      <div class="menu-sep"></div>
+      <div class="menu-item danger"><span class="ico">🗑</span>删除书签</div>
+    </div>
+  </div>
+  <div class="anno-tag">
+    备注编辑按钮仍在备注框右上角（✏️ 在框内）<br>
+    菜单项：修改名称 / 置顶 / 更新探测 / 已囤货 / 修改标记 / 删除
+  </div>
+</div>
+
+<!-- ═══════════════ 侧栏 ═══════════════ -->
+<h2>④ 侧栏（置顶书签）：有更新 → 置前 + 金框</h2>
+<div class="anno">
+  <div class="sidebar">
+    <div class="sb-group">书签</div>
+    <div class="sb-children">
+      <button class="sb-probe">检查更新（3）</button>
+      <!-- 有更新的置顶书签排最前，金框 -->
+      <div class="sb-item updated">
+        <span class="sb-title">巨乳</span>
+      </div>
+      <div class="sb-item"><span class="sb-title">首页 · 仅删除</span></div>
+      <div class="sb-item"><span class="sb-title">想补完的画师合集</span></div>
+      <div class="sb-item"><span class="sb-title">搜索: gohan pakupaku · 中文</span></div>
+      <div class="sb-item"><span class="sb-title">首页</span></div>
+    </div>
+  </div>
+  <div class="anno-tag">
+    侧栏置顶列表 = 书签页置顶区（最多 5 条）<br>
+    有更新的排最前 + 金色框（与书签页同一规则）<br>
+    无 📌、无红点；更新探测状态只在书签页徽章行显示
+  </div>
+</div>
+
+<h2>待你确认</h2>
+<p class="hint">
+  1. 金框颜色用 <code>#e6b800</code>（与"已囤货"徽章同色）可以吗？<br>
+  2. 分隔线只是一条 1px 淡线，不加"置顶/全部"文字标签 —— 可以吗？<br>
+  3. 置顶区最多 5 条（与侧栏一致），第 6 条置顶会被拒绝（提示"置顶已达上限"）—— 可以吗？<br>
+  4. 固定高度 a=24 / b=18 / c=22 / d=76（合计 184 与封面齐平）—— 数值合适吗？<br>
+  5. 侧栏置顶书签的"金框"是整行描边（当前样板）—— 可以吗？
+</p>
+
+</body>
+</html>

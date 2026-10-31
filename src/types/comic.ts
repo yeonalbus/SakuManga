@@ -298,7 +298,7 @@ export type ScrapeBookmarkType = 'home' | 'search'
  */
 export interface ScrapeBookmark {
   id: string // 唯一标识（bm_ 前缀）
-  name: string // 旧自定义名称（Round49：UI 不再可编辑，标题改由 bookmarkDisplayTitle 生成）
+  name: string // 用户自定义名称（Round49：可编辑；为空时回退翻译名/副标题内容）
   type: ScrapeBookmarkType
   keyword: string // type=search 时的搜索词（冗余于 config.keyword，便于侧栏展示）
   config: SearchConfig // 创建时深拷贝快照

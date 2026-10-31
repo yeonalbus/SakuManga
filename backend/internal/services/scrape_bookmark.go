@@ -179,6 +179,9 @@ func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*Sc
 		UpdateWatch: in.UpdateWatch,
 		BulkDone:    in.BulkDone,
 		BulkDoneAt:  bulkDoneAt,
+		// 新书签不参与一次性迁移（名称与字段都已是新语义）
+		FieldsMigrated: true,
+		NameReset:      true,
 	}
 	if err := db.Create(&m).Error; err != nil {
 		return nil, err
@@ -187,12 +190,9 @@ func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*Sc
 	return &dto, nil
 }
 
-// RenameScrapeBookmark 重命名书签（空名忽略，保持原名）
+// RenameScrapeBookmark 重命名书签（Round49：允许传空串 → 清空自定义名称，恢复默认显示）
 func RenameScrapeBookmark(db *gorm.DB, userID uint, id uint, name string) error {
 	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return nil
-	}
 	res := db.Model(&models.ScrapeBookmark{}).
 		Where("id = ? AND user_id = ?", id, userID).
 		Update("name", trimmed)

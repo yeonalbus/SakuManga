@@ -1,38 +1,46 @@
 <script setup lang="ts">
-// 🔖 搜刮书签 · 侧栏（Round49 第 3 版）
+// 🔖 搜刮书签 · 侧栏（Round49 v4）
 //
-// 结构：「书签」作为在线模式组的最后一项（与首页/订阅同款链接样式），
-// 子项（检查更新、置顶书签）缩进 32px 挂在其下方——不再单独成组、不再有组间距。
-//
-// 子项辨识度：缩进 + 更小字号 + 淡色文字；置顶书签右侧显示淡色角色徽章
-// （追新/续扫/兴趣）+ 有更新时的红点。检查更新用书架同款边框按钮，并显示
-// 当前开启更新探测的书签数量。暂不使用 emoji 图标（等矢量图标方案统一替换）。
+// 结构：「书签」作为在线模式组的最后一项；子项（检查更新、置顶书签）缩进 32px。
+// 置顶书签 = 书签页的置顶区（最多 5 条）；排序与书签页一致：
+//   有更新的排最前 + 金色框，其余按名称序（主标题，含翻译名）。
+// 侧栏只显示标题（不显示徽章/图标/红点）。
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   scrapeBookmarks,
-  pinnedBookmarks,
-  bookmarkDisplayTitle,
   probeScrapeBookmarks,
   PINNED_BOOKMARK_LIMIT,
 } from '@/stores/scrapeBookmarksStore'
-import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
+import { bookmarkTitleWith } from '@/utils/bookmarkTitle'
+import { useTagStore } from '@/stores/tagStore'
+import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
 
 const router = useRouter()
+const tagStore = useTagStore()
 const { toast } = useUI()
 
 const probing = ref(false)
+const collator = new Intl.Collator('zh-CN', { numeric: true })
 
-const roleLabels: Record<ScrapeBookmarkRole, string> = {
-  newest: '追新',
-  oldest: '续扫',
-  interest: '兴趣',
-}
+const titleOf = (bm: ScrapeBookmark) => bookmarkTitleWith(bm, tagStore.translate)
 
 /** 开启更新探测的书签数量（检查更新按钮上显示） */
 const watchCount = computed(() => scrapeBookmarks.value.filter((b) => b.updateWatch).length)
+
+/** 侧栏置顶列表：有更新在前 → 名称序，最多 5 条 */
+const pinnedList = computed(() =>
+  scrapeBookmarks.value
+    .filter((b) => b.pinned)
+    .slice()
+    .sort((a, b) => {
+      if (a.hasUpdate !== b.hasUpdate) return a.hasUpdate ? -1 : 1
+      return collator.compare(titleOf(a), titleOf(b))
+    })
+    .slice(0, PINNED_BOOKMARK_LIMIT),
+)
 
 /** 点击置顶书签：跳转到对应在线列表并定位锚点（PWA 同标签 / 桌面新标签） */
 const jumpToBookmark = (bm: ScrapeBookmark) => {
@@ -78,30 +86,27 @@ const runProbe = async () => {
     <router-link to="/online/toplist">排行榜</router-link>
     <router-link to="/online/favorites">收藏</router-link>
     <router-link to="/online/history">历史记录</router-link>
-    <!-- 书签：与其它导航项同款链接，点击进入书签页（进入后自动蓝底高亮） -->
     <router-link to="/online/bookmarks">书签</router-link>
 
-    <!-- 书签子项：缩进 32px，字号更小、颜色更淡，与上级条目形成层级 -->
     <div class="bm-children">
       <!-- 检查更新：书架同款边框按钮 + 开启探测的数量 -->
       <button class="bm-probe-btn" :disabled="probing" @click="runProbe">
         {{ probing ? '检查中…' : `检查更新（${watchCount}）` }}
       </button>
 
-      <!-- 置顶书签：标题 + 角色徽章 + 有更新的红点 -->
+      <!-- 置顶书签：只显示标题（有更新 → 置前 + 金框） -->
       <button
-        v-for="bm in pinnedBookmarks"
+        v-for="bm in pinnedList"
         :key="bm.id"
         class="bm-child-item"
-        :title="`${bookmarkDisplayTitle(bm)}（点击跳转并定位）`"
+        :class="{ updated: bm.hasUpdate }"
+        :title="`${titleOf(bm)}（点击跳转并定位）`"
         @click="jumpToBookmark(bm)"
       >
-        <span class="bm-child-title">{{ bookmarkDisplayTitle(bm) }}</span>
-        <span class="bm-role-badge" :class="bm.role">{{ roleLabels[bm.role] }}</span>
-        <span v-if="bm.hasUpdate" class="bm-pinned-dot" title="锚点之后有新内容" />
+        <span class="bm-child-title">{{ titleOf(bm) }}</span>
       </button>
 
-      <span v-if="pinnedBookmarks.length === 0" class="bm-pin-hint">
+      <span v-if="pinnedList.length === 0" class="bm-pin-hint">
         在书签页置顶常用书签（最多 {{ PINNED_BOOKMARK_LIMIT }} 个）
       </span>
     </div>
@@ -150,7 +155,7 @@ const runProbe = async () => {
   gap: 6px;
   width: 100%;
   padding: 6px 8px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   color: var(--app-text-muted);
@@ -165,39 +170,18 @@ const runProbe = async () => {
   color: var(--app-text-strong);
 }
 
+/* 有更新：金色框（与书签页同一规则） */
+.bm-child-item.updated {
+  border-color: #e6b800;
+  color: var(--app-text-2);
+}
+
 .bm-child-title {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* 淡色角色徽章（追新/续扫/兴趣） */
-.bm-role-badge {
-  flex-shrink: 0;
-  font-size: 0.66rem;
-  line-height: 1.4;
-  padding: 0 4px;
-  border-radius: 3px;
-  border: 1px solid var(--app-border-3);
-  color: var(--app-text-muted);
-}
-.bm-role-badge.newest {
-  border-color: rgba(0, 122, 204, 0.45);
-  color: #4fa3e3;
-}
-.bm-role-badge.oldest {
-  border-color: rgba(76, 195, 138, 0.45);
-  color: #4cc38a;
-}
-
-.bm-pinned-dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: #ff4d4f;
 }
 
 .bm-pin-hint {

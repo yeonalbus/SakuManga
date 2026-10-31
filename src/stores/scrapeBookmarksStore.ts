@@ -222,10 +222,12 @@ const languageLabel = (lang: string): string => {
 }
 
 /**
- * Round49：书签标题（固定，不支持手改）。
+ * Round49：书签副标题（固定，不支持手改）。
  * = 位置字段 + 非默认筛选摘要（仅删除 / 语言 / 评分下限）。
  * 位置字段沿用旧 bookmarkLocationLabel：`搜索: <词>` 或 `首页`。
  * 这样首页与"删除页"（onlyRemoved）不再重名，书签页里可区分。
+ *
+ * 注：主标题（自定义名 > 翻译名 > 本函数输出）见 utils/bookmarkTitle.ts。
  */
 export const bookmarkDisplayTitle = (
   bm: Pick<ScrapeBookmark, 'type' | 'keyword' | 'config'>,
@@ -239,22 +241,6 @@ export const bookmarkDisplayTitle = (
   if (bm.config?.minRating && bm.config.minRating > 0) extras.push(`评分≥${bm.config.minRating}`)
   return extras.length > 0 ? `${base} · ${extras.join(' · ')}` : base
 }
-
-/** 名称序比较器（中文拼音 + 数字自然序） */
-const titleCollator = new Intl.Collator('zh-CN', { numeric: true })
-
-/** Round49：书签展示顺序——有更新的排最前，同层按标题名称序 */
-export const sortedBookmarks = computed<ScrapeBookmark[]>(() =>
-  [...scrapeBookmarks.value].sort((a, b) => {
-    if (a.hasUpdate !== b.hasUpdate) return a.hasUpdate ? -1 : 1
-    return titleCollator.compare(bookmarkDisplayTitle(a), bookmarkDisplayTitle(b))
-  }),
-)
-
-/** Round49：侧栏常驻的置顶书签（最多 PINNED_BOOKMARK_LIMIT 条，按展示顺序） */
-export const pinnedBookmarks = computed<ScrapeBookmark[]>(() =>
-  sortedBookmarks.value.filter((b) => b.pinned).slice(0, PINNED_BOOKMARK_LIMIT),
-)
 
 // ─── 锚点失效标记（Round28：BUG2 修复）───
 
@@ -463,10 +449,9 @@ export const removeScrapeBookmark = async (id: string): Promise<boolean> => {
   }
 }
 
-/** 重命名书签（空名忽略）。返回是否成功 */
+/** 重命名书签（Round49：允许空名 → 清空自定义名称，恢复默认显示）。返回是否成功 */
 export const renameScrapeBookmark = async (id: string, name: string): Promise<boolean> => {
   const trimmed = name.trim()
-  if (!trimmed) return false
   if (rejectWhenOffline()) return false
   const bm = scrapeBookmarks.value.find((b) => b.id === id)
   if (!bm) return false

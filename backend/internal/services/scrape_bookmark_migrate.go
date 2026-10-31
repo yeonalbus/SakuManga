@@ -63,7 +63,34 @@ func MigrateScrapeBookmarkFields(db *gorm.DB) int {
 		}
 		n++
 	}
+
+	// 第二遍：旧 name 一律清空（"已下载完/最新/最旧"等信息已提取进 role / bulkDone）。
+	// Round49 起 name 只表示「用户自定义名称」；name_reset 标记保证只清一次，
+	// 不会误清用户之后通过「修改名称」写入的自定义名。
+	clearOldBookmarkNames(db)
+
 	return n
+}
+
+// clearOldBookmarkNames 一次性清空所有"尚未清理过名称"的书签名。
+// 幂等：处理过的记录置 name_reset = true；新书签在创建时已置位，不会被误清。
+func clearOldBookmarkNames(db *gorm.DB) {
+	var marks []models.ScrapeBookmark
+	if err := db.Where("name_reset = ? AND name <> ?", false, "").Find(&marks).Error; err != nil {
+		log.Printf("[BOOKMARK] 旧名称清理查询失败: %v", err)
+		return
+	}
+	for i := range marks {
+		if err := db.Model(&models.ScrapeBookmark{}).
+			Where("id = ?", marks[i].ID).
+			Updates(map[string]any{"name": "", "name_reset": true}).Error; err != nil {
+			log.Printf("[BOOKMARK] 书签 [%d] 旧名称清理失败: %v", marks[i].ID, err)
+		}
+	}
+	// 名字本来就是空的记录也打上标记，避免下次重复扫描
+	_ = db.Model(&models.ScrapeBookmark{}).
+		Where("name_reset = ?", false).
+		Update("name_reset", true).Error
 }
 
 // inferBookmarkRoleFromName 从旧名字推断标记与已囤货初值（仅迁移期使用）。

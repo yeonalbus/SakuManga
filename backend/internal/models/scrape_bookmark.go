@@ -37,6 +37,10 @@ type ScrapeBookmark struct {
 	// FieldsMigrated 内部标记：Round49 一次性字段回填（name → role/bulkDone）是否已完成。
 	// 不对外暴露；迁移逻辑只处理该标记为 false 的记录，保证幂等。
 	FieldsMigrated bool `gorm:"default:false" json:"-"`
+	// NameReset 内部标记：旧 name 是否已清空。
+	// Round49 起 name 只表示「用户自定义名称」——旧数据里手写的"已下载完/最新/最旧"
+	// 已提取进 role / bulkDone，不再作为标题展示，故一次性清空且只清一次。
+	NameReset bool `gorm:"default:false" json:"-"`
 
 	CreatedAt time.Time `json:"createdAt"`
 }

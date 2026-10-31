@@ -70,6 +70,16 @@ func TestMigrateScrapeBookmarkFields(t *testing.T) {
 		t.Errorf("不应改动的 anchor = %q", got[1].Anchor)
 	}
 
+	// Round49：旧 name 一律清空（信息已提取进 role / bulkDone），并置 NameReset
+	for i := range got {
+		if got[i].Name != "" {
+			t.Errorf("第 %d 条：旧 name 未清空（%q）", i+1, got[i].Name)
+		}
+		if !got[i].NameReset {
+			t.Errorf("第 %d 条：NameReset 未置位", i+1)
+		}
+	}
+
 	// 幂等：二次迁移不处理任何记录
 	if n := MigrateScrapeBookmarkFields(db); n != 0 {
 		t.Errorf("二次迁移应返回 0，实际 %d", n)

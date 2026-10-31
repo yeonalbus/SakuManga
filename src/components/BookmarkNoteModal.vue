@@ -6,6 +6,7 @@
 //   - 最多 3 行；每行 ≤ 19 个中文字符（38 半角单位）
 // 超限：计数实时标红；点「确定」时显示错误原因并拒绝保存（绝不静默截断）。
 import { computed, ref, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { noteCounterText, validateNote } from '@/utils/noteLimit'
 
 const props = defineProps<{
@@ -53,7 +54,9 @@ const handleConfirm = () => {
         <div class="bn-panel">
           <div class="bn-header">
             <span class="bn-title">编辑备注</span>
-            <button class="bn-close" title="关闭" @click="emit('close')">✕</button>
+            <button class="bn-close" title="关闭" @click="emit('close')">
+              <AppIcon name="close" :size="14" />
+            </button>
           </div>
 
           <div class="bn-body">

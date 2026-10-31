@@ -45,18 +45,18 @@
 
       <div class="setting-row clickable" @click="handleOpenBindModal">
         <span class="row-label">查看 / 更新凭证 (Cookie)</span>
-        <span class="arrow-icon">›</span>
+        <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
       </div>
 
       <div class="setting-row clickable danger" @click="handleLogout">
         <span class="row-label">清除凭证并退出</span>
-        <span class="logout-icon">🚪</span>
+        <span class="logout-icon"><AppIcon name="exit" :size="16" /></span>
       </div>
     </template>
 
     <!-- ── 管理员区块（Round25：由原「安全」页并入）── -->
     <template v-if="userStore.isAdmin">
-      <div class="section-title">👤 账户操作</div>
+      <div class="section-title"><AppIcon name="user" :size="14" /> 账户操作</div>
 
       <div class="setting-row">
         <div class="unbound-info">
@@ -73,7 +73,7 @@
         </div>
       </div>
 
-      <div class="section-title">👥 成员管理</div>
+      <div class="section-title"><AppIcon name="users" :size="14" /> 成员管理</div>
 
       <div class="member-form">
         <input v-model="newMember.username" placeholder="用户名" class="text-input" />
@@ -139,7 +139,7 @@
         <div v-if="members.length === 0" class="empty-tip">暂无成员</div>
       </div>
 
-      <div class="section-title">🖥️ 服务器</div>
+      <div class="section-title"><AppIcon name="monitor" :size="14" /> 服务器</div>
 
       <div class="setting-row">
         <div class="unbound-info">
@@ -199,7 +199,7 @@
 
         <!-- 方式 A：账号密码内部登录（免 F12 复制） -->
         <div class="login-form">
-          <div class="login-mode-title">🔑 方式一：使用 E 站账号密码登录</div>
+          <div class="login-mode-title"><AppIcon name="key" :size="14" /> 方式一：使用 E 站账号密码登录</div>
           <div class="login-mode-tip">无需打开浏览器复制 Cookie；遇验证码/风控时请改用方式二</div>
           <input
             v-model="loginForm.username"
@@ -295,6 +295,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'

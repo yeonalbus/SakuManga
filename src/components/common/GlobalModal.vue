@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useUI } from '@/composables/useUI'
+import AppIcon from '@/components/icons/AppIcon.vue'
 // Round14：手柄确认/取消（A=确认 B=取消，可自定义按键防与翻页键冲突）
 import { useGamepad } from '@/composables/useGamepad'
 
@@ -24,7 +25,7 @@ useGamepad({
         <p class="modal-message">{{ modalState.message }}</p>
 
         <div v-if="modalState.details" class="modal-details" :class="modalState.detailsTone">
-          <span class="details-icon">⚠</span>
+          <span class="details-icon"><AppIcon name="warning" :size="14" /></span>
           <span>{{ modalState.details }}</span>
         </div>
 

@@ -2,7 +2,7 @@
   <div class="tag-maintain-settings">
     <!-- 双轨模型说明 -->
     <div class="intro-card">
-      <div class="intro-title">🏷️ 双轨 Tag 维护说明</div>
+      <div class="intro-title"><AppIcon name="tag" :size="15" /> 双轨 Tag 维护说明</div>
       <div class="intro-text">
         <p>· <b>OnlineTags</b>：E站官方 tag，每日刷新时整体覆盖。</p>
         <p>· <b>OfflineAddTags</b>：本地新增 tag（客制化，不写回）。</p>
@@ -26,7 +26,7 @@
     <!-- 在线搜索 Tag 语法自动修正（全局，默认开启） -->
     <div class="setting-item">
       <div class="item-info">
-        <div class="item-title">🔍 在线搜索 Tag 语法自动修正</div>
+        <div class="item-title"><AppIcon name="search" :size="15" /> 在线搜索 Tag 语法自动修正</div>
         <div class="item-subtext">
           将 <code>group:da hootch</code> 之类的自由输入自动修正为 E 站标准语法
           <code>group:"da hootch$"</code>，避免多词 tag 被拆成独立词条导致搜索无结果。
@@ -57,7 +57,7 @@
             title="检查更新"
             @click="handleRefreshTagTranslation"
           >
-            🔄
+            <AppIcon name="refresh" :size="15" />
           </button>
           <label class="toggle-switch">
             <input
@@ -98,7 +98,7 @@
             title="检查更新"
             @click="handleRefreshTagSort"
           >
-            🔄
+            <AppIcon name="refresh" :size="15" />
           </button>
           <label class="toggle-switch">
             <input
@@ -128,7 +128,7 @@
 
     <div class="setting-item update-cycle-item">
       <div class="item-info">
-        <div class="item-title">🔄 标签数据自动更新周期</div>
+        <div class="item-title"><AppIcon name="refresh" :size="15" /> 标签数据自动更新周期</div>
         <div class="item-subtext">
           启动时自动查找本地文件，若缺失或不是最新版本将自行下载；之后每
           {{ updateCycleHours }} 小时自动检查一次更新
@@ -208,10 +208,10 @@
     <!-- 手动触发 -->
     <div class="manual-row">
       <button class="action-btn refresh-btn" :disabled="busy" @click="handleRefresh">
-        🔄 立即刷新
+        <AppIcon name="refresh" :size="15" /> 立即刷新
       </button>
       <button class="action-btn writeback-btn" :disabled="busy" @click="handleWriteback">
-        💾 立即写回
+        <AppIcon name="save" :size="15" /> 立即写回
       </button>
     </div>
 
@@ -235,6 +235,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
 import { useTagStore } from '@/stores/tagStore'

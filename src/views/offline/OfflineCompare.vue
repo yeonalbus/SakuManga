@@ -6,6 +6,7 @@ import { http } from '@/utils/request'
 import OfflineDetailPanel, { type DetailTag } from '@/components/OfflineDetailPanel.vue'
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // Round4 任务一：双列对比视图
 //   type=update   → 左=本地原版（GET /comics/:id），右=线上最新版（newGID/newToken 复用 OnlineDetail embedded）
@@ -154,7 +155,7 @@ const confirmDeleteMember = async (deleteFile: boolean) => {
       toast.info(`《${c.title}》记录已不存在（可能已在其他设备删除），已同步标记为已删除`)
     } else {
       toast.success(
-        deleteFile ? `《${c.title}》记录与本地文件已删除 🗑️` : `《${c.title}》记录已删除（保留本地文件）`,
+        deleteFile ? `《${c.title}》记录与本地文件已删除` : `《${c.title}》记录已删除（保留本地文件）`,
       )
     }
     // 原地占位：保留标签卡位置与左右索引，便于继续对比其余成员；
@@ -284,7 +285,7 @@ const downloadNew = async () => {
       method: 'POST',
       body: JSON.stringify({ comicId: comicId.value }),
     })
-    toast.success(`《${localComic.value.title}》新版已加入下载队列 📥`)
+    toast.success(`《${localComic.value.title}》新版已加入下载队列`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '加入下载队列失败')
@@ -298,7 +299,7 @@ const removeRight = async () => {
   if (!rightComic.value || removing.value) return
   const c = rightComic.value
   const confirmed = await modal.confirm(
-    `确定仅删除《${c.title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
+    `确定仅删除《${c.title}》的记录吗？\n\n本地文件将保留：${c.localPath || ''}`,
     '移除记录（保留文件）',
   )
   if (!confirmed) return
@@ -324,9 +325,25 @@ onMounted(load)
 <template>
   <div class="compare-page">
     <header class="compare-header">
-      <button class="back-btn" @click="goBack">← 返回</button>
+      <button class="back-btn" @click="goBack"><AppIcon name="arrowLeft" :size="14" /> 返回</button>
       <h2 class="compare-title">
-        {{ compareType === 'update' ? '🔄 更新对比' : compareType === 'cluster' ? '🔎 疑似重复对比' : '🗂️ 维护对比' }}
+        <AppIcon
+          :name="
+            compareType === 'update'
+              ? 'refresh'
+              : compareType === 'cluster'
+                ? 'searchPlus'
+                : 'folders'
+          "
+          :size="16"
+        />
+        {{
+          compareType === 'update'
+            ? '更新对比'
+            : compareType === 'cluster'
+              ? '疑似重复对比'
+              : '维护对比'
+        }}
       </h2>
       <div class="header-actions">
         <template v-if="compareType === 'update'">
@@ -335,7 +352,12 @@ onMounted(load)
             :disabled="!localComic || downloading"
             @click="downloadNew"
           >
-            {{ downloading ? '⏳ 加入中...' : '⬇️ 下载新版' }}
+            <AppIcon
+              :name="downloading ? 'loading' : 'download'"
+              :size="15"
+              :class="{ spin: downloading }"
+            />
+            {{ downloading ? '加入中...' : '下载新版' }}
           </button>
         </template>
         <template v-else>
@@ -345,7 +367,12 @@ onMounted(load)
             :disabled="removing"
             @click="removeRight"
           >
-            {{ removing ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+            <AppIcon
+              :name="removing ? 'loading' : 'trash'"
+              :size="15"
+              :class="{ spin: removing }"
+            />
+            {{ removing ? '处理中...' : '移除这本' }}
           </button>
         </template>
       </div>
@@ -356,7 +383,7 @@ onMounted(load)
       v-if="!loading && !error && compareType === 'cluster' && clusterDone"
       class="cluster-done-banner"
     >
-      <span class="done-icon">✅</span>
+      <span class="done-icon"><AppIcon name="success" :size="18" /></span>
       <div class="done-info">
         <p class="done-title">该组已处理完毕</p>
         <p class="done-sub">
@@ -364,7 +391,9 @@ onMounted(load)
           返回维护页后该组已从列表消失。
         </p>
       </div>
-      <button class="action-btn ghost" @click="goBack">← 返回维护页</button>
+      <button class="action-btn ghost" @click="goBack">
+        <AppIcon name="arrowLeft" :size="14" /> 返回维护页
+      </button>
     </div>
 
     <div v-if="loading" class="compare-state">
@@ -373,7 +402,7 @@ onMounted(load)
     </div>
 
     <div v-else-if="error" class="compare-state error-state">
-      <p class="error-icon">⚠️</p>
+      <p class="error-icon"><AppIcon name="warning" :size="32" /></p>
       <p>{{ error }}</p>
       <button class="action-btn ghost" @click="goBack">返回列表</button>
     </div>
@@ -384,13 +413,13 @@ onMounted(load)
         <template v-if="compareType === 'update'">
           <aside class="compare-online-panel">
             <header class="compare-panel-header">
-              <span class="compare-panel-title">📚 本地原版</span>
+              <span class="compare-panel-title"><AppIcon name="books" :size="14" /> 本地原版</span>
             </header>
             <div v-if="localGid" class="compare-online-body">
               <OnlineDetail embedded local-panel :gid="localGid" :token="localToken" />
             </div>
             <div v-else class="compare-online-empty">
-              <div class="empty-icon">📭</div>
+              <div class="empty-icon"><AppIcon name="tray" :size="32" /></div>
               <p>该本地漫画未绑定在线画廊（缺少 GID），无法在线对比详情。</p>
             </div>
           </aside>
@@ -399,7 +428,7 @@ onMounted(load)
           <!-- Round26-2：疑似重复组对比（左）——标签卡切换组内成员 -->
           <div class="cluster-panel">
             <header class="compare-panel-header cluster-panel-header">
-              <span class="compare-panel-title">📚 成员对比（左）</span>
+              <span class="compare-panel-title"><AppIcon name="books" :size="14" /> 成员对比（左）</span>
               <div class="cluster-tabs">
                 <button
                   v-for="(m, i) in clusterMembers"
@@ -419,7 +448,7 @@ onMounted(load)
                 title="删除当前左侧成员（可选择仅删记录或连同本地文件）"
                 @click="openDeletePicker('left')"
               >
-                🗑️ 移除这本
+                <AppIcon name="trash" :size="13" /> 移除这本
               </button>
             </header>
             <OfflineDetailPanel
@@ -433,7 +462,7 @@ onMounted(load)
             />
             <!-- Round43：删除后原地占位（不重排标签卡，避免左右面板索引跳动） -->
             <div v-else-if="clusterLeftMember" class="member-placeholder">
-              <div class="ph-icon">🗑️</div>
+              <div class="ph-icon"><AppIcon name="trash" :size="32" /></div>
               <p class="ph-title">{{ clusterLeftMember.comic.title }}</p>
               <p class="ph-sub">
                 该成员已删除（{{
@@ -460,13 +489,13 @@ onMounted(load)
         <template v-if="compareType === 'update'">
           <aside class="compare-online-panel">
             <header class="compare-panel-header">
-              <span class="compare-panel-title">🖼️ 线上最新版</span>
+              <span class="compare-panel-title"><AppIcon name="images" :size="14" /> 线上最新版</span>
             </header>
             <div v-if="onlineGid" class="compare-online-body">
               <OnlineDetail embedded :gid="onlineGid" :token="onlineToken" />
             </div>
             <div v-else class="compare-online-empty">
-              <div class="empty-icon">ℹ️</div>
+              <div class="empty-icon"><AppIcon name="info" :size="32" /></div>
               <p>{{ updateNote || '该漫画没有可用的新版画廊信息（可能未绑定 E 站账户，或线上画廊已不可用）。' }}</p>
             </div>
           </aside>
@@ -475,7 +504,7 @@ onMounted(load)
           <!-- Round26-2：疑似重复组对比（右）——标签卡切换组内成员 -->
           <div class="cluster-panel">
             <header class="compare-panel-header cluster-panel-header">
-              <span class="compare-panel-title">🖼️ 成员对比（右）</span>
+              <span class="compare-panel-title"><AppIcon name="images" :size="14" /> 成员对比（右）</span>
               <div class="cluster-tabs">
                 <button
                   v-for="(m, i) in clusterMembers"
@@ -495,7 +524,7 @@ onMounted(load)
                 title="删除当前右侧成员（可选择仅删记录或连同本地文件）"
                 @click="openDeletePicker('right')"
               >
-                🗑️ 移除这本
+                <AppIcon name="trash" :size="13" /> 移除这本
               </button>
             </header>
             <OfflineDetailPanel
@@ -509,7 +538,7 @@ onMounted(load)
             />
             <!-- Round43：删除后原地占位（不重排标签卡，避免左右面板索引跳动） -->
             <div v-else-if="clusterRightMember" class="member-placeholder">
-              <div class="ph-icon">🗑️</div>
+              <div class="ph-icon"><AppIcon name="trash" :size="32" /></div>
               <p class="ph-title">{{ clusterRightMember.comic.title }}</p>
               <p class="ph-sub">
                 该成员已删除（{{
@@ -536,11 +565,13 @@ onMounted(load)
     <div v-if="deleteTarget" class="modal-mask" @click.self="deleteTarget = null">
       <div class="modal-box">
         <div class="modal-head">
-          <span class="modal-title">🗑️ 移除这本</span>
-          <button class="modal-close" title="关闭" @click="deleteTarget = null">×</button>
+          <span class="modal-title"><AppIcon name="trash" :size="15" /> 移除这本</span>
+          <button class="modal-close" title="关闭" @click="deleteTarget = null">
+            <AppIcon name="close" :size="16" />
+          </button>
         </div>
         <p class="modal-target">《{{ pendingDeleteMember?.comic.title }}》</p>
-        <p class="modal-path">📁 {{ pendingDeleteMember?.comic.localPath || '—' }}</p>
+        <p class="modal-path"><AppIcon name="folder" :size="12" /> {{ pendingDeleteMember?.comic.localPath || '—' }}</p>
         <p class="modal-sub">
           删除后该成员在本页原地占位（标签卡置灰、不可再选中），后端会立即重算该疑似重复组；
           组内删到只剩 1 本时，该组不再显示于疑似重复列表。
@@ -548,10 +579,12 @@ onMounted(load)
         <div class="modal-actions">
           <button class="action-btn ghost" @click="deleteTarget = null">取消</button>
           <button class="action-btn primary" :disabled="removing" @click="confirmDeleteMember(false)">
-            {{ removing ? '⏳ 处理中...' : '仅移除记录（保留文件）' }}
+            <AppIcon name="loading" :size="14" :class="{ spin: removing }" />
+            {{ removing ? '处理中...' : '仅移除记录（保留文件）' }}
           </button>
           <button class="action-btn danger" :disabled="removing" @click="confirmDeleteMember(true)">
-            {{ removing ? '⏳ 处理中...' : '移除记录 + 本地文件' }}
+            <AppIcon name="loading" :size="14" :class="{ spin: removing }" />
+            {{ removing ? '处理中...' : '移除记录 + 本地文件' }}
           </button>
         </div>
       </div>

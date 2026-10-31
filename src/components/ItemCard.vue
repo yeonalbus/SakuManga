@@ -15,6 +15,7 @@ import { useUI } from '@/composables/useUI'
 import { openComicDetailInNewTab, buildDetailRoute, recordBackStateForDetail, contentOpensNewTab } from '@/utils/detailNav'
 // Round10-Bug2：卡片评分统一走「生效评分」（离线优先个人评分，回退社区评分）
 import { getEffectiveRating } from '@/stores/ratingStore'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 恢复 const props 变量定义，并补回 mode 与 size
 // 新增选择相关 props：selectable=是否允许长按进入选择；selectMode=是否处于选择模式；selected=是否被选中
@@ -452,7 +453,9 @@ const comicSourceBadge = computed(() => {
       :class="{ checked: selected }"
       @click.stop="emit('select', comic)"
     >
-      <span class="check-mark">{{ selected ? '✓' : '' }}</span>
+      <span class="check-mark">
+        <AppIcon v-if="selected" name="check" weight="fill" :size="13" />
+      </span>
     </span>
 
     <!-- 🪪 名片模式 (Compact) -->
@@ -477,10 +480,13 @@ const comicSourceBadge = computed(() => {
         </span>
 
         <!-- 🔖 Round27：搜刮书签锚定角标（缩略图右上角，与 rank 左上不冲突） -->
-        <span v-if="bookmarked" class="compact-bookmark-badge" title="搜刮书签锚定的画廊">🔖</span>
+        <span v-if="bookmarked" class="compact-bookmark-badge" title="搜刮书签锚定的画廊">
+          <AppIcon name="bookmark" weight="fill" :size="10" />
+        </span>
 
         <span class="tag-indicator" :class="{ active: showTags }">
-          {{ showTags ? '▲ 隐' : '🏷️ Tag' }}
+          <AppIcon :name="showTags ? 'caretUp' : 'tag'" :size="11" />
+          {{ showTags ? '隐' : 'Tag' }}
         </span>
 
         <!-- ⬇️ 在线卡片 hover 快捷下载按钮（零弹窗） -->
@@ -494,7 +500,8 @@ const comicSourceBadge = computed(() => {
           @pointerdown.stop
           @pointerup.stop
         >
-          {{ isQuickDownloading ? '…' : '⬇' }}
+          <AppIcon v-if="!isQuickDownloading" name="download" :size="12" />
+          <template v-else>…</template>
         </button>
       </div>
 
@@ -517,10 +524,12 @@ const comicSourceBadge = computed(() => {
               class="fav-dot"
               :style="{ backgroundColor: favColors[onlineComic.favIndex] || '#7f7f7f' }"
             >
-              ★
+              <AppIcon name="star" weight="fill" :size="10" />
             </span>
 
-            <span v-if="displayRating" class="rating-text">⭐ {{ displayRating.toFixed(1) }}</span>
+            <span v-if="displayRating" class="rating-text">
+              <AppIcon name="star" :size="12" /> {{ displayRating.toFixed(1) }}
+            </span>
 
             <span v-if="comic.pageCount" class="pages-text">{{ comic.pageCount }} 页</span>
 
@@ -528,8 +537,12 @@ const comicSourceBadge = computed(() => {
           </div>
 
           <div class="status-row">
-            <span v-if="isDownloading" class="downloaded-badge downloading"> ⏳ 下载中 </span>
-            <span v-else-if="comic.isDownloaded" class="downloaded-badge"> ✓ 已下载 </span>
+            <span v-if="isDownloading" class="downloaded-badge downloading">
+              <AppIcon name="loading" :size="12" class="spin" /> 下载中
+            </span>
+            <span v-else-if="comic.isDownloaded" class="downloaded-badge">
+              <AppIcon name="check" weight="fill" :size="12" /> 已下载
+            </span>
             <span v-if="comicSourceBadge" class="source-label-badge">{{ comicSourceBadge }}</span>
           </div>
         </div>
@@ -559,19 +572,25 @@ const comicSourceBadge = computed(() => {
           {{ comic.category || 'Manga' }}
         </span>
         <!-- 🔖 Round27：搜刮书签锚定角标（封面右上角；fav 星存在时右移让位） -->
-        <span v-if="bookmarked" class="card-bookmark-badge" title="搜刮书签锚定的画廊">🔖</span>
+        <span v-if="bookmarked" class="card-bookmark-badge" title="搜刮书签锚定的画廊">
+          <AppIcon name="bookmark" weight="fill" :size="11" />
+        </span>
         <span
           v-if="onlineComic?.isFavorite && onlineComic.favIndex !== undefined"
           class="card-fav-badge"
           :class="{ 'bm-shifted': bookmarked }"
           :style="{ backgroundColor: favColors[onlineComic.favIndex] || '#7f7f7f' }"
         >
-          ★
+          <AppIcon name="star" weight="fill" :size="11" />
         </span>
 
         <!-- 🟢 补齐下载状态标志（下载中优先展示，避免重复点击） -->
-        <span v-if="isDownloading" class="card-downloaded-badge downloading">⏳ 下载中</span>
-        <span v-else-if="comic.isDownloaded" class="card-downloaded-badge">✓ 已下载</span>
+        <span v-if="isDownloading" class="card-downloaded-badge downloading">
+          <AppIcon name="loading" :size="11" class="spin" /> 下载中
+        </span>
+        <span v-else-if="comic.isDownloaded" class="card-downloaded-badge">
+          <AppIcon name="check" weight="fill" :size="11" /> 已下载
+        </span>
         <span v-if="comic.pageCount" class="card-pages-badge">{{ comic.pageCount }}P</span>
 
         <!-- ⬇️ 在线卡片 hover 快捷下载按钮（零弹窗） -->
@@ -585,7 +604,10 @@ const comicSourceBadge = computed(() => {
           @pointerdown.stop
           @pointerup.stop
         >
-          {{ isQuickDownloading ? '加入中…' : '⬇ 下载' }}
+          <template v-if="isQuickDownloading">加入中…</template>
+          <template v-else>
+            <AppIcon name="download" :size="14" /> 下载
+          </template>
         </button>
       </div>
 
@@ -612,7 +634,10 @@ const comicSourceBadge = computed(() => {
           <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" />
         </div>
         <div v-if="!hideBottomMeta" class="card-bottom-meta">
-          <span class="rating">⭐ {{ displayRating ? displayRating.toFixed(1) : '—' }}</span>
+          <span class="rating">
+            <AppIcon name="star" :size="12" />
+            {{ displayRating ? displayRating.toFixed(1) : '—' }}
+          </span>
           <span v-if="languageLabel" class="lang-tag">{{ languageLabel }}</span>
           <span v-else class="source-tag" :class="[comic.source, { extra: !!comicSourceBadge }]">
             {{ comic.source === 'online' ? '在线' : comicSourceBadge || '本地' }}

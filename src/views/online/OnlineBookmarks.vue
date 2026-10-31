@@ -8,6 +8,7 @@
 import { computed, onMounted, ref } from 'vue'
 import BookmarkCard from '@/components/BookmarkCard.vue'
 import BookmarkNoteModal from '@/components/BookmarkNoteModal.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import {
   scrapeBookmarks,
   updateBookmarkFields,
@@ -94,14 +95,17 @@ onMounted(() => {
     <div class="bm-page">
       <header class="bm-page-head">
         <div class="bm-head-left">
-          <h2 class="bm-page-title">🔖 书签</h2>
+          <h2 class="bm-page-title"><AppIcon name="bookmark" :size="18" /> 书签</h2>
           <span class="bm-page-stat">
             共 {{ total }} 条 · 置顶 {{ pinnedCount }}/{{ PINNED_BOOKMARK_LIMIT }} · 有更新
             {{ updateCount }}
           </span>
         </div>
         <button class="bm-probe-btn" :disabled="probing" @click="runProbe">
-          {{ probing ? '⏳ 探测中…' : '🔄 检查更新' }}
+          <template v-if="probing">
+            <AppIcon name="loading" :size="15" class="spin" /> 探测中…
+          </template>
+          <template v-else><AppIcon name="refresh" :size="15" /> 检查更新</template>
         </button>
       </header>
 

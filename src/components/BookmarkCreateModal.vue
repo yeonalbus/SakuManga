@@ -6,6 +6,7 @@
 //   · 「确认」保存；「取消」回到拾取模式（可改锚定其他卡片）
 // 样式沿用 DateJumpModal 的 overlay/panel 暗色主题结构
 import { computed, ref, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import type { ScrapeBookmarkRole } from '@/types/comic'
 import { noteCounterText, validateNote } from '@/utils/noteLimit'
 
@@ -91,15 +92,18 @@ const handleConfirm = () => {
       <div v-if="show" class="bm-overlay" @click.self="emit('close')">
         <div class="bm-panel">
           <div class="bm-header">
-            <span class="bm-title">🔖 存为书签</span>
-            <button class="bm-close" title="关闭" @click="emit('close')">✕</button>
+            <span class="bm-title"><AppIcon name="bookmark" :size="15" /> 存为书签</span>
+            <button class="bm-close" title="关闭" @click="emit('close')">
+              <AppIcon name="close" :size="14" />
+            </button>
           </div>
 
           <div class="bm-body">
             <!-- 自动记录的关键信息：位置（页面上下文）+ 发布时间 -->
             <div class="bm-info">
               <span class="bm-type-badge" :class="type">
-                {{ type === 'search' ? '🔍 搜索内容' : '🏠 首页' }}
+                <AppIcon :name="type === 'search' ? 'search' : 'home'" :size="12" />
+                {{ type === 'search' ? '搜索内容' : '首页' }}
               </span>
               <span v-if="type === 'search' && keyword" class="bm-keyword" :title="keyword">
                 {{ keyword }}
@@ -109,15 +113,15 @@ const handleConfirm = () => {
 
             <div class="bm-record">
               <div class="bm-record-row">
-                <span class="bm-record-label">📅 发布时间</span>
+                <span class="bm-record-label"><AppIcon name="calendar" :size="13" /> 发布时间</span>
                 <span class="bm-record-value">{{ postedAt || '未知' }}</span>
               </div>
               <div class="bm-record-row">
-                <span class="bm-record-label">📍 位置</span>
+                <span class="bm-record-label"><AppIcon name="mapPin" :size="13" /> 位置</span>
                 <span class="bm-record-value" :title="locationLabel">{{ locationLabel }}</span>
               </div>
               <div v-if="anchorTitle" class="bm-record-row">
-                <span class="bm-record-label">🎴 锚定画廊</span>
+                <span class="bm-record-label"><AppIcon name="cards" :size="13" /> 锚定画廊</span>
                 <span class="bm-record-value" :title="anchorTitle">{{ anchorTitle }}</span>
               </div>
             </div>

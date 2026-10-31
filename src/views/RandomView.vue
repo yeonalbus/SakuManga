@@ -5,6 +5,7 @@ import { useUI } from '@/composables/useUI'
 import { setListStateProvider, clearListStateProvider, getMainContent } from '@/utils/scrollMemory'
 import ItemCard from '@/components/ItemCard.vue'
 import TagChip from '@/components/TagChip.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 // Round22：抽卡结果多选快捷加入书架（仅离线结果可加入，决策 D7）
 import { useShelfQuickAdd } from '@/composables/useShelfQuickAdd'
 import { useImeEnter } from '@/composables/useImeEnter'
@@ -404,7 +405,7 @@ onBeforeUnmount(() => {
     <!-- 1. 页面标题 Header -->
     <div class="page-header">
       <div class="header-title">
-        <span>🎲 随机本子抽卡</span>
+        <span><AppIcon name="dice" :size="17" /> 随机本子抽卡</span>
         <span class="subtitle">摆脱选择困难症</span>
       </div>
     </div>
@@ -421,7 +422,7 @@ onBeforeUnmount(() => {
             title="全库均匀随机（与旧版一致）"
             @click="poolMode = 'random'"
           >
-            🎲 纯随机
+            <AppIcon name="dice" :size="14" /> 纯随机
           </button>
           <button
             class="mode-btn"
@@ -429,7 +430,7 @@ onBeforeUnmount(() => {
             title="按本地库 XP 词云权重加权抽取（仅作用于本地库）"
             @click="poolMode = 'recommend'"
           >
-            ✨ 偏好推荐
+            <AppIcon name="sparkle" :size="14" /> 偏好推荐
           </button>
         </div>
         <button
@@ -438,9 +439,11 @@ onBeforeUnmount(() => {
           :class="{ open: showRecoPanel }"
           @click="showRecoPanel = !showRecoPanel"
         >
-          ⚙️ 推荐参数
+          <AppIcon name="settings" :size="14" /> 推荐参数
           <span v-if="recoDirtyCount > 0" class="reco-badge">{{ recoDirtyCount }}</span>
-          <span class="ft-arrow">{{ showRecoPanel ? '▲' : '▼' }}</span>
+          <span class="ft-arrow"
+            ><AppIcon :name="showRecoPanel ? 'caretUp' : 'caretDown'" :size="12"
+          /></span>
         </button>
       </div>
 
@@ -506,7 +509,7 @@ onBeforeUnmount(() => {
         </div>
 
         <p class="reco-note">
-          ✈️ 推荐只作用于本地库；在线部分始终为纯随机（不在本地库的画廊无法统计偏好）。
+          <AppIcon name="plane" :size="13" /> 推荐只作用于本地库；在线部分始终为纯随机（不在本地库的画廊无法统计偏好）。
         </p>
       </div>
 
@@ -547,10 +550,12 @@ onBeforeUnmount(() => {
             :class="{ open: filterOpen }"
             @click="filterOpen = !filterOpen"
           >
-            <span class="ft-icon">🎛️</span>
+            <span class="ft-icon"><AppIcon name="filter" :size="14" /></span>
             <span class="ft-label">抽卡过滤器</span>
             <span v-if="activeFilterCount > 0" class="filter-badge">{{ activeFilterCount }}</span>
-            <span class="ft-arrow">{{ filterOpen ? '▲' : '▼' }}</span>
+            <span class="ft-arrow"
+              ><AppIcon :name="filterOpen ? 'caretUp' : 'caretDown'" :size="12"
+            /></span>
           </button>
           <span class="filter-status" :class="{ active: activeFilterCount > 0 }">
             {{
@@ -577,7 +582,7 @@ onBeforeUnmount(() => {
               >
                 <span class="kw-text">{{ kw }}</span>
                 <span class="kw-remove" title="删除此关键词" @click.stop="removeKeyword(index)">
-                  ✕
+                  <AppIcon name="close" :size="12" />
                 </span>
               </span>
             </div>
@@ -610,7 +615,7 @@ onBeforeUnmount(() => {
                      否则点击时 TagChip 抢占事件并触发快捷搜索跳页，联想词进不了关键词队列 -->
                 <TagChip :tag="sug" :disable-quick-search="true" />
                 <span v-if="sug.count" class="tag-count-badge"
-                  >🔥 {{ sug.count.toLocaleString() }}</span
+                  ><AppIcon name="fire" :size="12" /> {{ sug.count.toLocaleString() }}</span
                 >
                 <span class="suggest-hint">{{ sug.isNegative ? '排除' : '加入' }}</span>
               </div>
@@ -656,12 +661,12 @@ onBeforeUnmount(() => {
             <div class="filter-field">
               <label class="field-label">最低评分</label>
               <select v-model="drawConfig.minRating" class="dark-select">
-                <option :value="0">0 ⭐ (全部)</option>
-                <option :value="1">1 ⭐</option>
-                <option :value="2">2 ⭐</option>
-                <option :value="3">3 ⭐</option>
-                <option :value="4">4 ⭐</option>
-                <option :value="5">5 ⭐</option>
+                <option :value="0">0 ★ (全部)</option>
+                <option :value="1">1 ★</option>
+                <option :value="2">2 ★</option>
+                <option :value="3">3 ★</option>
+                <option :value="4">4 ★</option>
+                <option :value="5">5 ★</option>
               </select>
             </div>
 
@@ -735,7 +740,9 @@ onBeforeUnmount(() => {
           </template>
 
           <div class="filter-actions">
-            <button class="filter-reset" @click="resetFilter">🔄 重置过滤器</button>
+            <button class="filter-reset" @click="resetFilter">
+              <AppIcon name="refresh" :size="14" /> 重置过滤器
+            </button>
           </div>
         </div>
       </div>
@@ -744,34 +751,38 @@ onBeforeUnmount(() => {
       <div class="control-group">
         <label class="group-label">范围：</label>
         <select v-model="scopeType" class="dark-select">
-          <option value="all">🌐+📚 全库 (在线+本地)</option>
-          <option value="online">🌐 仅在线图库</option>
-          <option value="offline">📚 仅本地画库</option>
+          <option value="all">全库（在线+本地）</option>
+          <option value="online">仅在线图库</option>
+          <option value="offline">仅本地画库</option>
         </select>
         <!-- Round32：推荐模式下范围含在线时，明确标注在线部分为纯随机（决策 D1） -->
         <span v-if="poolMode === 'recommend' && scopeType !== 'offline'" class="scope-note">
-          ✈️ 在线部分为纯随机
+          <AppIcon name="plane" :size="13" /> 在线部分为纯随机
         </span>
       </div>
 
       <!-- ④ 开始抽卡大按钮 -->
       <button class="draw-btn" :disabled="isSpinning" @click="handleStartDraw">
-        {{ isSpinning ? '🎰 正在洗牌抽卡中...' : hasDrawn ? '🔄 重新抽取' : '🎴 开始抽卡！' }}
+        <template v-if="isSpinning">
+          <AppIcon name="dice" :size="15" class="spin" /> 正在洗牌抽卡中...
+        </template>
+        <template v-else-if="hasDrawn"><AppIcon name="refresh" :size="15" /> 重新抽取</template>
+        <template v-else><AppIcon name="cards" :size="15" /> 开始抽卡！</template>
       </button>
     </div>
 
     <!-- 3. 结果展示区 -->
     <div class="results-container">
       <div v-if="!hasDrawn && !isSpinning" class="empty-placeholder">
-        <span class="placeholder-icon">🃏</span>
+        <span class="placeholder-icon"><AppIcon name="cards" :size="36" /></span>
         <p>选择好数量与范围，点击“开始抽卡”即可随机挑选作品</p>
       </div>
 
       <div v-else-if="isSpinning" class="spinning-placeholder">
         <div class="loading-cards">
-          <span class="card-flip">🎴</span>
-          <span class="card-flip delay-1">🎴</span>
-          <span class="card-flip delay-2">🎴</span>
+          <span class="card-flip"><AppIcon name="cards" :size="32" /></span>
+          <span class="card-flip delay-1"><AppIcon name="cards" :size="32" /></span>
+          <span class="card-flip delay-2"><AppIcon name="cards" :size="32" /></span>
         </div>
         <p>命运的轮盘转动中...</p>
       </div>
@@ -788,7 +799,7 @@ onBeforeUnmount(() => {
 
         <!-- 真实抽出的卡片网格 -->
         <div v-if="drawnByRecommend" class="reco-result-note">
-          ✨ 本地结果按 XP 偏好加权抽取（命中理由见每张卡片下方）
+          <AppIcon name="sparkle" :size="13" /> 本地结果按 XP 偏好加权抽取（命中理由见每张卡片下方）
         </div>
         <div class="results-grid">
           <div v-for="(comic, index) in drawnComics" :key="comic.id" class="drawn-item-card">

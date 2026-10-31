@@ -2,7 +2,7 @@
   <div class="dedup-settings">
     <!-- 功能说明 -->
     <div class="intro-card">
-      <div class="intro-title">🔎 本地书库维护 / 查重设置</div>
+      <div class="intro-title"><AppIcon name="searchPlus" :size="14" /> 本地书库维护 / 查重设置</div>
       <div class="intro-text">
         <p>· 维护页扫描本地书库，产出「<b>建议删除</b>」（同 GID / 归档 Hash / 父子画廊等强证据）与
           「<b>疑似重复</b>」（名称级弱证据，按「两本差在哪」分组）。两者都只给建议，<b>不会自动删除或忽略</b>。</p>
@@ -45,6 +45,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 

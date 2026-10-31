@@ -1,10 +1,13 @@
 <template>
   <div class="my-tags-settings">
     <div class="sub-header">
-      <button class="back-btn" title="返回" @click="$emit('back')">←</button>
+      <button class="back-btn" title="返回" @click="$emit('back')">
+        <AppIcon name="arrowLeft" :size="18" />
+      </button>
       <h3 class="sub-title">我的标签</h3>
       <button class="refresh-btn" title="从 E 站重新读取" :disabled="loading" @click="load">
-        {{ loading ? '读取中…' : '↻ 刷新' }}
+        <template v-if="loading">读取中…</template>
+        <template v-else><AppIcon name="refresh" :size="13" /> 刷新</template>
       </button>
     </div>
 
@@ -77,7 +80,7 @@
             :disabled="!!submitting"
             @click="removeTag(actionWatch, tag)"
           >
-            ✕
+            <AppIcon name="close" :size="12" />
           </button>
         </span>
       </div>
@@ -101,7 +104,9 @@
               @mousedown.prevent="pickSuggestion(actionWatch, s)"
             >
               <span class="suggest-text">{{ s.namespace }}:{{ s.key }}</span>
-              <span v-if="s.count" class="suggest-count">🔥 {{ s.count.toLocaleString() }}</span>
+              <span v-if="s.count" class="suggest-count">
+                <AppIcon name="fire" :size="12" /> {{ s.count.toLocaleString() }}
+              </span>
             </div>
           </div>
         </div>
@@ -136,7 +141,7 @@
             :disabled="!!submitting"
             @click="removeTag(actionHide, tag)"
           >
-            ✕
+            <AppIcon name="close" :size="12" />
           </button>
         </span>
       </div>
@@ -160,7 +165,9 @@
               @mousedown.prevent="pickSuggestion(actionHide, s)"
             >
               <span class="suggest-text">{{ s.namespace }}:{{ s.key }}</span>
-              <span v-if="s.count" class="suggest-count">🔥 {{ s.count.toLocaleString() }}</span>
+              <span v-if="s.count" class="suggest-count">
+                <AppIcon name="fire" :size="12" /> {{ s.count.toLocaleString() }}
+              </span>
             </div>
           </div>
         </div>
@@ -178,6 +185,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import type { EHMyTags, EHTagset, TagSuggestion } from '@/types/eh'

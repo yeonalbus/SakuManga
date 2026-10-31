@@ -2,6 +2,7 @@
 import { watch, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
@@ -117,7 +118,8 @@ onBeforeRouteLeave(() => {
           <template #header>
             <div v-if="subStore.prevGid" class="top-load-bar">
               <button class="pill-btn" :disabled="subStore.isLoading" @click="handleLoadBefore">
-                ⬆️ {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
+                <AppIcon name="upload" :size="15" />
+                {{ subStore.isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>
           </template>

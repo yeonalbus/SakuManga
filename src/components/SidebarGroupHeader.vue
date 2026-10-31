@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '@/components/icons/AppIcon.vue'
+
 /**
  * Round39：侧栏折叠分组标题行（书架 / 书签共用）——抽屉标题的唯一样式与结构来源
  *
@@ -32,7 +34,7 @@ const emit = defineEmits<{ toggle: [] }>()
     <span class="fh-actions" @click.stop>
       <slot name="actions" />
     </span>
-    <span class="arrow" :class="{ open }">❯</span>
+    <span class="arrow" :class="{ open }"><AppIcon name="arrowRight" :size="10" /></span>
   </div>
 </template>
 

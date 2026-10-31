@@ -21,6 +21,7 @@ import { useTagStore } from '@/stores/tagStore'
 import { useUI } from '@/composables/useUI'
 import { isStandalonePWA } from '@/utils/detailNav'
 import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const props = defineProps<{
   bm: ScrapeBookmark
@@ -136,7 +137,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   >
     <div class="bm-cover">
       <img v-if="bm.anchor?.coverUrl" :src="bm.anchor.coverUrl" alt="" loading="lazy" />
-      <span v-else class="bm-cover-placeholder">🖼</span>
+      <span v-else class="bm-cover-placeholder"><AppIcon name="images" :size="32" /></span>
     </div>
 
     <div class="bm-body">
@@ -144,7 +145,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <div class="bm-title-row">
         <div class="bm-title" :title="title">{{ title }}</div>
         <button class="bm-menu-btn" title="配置菜单" @click.stop="menuOpen = !menuOpen">
-          ⚙
+          <AppIcon name="settings" :size="14" />
         </button>
       </div>
 
@@ -154,29 +155,38 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <!-- c：徽章行（状态展示） -->
       <div class="bm-badges">
         <span class="bm-badge" :class="`role-${bm.role}`">{{ roleLabels[bm.role] }}</span>
-        <span v-if="bm.bulkDone" class="bm-badge bulk">🧾 已囤货</span>
-        <span v-if="bm.updateWatch" class="bm-badge watch">🔔</span>
+        <span v-if="bm.bulkDone" class="bm-badge bulk">
+          <AppIcon name="receipt" :size="12" /> 已囤货
+        </span>
+        <span v-if="bm.updateWatch" class="bm-badge watch">
+          <AppIcon name="bell" weight="fill" :size="12" />
+        </span>
       </div>
 
       <!-- d：备注框（边框 + 右上角编辑按钮） -->
       <div class="bm-note-box" :class="{ empty: !bm.note }" @click.stop>
         {{ bm.note || '（暂无备注）' }}
         <button class="bm-note-edit" title="编辑备注" @click.stop="emit('edit-note', bm)">
-          ✏️
+          <AppIcon name="edit" :size="13" />
         </button>
       </div>
 
       <!-- 配置菜单 -->
       <div v-if="menuOpen" class="bm-menu" @click.stop>
-        <div class="bm-menu-item" @click="rename">✏️ 修改名称</div>
+        <div class="bm-menu-item" @click="rename">
+          <AppIcon name="edit" :size="13" /> 修改名称
+        </div>
         <div class="bm-menu-item" @click="togglePin">
-          📌 {{ bm.pinned ? '取消置顶' : '置顶到侧栏' }}
+          <AppIcon name="pin" :weight="bm.pinned ? 'fill' : 'regular'" :size="13" />
+          {{ bm.pinned ? '取消置顶' : '置顶到侧栏' }}
         </div>
         <div class="bm-menu-item" @click="toggleWatch">
-          🔔 {{ bm.updateWatch ? '关闭更新探测' : '开启更新探测' }}
+          <AppIcon name="bell" :weight="bm.updateWatch ? 'fill' : 'regular'" :size="13" />
+          {{ bm.updateWatch ? '关闭更新探测' : '开启更新探测' }}
         </div>
         <div class="bm-menu-item" @click="toggleBulk">
-          🧾 {{ bm.bulkDone ? '取消已囤货' : '标记已囤货' }}
+          <AppIcon name="receipt" :size="13" />
+          {{ bm.bulkDone ? '取消已囤货' : '标记已囤货' }}
         </div>
         <div class="bm-menu-sep" />
         <div class="bm-menu-role-label">书签标记</div>
@@ -192,7 +202,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           </button>
         </div>
         <div class="bm-menu-sep" />
-        <div class="bm-menu-item danger" @click="remove">🗑 删除书签</div>
+        <div class="bm-menu-item danger" @click="remove">
+          <AppIcon name="trash" :size="13" /> 删除书签
+        </div>
       </div>
     </div>
   </article>

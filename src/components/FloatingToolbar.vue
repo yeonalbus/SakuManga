@@ -6,6 +6,7 @@ import { scrollMainToTop } from '@/utils/scrollMemory'
 import DateJumpModal from '@/components/DateJumpModal.vue'
 // 优化排行榜：排行榜类型选择弹窗
 import ToplistTypeModal from '@/components/ToplistTypeModal.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 🟢 1. 增加控制 Props（模板中直接使用 showSort / sortMode）
 withDefaults(
@@ -129,7 +130,7 @@ onUnmounted(() => {
     <Transition name="fab-fade">
       <div v-if="isOpen" class="fab-menu">
         <button v-if="showScrollTop" class="menu-item" title="回到顶部" @click="handleScrollTop">
-          <span class="icon">⬆️</span>
+          <span class="icon"><AppIcon name="upload" :size="16" /></span>
           <span class="label">回到顶部</span>
         </button>
 
@@ -140,14 +141,16 @@ onUnmounted(() => {
           :title="sortMode === 'favorited' ? '切换为：按发布时间排序' : '切换为：按收藏时间排序'"
           @click="handleToggleSort"
         >
-          <span class="icon">{{ sortMode === 'favorited' ? '⭐' : '🕒' }}</span>
+          <span class="icon"
+            ><AppIcon :name="sortMode === 'favorited' ? 'star' : 'clock'" :size="16"
+          /></span>
           <span class="label">
             {{ sortMode === 'favorited' ? '按收藏时间' : '按发布时间' }}
           </span>
         </button>
 
         <button class="menu-item" title="刷新页面" @click="handleRefresh">
-          <span class="icon">🔄</span>
+          <span class="icon"><AppIcon name="refresh" :size="16" /></span>
           <span class="label">刷新列表</span>
         </button>
 
@@ -158,7 +161,7 @@ onUnmounted(() => {
           title="将当前浏览位置存为书签"
           @click="handleBookmarkCreate"
         >
-          <span class="icon">🔖</span>
+          <span class="icon"><AppIcon name="bookmark" :size="16" /></span>
           <span class="label">存为书签</span>
         </button>
 
@@ -169,7 +172,7 @@ onUnmounted(() => {
           title="选择排行榜类型"
           @click="handleOpenToplist"
         >
-          <span class="icon">🏆</span>
+          <span class="icon"><AppIcon name="trophy" :size="16" /></span>
           <span class="label">排行榜选择 {{ toplistCurrent }}</span>
         </button>
 
@@ -180,7 +183,7 @@ onUnmounted(() => {
           title="按日期跳转"
           @click="handleOpenDateJump"
         >
-          <span class="icon">📅</span>
+          <span class="icon"><AppIcon name="calendar" :size="16" /></span>
           <span class="label">日期跳转</span>
         </button>
 
@@ -191,14 +194,16 @@ onUnmounted(() => {
           title="展开/收起详情页面"
           @click="handleDetailToggle"
         >
-          <span class="icon">📄</span>
+          <span class="icon"><AppIcon name="file" :size="16" /></span>
           <span class="label">详情页面</span>
         </button>
       </div>
     </Transition>
 
     <button class="fab-trigger" :class="{ active: isOpen }" title="操作菜单" @click="toggleMenu">
-      <span class="trigger-icon">{{ isOpen ? '✕' : '⚙️' }}</span>
+      <span class="trigger-icon"
+        ><AppIcon :name="isOpen ? 'close' : 'settings'" :size="20"
+      /></span>
     </button>
 
     <DateJumpModal :show="dateJumpOpen" @close="dateJumpOpen = false" @confirm="handleSeekConfirm" />

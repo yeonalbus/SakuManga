@@ -5,10 +5,10 @@
   <!-- 主设置列表 -->
   <div v-else class="download-settings">
     <!-- ── 下载路径 ── -->
-    <div class="section-title">📁 下载路径</div>
+    <div class="section-title"><AppIcon name="folder" :size="14" /> 下载路径</div>
 
     <div v-if="usingDefaultPaths" class="path-hint">
-      ⚠️ 当前使用默认下载目录（程序目录下的 downloads
+      <AppIcon name="warning" :size="13" /> 当前使用默认下载目录（程序目录下的 downloads
       文件夹）。建议点击上方路径，修改为你自己的下载目录。
     </div>
 
@@ -17,7 +17,7 @@
         <div class="item-title">压缩包路径</div>
         <div class="item-subtext">{{ downloadSettings.archivePath }}</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <div class="setting-item clickable" @click="handleSelectExtractPath">
@@ -25,7 +25,7 @@
         <div class="item-title">解压后的文件夹存储路径</div>
         <div class="item-subtext">{{ downloadSettings.extractPath }}</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <div class="setting-item clickable" @click="handleSelectSingleImagePath">
@@ -33,7 +33,7 @@
         <div class="item-title">单张图片保存路径</div>
         <div class="item-subtext">{{ downloadSettings.singleImageSavePath }}</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <div class="setting-item clickable" @click="handleExtraScanPaths">
@@ -41,7 +41,7 @@
         <div class="item-title">额外的画廊扫描路径</div>
         <div class="item-subtext">扫描并加载本地画廊的路径。请不要使用SD卡或系统路径</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <div class="setting-item clickable" @click="handleResetDownloadPaths">
@@ -49,11 +49,11 @@
         <div class="item-title">重置下载路径</div>
         <div class="item-subtext">重置压缩包路径、解压路径与单张图片保存路径为默认值</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <!-- ── 下载行为 ── -->
-    <div class="section-title">⬇️ 下载行为</div>
+    <div class="section-title"><AppIcon name="download" :size="14" /> 下载行为</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -114,7 +114,7 @@
     </div>
 
     <!-- ── 归档设置 ── -->
-    <div class="section-title">🗜️ 归档设置</div>
+    <div class="section-title"><AppIcon name="archive" :size="14" /> 归档设置</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -129,7 +129,7 @@
     </div>
 
     <!-- ── 并发控制 ── -->
-    <div class="section-title">⚙️ 并发控制</div>
+    <div class="section-title"><AppIcon name="settings" :size="14" /> 并发控制</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -198,7 +198,7 @@
           归档下载遇配额/IP 封锁（error_lock）时，自动取消旧 Session 并重新解锁重试（每任务最多 3 次）；关闭则进入 error_lock 等待手动解锁
         </div>
         <div v-if="downloadSettings.autoUnlockArchiveOnLock" class="warning-text">
-          ⚠️ 注意，这可能会导致消耗大量 GP
+          <AppIcon name="warning" :size="13" /> 注意，这可能会导致消耗大量 GP
         </div>
       </div>
       <label class="toggle-switch">
@@ -208,7 +208,7 @@
     </div>
 
     <!-- ── 下载任务 ── -->
-    <div class="section-title">📋 下载任务</div>
+    <div class="section-title"><AppIcon name="clipboard" :size="14" /> 下载任务</div>
 
     <div class="setting-item clickable" @click="handleRestoreDownloadTasks">
       <div class="item-info">
@@ -239,6 +239,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import ExtraScanPathsSettings from './ExtraScanPathsSettings.vue'

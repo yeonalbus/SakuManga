@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // ─────────────────────────────────────────────────────────────
 // Round44：忽略清单独立页（从维护页弹层剥离）
@@ -154,20 +155,24 @@ onMounted(load)
   <div class="ignore-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">🕶️ 忽略清单</h2>
+        <h2 class="page-title"><AppIcon name="eyeClosed" :size="18" /> 忽略清单</h2>
         <p class="subtitle">
           共 {{ items.length }} 条 · 忽略＝不再提示，随时可恢复；点开每条可看到它实际匹配到哪些本子
         </p>
       </div>
       <div class="header-actions">
-        <button class="scan-btn ghost" :disabled="loading" @click="load">⟳ 刷新</button>
-        <router-link class="scan-btn ghost" to="/offline/maintain">← 返回维护页</router-link>
+        <button class="scan-btn ghost" :disabled="loading" @click="load">
+          <AppIcon name="refresh" :size="15" /> 刷新
+        </button>
+        <router-link class="scan-btn ghost" to="/offline/maintain">
+          <AppIcon name="arrowLeft" :size="14" /> 返回维护页
+        </router-link>
       </div>
     </div>
 
     <!-- 忽略后新增提醒 -->
     <div v-if="newItems.length > 0" class="alert-bar">
-      <span class="alert-icon">🕶️</span>
+      <span class="alert-icon"><AppIcon name="eyeClosed" :size="18" /></span>
       <div class="alert-text">
         <b>{{ newItems.length }}</b> 条忽略项下有忽略之后新入库的本子（共
         <b>{{ newMemberTotal }}</b> 本）—— 确认后继续静默；不确认就会一直在维护页顶部提醒。
@@ -192,7 +197,7 @@ onMounted(load)
     </div>
 
     <div v-else-if="items.length === 0" class="empty-box">
-      <span class="icon">🕶️</span>
+      <span class="icon"><AppIcon name="eyeClosed" :size="36" /></span>
       <p class="empty-title">暂无忽略条目</p>
       <p class="empty-sub">在维护页对「两本都留」的疑似重复组点「都留（不再提示）」后，会出现在这里。</p>
     </div>
@@ -227,7 +232,10 @@ onMounted(load)
           <span v-else class="flag ok"
             >覆盖 {{ item.matchedCount }} 本 · 压制 {{ item.groupCount }} 组</span
           >
-          <span class="expand-hint">{{ isOpen(item.id) ? '▴ 收起' : '▾ 点开看成员' }}</span>
+          <span class="expand-hint">
+            <AppIcon :name="isOpen(item.id) ? 'caretUp' : 'caretDown'" :size="12" />
+            {{ isOpen(item.id) ? '收起' : '点开看成员' }}
+          </span>
         </div>
 
         <div v-show="isOpen(item.id)" class="ignore-body">
@@ -246,20 +254,24 @@ onMounted(load)
                     loading="lazy"
                     @error="onCoverError(m.comic.id)"
                   />
-                  <span v-else class="cover-fallback">🕶️</span>
+                  <span v-else class="cover-fallback"><AppIcon name="eyeClosed" :size="20" /></span>
                 </div>
                 <div class="member-main">
                   <div class="member-title" :title="m.comic.title">{{ m.comic.title }}</div>
                   <div class="member-meta">
                     <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
                     <span>{{ m.pageCount || 0 }} 页</span>
-                    <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                    <span
+                      ><AppIcon name="local" :size="12" /> {{ formatBytes(m.comic.fileSize) }}</span
+                    >
                     <span class="member-flag" :class="{ grouped: m.grouped }">
                       {{ m.grouped ? '同组（会构成重复）' : '未构成重复组' }}
                     </span>
                     <span v-if="m.isNew" class="member-flag new">忽略后新增</span>
                   </div>
-                  <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                  <div class="member-path">
+                    <AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -276,10 +288,10 @@ onMounted(load)
               title="把新入库的本子纳入「已知」，之后继续静默"
               @click="ackNew(item)"
             >
-              ✔ 确认新增（更新快照）
+              <AppIcon name="check" :size="13" /> 确认新增（更新快照）
             </button>
             <button class="action-btn ghost-gray" :disabled="busyId === item.id" @click="restore(item)">
-              ↩ 恢复忽略
+              <AppIcon name="arrowLeft" :size="13" /> 恢复忽略
             </button>
             <span class="spacer"></span>
             <span class="tip">

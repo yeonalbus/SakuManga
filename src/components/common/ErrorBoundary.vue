@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onErrorCaptured } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { reportError } from '@/utils/errorReporter'
 
 // 错误边界（问题8）：捕获子树内渲染/生命周期错误，避免单个组件报错
@@ -30,7 +31,7 @@ const reload = () => {
 <template>
   <div v-if="hasError" class="error-boundary">
     <div class="error-box">
-      <span class="error-icon">⚠️</span>
+      <span class="error-icon"><AppIcon name="warning" :size="36" /></span>
       <span class="error-text">该区域渲染出错，错误已自动记录日志。可点击下方按钮刷新页面。</span>
       <span v-if="errorMessage" class="error-detail">{{ errorMessage }}</span>
       <button class="reload-btn" @click="reload">刷新页面</button>

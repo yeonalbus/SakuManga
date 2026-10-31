@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useUI } from '@/composables/useUI'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const { toasts } = useUI()
 </script>
@@ -9,10 +10,18 @@ const { toasts } = useUI()
     <TransitionGroup name="toast-slide">
       <div v-for="item in toasts" :key="item.id" class="toast-item" :class="item.type">
         <span class="icon">
-          <template v-if="item.type === 'success'">✓</template>
-          <template v-else-if="item.type === 'error'">✕</template>
-          <template v-else-if="item.type === 'warning'">!</template>
-          <template v-else>ℹ</template>
+          <template v-if="item.type === 'success'">
+            <AppIcon name="success" :size="14" />
+          </template>
+          <template v-else-if="item.type === 'error'">
+            <AppIcon name="close" :size="14" />
+          </template>
+          <template v-else-if="item.type === 'warning'">
+            <AppIcon name="warning" :size="14" />
+          </template>
+          <template v-else>
+            <AppIcon name="info" :size="14" />
+          </template>
         </span>
         <span class="message">{{ item.message }}</span>
       </div>

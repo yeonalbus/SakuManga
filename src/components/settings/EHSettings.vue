@@ -10,7 +10,7 @@
             在应用内直接配置/切换 E 站 Profile（新建、重命名、删除、设为默认），无需跳转网页
           </div>
         </div>
-        <span class="arrow-icon">›</span>
+        <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
       </div>
 
       <!-- 站点 -->
@@ -69,7 +69,9 @@
           <span class="quota-text"
             >{{ formatNumber(status.currentQuota) }} / {{ formatNumber(status.maxQuota) }}</span
           >
-          <span v-if="!statusLoading" class="refresh-icon" title="刷新">↻</span>
+          <span v-if="!statusLoading" class="refresh-icon" title="刷新">
+            <AppIcon name="refresh" :size="14" />
+          </span>
         </div>
       </div>
 
@@ -89,7 +91,9 @@
           <span>GP: {{ status.assetGP || '--' }}</span>
           <span>Credits: {{ status.assetCredits || '--' }}</span>
           <span>Hath: {{ status.assetHath || '--' }}</span>
-          <span v-if="!statusLoading" class="refresh-icon" title="刷新">↻</span>
+          <span v-if="!statusLoading" class="refresh-icon" title="刷新">
+            <AppIcon name="refresh" :size="14" />
+          </span>
         </div>
       </div>
 
@@ -103,6 +107,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import type { EHSetting, EHSite, EHUserStatus } from '@/types/eh'

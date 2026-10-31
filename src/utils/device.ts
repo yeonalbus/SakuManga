@@ -11,11 +11,11 @@
  */
 export type DeviceClass = 'mobile' | 'tablet' | 'desktop'
 
-/** 设备类别中文名（用于设置页提示） */
+/** 设备类别中文名（用于设置页提示；图标由调用方用 AppIcon 渲染，此处只留纯文本） */
 export const DEVICE_CLASS_LABELS: Record<DeviceClass, string> = {
-  mobile: '📱 手机',
-  tablet: '📱 平板',
-  desktop: '💻 桌面',
+  mobile: '手机',
+  tablet: '平板',
+  desktop: '桌面',
 }
 
 /** 判断当前设备类别：手机 / 平板 / 桌面 */

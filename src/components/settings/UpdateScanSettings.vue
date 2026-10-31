@@ -2,7 +2,7 @@
   <div class="update-scan-settings">
     <!-- 功能说明 -->
     <div class="intro-card">
-      <div class="intro-title">🔄 每周自动更新扫描说明</div>
+      <div class="intro-title"><AppIcon name="refresh" :size="15" /> 每周自动更新扫描说明</div>
       <div class="intro-text">
         <p>· 到点自动执行「<b>更新检测 + 老化判定</b>」完整扫描，逐本联网核对 E 站画廊是否有新版。</p>
         <p>· <b>Aged Status（老化）</b>：发布超过 365 天且确认无新版的漫画将被标记为「已老化」，
@@ -63,7 +63,7 @@
     </div>
 
     <!-- ── 自动下载新版（Round25：由下载设置并入，与更新检测同主题聚合）── -->
-    <div class="section-title">📥 自动下载新版</div>
+    <div class="section-title"><AppIcon name="tray" :size="14" /> 自动下载新版</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -115,7 +115,7 @@
     <!-- 手动触发 -->
     <div class="manual-row">
       <button class="action-btn refresh-btn" :disabled="busy" @click="handleManualScan">
-        🔄 立即扫描一次
+        <AppIcon name="refresh" :size="15" /> 立即扫描一次
       </button>
     </div>
 
@@ -126,7 +126,10 @@
       :class="progress.status"
     >
       <div class="progress-text">
-        <template v-if="progress.status === 'paused'">⏸ 扫描已暂停（{{ progress.done }} / {{ progress.total }}）</template>
+        <template v-if="progress.status === 'paused'">
+          <AppIcon name="pause" :size="13" /> 扫描已暂停（{{ progress.done }} /
+          {{ progress.total }}）
+        </template>
         <template v-else>
           {{ progress.phase || '扫描中' }}<template v-if="progress.currentTitle">「{{ progress.currentTitle }}」</template>
         </template>
@@ -137,8 +140,12 @@
       <div class="progress-meta">{{ progress.done }} / {{ progress.total }}</div>
       <div class="banner-actions">
         <template v-if="progress.status === 'paused'">
-          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
-          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+          <button class="control-btn resume" @click="controlTask('resume')">
+            <AppIcon name="play" :size="13" /> 继续
+          </button>
+          <button class="control-btn cancel" @click="cancelTask">
+            <AppIcon name="close" :size="13" /> 取消
+          </button>
         </template>
         <button
           v-else
@@ -146,7 +153,7 @@
           title="暂停后当前项处理完即停止，可随时继续或取消"
           @click="controlTask('pause')"
         >
-          ⏸ 暂停
+          <AppIcon name="pause" :size="13" /> 暂停
         </button>
       </div>
     </div>
@@ -155,14 +162,22 @@
       class="progress-banner"
       :class="progress.status"
     >
-      <template v-if="progress.status === 'success'">✅ 扫描完成：检测更新 {{ progress.total }} 本</template>
-      <template v-else>❌ 扫描失败：{{ progress.error || progress.message || '未知错误' }}</template>
+      <template v-if="progress.status === 'success'">
+        <AppIcon name="success" weight="fill" :size="14" /> 扫描完成：检测更新
+        {{ progress.total }} 本
+      </template>
+      <template v-else>
+        <AppIcon name="error" weight="fill" :size="14" /> 扫描失败：{{
+          progress.error || progress.message || '未知错误'
+        }}
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
 // Round25：自动下载新版配置由下载设置并入（store 自动同步后端）
@@ -292,8 +307,8 @@ const controlTask = async (action: 'pause' | 'resume') => {
     if (progress.value) {
       progress.value = { ...progress.value, status: action === 'pause' ? 'paused' : 'running' }
     }
-    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
-    else toast.info('▶ 已继续')
+    if (action === 'pause') toast.info('已暂停，可在下方继续或取消')
+    else toast.info('已继续')
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))

@@ -2,6 +2,8 @@
 // src/components/ShelfQuickAddToolbar.vue
 // Round22：离线多选工具条（已选 N 部 / 全选本页 / 加入书架 / 移出书架(可选) / 删除(可选) / 取消）
 // 与 useShelfQuickAdd 配套；书架内页面通过 showRemove 追加「移出书架」动作。
+import AppIcon from '@/components/icons/AppIcon.vue'
+
 defineProps<{
   count: number
   /** 显示「🗑️ 移出书架」（仅书架内部多选移除场景） */
@@ -27,14 +29,16 @@ const emit = defineEmits<{
     <button class="toolbar-btn" :disabled="selectAllDisabled" @click="emit('select-all')">
       全选本页
     </button>
-    <button class="toolbar-btn" :disabled="count === 0" @click="emit('add')">📥 加入书架</button>
+    <button class="toolbar-btn" :disabled="count === 0" @click="emit('add')">
+      <AppIcon name="tray" :size="15" /> 加入书架
+    </button>
     <button
       v-if="showRemove"
       class="toolbar-btn"
       :disabled="count === 0"
       @click="emit('remove')"
     >
-      🗑️ 移出书架
+      <AppIcon name="trash" :size="15" /> 移出书架
     </button>
     <button
       v-if="showDelete"
@@ -42,7 +46,7 @@ const emit = defineEmits<{
       :disabled="count === 0"
       @click="emit('delete')"
     >
-      🗑️ 删除
+      <AppIcon name="trash" :size="15" /> 删除
     </button>
     <button class="toolbar-btn" @click="emit('close')">取消</button>
   </div>

@@ -5,6 +5,7 @@ import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 // 每漫画覆盖下拉复用「默认下载配置」四值选项（画廊下载/画廊原图/归档压缩/归档原图）
 import { DEFAULT_DOWNLOAD_SCHEME_OPTIONS } from '@/stores/downloadSettings'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const router = useRouter()
 const { modal, toast } = useUI()
@@ -90,8 +91,8 @@ const controlTask = async (action: 'pause' | 'resume') => {
     if (taskState.value) {
       taskState.value = { ...taskState.value, status: action === 'pause' ? 'paused' : 'running' }
     }
-    if (action === 'pause') toast.info('⏸ 已暂停，可在下方继续或取消')
-    else toast.info('▶ 已继续')
+    if (action === 'pause') toast.info('已暂停，可在下方继续或取消')
+    else toast.info('已继续')
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
@@ -101,7 +102,7 @@ const controlTask = async (action: 'pause' | 'resume') => {
 const cancelTask = async () => {
   const confirmed = await modal.confirm(
     '取消后本次检测将立即终止，已完成的结果不会保留（下次需重新开始检测）。\n\n确定取消吗？',
-    '✖ 取消本次检测',
+    '取消本次检测',
   )
   if (!confirmed) return
   try {
@@ -200,7 +201,7 @@ const startDownload = async (comic: OfflineComicDTO) => {
         mode: modeFor.value[comic.id] || undefined,
       }),
     })
-    toast.success(`《${comic.title}》新版已加入下载队列 📥`)
+    toast.success(`《${comic.title}》新版已加入下载队列`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || '加入下载队列失败')
@@ -280,22 +281,31 @@ onUnmounted(stopPolling)
   <div class="update-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">🔄 离线更新检测</h2>
+        <h2 class="page-title"><AppIcon name="refresh" :size="18" /> 离线更新检测</h2>
         <p class="subtitle">
           联网核对每个离线画廊的在线详情，发现新增页数或更新版（父画廊关系）时标记为「需要更新」
         </p>
       </div>
       <div class="header-actions">
-        <button class="link-btn" :disabled="isLoading" @click="fetchUpdates">⟳ 刷新列表</button>
-        <button class="link-btn" @click="goDownloads">📥 前往下载列表</button>
+        <button class="link-btn" :disabled="isLoading" @click="fetchUpdates">
+          <AppIcon name="refresh" :size="15" /> 刷新列表
+        </button>
+        <button class="link-btn" @click="goDownloads">
+          <AppIcon name="tray" :size="15" /> 前往下载列表
+        </button>
         <button class="check-btn" :disabled="isChecking" @click="runCheck">
-          {{ isChecking ? '⏳ 检测中...' : '🔍 开始检测' }}
+          <AppIcon
+            :name="isChecking ? 'loading' : 'search'"
+            :size="15"
+            :class="{ spin: isChecking }"
+          />
+          {{ isChecking ? '检测中...' : '开始检测' }}
         </button>
       </div>
     </div>
 
     <div class="scope-hint">
-      💡 范围：默认检测所有离线漫画。可在「设置 → 额外扫描路径」中关闭某路径的「离线维护」开关，
+      <AppIcon name="lightbulb" :size="13" /> 范围：默认检测所有离线漫画。可在「设置 → 额外扫描路径」中关闭某路径的「离线维护」开关，
       该路径下的漫画将不参与本检测（下载导入的漫画始终参与）。
     </div>
 
@@ -306,7 +316,7 @@ onUnmounted(stopPolling)
       :class="{ 'is-paused': isTaskPaused }"
     >
       <span v-if="!isTaskPaused" class="spinner"></span>
-      <span v-else class="paused-icon">⏸</span>
+      <span v-else class="paused-icon"><AppIcon name="pause" :size="18" /></span>
       <div class="checking-info">
         <p class="checking-title">
           <template v-if="isTaskPaused">检测已暂停</template>
@@ -327,12 +337,18 @@ onUnmounted(stopPolling)
           </template>
           <template v-else>正在启动检测任务...</template>
         </p>
-        <p v-if="currentTitle" class="checking-current">📖 {{ currentTitle }}</p>
+        <p v-if="currentTitle" class="checking-current">
+          <AppIcon name="book" :size="13" /> {{ currentTitle }}
+        </p>
       </div>
       <div class="banner-actions">
         <template v-if="isTaskPaused">
-          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
-          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+          <button class="control-btn resume" @click="controlTask('resume')">
+            <AppIcon name="play" :size="14" /> 继续
+          </button>
+          <button class="control-btn cancel" @click="cancelTask">
+            <AppIcon name="close" :size="14" /> 取消
+          </button>
         </template>
         <button
           v-else-if="isTaskRunning"
@@ -340,7 +356,7 @@ onUnmounted(stopPolling)
           title="暂停后当前项处理完即停止，可随时继续或取消"
           @click="controlTask('pause')"
         >
-          ⏸ 暂停
+          <AppIcon name="pause" :size="14" /> 暂停
         </button>
       </div>
     </div>
@@ -351,7 +367,7 @@ onUnmounted(stopPolling)
     </div>
 
     <div v-else-if="updates.length === 0" class="empty-box">
-      <span class="icon">✅</span>
+      <span class="icon"><AppIcon name="success" :size="36" /></span>
       <p class="empty-title">暂无需要更新的漫画</p>
       <p class="empty-sub">
         点击「开始检测」联网核对所有离线画廊，有新增页数或更新版时会出现在这里。
@@ -380,32 +396,39 @@ onUnmounted(stopPolling)
             loading="lazy"
             @error="onCoverError(comic.id)"
           />
-          <span v-else class="cover-fallback">🔄</span>
+          <span v-else class="cover-fallback"><AppIcon name="refresh" :size="20" /></span>
         </div>
 
         <div class="card-main">
           <div class="card-top">
             <h3 class="card-title">{{ comic.title }}</h3>
-            <span class="mode-chip">{{
-              comic.sourceMode === 'gallery' ? '📁 画廊' : '🗜️ 归档'
-            }}</span>
-            <span v-if="comic.removedStatus" class="removed-chip">🚫 已被删除/移除</span>
+            <span class="mode-chip">
+              <AppIcon :name="comic.sourceMode === 'gallery' ? 'folder' : 'archive'" :size="12" />
+              {{ comic.sourceMode === 'gallery' ? '画廊' : '归档' }}
+            </span>
+            <span v-if="comic.removedStatus" class="removed-chip">
+              <AppIcon name="ban" :size="12" /> 已被删除/移除
+            </span>
             <span class="compare-hint">⇄ 对比</span>
           </div>
 
           <div class="card-tags">
             <span v-if="comic.category" class="cat-chip">{{ comic.category }}</span>
-            <span class="meta-text">📄 {{ comic.pageCount || 0 }} 页</span>
-            <span class="meta-text">💾 {{ formatBytes(comic.fileSize) }}</span>
-            <span class="meta-text">🕒 {{ formatDate(comic.updatedAt) }}</span>
+            <span class="meta-text"><AppIcon name="file" :size="12" /> {{ comic.pageCount || 0 }} 页</span>
+            <span class="meta-text"
+              ><AppIcon name="local" :size="12" /> {{ formatBytes(comic.fileSize) }}</span
+            >
+            <span class="meta-text"
+              ><AppIcon name="clock" :size="12" /> {{ formatDate(comic.updatedAt) }}</span
+            >
           </div>
 
           <div v-if="comic.removedStatus" class="removed-note">
-            <span class="note-icon">🚫</span>
+            <span class="note-icon"><AppIcon name="ban" :size="13" /></span>
             <span>该画廊已从 E 站删除/版权移除，无法下载新版；可从下方移出列表或删除本地记录。</span>
           </div>
           <div v-else class="update-note">
-            <span class="note-icon">⚠️</span>
+            <span class="note-icon"><AppIcon name="warning" :size="13" /></span>
             <span>{{ comic.updateNote || '检测到新版本' }}</span>
           </div>
 
@@ -418,8 +441,12 @@ onUnmounted(stopPolling)
         <div class="card-actions" @click.stop>
           <template v-if="comic.removedStatus">
             <span class="removed-hint">已被删除的画廊无法下载新版</span>
-            <button class="ghost-btn" @click="dismissUpdate(comic)">🗑️ 移出列表</button>
-            <button class="delete-btn" @click="deleteRecord(comic)">⛔ 删除记录</button>
+            <button class="ghost-btn" @click="dismissUpdate(comic)">
+              <AppIcon name="trash" :size="13" /> 移出列表
+            </button>
+            <button class="delete-btn" @click="deleteRecord(comic)">
+              <AppIcon name="ban" :size="13" /> 删除记录
+            </button>
           </template>
           <template v-else>
             <label class="mode-label" for="mode">下载方案</label>
@@ -439,7 +466,12 @@ onUnmounted(stopPolling)
               </option>
             </select>
             <button class="download-btn" :disabled="isDownloading" @click="startDownload(comic)">
-              {{ downloadingId === comic.id ? '⏳ 加入中...' : '⬇️ 下载新版' }}
+              <AppIcon
+                :name="downloadingId === comic.id ? 'loading' : 'download'"
+                :size="15"
+                :class="{ spin: downloadingId === comic.id }"
+              />
+              {{ downloadingId === comic.id ? '加入中...' : '下载新版' }}
             </button>
           </template>
         </div>

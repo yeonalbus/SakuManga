@@ -1,6 +1,7 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -87,7 +88,9 @@ const showRightEllipsis = computed(() => {
   <div class="custom-pagination">
     <div class="pill-btn status">{{ currentPage }} of {{ totalPages }}</div>
 
-    <button v-if="currentPage > 1" class="pill-btn nav-btn" @click="goToPage(1)">« 首页</button>
+    <button v-if="currentPage > 1" class="pill-btn nav-btn" @click="goToPage(1)">
+      <AppIcon name="doubleLeft" :size="13" /> 首页
+    </button>
 
     <span v-if="showLeftEllipsis" class="symbol">...</span>
 
@@ -105,7 +108,7 @@ const showRightEllipsis = computed(() => {
       title="上一页"
       @click="goToPage(currentPage - 1)"
     >
-      «
+      <AppIcon name="doubleLeft" :size="13" />
     </button>
 
     <button
@@ -124,7 +127,7 @@ const showRightEllipsis = computed(() => {
       title="下一页"
       @click="goToPage(currentPage + 1)"
     >
-      »
+      <AppIcon name="doubleRight" :size="13" />
     </button>
 
     <button v-if="plus10Page <= totalPages" class="pill-btn offset" @click="goToPage(plus10Page)">
@@ -138,7 +141,7 @@ const showRightEllipsis = computed(() => {
     <span v-if="showRightEllipsis" class="symbol">...</span>
 
     <button v-if="currentPage < totalPages" class="pill-btn nav-btn" @click="goToPage(totalPages)">
-      尾页 »
+      尾页 <AppIcon name="doubleRight" :size="13" />
     </button>
 
     <div class="jump-box">
@@ -178,6 +181,7 @@ const showRightEllipsis = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px; /* AppIcon 与文字间距（flex 会吞掉模板空白） */
   min-width: 32px;
   height: 28px;
   box-sizing: border-box;

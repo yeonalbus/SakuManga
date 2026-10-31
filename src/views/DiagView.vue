@@ -3,6 +3,7 @@
 // 读取所有视口/布局实测值，点击「复制 JSON」可粘贴给开发者
 import { ref, onMounted } from "vue"
 import { useRouter } from "vue-router"
+import AppIcon from "@/components/icons/AppIcon.vue"
 
 const router = useRouter()
 const data = ref<Record<string, unknown>>({})
@@ -79,10 +80,13 @@ onMounted(() => {
 
 <template>
   <div class="diag-page">
-    <h2>🔍 视口诊断（iPad PWA 底部条）</h2>
+    <h2><AppIcon name="search" :size="17" /> 视口诊断（iPad PWA 底部条）</h2>
     <div class="diag-actions">
-      <button class="diag-btn" @click="measure">🔄 重新测量</button>
-      <button class="diag-btn primary" @click="copyJson">{{ copied ? "✓ 已复制" : "📋 复制 JSON" }}</button>
+      <button class="diag-btn" @click="measure"><AppIcon name="refresh" :size="14" /> 重新测量</button>
+      <button class="diag-btn primary" @click="copyJson">
+        <template v-if="copied"><AppIcon name="check" :size="14" /> 已复制</template>
+        <template v-else><AppIcon name="clipboard" :size="14" /> 复制 JSON</template>
+      </button>
       <button class="diag-btn" @click="router.back()">返回</button>
     </div>
     <p class="diag-tip">

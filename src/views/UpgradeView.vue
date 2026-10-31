@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
+import AppIcon from '@/components/icons/AppIcon.vue'
+import type { IconName } from '@/components/icons/iconMap'
 
 const router = useRouter()
 const { toast } = useUI()
@@ -37,11 +39,11 @@ const batchDone = ref(0)
 const batchTotal = ref(0)
 
 // 下载方案展示映射（升级候选不可能出现 archiveOriginal，已达标被排除）
-const SCHEME_META: Record<string, { label: string; cls: string }> = {
-  gallery: { label: '📁 画廊下载', cls: 'scheme-gallery' },
-  galleryOriginal: { label: '📁 画廊原图', cls: 'scheme-gallery' },
-  archiveResample: { label: '🗜️ 归档压缩', cls: 'scheme-archive' },
-  '': { label: '❓ 版本未知', cls: 'scheme-unknown' },
+const SCHEME_META: Record<string, { label: string; cls: string; icon: IconName }> = {
+  gallery: { label: '画廊下载', cls: 'scheme-gallery', icon: 'folder' },
+  galleryOriginal: { label: '画廊原图', cls: 'scheme-gallery', icon: 'folder' },
+  archiveResample: { label: '归档压缩', cls: 'scheme-archive', icon: 'archive' },
+  '': { label: '版本未知', cls: 'scheme-unknown', icon: 'question' },
 }
 const schemeMeta = (s?: string) => SCHEME_META[s || ''] || SCHEME_META['']
 
@@ -68,7 +70,7 @@ const startUpgrade = async (candidate: UpgradeCandidateDTO) => {
       method: 'POST',
       body: JSON.stringify({ comicId: candidate.id }),
     })
-    toast.success(`《${candidate.title}》升级任务已加入下载队列 ⬆️`)
+    toast.success(`《${candidate.title}》升级任务已加入下载队列`)
     candidate.upgrading = true
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
@@ -105,7 +107,7 @@ const startBatchUpgrade = async () => {
     batchDone.value++
   }
   isBatchRunning.value = false
-  toast.success(`批量升级完成：成功加入 ${ok} 个${fail ? `，失败 ${fail} 个` : ''} 📥`)
+  toast.success(`批量升级完成：成功加入 ${ok} 个${fail ? `，失败 ${fail} 个` : ''}`)
 }
 
 const goDownloads = () => {
@@ -151,27 +153,37 @@ onMounted(fetchCandidates)
   <div class="upgrade-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">⬆️ 图片质量升级</h2>
+        <h2 class="page-title"><AppIcon name="upload" :size="18" /> 图片质量升级</h2>
         <p class="subtitle">
           检测「非归档原图」版本的本子（画廊下载 / 归档压缩），确认后升级为归档原图（H@H
           原图包）下载方案，完成后自动删除旧版本
         </p>
       </div>
       <div class="header-actions">
-        <button class="link-btn" :disabled="isLoading" @click="fetchCandidates">⟳ 刷新列表</button>
-        <button class="link-btn" @click="goDownloads">📥 前往下载列表</button>
+        <button class="link-btn" :disabled="isLoading" @click="fetchCandidates">
+          <AppIcon name="refresh" :size="15" /> 刷新列表
+        </button>
+        <button class="link-btn" @click="goDownloads">
+          <AppIcon name="tray" :size="15" /> 前往下载列表
+        </button>
         <button
           class="check-btn"
           :disabled="isBatchRunning || upgradableCount === 0"
           @click="startBatchUpgrade"
         >
-          {{ isBatchRunning ? `⏳ 批量升级中 ${batchDone}/${batchTotal}` : '⬆️ 全部升级' }}
+          <AppIcon
+            :name="isBatchRunning ? 'loading' : 'upload'"
+            :size="15"
+            :class="{ spin: isBatchRunning }"
+          />
+          {{ isBatchRunning ? `批量升级中 ${batchDone}/${batchTotal}` : '全部升级' }}
         </button>
       </div>
     </div>
 
     <div class="scope-hint">
-      💡 范围：仅检测 SakuManga 自己下载的本子（以元数据来源标记为唯一标准，不做文件尺寸判定）。
+      <AppIcon name="lightbulb" :size="13" /> 范围：仅检测 SakuManga
+      自己下载的本子（以元数据来源标记为唯一标准，不做文件尺寸判定）。
       方案识别顺序：下载记录方案 → 下载任务列表方案（归档·原图/归档·压缩/画廊）→ 落地目录形态
       （归档目录视为归档原图）。手动导入 / 其他下载器下载的本子不纳入升级范围。
     </div>
@@ -196,7 +208,7 @@ onMounted(fetchCandidates)
     </div>
 
     <div v-else-if="candidates.length === 0" class="empty-box">
-      <span class="icon">✅</span>
+      <span class="icon"><AppIcon name="success" :size="36" /></span>
       <p class="empty-title">暂无需要升级的漫画</p>
       <p class="empty-sub">
         所有 SakuManga 下载的本子都已是归档原图版本，或本地暂无符合条件的漫画。
@@ -220,28 +232,37 @@ onMounted(fetchCandidates)
             loading="lazy"
             @error="onCoverError(candidate.id)"
           />
-          <span v-else class="cover-fallback">⬆️</span>
+          <span v-else class="cover-fallback"><AppIcon name="upload" :size="20" /></span>
         </div>
 
         <div class="card-main">
           <div class="card-top">
             <h3 class="card-title">{{ candidate.title }}</h3>
-            <span class="scheme-chip" :class="schemeMeta(candidate.downloadScheme).cls">{{
-              schemeMeta(candidate.downloadScheme).label
-            }}</span>
-            <span v-if="candidate.upgrading" class="upgrading-chip">⏳ 升级中</span>
+            <span class="scheme-chip" :class="schemeMeta(candidate.downloadScheme).cls">
+              <AppIcon :name="schemeMeta(candidate.downloadScheme).icon" :size="12" />
+              {{ schemeMeta(candidate.downloadScheme).label }}
+            </span>
+            <span v-if="candidate.upgrading" class="upgrading-chip">
+              <AppIcon name="loading" :size="12" class="spin" /> 升级中
+            </span>
           </div>
 
           <div class="card-tags">
             <span v-if="candidate.category" class="cat-chip">{{ candidate.category }}</span>
-            <span class="meta-text">📄 {{ candidate.pageCount || 0 }} 页</span>
-            <span class="meta-text">💾 {{ formatBytes(candidate.fileSize) }}</span>
-            <span class="meta-text">🕒 {{ formatDate(candidate.updatedAt) }}</span>
-            <span class="meta-text">🔗 gid: {{ candidate.gid || '—' }}</span>
+            <span class="meta-text"><AppIcon name="file" :size="12" /> {{ candidate.pageCount || 0 }} 页</span>
+            <span class="meta-text"
+              ><AppIcon name="local" :size="12" /> {{ formatBytes(candidate.fileSize) }}</span
+            >
+            <span class="meta-text"
+              ><AppIcon name="clock" :size="12" /> {{ formatDate(candidate.updatedAt) }}</span
+            >
+            <span class="meta-text"
+              ><AppIcon name="link" :size="12" /> gid: {{ candidate.gid || '—' }}</span
+            >
           </div>
 
           <div class="upgrade-note">
-            <span class="note-icon">⬆️</span>
+            <span class="note-icon"><AppIcon name="upload" :size="13" /></span>
             <span>升级为「归档原图」：H@H 原图包下载，下载完成后自动删除旧版本。</span>
           </div>
         </div>
@@ -252,12 +273,17 @@ onMounted(fetchCandidates)
             :disabled="isAnyBusy || candidate.upgrading"
             @click="startUpgrade(candidate)"
           >
+            <AppIcon
+              :name="candidate.upgrading || upgradingId === candidate.id ? 'loading' : 'upload'"
+              :size="15"
+              :class="{ spin: candidate.upgrading || upgradingId === candidate.id }"
+            />
             {{
               candidate.upgrading
-                ? '⏳ 升级中'
+                ? '升级中'
                 : upgradingId === candidate.id
-                  ? '⏳ 加入中...'
-                  : '⬆️ 升级为原图'
+                  ? '加入中...'
+                  : '升级为原图'
             }}
           </button>
         </div>

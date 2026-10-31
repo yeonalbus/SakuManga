@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted, onActivated, onDeactivate
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue' // 👈 引入悬浮球
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
@@ -403,7 +404,8 @@ onUnmounted(() => {
             <div v-if="locating && locateInfo" class="locate-bar">
               <span class="locate-spinner"></span>
               <span class="locate-text">
-                🔖 正在定位书签「{{ locateInfo.name }}」<template v-if="locateInfo.seekDate">
+                <AppIcon name="bookmark" :size="13" />
+                正在定位书签「{{ locateInfo.name }}」<template v-if="locateInfo.seekDate">
                   （已跳转到 {{ locateInfo.seekDate }}）</template
                 >… 已扫描 {{ locateInfo.pages }} 页 / 约 {{ locateInfo.cards }} 张
               </span>
@@ -411,7 +413,8 @@ onUnmounted(() => {
 
             <div v-if="onlineStore.prevGid" class="top-load-bar">
               <button class="pill-btn" :disabled="onlineStore.isLoading" @click="handleLoadBefore">
-                ⬆️ {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
+                <AppIcon name="upload" :size="15" />
+                {{ onlineStore.isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>
           </template>
@@ -459,7 +462,7 @@ onUnmounted(() => {
     <!-- Round27：拾取模式提示条（pointer-events:none，不拦截点击） -->
     <Transition name="bm-fade">
       <div v-if="pickMode" class="pick-hint" aria-hidden="true">
-        🎯 点击要锚定的画廊卡片（点击空白处取消）
+        <AppIcon name="target" :size="14" /> 点击要锚定的画廊卡片（点击空白处取消）
       </div>
     </Transition>
 

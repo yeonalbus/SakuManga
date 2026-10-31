@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import OnlineLoadBar from '@/components/OnlineLoadBar.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import type { OnlineComic } from '@/types/comic'
@@ -357,7 +358,10 @@ onBeforeRouteLeave(() => {
         :disabled="isDownloadingAll || favComicList.length === 0"
         @click="downloadAllFavorites"
       >
-        {{ isDownloadingAll ? '加入中…' : `⬇ 一键全部下载（${favComicList.length}）` }}
+        <template v-if="isDownloadingAll">加入中…</template>
+        <template v-else>
+          <AppIcon name="download" :size="15" /> 一键全部下载（{{ favComicList.length }}）
+        </template>
       </button>
     </div>
 
@@ -378,7 +382,8 @@ onBeforeRouteLeave(() => {
           <template #header>
             <div v-if="prevGid" class="top-load-bar">
               <button class="pill-btn" :disabled="isLoading" @click="handleLoadBefore">
-                ⬆️ {{ isLoading ? '加载中...' : '加载较新内容' }}
+                <AppIcon name="upload" :size="15" />
+                {{ isLoading ? '加载中...' : '加载较新内容' }}
               </button>
             </div>
           </template>

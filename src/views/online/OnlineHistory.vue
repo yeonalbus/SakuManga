@@ -5,6 +5,7 @@ import { onlineHistoryList, clearHistory } from '@/stores/historyStore'
 import GridContainer from '@/components/GridContainer.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import type { OnlineComic } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
@@ -72,9 +73,11 @@ const handleClear = () => {
 <template>
   <div class="history-view">
     <div class="view-header">
-      <h2 class="view-title">🌐 在线浏览历史 ({{ comics.length }})</h2>
+      <h2 class="view-title">
+        <AppIcon name="online" :size="18" /> 在线浏览历史 ({{ comics.length }})
+      </h2>
       <button v-if="comics.length > 0" class="clear-btn" @click="handleClear">
-        🗑️ 清空在线历史
+        <AppIcon name="trash" :size="15" /> 清空在线历史
       </button>
     </div>
 

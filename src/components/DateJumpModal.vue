@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 通用日期跳转弹窗（Round4 任务八）
 // 两个 Tab：选择节点（8 个相对今天预设） / 选择日期（<input type="date">）
@@ -78,8 +79,10 @@ watch(
       <div v-if="show" class="dm-overlay" @click.self="emit('close')">
         <div class="dm-panel">
           <div class="dm-header">
-            <span class="dm-title">📅 日期跳转</span>
-            <button class="dm-close" title="关闭" @click="emit('close')">✕</button>
+            <span class="dm-title"><AppIcon name="calendar" :size="15" /> 日期跳转</span>
+            <button class="dm-close" title="关闭" @click="emit('close')">
+              <AppIcon name="close" :size="15" />
+            </button>
           </div>
 
           <div class="dm-tabs">

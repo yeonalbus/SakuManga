@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 // 🎯 阅读清单队列状态与操作方法（由 appStore 拆分而来）
 import {
@@ -121,7 +122,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
   <div class="reading-list-view">
     <!-- 页面标题 -->
     <div class="page-header">
-      <h2 class="page-title">📑 候补阅读清单</h2>
+      <h2 class="page-title"><AppIcon name="list" :size="18" /> 候补阅读清单</h2>
       <span v-if="onlineReadingList.length + offlineReadingList.length > 0" class="total-badge">
         {{ onlineReadingList.length + offlineReadingList.length }} 本候补
       </span>
@@ -134,24 +135,24 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
         :class="{ active: activeTab === 'online' }"
         @click="activeTab = 'online'"
       >
-        🌐 在线清单 ({{ onlineReadingList.length }})
+        <AppIcon name="online" :size="14" /> 在线清单 ({{ onlineReadingList.length }})
       </button>
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'offline' }"
         @click="activeTab = 'offline'"
       >
-        📚 本地清单 ({{ offlineReadingList.length }})
+        <AppIcon name="books" :size="14" /> 本地清单 ({{ offlineReadingList.length }})
       </button>
     </div>
 
     <!-- 二级动作栏（Round11-Opt1：快速导入仅离线 tab 显示，在线取消） -->
     <div class="action-bar">
       <button v-if="activeTab === 'offline'" class="action-text-btn" @click="openShelfImport">
-        ➕ 从书架导入
+        <AppIcon name="plus" :size="14" /> 从书架导入
       </button>
       <button v-if="currentList.length > 0" class="action-text-btn danger" @click="handleClearAll">
-        🗑️ 清空当前
+        <AppIcon name="trash" :size="14" /> 清空当前
       </button>
     </div>
 
@@ -160,7 +161,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
       <Transition name="fade">
         <div v-if="showShelfImport" class="shelf-import-mask" @click.self="showShelfImport = false">
           <div class="shelf-import-panel">
-            <h3 class="import-title">📁 从书架导入</h3>
+            <h3 class="import-title"><AppIcon name="folder" :size="16" /> 从书架导入</h3>
             <p class="import-hint">按书架内顺序增量追加到本地清单（已在清单中的自动跳过）</p>
             <div class="shelf-import-list">
               <div v-if="bookshelves.length === 0" class="import-empty">
@@ -173,7 +174,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
                 :disabled="importingId === shelf.id"
                 @click="importFromShelf(shelf)"
               >
-                <span class="shelf-name">📁 {{ shelf.name }}</span>
+                <span class="shelf-name"><AppIcon name="folder" :size="14" /> {{ shelf.name }}</span>
                 <span class="shelf-count">{{ shelf.count || 0 }} 本</span>
                 <span class="import-action">{{ importingId === shelf.id ? '导入中…' : '导入 →' }}</span>
               </button>
@@ -187,7 +188,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
     <!-- 列表主体 -->
     <div class="list-body">
       <div v-if="currentList.length === 0" class="empty-state">
-        <span class="empty-icon">📭</span>
+        <span class="empty-icon"><AppIcon name="tray" :size="36" /></span>
         <p>当前清单为空，快去添加点想看的本子吧！</p>
       </div>
 
@@ -210,7 +211,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
               :disabled="currentList[0]?.id === comic.id"
               @click="moveInReadingList(comic, -1)"
             >
-              ↑
+              <AppIcon name="caretUp" :size="14" />
             </button>
             <button
               class="icon-btn move-btn"
@@ -218,11 +219,13 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
               :disabled="currentList[currentList.length - 1]?.id === comic.id"
               @click="moveInReadingList(comic, 1)"
             >
-              ↓
+              <AppIcon name="caretDown" :size="14" />
             </button>
-            <button class="icon-btn play-btn" title="立即阅读" @click="handleRead(comic)">▶</button>
+            <button class="icon-btn play-btn" title="立即阅读" @click="handleRead(comic)">
+              <AppIcon name="play" :size="14" />
+            </button>
             <button class="icon-btn remove-btn" title="移出清单" @click="handleRemove(comic)">
-              ✕
+              <AppIcon name="close" :size="14" />
             </button>
           </div>
         </div>

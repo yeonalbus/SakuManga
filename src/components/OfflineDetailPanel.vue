@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 本地离线漫画的紧凑详情数据（由父级从 GET /comics/:id 或维护查重结果归一化传入）
 // Round4 任务一：双列对比视图的左侧/右侧本地面板数据源
@@ -62,7 +63,8 @@ const formatDate = (iso?: string) => {
   return d.toLocaleString('zh-CN', { hour12: false })
 }
 
-const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
+// 图标由模板中的 AppIcon 渲染，这里只返回文案
+const modeText = (mode?: string) => (mode === 'gallery' ? '画廊' : '归档')
 </script>
 
 <template>
@@ -76,14 +78,18 @@ const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜�
           title="在新标签页打开完整详情"
           @click="$emit('open-full')"
         >
-          📚 本地详情 <span class="open-hint">↗</span>
+          <AppIcon name="books" :size="15" /> 本地详情
+          <span class="open-hint"><AppIcon name="openExternal" :size="12" /></span>
         </button>
       </div>
-      <span v-if="comic" class="odp-mode">{{ modeText(comic.sourceMode) }}</span>
+      <span v-if="comic" class="odp-mode">
+        <AppIcon :name="comic.sourceMode === 'gallery' ? 'folder' : 'archive'" :size="12" />
+        {{ modeText(comic.sourceMode) }}
+      </span>
     </header>
 
     <div v-if="!comic" class="odp-empty">
-      <div class="empty-icon">📭</div>
+      <div class="empty-icon"><AppIcon name="tray" :size="32" /></div>
       <p>无本地数据</p>
     </div>
 
@@ -96,7 +102,7 @@ const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜�
           loading="lazy"
           @error="coverFailed = true"
         />
-        <div v-else class="odp-cover-fallback">📚</div>
+        <div v-else class="odp-cover-fallback"><AppIcon name="books" :size="32" /></div>
       </div>
 
       <h3 class="odp-title-main" :title="comic.titleJpn ? comic.title : undefined">
@@ -128,10 +134,10 @@ const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜�
         </div>
       </dl>
 
-      <div class="odp-path">📁 {{ comic.localPath || '—' }}</div>
+      <div class="odp-path"><AppIcon name="folder" :size="13" /> {{ comic.localPath || '—' }}</div>
 
       <div v-if="reason" class="odp-reason">
-        <span class="odp-reason-icon">ℹ️</span>
+        <span class="odp-reason-icon"><AppIcon name="info" :size="13" /></span>
         <span>{{ reason }}</span>
       </div>
 

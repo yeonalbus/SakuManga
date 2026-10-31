@@ -3,6 +3,7 @@ import { ref, reactive, watch } from 'vue'
 import type { SearchConfig } from '@/types/comic'
 import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import TagChip from '@/components/TagChip.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 // Round3-任务6：负向 chips（「- 」前缀红色/删除线区分）
 import { isNegativeItem, formatFSearchTag } from '@/utils/tagFilter'
 // v2.0.1：输入法选词回车一步到位（Vue .enter 修饰符吞掉 IME 组合态回车）
@@ -196,9 +197,13 @@ const handleApply = () => {
     <Transition name="slide">
       <div v-if="visible" class="filter-drawer">
         <div class="drawer-header">
-          <button class="icon-btn" title="重置筛选" @click="handleReset">🔄</button>
+          <button class="icon-btn" title="重置筛选" @click="handleReset">
+            <AppIcon name="refresh" :size="16" />
+          </button>
           <h2 class="drawer-title">筛选</h2>
-          <button class="icon-btn apply-btn" title="完成" @click="handleApply">✓</button>
+          <button class="icon-btn apply-btn" title="完成" @click="handleApply">
+            <AppIcon name="check" :size="16" />
+          </button>
         </div>
 
         <div class="drawer-body">
@@ -238,7 +243,7 @@ const handleApply = () => {
               >
                 <span class="kw-text">{{ kw }}</span>
                 <span class="remove-x" title="删除此关键词" @click.stop="removeKeyword(index)">
-                  ✕
+                  <AppIcon name="close" :size="12" />
                 </span>
               </span>
             </div>
@@ -273,7 +278,7 @@ const handleApply = () => {
                      导致联想词被填进搜索栏而非压入过滤队列（PWA 端 SPA 导航尤其明显） -->
                 <TagChip :tag="sug" :disable-quick-search="true" />
                 <span v-if="sug.count" class="tag-count-badge"
-                  >🔥 {{ sug.count.toLocaleString() }}</span
+                  ><AppIcon name="fire" :size="12" /> {{ sug.count.toLocaleString() }}</span
                 >
                 <span class="suggest-hint">{{ sug.isNegative ? '排除' : '加入' }}</span>
               </div>
@@ -328,12 +333,12 @@ const handleApply = () => {
           <div class="form-row">
             <span class="row-label">最低评分</span>
             <select v-model="filterState.minRating" class="dark-select mini">
-              <option :value="0">0 ⭐ (全部)</option>
-              <option :value="1">1 ⭐</option>
-              <option :value="2">2 ⭐</option>
-              <option :value="3">3 ⭐</option>
-              <option :value="4">4 ⭐</option>
-              <option :value="5">5 ⭐</option>
+              <option :value="0">0 ★ (全部)</option>
+              <option :value="1">1 ★</option>
+              <option :value="2">2 ★</option>
+              <option :value="3">3 ★</option>
+              <option :value="4">4 ★</option>
+              <option :value="5">5 ★</option>
             </select>
           </div>
 

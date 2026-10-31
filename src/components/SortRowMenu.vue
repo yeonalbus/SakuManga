@@ -2,6 +2,7 @@
 // src/components/SortRowMenu.vue
 // Round22：排序行操作菜单（⋯）——「移到顶部/置顶」+「移动到第 X 位」（决策 D6：书架列表「移到顶部」，书架内本子「置顶」）
 import { ref } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 
 const props = withDefaults(
@@ -56,10 +57,16 @@ const handleMoveTo = async (e: MouseEvent) => {
 
 <template>
   <div class="sort-row-menu" :class="{ open }">
-    <button class="menu-trigger" title="排序操作" @click="toggle" @pointerdown.stop>⋯</button>
+    <button class="menu-trigger" title="排序操作" @click="toggle" @pointerdown.stop>
+      <AppIcon name="more" :size="14" />
+    </button>
     <div v-if="open" class="menu-pop" @pointerdown.stop @click.stop>
-      <button class="menu-item" @click="handleMoveTop">📌 {{ topLabel }}</button>
-      <button class="menu-item" @click="handleMoveTo">🎯 移动到第 {{ total }} 位以内…</button>
+      <button class="menu-item" @click="handleMoveTop">
+        <AppIcon name="pin" :size="14" /> {{ topLabel }}
+      </button>
+      <button class="menu-item" @click="handleMoveTo">
+        <AppIcon name="target" :size="14" /> 移动到第 {{ total }} 位以内…
+      </button>
     </div>
     <!-- 点击外部关闭 -->
     <div v-if="open" class="menu-backdrop" @click="close" />

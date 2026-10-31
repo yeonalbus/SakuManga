@@ -20,6 +20,7 @@ import { rememberListState } from '@/utils/scrollMemory'
 import { formatFSearchTag } from '@/utils/tagFilter'
 // Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
 import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -382,7 +383,7 @@ const handleAddToReadingList = () => {
     toast.info(`已将《${comic.value.title}》从在线清单移出`)
   } else {
     addToReadingList(comic.value)
-    toast.success(`已将《${comic.value.title}》加入在线阅读清单 📑`)
+    toast.success(`已将《${comic.value.title}》加入在线阅读清单`)
   }
 }
 
@@ -821,19 +822,23 @@ watch(
   <div class="detail-page" :class="{ embedded }">
     <!-- 📱 移动形态：左上角圆形返回悬浮球（fixed，位于悬浮 TopBar 正下方；桌面端隐藏） -->
     <button v-if="!embedded" class="detail-fab-back" @click="handleBack" title="返回上一页">
-      ‹
+      <AppIcon name="arrowLeft" :size="18" />
     </button>
     <div v-if="isLoading" class="loading-state">加载中...</div>
 
     <div v-else-if="detailError" class="error-state">
-      <div class="error-icon">⚠️</div>
+      <div class="error-icon"><AppIcon name="warning" :size="36" /></div>
       <p class="error-msg">{{ detailError }}</p>
-      <button v-if="!embedded" class="back-btn" @click="handleBack">‹ 返回</button>
+      <button v-if="!embedded" class="back-btn" @click="handleBack">
+        <AppIcon name="arrowLeft" :size="14" /> 返回
+      </button>
     </div>
 
     <template v-else>
       <div class="top-action-bar">
-        <button v-if="!embedded" class="back-btn" @click="handleBack">‹ 返回</button>
+        <button v-if="!embedded" class="back-btn" @click="handleBack">
+          <AppIcon name="arrowLeft" :size="14" /> 返回
+        </button>
 
         <div class="right-actions">
           <button
@@ -841,7 +846,12 @@ watch(
             :class="{ active: isInReadingList }"
             @click="handleAddToReadingList"
           >
-            {{ isInReadingList ? '✓ 在清单' : '📑 清单' }}
+            <AppIcon
+              :name="isInReadingList ? 'check' : 'list'"
+              :weight="isInReadingList ? 'fill' : 'regular'"
+              :size="15"
+            />
+            {{ isInReadingList ? '在清单' : '清单' }}
           </button>
 
           <button
@@ -859,10 +869,13 @@ watch(
             @contextmenu.prevent
             @click="handleFavClick"
           >
-            ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
+            <AppIcon name="heart" :weight="comic.isFavorite ? 'fill' : 'regular'" :size="15" />
+            {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
           </button>
 
-          <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
+          <button class="read-btn" @click="handleStartReading()">
+            <AppIcon name="book" :size="15" /> 阅读
+          </button>
 
           <!-- 本地已存在副本：⬇️ 下载 替换为 📚 本地（跳转本地画廊详情） -->
           <button
@@ -871,14 +884,14 @@ watch(
             title="该画廊已存入本地，点击查看本地详情"
             @click="goLocalGallery"
           >
-            📚 本地
+            <AppIcon name="books" :size="15" /> 本地
           </button>
           <button
             v-else-if="canDownload"
             class="action-btn download-btn"
             @click="handleOpenDownloadPanel"
           >
-            ⬇️ 下载
+            <AppIcon name="download" :size="15" /> 下载
           </button>
         </div>
       </div>
@@ -890,7 +903,8 @@ watch(
         :class="{ 'is-online': useOnlineOverride, 'is-static': localPanel }"
       >
         <span class="local-badge" :class="{ online: useOnlineOverride && !localPanel }">
-          {{ localPanel ? '📚 本地原版' : useOnlineOverride ? '🌐 在线版本' : '📚 本地版本' }}
+          <AppIcon :name="useOnlineOverride && !localPanel ? 'online' : 'books'" :size="13" />
+          {{ localPanel ? '本地原版' : useOnlineOverride ? '在线版本' : '本地版本' }}
         </span>
         <button
           v-if="!localPanel && !useOnlineOverride"
@@ -919,7 +933,12 @@ watch(
           :class="{ active: isInReadingList }"
           @click="handleAddToReadingList"
         >
-          {{ isInReadingList ? '✓ 在清单' : '📑 清单' }}
+          <AppIcon
+            :name="isInReadingList ? 'check' : 'list'"
+            :weight="isInReadingList ? 'fill' : 'regular'"
+            :size="15"
+          />
+          {{ isInReadingList ? '在清单' : '清单' }}
         </button>
 
         <button
@@ -937,10 +956,13 @@ watch(
           @contextmenu.prevent
           @click="handleFavClick"
         >
-          ❤️ {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
+          <AppIcon name="heart" :weight="comic.isFavorite ? 'fill' : 'regular'" :size="15" />
+          {{ comic.isFavorite ? `Fav ${comic.favIndex ?? 0}` : '收藏' }}
         </button>
 
-        <button class="read-btn" @click="handleStartReading()">📖 阅读</button>
+        <button class="read-btn" @click="handleStartReading()">
+          <AppIcon name="book" :size="15" /> 阅读
+        </button>
 
         <!-- 本地已存在副本：⬇️ 下载 替换为 📚 本地（跳转本地画廊详情） -->
         <button
@@ -949,14 +971,14 @@ watch(
           title="该画廊已存入本地，点击查看本地详情"
           @click="goLocalGallery"
         >
-          📚 本地
+          <AppIcon name="books" :size="15" /> 本地
         </button>
         <button
           v-else-if="canDownload"
           class="action-btn download-btn"
           @click="handleOpenDownloadPanel"
         >
-          ⬇️ 下载
+          <AppIcon name="download" :size="15" /> 下载
         </button>
       </div>
 
@@ -967,14 +989,15 @@ watch(
           :class="{ active: activeTab === 'info' }"
           @click="activeTab = 'info'"
         >
-          📌 基础信息
+          <AppIcon name="pin" :size="13" /> 基础信息
         </button>
         <button
           class="tab-item"
           :class="{ active: activeTab === 'preview' }"
           @click="activeTab = 'preview'"
         >
-          🖼️ 预览切片 (已载 {{ comic.previewPages?.length || 0 }} / 共 {{ comic.pageCount || 0 }}P)
+          <AppIcon name="images" :size="13" />
+          预览切片 (已载 {{ comic.previewPages?.length || 0 }} / 共 {{ comic.pageCount || 0 }}P)
         </button>
         <button
           v-if="!localPanel && preferenceSettings.showGalleryComments"
@@ -982,7 +1005,8 @@ watch(
           :class="{ active: activeTab === 'comments' }"
           @click="activeTab = 'comments'"
         >
-          💬 社区评论 ({{ comic.comments?.length || 0 }})
+          <AppIcon name="chat" :size="13" />
+          社区评论 ({{ comic.comments?.length || 0 }})
         </button>
       </div>
 
@@ -1009,7 +1033,7 @@ watch(
             </div>
             <div class="meta-row">
               <span class="label">全站评分:</span>
-              <span class="value rating-star">⭐ {{ comic.rating }} / 5.0</span>
+              <span class="value rating-star"><AppIcon name="star" :size="13" /> {{ comic.rating }} / 5.0</span>
             </div>
             <div class="meta-row">
               <span class="label">总页数:</span>
@@ -1022,7 +1046,7 @@ watch(
 
             <!-- 按 Namespace 分组渲染 Tag -->
             <div class="tags-section">
-              <h3 class="section-title">🏷️ Tag 属性云</h3>
+              <h3 class="section-title"><AppIcon name="tag" :size="15" /> Tag 属性云</h3>
               <div class="grouped-tag-list">
                 <div v-for="(tags, ns) in groupedTags" :key="ns" class="ns-group-row">
                   <span class="ns-label">{{ ns }}:</span>
@@ -1123,8 +1147,12 @@ watch(
     <div v-if="showDownloadPanel" class="download-mask" @click.self="closeDownloadPanel">
       <div class="download-panel">
         <div class="panel-header">
-          <span class="panel-title">⬇️ 下载《{{ comic.title }}》</span>
-          <button class="panel-close" @click="closeDownloadPanel">✕</button>
+          <span class="panel-title">
+            <AppIcon name="download" :size="15" /> 下载《{{ comic.title }}》
+          </span>
+          <button class="panel-close" @click="closeDownloadPanel">
+            <AppIcon name="close" :size="16" />
+          </button>
         </div>
 
         <div class="panel-body">
@@ -1157,14 +1185,14 @@ watch(
               :class="{ active: selectedMode === 'archive' }"
               @click="selectedMode = 'archive'"
             >
-              🗜️ 归档下载（H@H）
+              <AppIcon name="archive" :size="15" /> 归档下载（H@H）
             </button>
             <button
               class="mode-btn"
               :class="{ active: selectedMode === 'gallery' }"
               @click="selectedMode = 'gallery'"
             >
-              🖼️ 画廊下载（逐图）
+              <AppIcon name="images" :size="15" /> 画廊下载（逐图）
             </button>
           </div>
 
@@ -1187,7 +1215,8 @@ watch(
           </div>
 
           <div v-if="selectedMode === 'gallery'" class="gallery-hint">
-            📄 画廊下载将逐张保存 {{ comic.pageCount || 0 }} 页图片到压缩包/解压目录
+            <AppIcon name="file" :size="12" /> 画廊下载将逐张保存
+            {{ comic.pageCount || 0 }} 页图片到压缩包/解压目录
           </div>
         </div>
 

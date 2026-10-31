@@ -2,8 +2,10 @@
   <div class="gamepad-settings">
     <!-- 页头 -->
     <div class="page-header">
-      <button class="back-btn" @click="$emit('back')">← 返回</button>
-      <div class="page-title">🎮 手柄设置</div>
+      <button class="back-btn" @click="$emit('back')">
+        <AppIcon name="arrowLeft" :size="13" /> 返回
+      </button>
+      <div class="page-title"><AppIcon name="gamepad" :size="16" /> 手柄设置</div>
     </div>
 
     <div class="setting-item">
@@ -32,7 +34,9 @@
         <div class="key-list">
           <span v-for="k in readerSettings[slot.key]" :key="k" class="key-chip">
             {{ btnName(k) }}
-            <button class="key-remove" title="移除该键位" @click="removeKey(slot.key, k)">×</button>
+            <button class="key-remove" title="移除该键位" @click="removeKey(slot.key, k)">
+              <AppIcon name="close" :size="12" />
+            </button>
           </span>
           <span v-if="readerSettings[slot.key].length === 0" class="key-empty">未设置</span>
         </div>
@@ -42,12 +46,15 @@
         :class="{ capturing: captureSlot === slot.key }"
         @click="startCapture(slot.key)"
       >
-        {{ captureSlot === slot.key ? '请按手柄按键…' : '＋ 录制' }}
+        <template v-if="captureSlot === slot.key">请按手柄按键…</template>
+        <template v-else><AppIcon name="plus" :size="13" /> 录制</template>
       </button>
     </div>
 
     <div class="preset-row">
-      <button class="preset-btn" @click="applyMicroPreset">🔄 恢复 8BitDo Micro 默认键位</button>
+      <button class="preset-btn" @click="applyMicroPreset">
+        <AppIcon name="refresh" :size="13" /> 恢复 8BitDo Micro 默认键位
+      </button>
     </div>
 
     <!-- Round14：双击快速确认切本 -->
@@ -80,6 +87,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { readerSettings, GAMEPAD_BUTTONS } from '@/stores/readerSettings'
 

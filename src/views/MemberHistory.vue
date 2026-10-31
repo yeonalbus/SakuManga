@@ -9,6 +9,7 @@ import { useUserStore } from '@/stores/userStore'
 import { http } from '@/utils/request'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import type { ComicItem } from '@/types/comic'
 
 interface AdminHistoryItem {
@@ -127,8 +128,10 @@ onMounted(() => {
   <div class="member-history-view">
     <div class="view-header">
       <div class="header-left">
-        <button class="back-btn" @click="router.back()">‹ 返回</button>
-        <h2 class="view-title">📜 成员历史</h2>
+        <button class="back-btn" @click="router.back()">
+          <AppIcon name="arrowLeft" :size="15" /> 返回
+        </button>
+        <h2 class="view-title"><AppIcon name="scroll" :size="18" /> 成员历史</h2>
       </div>
 
       <div class="filters">
@@ -140,8 +143,8 @@ onMounted(() => {
         </select>
 
         <select v-model="source" class="filter-select">
-          <option value="online">🌐 在线</option>
-          <option value="offline">📚 本地</option>
+          <option value="online">在线</option>
+          <option value="offline">本地</option>
         </select>
       </div>
     </div>

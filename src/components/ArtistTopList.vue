@@ -6,6 +6,7 @@
  * 因此从词云体系剥离，以「Top 20 排行榜」形式单独呈现。
  */
 import { computed } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import type { XpCloudArtist } from '@/types/comic'
 
 const props = defineProps<{ artists: XpCloudArtist[] }>()
@@ -17,7 +18,7 @@ const maxCount = computed(() => Math.max(1, ...props.artists.map((a) => a.comicC
 
 <template>
   <div class="artist-top">
-    <h3 class="artist-title">🎨 Top 画师 / 社团</h3>
+    <h3 class="artist-title"><AppIcon name="palette" :size="15" /> Top 画师 / 社团</h3>
     <div v-if="artists.length === 0" class="artist-empty">暂无画师/社团标签</div>
     <ol v-else class="artist-list">
       <li

@@ -20,6 +20,7 @@ import { useDragReorder } from '@/composables/useDragReorder'
 import { useUserStore } from '@/stores/userStore'
 import { loadStorage, saveStorage } from '@/utils/storage'
 import type { Bookshelf } from '@/types/comic'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const route = useRoute() // 1. 引入 useRoute 用于精准匹配 query.id
 const { modal, toast } = useUI()
@@ -50,7 +51,7 @@ const unreadTotal = computed(() => shelfWallSummary.value.unread)
 const unreadBadge = (shelf: Bookshelf): string => {
   const unread = shelfUnreadCount(shelf)
   const total = shelf.count || 0
-  return unread === 0 ? `${total} ✓` : `${unread}/${total}`
+  return unread === 0 ? `${total}` : `${unread}/${total}`
 }
 
 // 新建书架
@@ -134,7 +135,7 @@ const onLinkClick = (e: MouseEvent) => {
 
 <template>
   <div class="nav-group">
-    <span class="group-title">📚 离线模式</span>
+    <span class="group-title"><AppIcon name="books" :size="13" /> 离线模式</span>
     <router-link to="/offline/home">首页</router-link>
     <!-- Round3-任务2：更新/维护入口仅管理员可见 -->
     <router-link v-if="isAdmin" to="/offline/update">更新</router-link>
@@ -151,7 +152,8 @@ const onLinkClick = (e: MouseEvent) => {
       <div v-show="isBookshelfOpen" class="foldable-body">
         <!-- Round13：仅常驻展示置顶书架（最多 PIN_LIMIT 个），其余进「全部书架」浮层 -->
         <div v-if="pinnedBookshelves.length === 0" class="pin-hint">
-          💡 在「全部书架」中点击 ⭐ 置顶常用书架（最多 {{ PIN_LIMIT }} 个）
+          <AppIcon name="lightbulb" :size="12" /> 在「全部书架」中点击 <AppIcon name="star" :size="12" />
+          置顶常用书架（最多 {{ PIN_LIMIT }} 个）
         </div>
 
         <template v-for="(shelf, idx) in pinnedBookshelves" :key="shelf.id">
@@ -161,7 +163,9 @@ const onLinkClick = (e: MouseEvent) => {
             :class="{ active: route.query.id === shelf.id }"
             @click="onLinkClick"
           >
-            <span class="shelf-name"><span class="pin-dot">📌</span> {{ shelf.name }}</span>
+            <span class="shelf-name"
+              ><AppIcon name="pin" weight="fill" :size="11" class="pin-dot" /> {{ shelf.name }}</span
+            >
 
             <div class="shelf-right-info">
               <span class="shelf-count" :class="{ cleared: shelfUnreadCount(shelf) === 0 }">
@@ -175,7 +179,7 @@ const onLinkClick = (e: MouseEvent) => {
                 @pointerdown="(e) => pinnedHandleDown(e as PointerEvent, idx)"
                 @click.stop.prevent
               >
-                ⠿
+                <AppIcon name="drag" :size="12" />
               </span>
 
               <!-- Round22：排序操作菜单（移到顶部 / 移动到第 X 位） -->
@@ -191,7 +195,7 @@ const onLinkClick = (e: MouseEvent) => {
                 title="取消置顶"
                 @click.stop.prevent="setBookshelfPinned(shelf.id, false)"
               >
-                📌
+                <AppIcon name="pin" :size="12" />
               </span>
             </div>
           </router-link>
@@ -219,7 +223,7 @@ const onLinkClick = (e: MouseEvent) => {
               height: pinnedGhostHeight + 'px',
             }"
           >
-            📌 {{ pinnedGhostText(pinnedDragIndex) }}
+            <AppIcon name="pin" weight="fill" :size="12" /> {{ pinnedGhostText(pinnedDragIndex) }}
           </div>
         </Teleport>
 
@@ -229,7 +233,7 @@ const onLinkClick = (e: MouseEvent) => {
           class="all-shelf-btn"
           :class="{ 'is-current': route.path === '/offline/bookshelves' }"
         >
-          🔍 全部书架（{{ bookshelves.length }}）
+          <AppIcon name="search" :size="13" /> 全部书架（{{ bookshelves.length }}）
         </router-link>
         <router-link
           v-if="unreadTotal > 0"
@@ -237,16 +241,18 @@ const onLinkClick = (e: MouseEvent) => {
           class="unread-entry"
           title="打开书架墙查看待读的书架"
         >
-          📖 未读 {{ unreadTotal }} 本
+          <AppIcon name="book" :size="13" /> 未读 {{ unreadTotal }} 本
         </router-link>
-        <button class="add-shelf-btn" @click="createNewBookshelf">➕ 新建书架</button>
+        <button class="add-shelf-btn" @click="createNewBookshelf">
+          <AppIcon name="plus" :size="13" /> 新建书架
+        </button>
       </div>
     </div>
   </div>
 
   <!-- 🎲 工具：跨模式全局功能（骰子支持全库、清单有在线/离线双 tab） -->
   <div class="nav-group">
-    <span class="group-title">🎲 工具</span>
+    <span class="group-title"><AppIcon name="dice" :size="13" /> 工具</span>
     <router-link to="/random">手气不错</router-link>
     <router-link to="/reading-list">阅读清单</router-link>
     <!-- 画质升级：与工具组其他组件一致对所有登录用户显示（下载许可由后端按用户校验） -->
@@ -364,7 +370,7 @@ const onLinkClick = (e: MouseEvent) => {
 }
 
 .pin-dot {
-  font-size: 0.7rem;
+  color: var(--app-text-muted);
   margin-right: 2px;
 }
 

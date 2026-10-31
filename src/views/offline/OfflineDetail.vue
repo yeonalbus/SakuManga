@@ -18,6 +18,7 @@ import { consumeBackState, isStandalonePWA, shouldCloseTab, openContentTab } fro
 import { rememberListState } from '@/utils/scrollMemory'
 // Round7-任务1/3：起始页确定性恢复（历史入口总是恢复，否则按偏好开关）
 import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingProgress'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 后端 GetOfflineComicDetail 返回的离线漫画 DTO
 // tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
@@ -257,7 +258,7 @@ const handleAddToReadingList = () => {
     toast.info(`已将《${comic.value.title}》从本地清单移出`)
   } else {
     addToReadingList(comic.value)
-    toast.success(`已将《${comic.value.title}》加入本地阅读清单 📑`)
+    toast.success(`已将《${comic.value.title}》加入本地阅读清单`)
   }
 }
 
@@ -775,19 +776,30 @@ const goOnlineGallery = () => {
 <template>
   <div class="offline-detail-page">
     <!-- 📱 移动形态：左上角圆形返回悬浮球（fixed，位于悬浮 TopBar 正下方；桌面端隐藏） -->
-    <button class="detail-fab-back" @click="handleBack" title="返回上一页">‹</button>
+    <button class="detail-fab-back" @click="handleBack" title="返回上一页">
+      <AppIcon name="arrowLeft" :size="18" />
+    </button>
     <div class="top-bar">
-      <button class="back-btn" @click="handleBack">‹ 返回</button>
+      <button class="back-btn" @click="handleBack">
+        <AppIcon name="arrowLeft" :size="14" /> 返回
+      </button>
       <div class="right-actions">
         <button
           class="add-reading-btn"
           :class="{ active: isInReadingList }"
           @click="handleAddToReadingList"
         >
-          {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+          <AppIcon
+            :name="isInReadingList ? 'check' : 'list'"
+            :weight="isInReadingList ? 'fill' : 'regular'"
+            :size="15"
+          />
+          {{ isInReadingList ? '已在清单' : '加入清单' }}
         </button>
 
-        <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
+        <button class="read-btn" @click="handleStartReading">
+          <AppIcon name="book" :size="15" /> 立即阅读
+        </button>
 
         <!-- Round11-Opt3：跳转 E 站在线画廊（无 gid 置灰） -->
         <button
@@ -796,7 +808,7 @@ const goOnlineGallery = () => {
           title="跳转 E 站在线画廊"
           @click="goOnlineGallery"
         >
-          🌐 在线
+          <AppIcon name="online" :size="15" /> 在线
         </button>
 
         <button
@@ -805,7 +817,10 @@ const goOnlineGallery = () => {
           :disabled="deleting"
           @click="handleDelete"
         >
-          {{ deleting ? '删除中…' : '🗑️ 删除' }}
+          <template v-if="deleting">删除中…</template>
+          <template v-else>
+            <AppIcon name="trash" :size="15" /> 删除
+          </template>
         </button>
       </div>
     </div>
@@ -817,13 +832,20 @@ const goOnlineGallery = () => {
         :class="{ active: isInReadingList }"
         @click="handleAddToReadingList"
       >
-        {{ isInReadingList ? '✓ 已在清单' : '📑 加入清单' }}
+        <AppIcon
+          :name="isInReadingList ? 'check' : 'list'"
+          :weight="isInReadingList ? 'fill' : 'regular'"
+          :size="15"
+        />
+        {{ isInReadingList ? '已在清单' : '加入清单' }}
       </button>
 
-      <button class="read-btn" @click="handleStartReading">📖 立即阅读</button>
+      <button class="read-btn" @click="handleStartReading">
+        <AppIcon name="book" :size="15" /> 立即阅读
+      </button>
 
       <button class="online-link-btn" :disabled="!comic.gid" @click="goOnlineGallery">
-        🌐 在线
+        <AppIcon name="online" :size="15" /> 在线
       </button>
 
       <button
@@ -832,7 +854,10 @@ const goOnlineGallery = () => {
         :disabled="deleting"
         @click="handleDelete"
       >
-        {{ deleting ? '删除中…' : '🗑️ 删除' }}
+        <template v-if="deleting">删除中…</template>
+        <template v-else>
+          <AppIcon name="trash" :size="15" /> 删除
+        </template>
       </button>
     </div>
 
@@ -843,14 +868,14 @@ const goOnlineGallery = () => {
         :class="{ active: detailTab === 'info' }"
         @click="detailTab = 'info'"
       >
-        📄 信息
+        <AppIcon name="file" :size="13" /> 信息
       </button>
       <button
         class="detail-tab-btn"
         :class="{ active: detailTab === 'preview' }"
         @click="switchPreview"
       >
-        🖼️ 画廊预览 ({{ previewCount }})
+        <AppIcon name="images" :size="13" /> 画廊预览 ({{ previewCount }})
       </button>
     </div>
 
@@ -864,17 +889,17 @@ const goOnlineGallery = () => {
           :disabled="savingHidden"
           @click="hideSelectedPages"
         >
-          ✓ 隐藏选中
+          <AppIcon name="check" :size="13" /> 隐藏选中
         </button>
         <button
           class="manage-btn restore-btn"
           :disabled="savingHidden"
           @click="restoreSelectedPages"
         >
-          ↩ 恢复选中
+          <AppIcon name="refresh" :size="13" /> 恢复选中
         </button>
         <button class="manage-btn cancel-btn" :disabled="savingHidden" @click="exitManageMode">
-          ✕ 退出
+          <AppIcon name="close" :size="13" /> 退出
         </button>
         <span class="manage-hint">已隐藏 {{ hiddenCount }} 页 · 有效 {{ previewCount }} 页</span>
       </div>
@@ -912,7 +937,12 @@ const goOnlineGallery = () => {
             "
             @click="toggleManageFold(seg.start)"
           >
-            <span class="fold-caret">{{ isManageFoldExpanded(seg.start) ? '▾' : '▸' }}</span>
+            <span class="fold-caret">
+              <AppIcon
+                :name="isManageFoldExpanded(seg.start) ? 'caretDown' : 'arrowRight'"
+                :size="12"
+              />
+            </span>
             <span class="fold-text">
               {{
                 isManageFoldExpanded(seg.start)
@@ -937,7 +967,9 @@ const goOnlineGallery = () => {
               <img :src="rawPageUrl(p)" :alt="'第 ' + (p + 1) + ' 页'" loading="lazy" />
               <span class="preview-page-num">{{ p + 1 }}</span>
               <span v-if="isHiddenPage(p)" class="hidden-mask">已隐藏</span>
-              <span v-if="isSelectedPage(p)" class="select-mask">✓</span>
+              <span v-if="isSelectedPage(p)" class="select-mask">
+                <AppIcon name="check" weight="fill" :size="13" />
+              </span>
             </div>
           </div>
         </div>
@@ -970,7 +1002,7 @@ const goOnlineGallery = () => {
           点击加载更多 (已加载 {{ previewPages.length }} / 共 {{ visibleTotal }} 页)
         </button>
         <button class="manage-entry-btn" @click="enterManageMode">
-          🛠️ 管理模式（隐藏/恢复页面）
+          <AppIcon name="wrench" :size="14" /> 管理模式（隐藏/恢复页面）
         </button>
       </div>
     </div>
@@ -999,7 +1031,7 @@ const goOnlineGallery = () => {
             title="修改标题（清空可恢复日文原名）"
             @click="handleEditTitle"
           >
-            ✎
+            <AppIcon name="edit" :size="13" />
           </button>
           <span v-if="comic.titleJpn && comic.title && comic.title !== comic.titleJpn" class="subtitle">
             {{ comic.title }}
@@ -1016,7 +1048,7 @@ const goOnlineGallery = () => {
               :class="{ active: star <= myLocalRating }"
               @click="setRating(star)"
             >
-              ★
+              <AppIcon name="star" :weight="star <= myLocalRating ? 'fill' : 'regular'" :size="18" />
             </span>
           </div>
           <span class="rating-num">({{ myLocalRating }} / 5.0)</span>
@@ -1024,8 +1056,10 @@ const goOnlineGallery = () => {
 
         <div class="info-card">
           <div class="card-header">
-            <h3 class="card-title">🏷️ 本地作品标签 (Tags)</h3>
-            <button v-if="userStore.isAdmin" class="add-tag-btn" @click="handleAddTag">➕ 添加 Tag</button>
+            <h3 class="card-title"><AppIcon name="tag" :size="15" /> 本地作品标签 (Tags)</h3>
+            <button v-if="userStore.isAdmin" class="add-tag-btn" @click="handleAddTag">
+              <AppIcon name="plus" :size="12" /> 添加 Tag
+            </button>
           </div>
 
           <!-- 🎯 TagChip 组件 + 独立删除按钮组合（Round23：原生 tag 删除置灰可恢复，本地 tag 物理删除） -->
@@ -1054,7 +1088,7 @@ const goOnlineGallery = () => {
                 :title="dt.source === 'local' ? '删除此标签' : '叉除此标签（可点击恢复）'"
                 @click.stop="handleRemoveTag(dt)"
               >
-                ✕
+                <AppIcon name="close" :size="12" />
               </span>
             </div>
 
@@ -1065,7 +1099,7 @@ const goOnlineGallery = () => {
         </div>
 
         <div class="info-card">
-          <h3 class="card-title">💾 本地文件属性</h3>
+          <h3 class="card-title"><AppIcon name="local" :size="15" /> 本地文件属性</h3>
           <div class="info-grid">
             <div class="info-item">
               <span class="k">文件大小:</span>
@@ -1112,7 +1146,7 @@ const goOnlineGallery = () => {
         </div>
 
         <div class="info-card">
-          <h3 class="card-title">📝 本地备注</h3>
+          <h3 class="card-title"><AppIcon name="notebook" :size="15" /> 本地备注</h3>
           <textarea
             v-model="remarkText"
             class="remark-input"
@@ -1127,7 +1161,7 @@ const goOnlineGallery = () => {
         </div>
 
         <div class="info-card">
-          <h3 class="card-title">📚 归属本地书架 (可多选)</h3>
+          <h3 class="card-title"><AppIcon name="books" :size="15" /> 归属本地书架 (可多选)</h3>
           <div class="bookshelves-list">
             <div
               v-for="shelf in bookshelves"

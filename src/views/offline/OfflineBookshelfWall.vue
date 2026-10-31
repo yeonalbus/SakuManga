@@ -31,6 +31,7 @@ import ShelfCoverPickerOverlay from '@/components/ShelfCoverPickerOverlay.vue'
 import { useDragReorder } from '@/composables/useDragReorder'
 import { getMainContent } from '@/utils/scrollMemory'
 import type { Bookshelf } from '@/types/comic'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -65,10 +66,10 @@ const filtered = computed<Bookshelf[]>(() => {
   return list
 })
 
-/** 未读徽标文案：0 未读 → ✓ 已清空 */
+/** 未读徽标文案：0 未读 → 已清空（勾选图标由模板按状态渲染） */
 const unreadLabel = (shelf: Bookshelf): string => {
   const unread = shelfUnreadCount(shelf)
-  if (unread === 0) return '✓ 已清空'
+  if (unread === 0) return '已清空'
   return `未读 ${unread}/${shelf.count || 0}`
 }
 
@@ -243,15 +244,17 @@ const markCoverFailed = (id: string) => {
   <div class="shelf-wall-view">
     <div class="wall-header">
       <div class="title-area">
-        <span class="icon">📚</span>
+        <span class="icon"><AppIcon name="books" :size="20" /></span>
         <h2 class="wall-title">书架墙</h2>
         <span class="wall-badge">{{ summary.shelfCount }} 个书架</span>
       </div>
       <div class="header-actions">
         <button class="wall-op-btn" :class="{ active: sortPanel }" @click="sortPanel ? exitSortPanel() : enterSortPanel()">
-          ↕ {{ sortPanel ? '完成排序' : '排序' }}
+          <AppIcon name="sort" :size="13" /> {{ sortPanel ? '完成排序' : '排序' }}
         </button>
-        <button class="wall-op-btn" @click="handleCreate">➕ 新建书架</button>
+        <button class="wall-op-btn" @click="handleCreate">
+          <AppIcon name="plus" :size="13" /> 新建书架
+        </button>
       </div>
     </div>
 
@@ -266,14 +269,16 @@ const markCoverFailed = (id: string) => {
         @click="toggleUnreadOnly"
       >
         <template v-if="summary.unread > 0">未读 <b>{{ summary.unread }}</b> 本</template>
-        <template v-else>全部读完 ✓</template>
+        <template v-else
+          >全部读完 <AppIcon name="check" :size="12" weight="fill"
+        /></template>
       </button>
       <span v-if="unreadOnly" class="stat-hint">（已过滤出有未读的书架）</span>
     </div>
 
     <template v-if="!sortPanel">
       <div class="wall-toolbar">
-        <input v-model="keyword" class="wall-search" type="text" placeholder="🔎 搜索书架名称…" />
+        <input v-model="keyword" class="wall-search" type="text" placeholder="搜索书架名称…" />
         <select v-model="sortMode" class="wall-select">
           <option value="custom">自定义顺序</option>
           <option value="unread">未读最多</option>
@@ -283,11 +288,12 @@ const markCoverFailed = (id: string) => {
       </div>
 
       <div v-if="filtered.length === 0" class="wall-empty">
+        <AppIcon v-if="!keyword && unreadOnly" name="confetti" :size="16" />
         {{
           keyword
             ? '无匹配书架'
             : unreadOnly
-              ? '🎉 没有待清理的书架，全部读完了'
+              ? '没有待清理的书架，全部读完了'
               : '暂无书架，点击右上「新建书架」创建'
         }}
       </div>
@@ -314,8 +320,16 @@ const markCoverFailed = (id: string) => {
               <span v-if="!isCoverLoaded(shelf.id)" class="cover-fallback">
                 {{ shelf.name.slice(0, 1) }}
               </span>
-              <span v-if="shelf.pinned" class="pin-flag">📌</span>
+              <span v-if="shelf.pinned" class="pin-flag"
+                ><AppIcon name="pin" :size="12" weight="fill"
+              /></span>
               <span class="unread-badge" :class="{ cleared: shelfUnreadCount(shelf) === 0 }">
+                <AppIcon
+                  v-if="shelfUnreadCount(shelf) === 0"
+                  name="check"
+                  :size="10"
+                  weight="fill"
+                />
                 {{ unreadLabel(shelf) }}
               </span>
             </div>
@@ -336,21 +350,27 @@ const markCoverFailed = (id: string) => {
               "
               @click="handleImport(shelf)"
             >
-              📋 导入清单
+              <AppIcon name="clipboard" :size="13" /> 导入清单
             </button>
           </div>
 
           <div class="card-tools">
-            <button class="tool-btn" title="设置封面" @click="openCoverPicker(shelf)">🖼</button>
+            <button class="tool-btn" title="设置封面" @click="openCoverPicker(shelf)">
+              <AppIcon name="images" :size="12" />
+            </button>
             <button
               class="tool-btn"
               :title="shelf.pinned ? '取消置顶' : '置顶到侧栏'"
               @click="togglePin(shelf)"
             >
-              📌
+              <AppIcon name="pin" :size="12" :weight="shelf.pinned ? 'fill' : 'regular'" />
             </button>
-            <button class="tool-btn" title="重命名" @click="handleRename(shelf)">✎</button>
-            <button class="tool-btn danger" title="删除" @click="handleDelete(shelf)">✕</button>
+            <button class="tool-btn" title="重命名" @click="handleRename(shelf)">
+              <AppIcon name="edit" :size="12" />
+            </button>
+            <button class="tool-btn danger" title="删除" @click="handleDelete(shelf)">
+              <AppIcon name="close" :size="12" />
+            </button>
           </div>
         </div>
       </div>
@@ -360,7 +380,9 @@ const markCoverFailed = (id: string) => {
     <div v-else class="wall-sort-panel">
       <div class="sort-toolbar">
         <span class="sort-hint">拖动把手调整书架顺序（共 {{ sortRows.length }} 个）</span>
-        <button class="wall-op-btn" @click="exitSortPanel">✓ 完成排序</button>
+        <button class="wall-op-btn" @click="exitSortPanel">
+          <AppIcon name="check" :size="13" /> 完成排序
+        </button>
       </div>
       <div class="sort-list">
         <template v-for="(shelf, idx) in sortRows" :key="shelf.id">
@@ -381,7 +403,15 @@ const markCoverFailed = (id: string) => {
             </div>
             <div class="sort-info">
               <span class="sort-name" :title="shelf.name">{{ shelf.name }}</span>
-              <span class="sort-meta">{{ unreadLabel(shelf) }} · {{ shelf.count || 0 }} 本</span>
+              <span class="sort-meta">
+                <AppIcon
+                  v-if="shelfUnreadCount(shelf) === 0"
+                  name="check"
+                  :size="10"
+                  weight="fill"
+                />
+                {{ unreadLabel(shelf) }} · {{ shelf.count || 0 }} 本
+              </span>
             </div>
             <span
               class="drag-handle"
@@ -409,7 +439,7 @@ const markCoverFailed = (id: string) => {
             height: sortGhostHeight + 'px',
           }"
         >
-          📚 {{ sortGhostText(sortDragIndex) }}
+          <AppIcon name="books" :size="14" /> {{ sortGhostText(sortDragIndex) }}
         </div>
       </Teleport>
     </div>

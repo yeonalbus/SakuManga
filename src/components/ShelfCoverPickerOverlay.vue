@@ -8,6 +8,7 @@
  * 缩略图直接用本子自身的 coverUrl（`/api/v1/comics/<id>/cover`），无需额外接口。
  */
 import { computed } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { bookshelves, setBookshelfCover } from '@/stores/bookshelfStore'
 import { shelfComicsOf } from '@/composables/useShelfStats'
@@ -61,8 +62,12 @@ const onImgError = (e: Event) => {
       <div v-if="open" class="cover-mask" @click.self="close">
         <div class="cover-panel">
           <div class="cover-header">
-            <h3 class="cover-title">🖼 设置封面 · {{ shelf?.name || '' }}</h3>
-            <button class="cover-close" @click="close">✕</button>
+            <h3 class="cover-title">
+              <AppIcon name="images" :size="16" /> 设置封面 · {{ shelf?.name || '' }}
+            </h3>
+            <button class="cover-close" @click="close">
+              <AppIcon name="close" :size="15" />
+            </button>
           </div>
 
           <p class="cover-hint">
@@ -80,13 +85,15 @@ const onImgError = (e: Event) => {
               @click="pick(c.id)"
             >
               <img :src="c.coverUrl || ''" :alt="c.title" loading="lazy" @error="onImgError" />
-              <span v-if="c.id === currentCoverId" class="current-badge">✓ 当前封面</span>
+              <span v-if="c.id === currentCoverId" class="current-badge">
+                <AppIcon name="check" :size="12" weight="fill" /> 当前封面
+              </span>
             </button>
           </div>
 
           <div class="cover-footer">
             <button class="reset-btn" :disabled="!currentCoverId" @click="resetAuto">
-              ↺ 恢复自动封面
+              <AppIcon name="refresh" :size="13" /> 恢复自动封面
             </button>
             <button class="close-btn" @click="close">关闭</button>
           </div>

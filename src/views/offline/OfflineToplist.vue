@@ -29,6 +29,7 @@ import { offlineSearchConfig } from '@/stores/searchStore'
 import { useModeStore } from '@/stores/modeStore'
 import { useUserStore } from '@/stores/userStore'
 import { useUI } from '@/composables/useUI'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
@@ -228,23 +229,25 @@ const resetCloudParams = () => {
         :class="{ active: activeTab === 'rank' }"
         @click="activeTab = 'rank'"
       >
-        📊 阅读榜
+        <AppIcon name="chart" :size="14" /> 阅读榜
       </button>
       <button
         class="switch-btn"
         :class="{ active: activeTab === 'cloud' }"
         @click="activeTab = 'cloud'"
       >
-        ☁️ XP 词云
+        <AppIcon name="cloud" :size="14" /> XP 词云
       </button>
     </div>
 
     <template v-if="activeTab === 'rank'">
-      <h2 class="page-title">📊 本地个人阅读频次榜 (TOP 25)</h2>
+      <h2 class="page-title">
+        <AppIcon name="chart" :size="18" /> 本地个人阅读频次榜 (TOP 25)
+      </h2>
 
       <div v-if="!isMobileDevice" class="podium-section">
         <div v-if="topThree[1]" class="podium-item rank-2-wrapper">
-          <div class="podium-crown">🥈 NO.2</div>
+          <div class="podium-crown"><AppIcon name="medal" :size="14" /> NO.2</div>
           <ItemCard
             :comic="topThree[1]"
             :rank="2"
@@ -259,7 +262,7 @@ const resetCloudParams = () => {
         </div>
 
         <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
-          <div class="podium-crown crown-gold">👑 NO.1</div>
+          <div class="podium-crown crown-gold"><AppIcon name="crown" :size="15" /> NO.1</div>
           <ItemCard
             :comic="topThree[0]"
             :rank="1"
@@ -274,7 +277,7 @@ const resetCloudParams = () => {
         </div>
 
         <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
-          <div class="podium-crown">🥉 NO.3</div>
+          <div class="podium-crown"><AppIcon name="medal" :size="14" /> NO.3</div>
           <ItemCard
             :comic="topThree[2]"
             :rank="3"
@@ -290,7 +293,10 @@ const resetCloudParams = () => {
       </div>
 
       <div v-if="restItemsForView.length > 0" class="rest-section">
-        <h3 class="section-subtitle">{{ isMobileDevice ? '🏆 TOP 25' : '第 4 - 25 名' }}</h3>
+        <h3 class="section-subtitle">
+          <AppIcon v-if="isMobileDevice" name="trophy" :size="15" />
+          {{ isMobileDevice ? 'TOP 25' : '第 4 - 25 名' }}
+        </h3>
         <div class="card-grid">
           <div v-for="item in restItemsForView" :key="item.id" class="grid-item-wrapper">
             <ItemCard
@@ -310,7 +316,7 @@ const resetCloudParams = () => {
 
     <!-- ─── XP 词云面板 ─── -->
     <template v-else>
-      <h2 class="page-title">☁️ XP 词云</h2>
+      <h2 class="page-title"><AppIcon name="cloud" :size="18" /> XP 词云</h2>
 
       <div class="cloud-toolbar">
         <div class="segmented">
@@ -354,9 +360,11 @@ const resetCloudParams = () => {
           :class="{ open: showCloudParams }"
           @click="showCloudParams = !showCloudParams"
         >
-          ⚙️ 词云参数
+          <AppIcon name="settings" :size="13" /> 词云参数
           <span v-if="cloudParamDirty > 0" class="reco-badge">{{ cloudParamDirty }}</span>
-          <span class="ft-arrow">{{ showCloudParams ? '▲' : '▼' }}</span>
+          <span class="ft-arrow"
+            ><AppIcon :name="showCloudParams ? 'caretUp' : 'caretDown'" :size="11"
+          /></span>
         </button>
       </div>
 
@@ -473,7 +481,9 @@ const resetCloudParams = () => {
         </div>
       </div>
 
-      <div v-if="coverageHint" class="cloud-hint">💡 {{ coverageHint }}</div>
+      <div v-if="coverageHint" class="cloud-hint">
+        <AppIcon name="lightbulb" :size="13" /> {{ coverageHint }}
+      </div>
 
       <div v-if="cloudLoading" class="cloud-state">统计加载中…</div>
       <div v-else-if="cloudError" class="cloud-state error">

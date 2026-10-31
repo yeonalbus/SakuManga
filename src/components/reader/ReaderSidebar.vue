@@ -7,6 +7,7 @@
  * 交互：跳页、书签增删、章节添加（名称+层级+父节点）/删除。
  */
 import { ref, computed, watch, nextTick } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 export interface SidebarChapter {
   id: number
@@ -230,21 +231,22 @@ const jumpAndClose = (physical: number) => {
           :class="{ active: activeTab === 'thumbs' }"
           @click="emit('update:activeTab', 'thumbs')"
         >
-          ▦ 缩略图
+          <AppIcon name="images" :size="13" /> 缩略图
         </button>
         <button
           class="rs-tab"
           :class="{ active: activeTab === 'outline' }"
           @click="emit('update:activeTab', 'outline')"
         >
-          𖧕 大纲
+          <AppIcon name="outline" :size="13" /> 大纲
         </button>
         <button
           class="rs-tab"
           :class="{ active: activeTab === 'bookmarks' }"
           @click="emit('update:activeTab', 'bookmarks')"
         >
-          ★ 书签<template v-if="bookmarks.length"> ({{ bookmarks.length }})</template>
+          <AppIcon name="star" :size="13" /> 书签<template v-if="bookmarks.length">
+            ({{ bookmarks.length }})</template>
         </button>
       </div>
 
@@ -257,9 +259,12 @@ const jumpAndClose = (physical: number) => {
             :class="{ on: currentIsBookmarked }"
             @click="emit('toggleBookmark', currentPhysical)"
           >
-            {{ currentIsBookmarked ? '★ 已书签' : '☆ 书签' }}
+            <AppIcon name="star" :weight="currentIsBookmarked ? 'fill' : 'regular'" :size="12" />
+            {{ currentIsBookmarked ? '已书签' : '书签' }}
           </button>
-          <button class="rs-btn" @click="showAddForm = !showAddForm">＋ 章节</button>
+          <button class="rs-btn" @click="showAddForm = !showAddForm">
+            <AppIcon name="plus" :size="12" /> 章节
+          </button>
         </div>
       </div>
 
@@ -309,8 +314,12 @@ const jumpAndClose = (physical: number) => {
           >
             <img :src="p.url" :alt="`P${p.physical + 1}`" loading="lazy" />
             <span class="rs-tnum">{{ p.physical + 1 }}</span>
-            <span v-if="bookmarks.includes(p.physical)" class="rs-badge bm">★</span>
-            <span v-if="chapters.some((c) => c.pageIndex === p.physical)" class="rs-badge ch">📑</span>
+            <span v-if="bookmarks.includes(p.physical)" class="rs-badge bm">
+              <AppIcon name="star" weight="fill" :size="11" />
+            </span>
+            <span v-if="chapters.some((c) => c.pageIndex === p.physical)" class="rs-badge ch">
+              <AppIcon name="list" :size="11" />
+            </span>
           </div>
           <div v-if="pages.length === 0" class="rs-empty">暂无可见页面</div>
         </div>
@@ -319,7 +328,9 @@ const jumpAndClose = (physical: number) => {
         <div v-else-if="activeTab === 'outline'" class="rs-outline">
           <div v-if="rootChapters.length === 0" class="rs-empty">
             暂无章节标记<br />
-            <span class="rs-empty-sub">在当前页点「＋ 章节」添加</span>
+            <span class="rs-empty-sub">
+              在当前页点「<AppIcon name="plus" :size="12" /> 章节」添加
+            </span>
           </div>
           <div v-else>
             <div v-for="c1 in rootChapters" :key="c1.id" class="rs-node lv1">
@@ -339,8 +350,12 @@ const jumpAndClose = (physical: number) => {
                   <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
                   <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
                 </select>
-                <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c1.id)">✓</button>
-                <button class="rs-btn" @click="editingId = null">✕</button>
+                <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c1.id)">
+                  <AppIcon name="check" :size="12" />
+                </button>
+                <button class="rs-btn" @click="editingId = null">
+                  <AppIcon name="close" :size="12" />
+                </button>
               </div>
               <div
                 v-else
@@ -354,13 +369,24 @@ const jumpAndClose = (physical: number) => {
                   :title="folded.has(c1.id) ? '展开子级' : '收纳子级'"
                   @click.stop="toggleFold(c1.id)"
                 >
-                  {{ folded.has(c1.id) ? '▸' : '▾' }}
+                  <AppIcon
+                    :name="folded.has(c1.id) ? 'arrowRight' : 'caretDown'"
+                    :size="11"
+                  />
                 </button>
                 <span v-else class="rs-fold-spacer"></span>
                 <span class="rs-node-name">{{ c1.title }}</span>
                 <span class="rs-node-page">P{{ c1.pageIndex + 1 }}</span>
-                <button class="rs-del" title="编辑章节" @click.stop="startEdit(c1)">✎</button>
-                <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c1.id)">✕</button>
+                <button class="rs-del" title="编辑章节" @click.stop="startEdit(c1)">
+                  <AppIcon name="edit" :size="11" />
+                </button>
+                <button
+                  class="rs-del"
+                  title="删除章节（连同子级）"
+                  @click.stop="emit('removeChapter', c1.id)"
+                >
+                  <AppIcon name="close" :size="11" />
+                </button>
               </div>
               <div v-if="!folded.has(c1.id)">
                 <div v-for="c2 in chapterChildren(c1.id)" :key="c2.id" class="rs-node lv2">
@@ -380,8 +406,12 @@ const jumpAndClose = (physical: number) => {
                       <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
                       <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
                     </select>
-                    <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c2.id)">✓</button>
-                    <button class="rs-btn" @click="editingId = null">✕</button>
+                    <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c2.id)">
+                      <AppIcon name="check" :size="12" />
+                    </button>
+                    <button class="rs-btn" @click="editingId = null">
+                      <AppIcon name="close" :size="12" />
+                    </button>
                   </div>
                   <div
                     v-else
@@ -395,13 +425,24 @@ const jumpAndClose = (physical: number) => {
                       :title="folded.has(c2.id) ? '展开子级' : '收纳子级'"
                       @click.stop="toggleFold(c2.id)"
                     >
-                      {{ folded.has(c2.id) ? '▸' : '▾' }}
+                      <AppIcon
+                        :name="folded.has(c2.id) ? 'arrowRight' : 'caretDown'"
+                        :size="11"
+                      />
                     </button>
                     <span v-else class="rs-fold-spacer"></span>
                     <span class="rs-node-name">{{ c2.title }}</span>
                     <span class="rs-node-page">P{{ c2.pageIndex + 1 }}</span>
-                    <button class="rs-del" title="编辑章节" @click.stop="startEdit(c2)">✎</button>
-                    <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c2.id)">✕</button>
+                    <button class="rs-del" title="编辑章节" @click.stop="startEdit(c2)">
+                      <AppIcon name="edit" :size="11" />
+                    </button>
+                    <button
+                      class="rs-del"
+                      title="删除章节（连同子级）"
+                      @click.stop="emit('removeChapter', c2.id)"
+                    >
+                      <AppIcon name="close" :size="11" />
+                    </button>
                   </div>
                   <div v-if="!folded.has(c2.id)">
                     <div
@@ -425,8 +466,12 @@ const jumpAndClose = (physical: number) => {
                           <option v-if="editParentCandidates.length === 0" :value="0" disabled>（暂无可选父级）</option>
                           <option v-for="p in editParentCandidates" :key="p.id" :value="p.id">{{ p.label }}</option>
                         </select>
-                        <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c3.id)">✓</button>
-                        <button class="rs-btn" @click="editingId = null">✕</button>
+                        <button class="rs-btn ok" :disabled="!canSaveEdit" @click="saveEdit(c3.id)">
+                          <AppIcon name="check" :size="12" />
+                        </button>
+                        <button class="rs-btn" @click="editingId = null">
+                          <AppIcon name="close" :size="12" />
+                        </button>
                       </div>
                       <div
                         v-else
@@ -437,8 +482,16 @@ const jumpAndClose = (physical: number) => {
                         <span class="rs-fold-spacer"></span>
                         <span class="rs-node-name">{{ c3.title }}</span>
                         <span class="rs-node-page">P{{ c3.pageIndex + 1 }}</span>
-                        <button class="rs-del" title="编辑章节" @click.stop="startEdit(c3)">✎</button>
-                        <button class="rs-del" title="删除章节（连同子级）" @click.stop="emit('removeChapter', c3.id)">✕</button>
+                        <button class="rs-del" title="编辑章节" @click.stop="startEdit(c3)">
+                          <AppIcon name="edit" :size="11" />
+                        </button>
+                        <button
+                          class="rs-del"
+                          title="删除章节（连同子级）"
+                          @click.stop="emit('removeChapter', c3.id)"
+                        >
+                          <AppIcon name="close" :size="11" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -452,7 +505,9 @@ const jumpAndClose = (physical: number) => {
         <div v-else class="rs-bookmarks">
           <div v-if="bookmarks.length === 0" class="rs-empty">
             暂无书签<br />
-            <span class="rs-empty-sub">当前页点「☆ 书签」快速收藏</span>
+            <span class="rs-empty-sub">
+              当前页点「<AppIcon name="star" :size="12" /> 书签」快速收藏
+            </span>
           </div>
           <div v-else class="rs-bm-list">
             <button
@@ -462,10 +517,12 @@ const jumpAndClose = (physical: number) => {
               :class="{ current: b === currentPhysical }"
               @click="jumpAndClose(b)"
             >
-              <span class="rs-bm-star">★</span>
+              <span class="rs-bm-star"><AppIcon name="star" weight="fill" :size="13" /></span>
               <span class="rs-bm-label">书签</span>
               <span class="rs-bm-page">P{{ b + 1 }}</span>
-              <span class="rs-del" title="移除书签" @click.stop="emit('toggleBookmark', b)">✕</span>
+              <span class="rs-del" title="移除书签" @click.stop="emit('toggleBookmark', b)">
+                <AppIcon name="close" :size="11" />
+              </span>
             </button>
           </div>
         </div>

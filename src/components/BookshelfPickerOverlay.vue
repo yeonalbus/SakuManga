@@ -19,6 +19,7 @@ import {
 // Round22：全部书架浮层拖拽排序（把手拖动 / 操作菜单；作用于全局书架顺序）
 import { useDragReorder } from "@/composables/useDragReorder"
 import SortRowMenu from "@/components/SortRowMenu.vue"
+import AppIcon from "@/components/icons/AppIcon.vue"
 
 const props = withDefaults(
   defineProps<{
@@ -156,13 +157,16 @@ const handleShelfMoveTo = (shelfId: string, position: number) => {
         <div class="picker-panel">
           <div class="picker-header">
             <h3 class="picker-title">
-              {{ mode === "add" ? `📥 加入书架（已选 ${selectedCount} 部）` : "🔍 全部书架" }}
+              <AppIcon :name="mode === 'add' ? 'tray' : 'search'" :size="16" />
+              {{ mode === "add" ? `加入书架（已选 ${selectedCount} 部）` : "全部书架" }}
             </h3>
-            <button class="picker-close" @click="close">✕</button>
+            <button class="picker-close" @click="close">
+              <AppIcon name="close" :size="15" />
+            </button>
           </div>
 
           <!-- 搜索框 -->
-          <input v-model="keyword" class="picker-search" type="text" placeholder="🔎 搜索书架名称…" />
+          <input v-model="keyword" class="picker-search" type="text" placeholder="搜索书架名称…" />
 
           <div class="picker-list">
             <div v-if="filtered.length === 0" class="picker-empty">
@@ -172,7 +176,9 @@ const handleShelfMoveTo = (shelfId: string, position: number) => {
             <template v-for="(shelf, idx) in filtered" :key="shelf.id">
               <div class="picker-item" :class="{ pinned: shelf.pinned }">
                 <button class="item-main" @click="mode === 'add' ? handleAdd(shelf.id) : handleEnter(shelf.id)">
-                  <span class="pin-badge" :class="{ on: shelf.pinned }">📌</span>
+                  <span class="pin-badge" :class="{ on: shelf.pinned }">
+                    <AppIcon name="pin" :weight="shelf.pinned ? 'fill' : 'regular'" :size="13" />
+                  </span>
                   <span class="shelf-name" :title="shelf.name">{{ shelf.name }}</span>
                   <span class="shelf-count">{{ shelf.count || 0 }}</span>
                 </button>
@@ -188,7 +194,7 @@ const handleShelfMoveTo = (shelfId: string, position: number) => {
                     @pointerdown="(e) => pickerHandleDown(e as PointerEvent, idx)"
                     @click.stop.prevent
                   >
-                    ⠿
+                    <AppIcon name="drag" :size="14" />
                   </span>
                   <!-- Round22：排序操作菜单（移到顶部 / 移动到第 X 位） -->
                   <SortRowMenu
@@ -196,8 +202,12 @@ const handleShelfMoveTo = (shelfId: string, position: number) => {
                     @move-top="handleShelfMoveTop(shelf.id)"
                     @move-to="(p) => handleShelfMoveTo(shelf.id, p)"
                   />
-                  <button class="mini-btn rename" title="重命名" @click="handleRename(shelf)">✎</button>
-                  <button class="mini-btn danger" title="删除" @click="handleDelete(shelf.id, shelf.name)">✕</button>
+                  <button class="mini-btn rename" title="重命名" @click="handleRename(shelf)">
+                    <AppIcon name="edit" :size="13" />
+                  </button>
+                  <button class="mini-btn danger" title="删除" @click="handleDelete(shelf.id, shelf.name)">
+                    <AppIcon name="close" :size="13" />
+                  </button>
                 </div>
               </div>
               <!-- Round22：拖拽落位指示线 -->
@@ -224,13 +234,15 @@ const handleShelfMoveTo = (shelfId: string, position: number) => {
                   height: pickerGhostHeight + 'px',
                 }"
               >
-                📚 {{ pickerGhostText(pickerDragIndex) }}
+                <AppIcon name="books" :size="14" /> {{ pickerGhostText(pickerDragIndex) }}
               </div>
             </Teleport>
           </div>
 
           <div class="picker-footer">
-            <button class="create-btn" @click="handleCreate">➕ 新建书架</button>
+            <button class="create-btn" @click="handleCreate">
+              <AppIcon name="plus" :size="14" /> 新建书架
+            </button>
             <button class="close-btn" @click="close">关闭</button>
           </div>
         </div>

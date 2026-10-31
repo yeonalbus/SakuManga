@@ -2,7 +2,9 @@
   <div class="profile-settings">
     <!-- 页头 -->
     <div class="page-header">
-      <button class="back-btn" @click="emit('back')">← 返回</button>
+      <button class="back-btn" @click="emit('back')">
+        <AppIcon name="arrowLeft" :size="13" /> 返回
+      </button>
       <div class="page-title">Profile 设置（E 站）</div>
     </div>
 
@@ -158,6 +160,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import type {

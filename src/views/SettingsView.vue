@@ -14,7 +14,7 @@
             :class="{ active: activeTab === item.id }"
             @click="handleMenuClick(item)"
           >
-            <span class="item-icon">{{ item.icon }}</span>
+            <span class="item-icon"><component :is="item.icon" :size="16" /></span>
             <span class="item-label">{{ item.label }}</span>
             <!-- Round29：关于软件入口红点——GitHub 有新版 release 时提醒 -->
             <span
@@ -30,7 +30,9 @@
     <div class="settings-content">
       <div class="panel-section">
         <div class="panel-header">
-          <button class="back-btn" @click="handleBack" title="返回上一页">←</button>
+          <button class="back-btn" @click="handleBack" title="返回上一页">
+            <AppIcon name="arrowLeft" :size="16" />
+          </button>
           <h3>{{ currentTabTitle }}</h3>
         </div>
 
@@ -57,7 +59,24 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import type { Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import {
+  PhArrowsClockwise,
+  PhBookOpen,
+  PhBroom,
+  PhInfo,
+  PhMagnifyingGlassPlus,
+  PhPalette,
+  PhScroll,
+  PhSmiley,
+  PhStar,
+  PhTag,
+  PhTray,
+  PhUser,
+  PhWifiHigh,
+} from '@phosphor-icons/vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUserStore } from '@/stores/userStore'
 import { useVersionCheck } from '@/composables/useVersionCheck'
 
@@ -91,7 +110,7 @@ onMounted(() => {
 interface SettingsMenuItem {
   id: string
   label: string
-  icon: string
+  icon: Component
   title: string // 面板标题
   adminOnly?: boolean // true=仅管理员可见（网络/下载/更新扫描/Tag维护/日志）
   href?: string // 🔍 存在时点击跳转路由（如 /diag），而非切换 tab
@@ -107,49 +126,49 @@ const allGroups: SettingsMenuGroup[] = [
   {
     title: '账户',
     items: [
-      { id: 'account', label: '账户', icon: '👤', title: '账户设置' },
+      { id: 'account', label: '账户', icon: PhUser, title: '账户设置' },
     ],
   },
   {
     title: 'E 站连接',
     items: [
-      { id: 'eh', label: 'EH 网站', icon: '😄', title: 'EH 网站设置' },
-      { id: 'network', label: '网络', icon: '📶', title: '网络设置', adminOnly: true },
+      { id: 'eh', label: 'EH 网站', icon: PhSmiley, title: 'EH 网站设置' },
+      { id: 'network', label: '网络', icon: PhWifiHigh, title: '网络设置', adminOnly: true },
     ],
   },
   {
     title: '阅读体验',
     items: [
-      { id: 'style', label: '样式', icon: '🎨', title: '样式设置' },
-      { id: 'reader', label: '阅读', icon: '📖', title: '阅读设置' },
-      { id: 'preference', label: '偏好', icon: '⭐', title: '偏好设置' },
+      { id: 'style', label: '样式', icon: PhPalette, title: '样式设置' },
+      { id: 'reader', label: '阅读', icon: PhBookOpen, title: '阅读设置' },
+      { id: 'preference', label: '偏好', icon: PhStar, title: '偏好设置' },
     ],
   },
   {
     title: '下载与离线',
     items: [
-      { id: 'download', label: '下载', icon: '📥', title: '下载设置', adminOnly: true },
-      { id: 'update-scan', label: '更新扫描', icon: '🔄', title: '更新扫描', adminOnly: true },
-      { id: 'dedup', label: '维护查重', icon: '🔎', title: '维护查重设置', adminOnly: true },
+      { id: 'download', label: '下载', icon: PhTray, title: '下载设置', adminOnly: true },
+      { id: 'update-scan', label: '更新扫描', icon: PhArrowsClockwise, title: '更新扫描', adminOnly: true },
+      { id: 'dedup', label: '维护查重', icon: PhMagnifyingGlassPlus, title: '维护查重设置', adminOnly: true },
     ],
   },
   {
     title: '标签管理',
     items: [
-      { id: 'my-tags', label: '我的标签', icon: '🏷️', title: '我的标签' },
-      { id: 'tag-maintain', label: 'Tag 维护', icon: '🧹', title: 'Tag 维护', adminOnly: true },
+      { id: 'my-tags', label: '我的标签', icon: PhTag, title: '我的标签' },
+      { id: 'tag-maintain', label: 'Tag 维护', icon: PhBroom, title: 'Tag 维护', adminOnly: true },
     ],
   },
   {
     title: '日志',
     items: [
-      { id: 'logs', label: '日志', icon: '📜', title: '日志', adminOnly: true },
+      { id: 'logs', label: '日志', icon: PhScroll, title: '日志', adminOnly: true },
     ],
   },
   {
     title: '关于',
     items: [
-      { id: 'about', label: '关于软件', icon: 'ℹ️', title: '关于软件' },
+      { id: 'about', label: '关于软件', icon: PhInfo, title: '关于软件' },
     ],
   },
 ]
@@ -304,9 +323,11 @@ const handleBack = () => {
 }
 
 .item-icon {
-  font-size: 16px;
   width: 20px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 /* Round29：关于软件入口「发现新版本」红点徽标 */

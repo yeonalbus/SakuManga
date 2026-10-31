@@ -11,13 +11,13 @@
           {{ effectiveLabel }}
         </div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <!-- 当前生效代理来源说明 -->
     <div v-if="effectiveSource === 'system'" class="setting-item hint">
       <div class="item-info">
-        <div class="item-title">🖥️ 正在自动使用系统代理</div>
+        <div class="item-title"><AppIcon name="monitor" :size="15" /> 正在自动使用系统代理</div>
         <div class="item-subtext">
           检测到系统代理 {{ effectiveProxy }}（Clash / v2rayN 等）。如需固定代理地址，点击上方配置。
         </div>
@@ -25,7 +25,7 @@
     </div>
     <div v-else-if="effectiveSource === 'none'" class="setting-item hint">
       <div class="item-info">
-        <div class="item-title">📡 当前为直连模式</div>
+        <div class="item-title"><AppIcon name="broadcast" :size="15" /> 当前为直连模式</div>
         <div class="item-subtext">
           未检测到系统代理。若浏览器能访问 E 站但程序连不上，请在上方填写代理地址（如 http://127.0.0.1:7897）。
         </div>
@@ -47,7 +47,7 @@
           step="1000"
         />
         <span class="unit">ms</span>
-        <span class="check-mark">✓</span>
+        <span class="check-mark"><AppIcon name="check" :size="14" /></span>
       </div>
     </div>
 
@@ -63,7 +63,7 @@
 
     <div class="setting-item hint-soft">
       <div class="item-info">
-        <div class="item-title">⚠️ 高级功能说明</div>
+        <div class="item-title"><AppIcon name="warning" :size="15" /> 高级功能说明</div>
         <div class="item-subtext">
           用于优化大批量归档下载：遇到「请求 archiver.php 失败」时自动更换出口节点重试。<br />
           不开不影响日常使用；开启后可能因反复解锁画廊产生额外 <b>GP 开销</b>。<br />
@@ -212,6 +212,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { networkSettings, resetNetworkSettings } from '@/stores/networkSettings'

@@ -21,6 +21,7 @@ import {
   clearListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 动态提取离线浏览过的漫画列表
 const comics = computed(() => offlineHistoryList.value.map((item) => item.comic))
@@ -88,9 +89,11 @@ const handleClear = () => {
 <template>
   <div class="history-view">
     <div class="view-header">
-      <h2 class="view-title">📚 本地浏览历史 ({{ comics.length }})</h2>
+      <h2 class="view-title">
+        <AppIcon name="books" :size="18" /> 本地浏览历史 ({{ comics.length }})
+      </h2>
       <button v-if="comics.length > 0" class="clear-btn" @click="handleClear">
-        🗑️ 清空本地历史
+        <AppIcon name="trash" :size="15" /> 清空本地历史
       </button>
     </div>
 

@@ -7,6 +7,7 @@ import {
 } from '@/stores/searchStore'
 import { useUI } from '@/composables/useUI'
 import { useModeStore } from '@/stores/modeStore'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import TagChip from '@/components/TagChip.vue'
 import FilterDrawer from '@/components/FilterDrawer.vue'
 import type { TagItem } from '@/stores/tagStore'
@@ -397,7 +398,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
 <template>
   <div ref="searchBarRef" class="search-bar-container">
     <div class="input-wrapper" :class="{ focused: isFocused }">
-      <span class="search-icon">🔍</span>
+      <span class="search-icon"><AppIcon name="search" :size="15" /></span>
       <input
         ref="searchInputRef"
         v-model="keyword"
@@ -411,10 +412,12 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
       />
       <!-- 🎛️ 筛选入口（原 TopBar 齿轮按钮移入搜索框内，激活态显示红点） -->
       <button class="filter-trigger-btn" title="筛选" @click="isFilterOpen = true">
-        <span class="filter-icon">⚙️</span>
+        <span class="filter-icon"><AppIcon name="settings" :size="15" /></span>
         <span v-if="hasActiveFilters" class="filter-active-dot"></span>
       </button>
-      <button v-if="keyword" class="clear-input-btn" @click="handleClearInput">✕</button>
+      <button v-if="keyword" class="clear-input-btn" @click="handleClearInput">
+        <AppIcon name="close" :size="14" />
+      </button>
       <button class="search-submit-btn" @click="triggerSearch()">搜索</button>
     </div>
 
@@ -430,7 +433,10 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
     >
       <div v-if="filteredHistory.length > 0" class="dropdown-section">
         <div class="section-header">
-          <span>🕒 {{ keyword.trim() ? '历史匹配' : '搜索历史' }}</span>
+          <span>
+            <AppIcon name="clock" :size="13" />
+            {{ keyword.trim() ? '历史匹配' : '搜索历史' }}
+          </span>
           <button v-if="!keyword.trim()" class="clear-history-text-btn" @click="clearAllHistory">
             清空
           </button>
@@ -446,14 +452,16 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
           >
             <span class="history-text">{{ item }}</span>
             <span class="delete-chip-btn" title="删除记录" @click="removeHistoryItem(item, $event)"
-              >✕</span
+              ><AppIcon name="close" :size="12" /></span
             >
           </span>
         </div>
       </div>
 
       <div v-if="safeSuggestedTags.length > 0" class="dropdown-section">
-        <div class="section-header">🔥 热门 Tag 推荐</div>
+        <div class="section-header">
+          <span><AppIcon name="fire" :size="13" /> 热门 Tag 推荐</span>
+        </div>
         <div class="vertical-tag-list">
           <div
             v-for="tag in safeSuggestedTags"
@@ -465,7 +473,7 @@ const handleApplyFilters = (filters: Partial<FilterParams>) => {
                 而是冒泡给父级 handleTagSuggestClick 把 tag 插入输入框，支持连续输入多 tag（修复3b） -->
             <TagChip :tag="tag" :disable-quick-search="true" />
             <span v-if="tag.count" class="tag-count-badge"
-              >🔥 {{ tag.count.toLocaleString() }}</span
+              ><AppIcon name="fire" :size="12" /> {{ tag.count.toLocaleString() }}</span
             >
           </div>
         </div>

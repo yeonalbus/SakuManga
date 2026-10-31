@@ -17,6 +17,7 @@ import { useTagStore } from '@/stores/tagStore'
 import type { ScrapeBookmark } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const router = useRouter()
 const tagStore = useTagStore()
@@ -79,7 +80,7 @@ const runProbe = async () => {
 
 <template>
   <div class="nav-group">
-    <span class="group-title">🌐 在线模式</span>
+    <span class="group-title"><AppIcon name="online" :size="13" /> 在线模式</span>
     <router-link to="/online/home">首页</router-link>
     <router-link to="/online/sub">订阅</router-link>
     <router-link to="/online/hot">热门</router-link>

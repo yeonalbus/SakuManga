@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useModeStore } from '@/stores/modeStore'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const router = useRouter()
 const modeStore = useModeStore()
@@ -28,7 +29,7 @@ const toggleMode = () => {
     :title="isOnline ? '当前在线模式，点击切换为离线' : '当前离线模式，点击切换为在线'"
     @click="toggleMode"
   >
-    <span class="icon">{{ isOnline ? '☀️' : '🌙' }}</span>
+    <span class="icon"><AppIcon :name="isOnline ? 'sun' : 'moon'" :size="14" /></span>
     <span class="label">{{ isOnline ? '在线' : '离线' }}</span>
   </button>
 </template>
@@ -54,7 +55,8 @@ const toggleMode = () => {
 }
 
 .icon {
-  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
 }
 
 .label {

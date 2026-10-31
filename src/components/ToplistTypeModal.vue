@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 排行榜类型选择弹窗（优化排行榜功能）
 // 4 种类型对应 e-hentai toplist.php 的 tl 参数：
@@ -50,8 +51,10 @@ const confirm = () => {
       <div v-if="show" class="tm-overlay" @click.self="emit('close')">
         <div class="tm-panel">
           <div class="tm-header">
-            <span class="tm-title">🏆 排行榜选择</span>
-            <button class="tm-close" title="关闭" @click="emit('close')">✕</button>
+            <span class="tm-title"><AppIcon name="trophy" :size="15" /> 排行榜选择</span>
+            <button class="tm-close" title="关闭" @click="emit('close')">
+              <AppIcon name="close" :size="15" />
+            </button>
           </div>
 
           <div class="tm-body">
@@ -64,7 +67,9 @@ const confirm = () => {
                 @click="selected = t.tl"
               >
                 <span class="tm-item-label">{{ t.label }}</span>
-                <span class="tm-item-check">{{ selected === t.tl ? '✓' : '' }}</span>
+                <span class="tm-item-check">
+                  <AppIcon v-if="selected === t.tl" name="check" :size="14" weight="fill" />
+                </span>
               </button>
             </div>
             <p class="tm-hint">每页展示 50 个画廊，支持 1 ~ 200 页翻页</p>

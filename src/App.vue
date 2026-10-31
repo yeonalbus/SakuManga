@@ -8,6 +8,7 @@ import TopBar from '@/components/TopBar.vue' // 引入组合好的顶栏
 import GlobalToast from '@/components/common/GlobalToast.vue'
 import GlobalModal from '@/components/common/GlobalModal.vue'
 import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useTagStore } from '@/stores/tagStore'
 import { useUserStore } from '@/stores/userStore'
 import { useModeStore } from '@/stores/modeStore'
@@ -183,7 +184,7 @@ watch(
           <OfflineSidebar v-else />
           <!-- 全局通用的系统菜单与历史记录：放在侧边栏底部或独立组里 -->
           <div class="nav-group">
-            <span class="group-title">⚙️ 系统</span>
+            <span class="group-title"><AppIcon name="settings" :size="13" /> 系统</span>
             <router-link to="/downloads">下载列表</router-link>
             <router-link to="/settings">系统设置</router-link>
           </div>
@@ -324,6 +325,25 @@ watch(
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* ─────────────────────────────────────────
+   图标（Phosphor AppIcon）：与文字基线对齐
+   - .app-icon 由 AppIcon.vue 渲染到 svg 上
+   - .spin 为加载旋转（配合 name="loading"）
+   ───────────────────────────────────────── */
+.app-icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+}
+.app-icon.spin {
+  animation: app-icon-spin 1.1s linear infinite;
+}
+@keyframes app-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 /* Round17.2：Vue 根节点铺满 —— 修复 iPad PWA 底部手势条安全区避让（Letterbox）导致的窄长条 */
 #app {

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import GridContainer from '@/components/GridContainer.vue'
 import Pagination from '@/components/Pagination.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import FloatingToolbar from '@/components/FloatingToolbar.vue'
 import BatchDownloadBar from '@/components/BatchDownloadBar.vue'
 import OnlineDetailPanel from '@/components/OnlineDetailPanel.vue'
@@ -142,7 +143,7 @@ onBeforeRouteLeave(() => {
 
 <template>
   <div class="leaderboard-page">
-    <h2 class="page-title">🏆 官方排行榜 · {{ currentLabel }}</h2>
+    <h2 class="page-title"><AppIcon name="trophy" :size="18" /> 官方排行榜 · {{ currentLabel }}</h2>
 
     <div class="online-split" :class="{ 'panel-open': isPanelOpen }">
       <div class="split-main">

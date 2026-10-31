@@ -106,7 +106,7 @@ export function generateOnlineComics(count = 30): OnlineComic[] {
 export function generateOfflineComics(count = 30): OfflineComic[] {
   return Array.from({ length: count }, (_, i) => {
     const idNum = i + 1
-    const title = `📖 [本地] 深度学习资料包作品 #${idNum}`
+    const title = `[本地] 深度学习资料包作品 #${idNum}`
     const shuffledTags = [...mockTags].sort(() => 0.5 - Math.random())
 
     return {
@@ -183,8 +183,8 @@ export function generateMockHistory(): HistoryRecord[] {
     {
       comicId: 'offline-1',
       source: 'offline',
-      title: '📖 [本地] 深度学习资料包作品 #1',
-      coverUrl: generateSvgImage('📖 [本地] 深度学习资料包作品 #1', 'Local #1', 300, 400, 2),
+      title: '[本地] 深度学习资料包作品 #1',
+      coverUrl: generateSvgImage('[本地] 深度学习资料包作品 #1', 'Local #1', 300, 400, 2),
       lastChapterTitle: '第 01 话',
       lastPageIndex: 12,
       pageCount: 28,

@@ -1,7 +1,7 @@
 <template>
   <div class="reader-settings">
     <!-- ── 阅读方向 / 页面布局 ── -->
-    <div class="section-title">📐 布局</div>
+    <div class="section-title"><AppIcon name="ruler" :size="14" /> 布局</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -56,7 +56,7 @@
     </div>
 
     <!-- ── 翻页行为 ── -->
-    <div class="section-title">📖 翻页行为</div>
+    <div class="section-title"><AppIcon name="book" :size="14" /> 翻页行为</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -107,7 +107,7 @@
     </div>
 
     <!-- ── 界面显隐 ── -->
-    <div class="section-title">🖥️ 界面显隐</div>
+    <div class="section-title"><AppIcon name="monitor" :size="14" /> 界面显隐</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -142,7 +142,7 @@
     </div>
 
     <!-- ── 设备能力 ── -->
-    <div class="section-title">🔋 设备能力</div>
+    <div class="section-title"><AppIcon name="battery" :size="14" /> 设备能力</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -191,7 +191,7 @@
     </div>
 
     <!-- ── 游戏手柄 ── -->
-    <div class="section-title">🎮 游戏手柄</div>
+    <div class="section-title"><AppIcon name="gamepad" :size="14" /> 游戏手柄</div>
 
     <!-- Round25：手柄细节全部收进子视图，主页只留一行入口 -->
     <div v-if="currentView === 'main'" class="setting-item clickable" @click="currentView = 'gamepad'">
@@ -201,12 +201,12 @@
           {{ readerSettings.enableGamepad ? '已启用 · 键位/切本细节进入配置' : '未启用' }}
         </div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
     <ReaderGamepadSettings v-else @back="currentView = 'main'" />
 
     <!-- ── 性能 / 扩展 ── -->
-    <div class="section-title">⚡ 性能 / 扩展</div>
+    <div class="section-title"><AppIcon name="lightning" :size="14" /> 性能 / 扩展</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -229,6 +229,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { readerSettings, resetReaderSettings, parseReadDirection } from '@/stores/readerSettings'
 import ReaderGamepadSettings from './ReaderGamepadSettings.vue'

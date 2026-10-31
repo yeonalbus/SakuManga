@@ -23,14 +23,14 @@
           :class="{ active: viewMode === 'card' }"
           @click="setViewMode('card')"
         >
-          🎴 卡片
+          <AppIcon name="cards" :size="14" /> 卡片
         </button>
         <button
           class="segment-btn"
           :class="{ active: viewMode === 'compact' }"
           @click="setViewMode('compact')"
         >
-          🪪 名片
+          <AppIcon name="id" :size="14" /> 名片
         </button>
       </div>
     </div>
@@ -57,25 +57,25 @@
       </div>
       <div class="columns-config panel-cols">
         <label class="columns-row">
-          <span class="columns-label">🎴 卡片·收起</span>
+          <span class="columns-label"><AppIcon name="cards" :size="14" /> 卡片·收起</span>
           <select v-model.number="styleSettings.cardPanelClosedCols" class="setting-select">
             <option v-for="n in 5" :key="`cc-${n}`" :value="n">{{ n }} 个</option>
           </select>
         </label>
         <label class="columns-row">
-          <span class="columns-label">🎴 卡片·展开</span>
+          <span class="columns-label"><AppIcon name="cards" :size="14" /> 卡片·展开</span>
           <select v-model.number="styleSettings.cardPanelOpenCols" class="setting-select">
             <option v-for="n in 5" :key="`co-${n}`" :value="n">{{ n }} 个</option>
           </select>
         </label>
         <label class="columns-row">
-          <span class="columns-label">🪪 名片·收起</span>
+          <span class="columns-label"><AppIcon name="id" :size="14" /> 名片·收起</span>
           <select v-model.number="styleSettings.compactPanelClosedCols" class="setting-select">
             <option v-for="n in 5" :key="`mpc-${n}`" :value="n">{{ n }} 个</option>
           </select>
         </label>
         <label class="columns-row">
-          <span class="columns-label">🪪 名片·展开</span>
+          <span class="columns-label"><AppIcon name="id" :size="14" /> 名片·展开</span>
           <select v-model.number="styleSettings.compactPanelOpenCols" class="setting-select">
             <option v-for="n in 5" :key="`mpo-${n}`" :value="n">{{ n }} 个</option>
           </select>
@@ -106,6 +106,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { viewMode, toggleViewMode } from '@/stores/viewMode'
 import {

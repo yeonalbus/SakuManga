@@ -40,6 +40,7 @@ import {
   setListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const { toast, modal } = useUI()
 const userStore = useUserStore()
@@ -344,7 +345,7 @@ const handleImportToReadingList = () => {
   <div class="offline-bookshelf-view">
     <div class="shelf-header">
       <div class="title-area">
-        <span class="icon">📁</span>
+        <span class="icon"><AppIcon name="folder" :size="20" /></span>
         <h2 class="shelf-title">{{ currentShelf.name }}</h2>
         <span class="shelf-badge">{{ shelfComics.length }} 部作品</span>
         <!-- Round10-Opt3：书架页 header 操作（排序/改名/删除，仅具体书架视图） -->
@@ -360,14 +361,20 @@ const handleImportToReadingList = () => {
             "
             @click="handleImportToReadingList"
           >
-            📋 导入清单
+            <AppIcon name="clipboard" :size="13" /> 导入清单
           </button>
-          <button class="shelf-op-btn" title="自定义排序" @click="enterSortMode">↕ 排序</button>
+          <button class="shelf-op-btn" title="自定义排序" @click="enterSortMode">
+            <AppIcon name="sort" :size="13" /> 排序
+          </button>
           <!-- Round38-R5：手动指定本架封面（浮层点选架内本子） -->
-          <button class="shelf-op-btn" title="手动指定书架封面" @click="coverOpen = true">🖼 封面</button>
-          <button class="shelf-op-btn" title="重命名书架" @click="handleRenameCurrent">✎ 改名</button>
+          <button class="shelf-op-btn" title="手动指定书架封面" @click="coverOpen = true">
+            <AppIcon name="images" :size="13" /> 封面
+          </button>
+          <button class="shelf-op-btn" title="重命名书架" @click="handleRenameCurrent">
+            <AppIcon name="edit" :size="13" /> 改名
+          </button>
           <button class="shelf-op-btn danger" title="删除书架" @click="handleDeleteCurrent">
-            🗑️ 删除
+            <AppIcon name="trash" :size="13" /> 删除
           </button>
         </template>
       </div>
@@ -381,7 +388,9 @@ const handleImportToReadingList = () => {
         </span>
         <div class="sort-actions">
           <button class="shelf-op-btn" @click="exitSortMode(false)">取消</button>
-          <button class="shelf-op-btn" @click="exitSortMode(true)">✓ 完成排序</button>
+          <button class="shelf-op-btn" @click="exitSortMode(true)">
+            <AppIcon name="check" :size="13" /> 完成排序
+          </button>
         </div>
       </div>
       <div class="sort-mini-list">
@@ -414,7 +423,7 @@ const handleImportToReadingList = () => {
                 @pointerdown="(e) => sortHandleDown(e as PointerEvent, idx)"
                 @click.stop.prevent
               >
-                ⠿
+                <AppIcon name="drag" :size="14" />
               </span>
               <!-- Round22：排序操作菜单（置顶 / 移动到第 X 位；决策 D6：书架内本子用「置顶」） -->
               <SortRowMenu

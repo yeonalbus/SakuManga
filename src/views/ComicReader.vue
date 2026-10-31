@@ -34,6 +34,7 @@ import {
   resolveResumePage,
   isResumeFromLastPageEnabled,
 } from '@/utils/readingProgress'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 屏幕常亮 Wake Lock 的类型声明（避免 any）
 interface WakeLockManager {
@@ -657,7 +658,7 @@ const handleNextInQueue = async (force = false) => {
     if (!force) {
       const confirmed = await modal.confirm(
         `《${nextComic.title}》\n是否直接继续阅读清单中的下一本？`,
-        '当前本子已全部读完 📖',
+        '当前本子已全部读完',
       )
       if (!confirmed) return
     }
@@ -675,7 +676,7 @@ const handleNextInQueue = async (force = false) => {
     router.replace({ path: '/reader', query })
   } else {
     // 队列中已经没有更多本子了
-    await modal.alert('清单中的所有本子都已经全部读完啦！🎉', '阅读完毕')
+    await modal.alert('清单中的所有本子都已经全部读完啦！', '阅读完毕')
   }
 }
 
@@ -1253,19 +1254,25 @@ watch(
     <!-- Round20-Bug2/Bug4：页列表加载失败错误层（重试/返回，替代裸 toast 白屏） -->
     <div v-if="loadError" class="reader-error-overlay">
       <div class="reader-error-card">
-        <div class="reader-error-icon">⚠️</div>
+        <div class="reader-error-icon"><AppIcon name="warning" :size="36" /></div>
         <p class="reader-error-title">漫画加载失败</p>
         <p class="reader-error-msg">{{ loadError }}</p>
         <div class="reader-error-actions">
-          <button class="reader-error-btn" @click="retryLoad">🔄 重试</button>
-          <button class="reader-error-btn primary" @click="handleReaderBack">‹ 返回</button>
+          <button class="reader-error-btn" @click="retryLoad">
+            <AppIcon name="refresh" :size="15" /> 重试
+          </button>
+          <button class="reader-error-btn primary" @click="handleReaderBack">
+            <AppIcon name="arrowLeft" :size="15" /> 返回
+          </button>
         </div>
       </div>
     </div>
 
     <Transition name="fade-top">
       <div v-if="showControls" class="floating-header">
-        <button class="topbar-btn" title="退出阅读" @click="handleReaderBack">‹</button>
+        <button class="topbar-btn" title="退出阅读" @click="handleReaderBack">
+          <AppIcon name="arrowLeft" :size="16" />
+        </button>
 
         <!-- Round24：侧栏抽屉开关（仅本地；横屏/窄屏均折叠保沉浸） -->
         <button
@@ -1275,15 +1282,16 @@ watch(
           @click.stop="openSidebar"
           title="侧栏（缩略图/大纲/书签）"
         >
-          ☰
+          <AppIcon name="outline" :size="16" />
         </button>
 
         <div class="header-info">
           <div class="title-row">
             <span class="comic-title" :title="readerTitle">{{ readerTitleDisplay }}</span>
-            <span class="source-tag">{{
-              source === 'online' ? '🌐 在线流加载' : '📚 本地挂载'
-            }}</span>
+            <span class="source-tag">
+              <AppIcon :name="source === 'online' ? 'online' : 'books'" :size="12" />
+              {{ source === 'online' ? '在线流加载' : '本地挂载' }}
+            </span>
           </div>
           <span v-if="readerChapterPathText" class="chapter-path" :title="readerChapterPathText">{{
             readerChapterPathText
@@ -1296,13 +1304,15 @@ watch(
             class="widget-item gamepad-indicator"
             title="游戏手柄已连接"
           >
-            🎮<span class="gamepad-name">{{ gamepadName }}</span>
+            <AppIcon name="gamepad" :size="14" /><span class="gamepad-name">{{
+              gamepadName
+            }}</span>
           </span>
           <button class="topbar-btn" @click.stop="showSettings = !showSettings" title="阅读设置">
-            ⚙️
+            <AppIcon name="settings" :size="16" />
           </button>
           <button class="topbar-btn" @click.stop="showControls = false" title="隐藏控制条">
-            ✕
+            <AppIcon name="close" :size="16" />
           </button>
         </div>
       </div>
@@ -1430,7 +1440,9 @@ watch(
     <Transition name="fade-bottom">
       <div v-if="showControls" class="floating-footer">
         <div v-if="readerSettings.showBottomBar" class="slider-row">
-          <button class="step-btn" @click="handlePrevPage">‹</button>
+          <button class="step-btn" @click="handlePrevPage">
+            <AppIcon name="arrowLeft" :size="16" />
+          </button>
           <input
             :value="currentPage"
             @input="jumpToPage(Number(($event.target as HTMLInputElement).value))"
@@ -1439,24 +1451,30 @@ watch(
             :max="Math.max(totalPages, 1)"
             class="page-slider"
           />
-          <button class="step-btn" @click="handleNextPage">›</button>
+          <button class="step-btn" @click="handleNextPage">
+            <AppIcon name="arrowRight" :size="16" />
+          </button>
         </div>
 
         <div v-if="readerSettings.enableBottomMenu" class="control-row">
           <button class="control-btn" :class="{ active: isDoublePage }" @click="togglePageLayout">
-            {{ isDoublePage ? '📖 双页模式' : '📄 单页模式' }}
+            <AppIcon :name="isDoublePage ? 'book' : 'file'" :size="13" />
+            {{ isDoublePage ? '双页模式' : '单页模式' }}
           </button>
 
           <button class="control-btn" :class="{ active: isRTL }" @click="toggleDirection">
-            {{ isRTL ? '◀ RTL' : 'LTR ▶' }}
+            <AppIcon :name="isRTL ? 'arrowLeft' : 'arrowRight'" :size="13" />
+            {{ isRTL ? 'RTL' : 'LTR' }}
           </button>
 
           <button class="control-btn" :class="{ active: isWebtoon }" @click="toggleWebtoon">
-            {{ isWebtoon ? '🎞️ 滚动模式' : '📜 Webtoon' }}
+            <AppIcon :name="isWebtoon ? 'film' : 'scroll'" :size="13" />
+            {{ isWebtoon ? '滚动模式' : 'Webtoon' }}
           </button>
 
           <button class="control-btn" @click="toggleFullscreen">
-            {{ isFullscreen ? '📉 退出全屏' : '📺 全屏' }}
+            <AppIcon :name="isFullscreen ? 'collapse' : 'television'" :size="13" />
+            {{ isFullscreen ? '退出全屏' : '全屏' }}
           </button>
         </div>
 
@@ -1472,8 +1490,10 @@ watch(
     <Transition name="slide-left">
       <div v-if="showSettings" class="settings-drawer" @click.stop>
         <div class="drawer-header">
-          <h3>⚙️ 阅读设置</h3>
-          <button class="close-btn" @click="showSettings = false">✕</button>
+          <h3><AppIcon name="settings" :size="15" /> 阅读设置</h3>
+          <button class="close-btn" @click="showSettings = false">
+            <AppIcon name="close" :size="18" />
+          </button>
         </div>
 
         <div class="drawer-body">
@@ -1560,7 +1580,7 @@ watch(
           <hr class="divider" />
 
           <button class="full-settings-btn" @click="router.push('/settings')">
-            📋 前往完整阅读设置
+            <AppIcon name="clipboard" :size="14" /> 前往完整阅读设置
           </button>
         </div>
       </div>

@@ -29,6 +29,7 @@ import {
   setListStateProvider,
   getMainContent,
 } from '@/utils/scrollMemory'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 const { toast, modal } = useUI()
 const userStore = useUserStore()
@@ -360,7 +361,7 @@ const seekToDate = (date: string) => {
         :title="sortDesc ? '切换为升序' : '切换为降序'"
         @click="((sortDesc = !sortDesc), (currentPage = 1))"
       >
-        {{ sortDesc ? '↓' : '↑' }}
+        <AppIcon :name="sortDesc ? 'caretDown' : 'caretUp'" :size="14" />
       </button>
     </div>
 

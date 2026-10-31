@@ -19,6 +19,8 @@ import { useUserStore } from '@/stores/userStore'
 import { openContentTab, buildDetailHref } from '@/utils/detailNav'
 // 队列全部完成后 toast + 刷新本地库缓存
 import { fetchOfflineComics } from '@/stores/comicStore'
+import AppIcon from '@/components/icons/AppIcon.vue'
+import type { IconName } from '@/components/icons/iconMap'
 
 interface ListResponse {
   tasks: DownloadTask[]
@@ -73,19 +75,19 @@ const BULK_ACTIONS: Partial<Record<DownloadStatus, BatchAction[]>> = {
 
 const BULK_META: Record<
   BatchAction,
-  { label: string; verb: string; done: string; glyph: string; cls: string }
+  { label: string; verb: string; done: string; icon: IconName; cls: string }
 > = {
-  pause: { label: '全部暂停', verb: '暂停', done: '已暂停', glyph: '⏸', cls: 'pause' },
-  resume: { label: '全部恢复', verb: '恢复', done: '已恢复', glyph: '▶', cls: 'resume' },
-  retry: { label: '全部重试', verb: '重试', done: '已重新排队', glyph: '↻', cls: 'retry' },
-  cancel: { label: '全部取消', verb: '取消', done: '已取消', glyph: '✕', cls: 'cancel' },
-  unlock: { label: '全部解锁', verb: '解锁', done: '已解锁', glyph: '🔓', cls: 'unlock' },
+  pause: { label: '全部暂停', verb: '暂停', done: '已暂停', icon: 'pause', cls: 'pause' },
+  resume: { label: '全部恢复', verb: '恢复', done: '已恢复', icon: 'play', cls: 'resume' },
+  retry: { label: '全部重试', verb: '重试', done: '已重新排队', icon: 'refresh', cls: 'retry' },
+  cancel: { label: '全部取消', verb: '取消', done: '已取消', icon: 'close', cls: 'cancel' },
+  unlock: { label: '全部解锁', verb: '解锁', done: '已解锁', icon: 'unlock', cls: 'unlock' },
 }
 
-const MODE_OPTIONS: { key: DownloadModeFilter; label: string }[] = [
+const MODE_OPTIONS: { key: DownloadModeFilter; label: string; icon?: IconName }[] = [
   { key: 'all', label: '全部' },
-  { key: 'gallery', label: '🖼️ 画廊' },
-  { key: 'archive', label: '🗜️ 归档' },
+  { key: 'gallery', label: '画廊', icon: 'images' },
+  { key: 'archive', label: '归档', icon: 'archive' },
 ]
 
 const MODE_LABEL: Record<DownloadModeFilter, string> = {
@@ -193,7 +195,7 @@ const coverStyle = (task: DownloadTask): Record<string, string> => {
 const displayTaskError = (t: DownloadTask): string => {
   const raw = t.error || ''
   if (t.mode === 'archive' && /429|限流/.test(raw) && !raw.includes('并发数太多')) {
-    return `⚠️ 并发数太多：H@H 节点限流，请降低归档下载线程数或减少同时下载的归档任务数后重试（${raw}）`
+    return `并发数太多：H@H 节点限流，请降低归档下载线程数或减少同时下载的归档任务数后重试（${raw}）`
   }
   return raw
 }
@@ -494,10 +496,12 @@ onUnmounted(() => {
 <template>
   <div class="downloads-page" :class="{ 'bulk-busy': !!bulkRunning }">
     <!-- 无下载权限：直接隐藏任务列表与筛选区（中心制：无许可用户不展示下载功能） -->
-    <div v-if="!canDownload" class="no-permission-box">🔒 无下载权限，请联系管理员开启</div>
+    <div v-if="!canDownload" class="no-permission-box">
+      <AppIcon name="lock" :size="16" /> 无下载权限，请联系管理员开启
+    </div>
     <template v-else>
       <div class="page-header">
-        <h1 class="page-title"><span>⬇️</span>下载任务列表</h1>
+        <h1 class="page-title"><span><AppIcon name="download" :size="18" /></span>下载任务列表</h1>
         <div class="page-meta">
           <span
             >共 <b>{{ stats.total }}</b> 个任务 · 活动 <b>{{ stats.active }}</b></span
@@ -520,7 +524,7 @@ onUnmounted(() => {
                 :disabled="!!bulkRunning"
                 @click="setModeFilter(m.key)"
               >
-                {{ m.label }}
+                <AppIcon v-if="m.icon" :name="m.icon" :size="13" /> {{ m.label }}
               </button>
             </div>
           </div>
@@ -573,7 +577,9 @@ onUnmounted(() => {
       </section>
       <section v-else-if="showBulkBar" class="bulk-bar" :data-bulk="BULK_META[bulkAccent].cls">
         <div class="bulk-info">
-          <span class="bulk-icon">{{ BULK_META[bulkAccent].glyph }}</span>
+          <span class="bulk-icon">
+            <AppIcon :name="BULK_META[bulkAccent].icon" :size="17" />
+          </span>
           <div class="bulk-text">
             <div class="bulk-title">
               {{ STATUS_META[statusFilter].short }}任务 <b>{{ currentCount }}</b> 个<span
@@ -594,8 +600,8 @@ onUnmounted(() => {
               :disabled="!!bulkRunning"
               @click="handleBulk(action)"
             >
-              <span class="bglyph">{{ BULK_META[action].glyph }}</span
-              >{{ BULK_META[action].label }}
+              <span class="bglyph"><AppIcon :name="BULK_META[action].icon" :size="13" /></span>
+              {{ BULK_META[action].label }}
             </button>
           </template>
         </div>
@@ -603,7 +609,7 @@ onUnmounted(() => {
 
       <div v-if="isLoading && !tasks.length" class="loading-box">加载中...</div>
       <div v-else-if="!tasks.length" class="empty-state">
-        <div class="empty-icon">🗂️</div>
+        <div class="empty-icon"><AppIcon name="folders" :size="36" /></div>
         <h3>「{{ STATUS_META[statusFilter].short }}」下暂无任务</h3>
         <p>
           切换上方页签查看其它状态{{
@@ -644,24 +650,28 @@ onUnmounted(() => {
 
             <div class="chips">
               <span v-if="task.mode === 'archive'" class="chip mode archive">
-                🗜️ 归档{{ task.archiveType === 'resample' ? '·压缩' : '·原图' }}
+                <AppIcon name="archive" :size="12" /> 归档{{
+                  task.archiveType === 'resample' ? '·压缩' : '·原图'
+                }}
               </span>
-              <span v-else class="chip mode gallery">🖼️ 画廊</span>
+              <span v-else class="chip mode gallery"><AppIcon name="images" :size="12" /> 画廊</span>
               <span v-if="task.group" class="chip">分组 {{ task.group }}</span>
               <span class="chip priority" :class="{ zero: task.priority === 0 }">
-                ⭐ 优先级 {{ task.priority }}
+                <AppIcon name="star" :size="12" /> 优先级 {{ task.priority }}
               </span>
-              <span v-if="task.updateForComicId" class="chip update">🔄 离线更新</span>
+              <span v-if="task.updateForComicId" class="chip update">
+                <AppIcon name="refresh" :size="12" /> 离线更新
+              </span>
               <span v-if="userStore.isAdmin && task.username" class="chip user">
                 发起者：{{ task.username }}
               </span>
               <span v-if="task.nodeName" class="chip node" :title="`归档解锁时使用的出口节点：${task.nodeName}`">
-                🌐 {{ task.nodeName }}
+                <AppIcon name="online" :size="12" /> {{ task.nodeName }}
               </span>
             </div>
 
             <div v-if="task.error" class="task-error" :title="displayTaskError(task)">
-              <span class="err-icon">⚠</span>
+              <span class="err-icon"><AppIcon name="warning" :size="13" /></span>
               <span class="err-text">{{ displayTaskError(task) }}</span>
             </div>
 
@@ -763,7 +773,7 @@ onUnmounted(() => {
           :disabled="page <= 1 || !!bulkRunning"
           @click="changePage(-1)"
         >
-          ‹ 上一页
+          <AppIcon name="arrowLeft" :size="14" /> 上一页
         </button>
         <span class="page-info"
           >第 <b>{{ page }}</b> / {{ totalPages }} 页 · 共 {{ filteredTotal }} 个任务</span
@@ -774,7 +784,7 @@ onUnmounted(() => {
           :disabled="page >= totalPages || !!bulkRunning"
           @click="changePage(1)"
         >
-          下一页 ›
+          下一页 <AppIcon name="arrowRight" :size="14" />
         </button>
       </div>
     </template>

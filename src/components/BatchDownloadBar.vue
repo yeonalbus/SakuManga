@@ -2,6 +2,7 @@
 // src/components/BatchDownloadBar.vue
 // 在线列表页的批量下载工具条：固定悬浮于底部，显示已选数量，一键批量入队（零弹窗、默认方案）
 import { ref, computed } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { batchCreateDownloads, type DownloadTarget } from '@/api/download'
 import { useUI } from '@/composables/useUI'
 import { isGidDownloading, markGidActive } from '@/stores/downloadTasksStore'
@@ -93,7 +94,12 @@ const handleBatchDownload = async () => {
       :disabled="isBatchDownloading || count === 0"
       @click="handleBatchDownload"
     >
-      {{ isBatchDownloading ? '加入中…' : '⬇ 批量下载' }}
+      <AppIcon
+        :name="isBatchDownloading ? 'loading' : 'download'"
+        :size="15"
+        :class="{ spin: isBatchDownloading }"
+      />
+      {{ isBatchDownloading ? '加入中…' : '批量下载' }}
     </button>
     <button class="bar-btn" :disabled="isBatchDownloading" @click="emit('close')">取消</button>
   </div>

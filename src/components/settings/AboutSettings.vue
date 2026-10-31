@@ -9,11 +9,11 @@
         </div>
         <div class="item-subtext">{{ version }}</div>
         <div v-if="newVersionAvailable" class="new-ver-banner">
-          <span class="banner-icon">🔔</span>
+          <span class="banner-icon"><AppIcon name="bell" :size="13" /></span>
           <span>发现新版本 <b>v{{ info?.latest }}</b>，点击「查看新版」前往下载（升级仅需替换 SakuManga.exe）</span>
         </div>
         <div v-else-if="checkFailed" class="check-fail">
-          <span class="banner-icon">⚠️</span>
+          <span class="banner-icon"><AppIcon name="warning" :size="13" /></span>
           <span>版本检测失败：{{ checkFailed }}（可点击「检查更新」重试）</span>
         </div>
       </div>
@@ -24,10 +24,13 @@
           title="在浏览器打开 GitHub Release 页面查看并下载新版"
           @click="openLatestRelease"
         >
-          ⬇️ 查看新版
+          <AppIcon name="download" :size="13" /> 查看新版
         </button>
         <button class="check-btn" :disabled="checking" @click="manualCheck">
-          {{ checking ? '⏳ 检查中…' : '🔄 检查更新' }}
+          <template v-if="checking">
+            <AppIcon name="loading" :size="13" class="spin" /> 检查中…
+          </template>
+          <template v-else><AppIcon name="refresh" :size="13" /> 检查更新</template>
         </button>
       </div>
     </div>
@@ -63,13 +66,14 @@
         <div class="item-title">视口诊断</div>
         <div class="item-subtext">查看当前视口 / 设备信息，排查 iPad PWA 底部条问题</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useRouter } from 'vue-router'
 import { version } from '../../../package.json'
 import { useUI } from '@/composables/useUI'

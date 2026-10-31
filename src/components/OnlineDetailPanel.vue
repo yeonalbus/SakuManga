@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import OnlineDetail from '@/views/online/OnlineDetail.vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { openContentTab, buildDetailHref } from '@/utils/detailNav'
 
 const props = withDefaults(
@@ -38,10 +39,11 @@ const openFullDetail = () => {
         title="在新标签页打开完整详情（等同中键 / Ctrl + 点击）"
         @click="openFullDetail"
       >
-        🖼️ 画廊详情 <span class="open-hint">↗</span>
+        <AppIcon name="images" :size="15" /> 画廊详情
+        <span class="open-hint"><AppIcon name="openExternal" :size="12" /></span>
       </button>
       <button v-if="open" class="detail-panel-close" title="收起详情" @click="$emit('close')">
-        ✕ 收起
+        <AppIcon name="close" :size="14" /> 收起
       </button>
     </header>
 
@@ -49,7 +51,7 @@ const openFullDetail = () => {
       <OnlineDetail embedded :gid="gid" :token="token" :from-history="fromHistory" />
     </div>
     <div v-else class="detail-panel-empty">
-      <div class="empty-icon">🖼️</div>
+      <div class="empty-icon"><AppIcon name="images" :size="32" /></div>
       <p>请选择要查看详情页的本子</p>
     </div>
   </aside>

@@ -1,7 +1,7 @@
 <template>
   <div class="log-settings">
     <!-- ── 日志开关（Round25：由原「高级」页并入）── -->
-    <div class="section-title">⚙️ 日志开关</div>
+    <div class="section-title"><AppIcon name="settings" :size="14" /> 日志开关</div>
 
     <div class="setting-item">
       <div class="item-info">
@@ -30,7 +30,7 @@
         <div class="item-title">清除日志</div>
         <div class="item-subtext">按类别与时间范围精细清理系统日志与前端错误日志（当前共占用 {{ totalLogSize }}）</div>
       </div>
-      <span class="arrow-icon">›</span>
+      <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
     <!-- 各分类占用总览 -->
@@ -52,21 +52,21 @@
         :class="{ active: subTab === 'monitor' }"
         @click="subTab = 'monitor'"
       >
-        📡 监控
+        <AppIcon name="broadcast" :size="14" /> 监控
       </button>
       <button
         class="sub-tab"
         :class="{ active: subTab === 'query' }"
         @click="subTab = 'query'"
       >
-        🔍 查询
+        <AppIcon name="search" :size="14" /> 查询
       </button>
       <button
         class="sub-tab"
         :class="{ active: subTab === 'client' }"
         @click="subTab = 'client'"
       >
-        🐞 前端错误
+        <AppIcon name="bug" :size="14" /> 前端错误
       </button>
     </div>
 
@@ -86,9 +86,12 @@
           自动滚动
         </label>
         <button class="toolbar-btn" @click="togglePause">
-          {{ monitorPaused ? '▶ 继续' : '⏸ 暂停' }}
+          <template v-if="monitorPaused"><AppIcon name="play" :size="13" /> 继续</template>
+          <template v-else><AppIcon name="pause" :size="13" /> 暂停</template>
         </button>
-        <button class="toolbar-btn" @click="clearMonitor">🗑 清屏</button>
+        <button class="toolbar-btn" @click="clearMonitor">
+          <AppIcon name="trash" :size="13" /> 清屏
+        </button>
       </div>
 
       <div
@@ -280,6 +283,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 // Round25：日志开关与清除由原「高级」页并入

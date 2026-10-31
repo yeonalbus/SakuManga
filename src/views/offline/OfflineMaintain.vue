@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
+import AppIcon from '@/components/icons/AppIcon.vue'
 
 // ─────────────────────────────────────────────────────────────
 // Round44：本地书库维护 v3
@@ -327,7 +328,7 @@ const controlTask = async (action: 'pause' | 'resume') => {
     if (taskState.value) {
       taskState.value = { ...taskState.value, status: action === 'pause' ? 'paused' : 'running' }
     }
-    toast.info(action === 'pause' ? '⏸ 已暂停，可继续或取消' : '▶ 已继续')
+    toast.info(action === 'pause' ? '已暂停，可继续或取消' : '已继续')
   } catch (err) {
     const msg = err instanceof Error ? err.message : ''
     toast.error(msg || (action === 'pause' ? '暂停失败，任务可能已完成' : '继续失败'))
@@ -337,7 +338,7 @@ const controlTask = async (action: 'pause' | 'resume') => {
 const cancelTask = async () => {
   const confirmed = await modal.confirm(
     '取消后本次查重将立即终止，已完成的结果不会保留（下次需重新扫描）。\n\n确定取消吗？',
-    '✖ 取消本次查重',
+    '取消本次查重',
   )
   if (!confirmed) return
   try {
@@ -393,7 +394,7 @@ const runFullMaintain = async () => {
   moreMenuOpen.value = false
   const confirmed = await modal.confirm(
     '强制全量在线核对将忽略已核对标记，逐本联网抓取全部离线画廊详情页（每本约 1.2 秒限流退避），可能耗时数十分钟。确定继续吗？',
-    '⚡ 强制全量在线核对',
+    '强制全量在线核对',
   )
   if (!confirmed) return
   await runMaintain(true)
@@ -405,7 +406,7 @@ const clearRemovedAndRematch = async () => {
   if (isScanning.value || isClearingRemoved.value) return
   const confirmed = await modal.confirm(
     '将清除全部「已被删除/移除」标记并复位其核对时间戳，随后强制全量在线重新匹配这些画廊（可能耗时数十分钟）。\n\n仅适用于画廊已重新上传 / 源已恢复的情况。确定继续吗？',
-    '🧹 清除移除标记并重新匹配',
+    '清除移除标记并重新匹配',
   )
   if (!confirmed) return
   isClearingRemoved.value = true
@@ -434,8 +435,8 @@ const doRemoveComic = async (c: OfflineComicDTO, withFile: boolean): Promise<boo
   const title = c.title || '未命名'
   const confirmed = await modal.confirm(
     withFile
-      ? `确定移除《${title}》并同时删除其本地文件吗？\n\n📁 ${c.localPath || ''}\n\n此操作不可恢复！`
-      : `确定移除《${title}》的记录吗？\n\n本地文件将保留：📁 ${c.localPath || ''}`,
+      ? `确定移除《${title}》并同时删除其本地文件吗？\n\n${c.localPath || ''}\n\n此操作不可恢复！`
+      : `确定移除《${title}》的记录吗？\n\n本地文件将保留：${c.localPath || ''}`,
     withFile ? '移除记录 + 本地文件' : '移除记录（保留文件）',
   )
   if (!confirmed) return false
@@ -485,7 +486,7 @@ const keepWholeGroup = async (cl: DedupClusterDTO) => {
   const name = cl.artist ? `${cl.titleKey}（artist:${cl.artist}）` : cl.titleKey
   const confirmed = await modal.confirm(
     `两本都留，之后不再提示与「${name}」相关的疑似重复。\n\n忽略是可逆的：随时可在「忽略清单」里恢复；若该作品之后又入库了新的本子，会自动重新提醒你。\n\n确定忽略整组吗？`,
-    '🕶️ 都留（不再提示）',
+    '都留（不再提示）',
   )
   if (!confirmed) return
   try {
@@ -522,7 +523,7 @@ const ignoreParent = async (item: DedupItemDTO) => {
   }
   const confirmed = await modal.confirm(
     `忽略后，后续不再提示「${item.comic.title}」的「旧版被取代（父画廊关系）」。\n\n可在「忽略清单」中恢复。确定忽略此提示吗？`,
-    '🕶️ 忽略此提示',
+    '忽略此提示',
   )
   if (!confirmed) return
   try {
@@ -587,7 +588,7 @@ const formatDate = (iso?: string) => {
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString('zh-CN', { hour12: false })
 }
-const modeText = (mode?: string) => (mode === 'gallery' ? '📁 画廊' : '🗜️ 归档')
+const modeText = (mode?: string) => (mode === 'gallery' ? '画廊' : '归档')
 
 const closeMenu = () => {
   moreMenuOpen.value = false
@@ -644,7 +645,7 @@ onUnmounted(() => {
   <div class="maintenance-page" @click="closeMenu">
     <div class="page-header">
       <div>
-        <h2 class="page-title">🛠️ 本地书库维护</h2>
+        <h2 class="page-title"><AppIcon name="wrench" :size="18" /> 本地书库维护</h2>
         <p class="subtitle">
           扫描本地书库查重：只给建议，移除与忽略都由你确认；疑似重复按「两本差在哪」分组
         </p>
@@ -655,21 +656,26 @@ onUnmounted(() => {
           :disabled="isScanning || isClearingRemoved"
           @click="runMaintain(false)"
         >
-          {{ isScanning ? '⏳ 扫描中...' : '🔍 重新扫描' }}
+          <AppIcon
+            :name="isScanning ? 'loading' : 'search'"
+            :size="15"
+            :class="{ spin: isScanning }"
+          />
+          {{ isScanning ? '扫描中...' : '重新扫描' }}
         </button>
         <div class="menu-wrap">
           <button class="scan-btn ghost" @click.stop="moreMenuOpen = !moreMenuOpen">⋯ 更多</button>
           <div v-if="moreMenuOpen" class="more-menu" @click.stop>
             <button :disabled="isScanning || isClearingRemoved" @click="runFullMaintain">
-              ⚡ 强制全量在线核对
+              <AppIcon name="lightning" :size="13" /> 强制全量在线核对
               <small>忽略已核对标记，逐本联网，可能数十分钟</small>
             </button>
             <button :disabled="isScanning || isClearingRemoved" @click="clearRemovedAndRematch">
-              🧹 清除移除标记并重新匹配
+              <AppIcon name="broom" :size="13" /> 清除移除标记并重新匹配
               <small>画廊已重新上传 / 更换源时使用</small>
             </button>
             <router-link to="/settings?tab=dedup" class="menu-link">
-              ⚙️ 查重设置
+              <AppIcon name="settings" :size="13" /> 查重设置
               <small>联网复核（E 站反查）等，已收进设置页</small>
             </router-link>
           </div>
@@ -679,7 +685,7 @@ onUnmounted(() => {
 
     <!-- 顶部：忽略项出现「忽略后新增」的提醒（平时不占位） -->
     <div v-if="newIgnoreClusters.length > 0" class="alert-bar">
-      <span class="alert-icon">🕶️</span>
+      <span class="alert-icon"><AppIcon name="eyeClosed" :size="18" /></span>
       <div class="alert-text">
         <b>{{ newIgnoreClusters.length }}</b> 条忽略项下出现了忽略之后新入库的本子（共
         <b>{{ newIgnoreMemberCount }}</b> 本），可能构成新的重复 —— 已忽略的内容不会一直占位，只在有变化时提醒你。
@@ -689,7 +695,7 @@ onUnmounted(() => {
 
     <!-- 结果过期提示 -->
     <div v-if="resultStale" class="stale-banner">
-      <span class="stale-icon">⚠️</span>
+      <span class="stale-icon"><AppIcon name="warning" :size="18" /></span>
       <div class="stale-info">
         <p class="stale-title">查重结果已过期</p>
         <p class="stale-sub">
@@ -697,14 +703,14 @@ onUnmounted(() => {
         </p>
       </div>
       <button class="scan-btn primary" :disabled="isScanning" @click="runMaintain(false)">
-        🔍 重新扫描
+        <AppIcon name="search" :size="15" /> 重新扫描
       </button>
     </div>
 
     <!-- 扫描进度 -->
     <div v-if="isScanning" class="scanning-banner" :class="{ 'is-paused': isTaskPaused }">
       <span v-if="!isTaskPaused" class="spinner"></span>
-      <span v-else class="paused-icon">⏸</span>
+      <span v-else class="paused-icon"><AppIcon name="pause" :size="18" /></span>
       <div class="scanning-info">
         <p class="scanning-title">
           <template v-if="isTaskPaused">查重已暂停</template>
@@ -725,15 +731,21 @@ onUnmounted(() => {
           </template>
           <template v-else>正在启动维护任务...</template>
         </p>
-        <p v-if="currentTitle" class="scanning-current">📖 {{ currentTitle }}</p>
+        <p v-if="currentTitle" class="scanning-current">
+          <AppIcon name="book" :size="13" /> {{ currentTitle }}
+        </p>
       </div>
       <div class="banner-actions">
         <template v-if="isTaskPaused">
-          <button class="control-btn resume" @click="controlTask('resume')">▶ 继续</button>
-          <button class="control-btn cancel" @click="cancelTask">✖ 取消</button>
+          <button class="control-btn resume" @click="controlTask('resume')">
+            <AppIcon name="play" :size="14" /> 继续
+          </button>
+          <button class="control-btn cancel" @click="cancelTask">
+            <AppIcon name="close" :size="14" /> 取消
+          </button>
         </template>
         <button v-else-if="isTaskRunning" class="control-btn pause" @click="controlTask('pause')">
-          ⏸ 暂停
+          <AppIcon name="pause" :size="14" /> 暂停
         </button>
       </div>
     </div>
@@ -758,7 +770,9 @@ onUnmounted(() => {
           <div class="stat-chips">
             <span class="chip high"><i class="dot"></i>高置信 {{ highCount }}</span>
             <span class="chip medium"><i class="dot"></i>中置信 {{ mediumCount }}</span>
-            <router-link class="chip link" to="/offline/ignore">🕶️ 忽略清单 →</router-link>
+            <router-link class="chip link" to="/offline/ignore">
+              <AppIcon name="eyeClosed" :size="12" /> 忽略清单 →
+            </router-link>
           </div>
         </div>
         <div class="track"><i :style="{ width: progressWidth }"></i></div>
@@ -778,7 +792,9 @@ onUnmounted(() => {
         v-if="clusters.length === 0 && removeItems.length === 0"
         class="empty-box"
       >
-        <span class="icon">{{ resultStale ? '🔄' : '🎉' }}</span>
+        <span class="icon">
+          <AppIcon :name="resultStale ? 'refresh' : 'confetti'" :size="36" />
+        </span>
         <p class="empty-title">
           {{ resultStale ? '查重结果已过期，请重新扫描' : '恭喜！本地画库暂无重复或异常项' }}
         </p>
@@ -795,24 +811,38 @@ onUnmounted(() => {
         <!-- 建议删除（强证据；仅在有内容时出现）-->
         <section v-if="removeItems.length > 0" class="group open">
           <div class="group-head" @click="toggleGroup('REMOVE')">
-            <span class="arrow">▶</span>
-            <span class="group-name">🗑️ 建议删除</span>
+            <span class="arrow"><AppIcon name="arrowRight" :size="10" /></span>
+            <span class="group-name"><AppIcon name="trash" :size="14" /> 建议删除</span>
             <span class="group-count">{{ removeItems.length }} 项</span>
             <span class="group-desc">同 GID / 归档 Hash / 父子画廊等强证据规则判定</span>
           </div>
           <div v-show="openGroups['REMOVE'] !== false" class="group-body">            <div v-for="item in removeItems" :key="item.comic.id" class="card danger">
               <div class="card-head">
                 <span class="card-key" :title="item.comic.title">{{ item.comic.title }}</span>
-                <span class="mode-chip">{{ modeText(item.comic.sourceMode) }}</span>
+                <span class="mode-chip">
+                  <AppIcon
+                    :name="item.comic.sourceMode === 'gallery' ? 'folder' : 'archive'"
+                    :size="12"
+                  />
+                  {{ modeText(item.comic.sourceMode) }}
+                </span>
                 <span class="spacer"></span>
-                <span class="reason-chip">⚠️ {{ item.reason }}</span>
+                <span class="reason-chip"
+                  ><AppIcon name="warning" :size="12" /> {{ item.reason }}</span
+                >
               </div>
               <div class="member-meta">
-                <span>📄 {{ item.comic.pageCount || 0 }} 页</span>
-                <span>💾 {{ formatBytes(item.comic.fileSize) }}</span>
-                <span>🕒 {{ formatDate(item.comic.updatedAt) }}</span>
+                <span><AppIcon name="file" :size="12" /> {{ item.comic.pageCount || 0 }} 页</span>
+                <span
+                  ><AppIcon name="local" :size="12" /> {{ formatBytes(item.comic.fileSize) }}</span
+                >
+                <span
+                  ><AppIcon name="clock" :size="12" /> {{ formatDate(item.comic.updatedAt) }}</span
+                >
               </div>
-              <div class="member-path">📁 {{ item.comic.localPath || '—' }}</div>
+              <div class="member-path">
+                <AppIcon name="folder" :size="12" /> {{ item.comic.localPath || '—' }}
+              </div>
               <div class="card-actions">
                 <span class="spacer"></span>
                 <button
@@ -822,14 +852,19 @@ onUnmounted(() => {
                   title="忽略此更新提示（父画廊 gid），后续不再提示「旧版可删除」"
                   @click="ignoreParent(item)"
                 >
-                  🕶️ 忽略此提示
+                  <AppIcon name="eyeClosed" :size="13" /> 忽略此提示
                 </button>
                 <button
                   class="action-btn danger-soft"
                   :disabled="isRemoving"
                   @click="removeSuggested(item)"
                 >
-                  {{ isRemoving && removingId === item.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                  <AppIcon
+                    :name="isRemoving && removingId === item.comic.id ? 'loading' : 'trash'"
+                    :size="13"
+                    :class="{ spin: isRemoving && removingId === item.comic.id }"
+                  />
+                  {{ isRemoving && removingId === item.comic.id ? '处理中...' : '移除这本' }}
                 </button>
               </div>
             </div>
@@ -844,8 +879,8 @@ onUnmounted(() => {
           :class="{ open: openGroups[g.key] }"
         >
           <div class="group-head" @click="toggleGroup(g.key)">
-            <span class="arrow">▶</span>
-            <span class="group-name">🔎 {{ g.meta.name }}</span>
+            <span class="arrow"><AppIcon name="arrowRight" :size="10" /></span>
+            <span class="group-name"><AppIcon name="searchPlus" :size="14" /> {{ g.meta.name }}</span>
             <span class="group-count">{{ g.list.length }} 组</span>
             <span class="group-desc">{{ g.meta.desc }}</span>
           </div>
@@ -883,16 +918,22 @@ onUnmounted(() => {
                       :title="`移除《${m.comic.title}》（其余本子保留）`"
                       @click.stop="removeMember(cl, m)"
                     >
-                      {{ isRemoving && removingId === m.comic.id ? '⏳' : `🗑️ ${String.fromCharCode(65 + mi)}` }}
+                      <AppIcon
+                        :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                        :size="12"
+                        :class="{ spin: isRemoving && removingId === m.comic.id }"
+                      />
+                      {{ String.fromCharCode(65 + mi) }}
                     </button>
                     <button class="action-btn ghost-gray sm" @click.stop="keepWholeGroup(cl)" title="两本都留（忽略本组）">
-                      🕶️ 都留
+                      <AppIcon name="eyeClosed" :size="12" /> 都留
                     </button>
                     <button class="action-btn ghost-teal sm" @click.stop="toggleExpand(cl.id)">
-                      {{ isExpanded(cl.id) ? '▴ 收起' : '🔍 对比' }}
+                      <AppIcon :name="isExpanded(cl.id) ? 'caretUp' : 'search'" :size="12" />
+                      {{ isExpanded(cl.id) ? '收起' : '对比' }}
                     </button>
                     <button v-if="cl.ignored" class="action-btn ghost-gray sm" @click.stop="ackIgnoreNew(cl)">
-                      ✔ 确认新增
+                      <AppIcon name="check" :size="12" /> 确认新增
                     </button>
                   </div>
                 </div>
@@ -919,8 +960,11 @@ onUnmounted(() => {
                           <div class="panel-title" @click="openComic(m.comic.id)">{{ m.comic.title }}</div>
                           <div class="member-meta">
                             <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
-                            <span>📄 {{ m.pageCount }} 页</span>
-                            <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                            <span><AppIcon name="file" :size="12" /> {{ m.pageCount }} 页</span>
+                            <span
+                              ><AppIcon name="local" :size="12" />
+                              {{ formatBytes(m.comic.fileSize) }}</span
+                            >
                             <span>artist: {{ m.artist || 'null' }}</span>
                           </div>
                           <div v-if="decisionTags(m.comic).length" class="decision-row">
@@ -933,11 +977,16 @@ onUnmounted(() => {
                               >{{ d.name }}</span
                             >
                           </div>
-                          <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                          <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
                         </div>
                       </div>
                       <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
-                        {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                        <AppIcon
+                          :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                          :size="13"
+                          :class="{ spin: isRemoving && removingId === m.comic.id }"
+                        />
+                        {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
                       </button>
                     </div>
                   </div>
@@ -965,7 +1014,9 @@ onUnmounted(() => {
                       <div class="member-meta">
                         <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
                         <span>{{ m.pageCount || 0 }} 页</span>
-                        <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                        <span
+                          ><AppIcon name="local" :size="12" /> {{ formatBytes(m.comic.fileSize) }}</span
+                        >
                       </div>
                       <div v-if="decisionTags(m.comic).length" class="decision-row">
                         <span
@@ -977,7 +1028,7 @@ onUnmounted(() => {
                           >{{ d.name }}</span
                         >
                       </div>
-                      <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                      <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
                       <div class="member-actions">
                         <button
                           class="action-btn danger-soft sm"
@@ -985,7 +1036,12 @@ onUnmounted(() => {
                           :title="`仅移除这一本，组内其余本子照常保留`"
                           @click="removeMember(cl, m)"
                         >
-                          {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                          <AppIcon
+                            :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                            :size="12"
+                            :class="{ spin: isRemoving && removingId === m.comic.id }"
+                          />
+                          {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
                         </button>
                       </div>
                     </div>
@@ -1001,7 +1057,8 @@ onUnmounted(() => {
                   </span>
                   <span class="spacer"></span>
                   <button class="action-btn ghost-teal" @click="toggleExpand(cl.id)">
-                    {{ isExpanded(cl.id) ? '▴ 收起对比' : '🔍 展开对比' }}
+                    <AppIcon :name="isExpanded(cl.id) ? 'caretUp' : 'search'" :size="13" />
+                    {{ isExpanded(cl.id) ? '收起对比' : '展开对比' }}
                   </button>
                   <button
                     v-if="cl.ignored"
@@ -1009,10 +1066,10 @@ onUnmounted(() => {
                     title="把新入库的本子纳入「已知」，之后继续静默"
                     @click="ackIgnoreNew(cl)"
                   >
-                    ✔ 确认新增
+                    <AppIcon name="check" :size="13" /> 确认新增
                   </button>
                   <button class="action-btn ghost-gray" @click="keepWholeGroup(cl)">
-                    🕶️ 都留（不再提示）
+                    <AppIcon name="eyeClosed" :size="13" /> 都留（不再提示）
                   </button>
                 </div>
                 <div v-show="isExpanded(cl.id)" class="inline-compare">
@@ -1038,8 +1095,11 @@ onUnmounted(() => {
                           <div class="panel-title" @click="openComic(m.comic.id)">{{ m.comic.title }}</div>
                           <div class="member-meta">
                             <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
-                            <span>📄 {{ m.pageCount }} 页</span>
-                            <span>💾 {{ formatBytes(m.comic.fileSize) }}</span>
+                            <span><AppIcon name="file" :size="12" /> {{ m.pageCount }} 页</span>
+                            <span
+                              ><AppIcon name="local" :size="12" />
+                              {{ formatBytes(m.comic.fileSize) }}</span
+                            >
                             <span>artist: {{ m.artist || 'null' }}</span>
                           </div>
                           <div v-if="decisionTags(m.comic).length" class="decision-row">
@@ -1052,11 +1112,16 @@ onUnmounted(() => {
                               >{{ d.name }}</span
                             >
                           </div>
-                          <div class="member-path">📁 {{ m.comic.localPath || '—' }}</div>
+                          <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
                         </div>
                       </div>
                       <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
-                        {{ isRemoving && removingId === m.comic.id ? '⏳ 处理中...' : '🗑️ 移除这本' }}
+                        <AppIcon
+                          :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                          :size="13"
+                          :class="{ spin: isRemoving && removingId === m.comic.id }"
+                        />
+                        {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
                       </button>
                     </div>
                   </div>
@@ -1070,7 +1135,7 @@ onUnmounted(() => {
         <!-- 建议保留：无需操作的信息，默认收起 -->
         <div v-if="keepItems.length > 0" class="fold">
           <details>
-            <summary>✔ 建议保留 {{ keepItems.length }} 项 —— 无需操作，点开查看</summary>
+            <summary><AppIcon name="check" :size="14" /> 建议保留 {{ keepItems.length }} 项 —— 无需操作，点开查看</summary>
             <div class="fold-body">
               <div v-for="item in keepItems" :key="item.comic.id" class="keep-row">
                 <span class="keep-title" @click="openComic(item.comic.id)">{{ item.comic.title }}</span>
@@ -1082,7 +1147,7 @@ onUnmounted(() => {
 
         <!-- 已忽略：主列表不占位，只在独立页可见 -->
         <div class="fold flat">
-          <span>🕶️</span>
+          <span><AppIcon name="eyeClosed" :size="14" /></span>
           <span>已忽略的作品移到 <router-link to="/offline/ignore">忽略清单</router-link> 独立页 —— 有新增本子时会自动回到这里提醒</span>
         </div>
       </template>

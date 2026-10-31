@@ -2,7 +2,9 @@
   <div class="extra-scan-settings">
     <!-- 顶部 Header -->
     <div class="header">
-      <button class="back-btn" @click="$emit('back')" title="返回下载设置">‹</button>
+      <button class="back-btn" @click="$emit('back')" title="返回下载设置">
+        <AppIcon name="arrowLeft" :size="20" />
+      </button>
 
       <div class="header-text">
         <div class="header-title">额外的画廊扫描路径</div>
@@ -43,7 +45,7 @@
           <div class="path-info">
             <!-- 路径文字与图标 -->
             <div class="path-title">
-              <span class="folder-icon">📁</span>
+              <span class="folder-icon"><AppIcon name="folder" :size="14" /></span>
               <span class="path-text" :title="item.path">{{ item.path }}</span>
 
               <!-- 显示名（来源标签）：可设置/重命名（问题3） -->
@@ -64,7 +66,7 @@
                   @click="startEditName(item)"
                   title="重命名显示名"
                 >
-                  ✎
+                  <AppIcon name="edit" :size="11" />
                 </button>
               </span>
               <button
@@ -74,7 +76,7 @@
                 @click="startEditName(item)"
                 title="设置显示名（来源标签），卡片与详情页来源栏目将显示它"
               >
-                📛 起名
+                <AppIcon name="tag" :size="12" /> 起名
               </button>
             </div>
 
@@ -143,12 +145,12 @@
 
             <!-- 扫描中显示旋转图标 -->
             <span v-else class="btn btn-icon" title="扫描中…">
-              <span class="spinning">↻</span>
+              <span class="spinning"><AppIcon name="refresh" :size="15" /></span>
             </span>
 
             <!-- 删除按钮 -->
             <button @click="handleRemove(item.id)" class="btn btn-icon danger" title="移除路径">
-              ✕
+              <AppIcon name="close" :size="15" />
             </button>
           </div>
         </div>
@@ -157,7 +159,7 @@
         <div v-if="isScanning(item)" class="scan-progress-area">
           <!-- 计数阶段 -->
           <div v-if="progressOf(item)!.phase === 'counting'" class="progress-counting">
-            <span class="spinning">↻</span> 正在扫描文件夹结构…
+            <span class="spinning"><AppIcon name="refresh" :size="14" /></span> 正在扫描文件夹结构…
           </div>
           <!-- 扫描阶段 -->
           <template v-else>
@@ -195,9 +197,12 @@
           class="scan-done-area"
           :class="{ error: progressOf(item)!.error }"
         >
-          <span v-if="progressOf(item)!.error">⚠️ 扫描失败: {{ progressOf(item)!.error }}</span>
+          <span v-if="progressOf(item)!.error">
+            <AppIcon name="error" weight="fill" :size="13" /> 扫描失败: {{ progressOf(item)!.error }}
+          </span>
           <span v-else>
-            ✅ 扫描完成，共 {{ progressOf(item)!.comicCount ?? progressOf(item)!.found }} 本
+            <AppIcon name="success" weight="fill" :size="13" /> 扫描完成，共
+            {{ progressOf(item)!.comicCount ?? progressOf(item)!.found }} 本
             <template v-if="progressOf(item)!.skipped"
               >（跳过 {{ progressOf(item)!.skipped }}）</template
             >
@@ -215,6 +220,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import AppIcon from '@/components/icons/AppIcon.vue'
 import {
   scanPaths,
   scanProgress,

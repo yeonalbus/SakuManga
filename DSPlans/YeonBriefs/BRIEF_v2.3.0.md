@@ -91,16 +91,18 @@
   - 「性能与安全」段：可补全站矢量图标（视觉层）。
 - **项目结构图**：`DSPlans/` 下新增 `YeonBriefs/`（版本简报，可选提及）。
 - **预览图**：书签页、下载页、全站图标均有变化，建议更新截图。
+- **⚠️ 仓库根 `README.md` 当前处于「已删除」状态**（AI 未擅自恢复，属你的维护区）：发版后仓库首页会没有 README，需要你重写或恢复后再提交。
 
 ---
 
 ## 七、机械清单（AI 已完成，珱垣不必关心）
 
-- [ ] 版本号三处对齐 2.3.0（`package.json` / `package-lock.json` / `backend/internal/version/version.go`）
-- [ ] 前端产物同步 `backend/webui/dist`
-- [ ] `go test ./...` 与 `npm run type-check` 通过
-- [ ] `SakuManga.exe` 打包冒烟
-- [ ] tag `SakuManga-2.3.0` 推送 + Actions 镜像状态
+- [x] 版本号三处对齐 2.3.0（`package.json` / `package-lock.json` / `backend/internal/version/version.go`）
+- [x] 前端产物同步 `backend/webui/dist`（提交 `1236d1f`，含书签页与全站图标）
+- [x] `go test ./...` 全绿（含修复一处 Round49 遗留的书签空名重命名测试，提交 `cb85f63`；`npm run type-check` 随 build 通过）
+- [x] `SakuManga.exe` 已打包：`G:\SakuProjects\SakuManga\SakuManga.exe`，构建标识 `202610312113-g1236d1f`
+- [x] tag `SakuManga-2.3.0` 已推送（指向 `1236d1f`）→ Actions 镜像构建中，状态请在仓库 Actions 页确认
+- [x] Release 三件套已入库：`CHANGELOG.md` v2.3.0 区块、[`RELEASE_NOTES_v2.3.0.md`](../VerNotes/RELEASE_NOTES_v2.3.0.md)、本简报
 
 ---
 

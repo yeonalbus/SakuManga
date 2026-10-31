@@ -45,6 +45,8 @@ export interface TimeAnchorCandidate {
   token?: string
   title: string
   postedAt: string
+  /** Round49：候选画廊封面（迁移写回用，避免书签封面丢失） */
+  coverUrl?: string
   /** 与目标发布时间的偏差（毫秒，越小越接近） */
   diffMs: number
   /** 已检索页数（诊断用） */
@@ -128,6 +130,7 @@ export const findTimeAnchorCandidate = async (
     token: best.comic.source === 'online' ? best.comic.token : undefined,
     title: best.comic.title,
     postedAt: best.comic.updatedAt || '',
+    coverUrl: best.comic.coverUrl || undefined,
     diffMs: best.diffMs,
     pagesScanned,
   }

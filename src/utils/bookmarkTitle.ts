@@ -59,7 +59,11 @@ export type TagTranslateFn = (raw: string) => { name: string; key: string }
 
 /**
  * 书签主标题：
- *   自定义名称 > 标准 tag 翻译名 > 副标题内容（位置 + 非默认筛选）
+ *   自定义名称 > 标准 tag 翻译名 > (artist 类) tag key 本身 > 副标题内容
+ *
+ * artist 豁免说明：画师名的"正确显示"经常就是原名（英文 ID / 日文名 / 中文昵称都可能），
+ * 词典没有翻译时直接显示 tag key（如 `jndfh`、`toraisi666`），不回退成
+ * `搜索: artist:"jndfh$"` 这种长串；有翻译时仍优先用翻译名（如 asanagi → 朝凪）。
  */
 export const bookmarkTitleWith = (
   bm: Pick<ScrapeBookmark, 'name' | 'keyword' | 'config' | 'type'>,
@@ -71,6 +75,8 @@ export const bookmarkTitleWith = (
   if (tag) {
     const item = translate(tag)
     if (item.name && item.name !== item.key) return item.name
+    // artist 类无翻译：显示画师名/ID 本身
+    if (tag.startsWith('artist:')) return tag.slice('artist:'.length)
   }
   return bookmarkDisplayTitle(bm)
 }

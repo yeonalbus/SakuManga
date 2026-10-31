@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// 书签名片（Round49 v3）
+// 书签名片（Round49 v4）
 //
 // 结构（固定高度，内容变化不推挤卡片）：
 //   a 标题行 24px：主标题（1 行省略）+ 右上角 ⚙ 配置菜单
 //   b 副标题 18px：位置字段 + 非默认筛选（1 行）
 //   c 徽章行 22px：追新/续扫/兴趣 · 🧾已囤货 · 🔔更新探测（仅状态展示）
 //   d 备注框 76px：带边框，右上角 ✏️ 编辑
-// 有更新 → 金色框（不再用红点）；置顶不标图标（靠书签页「置顶区」表达）。
+// 有更新 → 金色框；书签标记 → 左侧 3px 竖色条（追新蓝 / 续扫绿 / 兴趣灰）。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -41,12 +41,13 @@ const rootEl = ref<HTMLElement | null>(null)
 
 const roleLabels: Record<ScrapeBookmarkRole, string> = {
   newest: '追新',
-  oldest: '续扫',
   interest: '兴趣',
+  oldest: '续扫',
 }
-const roleOrder: ScrapeBookmarkRole[] = ['newest', 'oldest', 'interest']
+/** 菜单里的展示顺序：追新 | 兴趣 | 续扫 */
+const roleChoices: ScrapeBookmarkRole[] = ['newest', 'interest', 'oldest']
 
-/** 主标题：自定义名称 > 翻译名 > 副标题内容 */
+/** 主标题：自定义名称 > 翻译名 > (artist) tag key > 副标题内容 */
 const title = computed(() => bookmarkTitleWith(props.bm, tagStore.translate))
 /** 副标题：永远显示位置 + 非默认筛选（与主标题相同也保留） */
 const subtitle = computed(() => bookmarkDisplayTitle(props.bm))
@@ -88,13 +89,11 @@ const toggleBulk = async () => {
   if (ok) toast.success(props.bm.bulkDone ? '已取消已囤货标记' : '已标记为已囤货')
 }
 
-/** 修改书签标记：追新 → 续扫 → 兴趣 循环 */
-const cycleRole = async () => {
-  closeMenu()
-  const idx = roleOrder.indexOf(props.bm.role)
-  const next = roleOrder[(idx + 1) % roleOrder.length]
-  const ok = await updateBookmarkFields(props.bm.id, { role: next })
-  if (ok) toast.success(`标记已改为「${roleLabels[next]}」`)
+/** 设置书签标记（三项直接切换，点完不关菜单） */
+const setRole = async (role: ScrapeBookmarkRole) => {
+  if (props.bm.role === role) return
+  const ok = await updateBookmarkFields(props.bm.id, { role })
+  if (ok) toast.success(`标记已改为「${roleLabels[role]}」`)
 }
 
 /** 修改名称（留空恢复默认显示） */
@@ -132,10 +131,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   <article
     ref="rootEl"
     class="bm-card"
-    :class="{ updated: bm.hasUpdate }"
+    :class="[`role-${bm.role}`, { updated: bm.hasUpdate }]"
     @click="jump"
   >
-    <div class="bm-cover">🖼</div>
+    <div class="bm-cover">
+      <img v-if="bm.anchor?.coverUrl" :src="bm.anchor.coverUrl" alt="" loading="lazy" />
+      <span v-else class="bm-cover-placeholder">🖼</span>
+    </div>
 
     <div class="bm-body">
       <!-- a：标题行 -->
@@ -176,8 +178,18 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="bm-menu-item" @click="toggleBulk">
           🧾 {{ bm.bulkDone ? '取消已囤货' : '标记已囤货' }}
         </div>
-        <div class="bm-menu-item" @click="cycleRole">
-          🏷️ 书签标记：{{ roleLabels[bm.role] }}（点击切换）
+        <div class="bm-menu-sep" />
+        <div class="bm-menu-role-label">书签标记</div>
+        <div class="bm-menu-role">
+          <button
+            v-for="r in roleChoices"
+            :key="r"
+            class="bm-role-chip"
+            :class="[r, { active: bm.role === r }]"
+            @click.stop="setRole(r)"
+          >
+            {{ roleLabels[r] }}
+          </button>
         </div>
         <div class="bm-menu-sep" />
         <div class="bm-menu-item danger" @click="remove">🗑 删除书签</div>
@@ -198,6 +210,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   border: 1px solid var(--app-border-3);
   border-radius: 10px;
   cursor: pointer;
+  overflow: hidden;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
@@ -212,16 +225,46 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   box-shadow: 0 0 0 1px rgba(230, 184, 0, 0.18);
 }
 
+/* 书签标记：左侧 3px 竖色条（与金框并存，不抢更新信号） */
+.bm-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+}
+.bm-card.role-newest::before {
+  background: #4fa3e3;
+}
+.bm-card.role-oldest::before {
+  background: #4cc38a;
+}
+.bm-card.role-interest::before {
+  background: #5a5a5a;
+}
+
 /* 封面：3:4，固定 120×160 */
 .bm-cover {
+  position: relative;
   flex-shrink: 0;
   width: 120px;
   height: 160px;
   border-radius: 6px;
+  overflow: hidden;
   background: linear-gradient(160deg, #2a2a2a, #222);
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.bm-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.bm-cover-placeholder {
   font-size: 30px;
   color: #555;
 }
@@ -361,7 +404,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   position: absolute;
   top: 42px;
   right: 12px;
-  width: 190px;
+  width: 210px;
   background-color: var(--app-surface-2);
   border: 1px solid var(--app-border-3);
   border-radius: 8px;
@@ -378,7 +421,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   font-size: 0.8rem;
   color: var(--app-text-2);
   cursor: pointer;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bm-menu-item:hover {
   background-color: var(--app-surface-3);
@@ -395,5 +441,47 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   height: 1px;
   background-color: var(--app-border-2);
   margin: 4px 6px;
+}
+
+/* 菜单里的书签标记三项 chips */
+.bm-menu-role-label {
+  padding: 4px 10px 2px;
+  font-size: 0.72rem;
+  color: var(--app-text-3);
+}
+.bm-menu-role {
+  display: flex;
+  gap: 4px;
+  padding: 2px 10px 6px;
+}
+.bm-role-chip {
+  flex: 1;
+  padding: 4px 0;
+  border-radius: 4px;
+  border: 1px solid var(--app-border-3);
+  background: transparent;
+  color: var(--app-text-3);
+  font-size: 0.74rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.bm-role-chip:hover {
+  color: var(--app-text-strong);
+}
+.bm-role-chip.newest.active {
+  border-color: #4fa3e3;
+  color: #4fa3e3;
+  background: rgba(79, 163, 227, 0.12);
+}
+.bm-role-chip.oldest.active {
+  border-color: #4cc38a;
+  color: #4cc38a;
+  background: rgba(76, 195, 138, 0.12);
+}
+.bm-role-chip.interest.active {
+  border-color: var(--app-text-muted);
+  color: var(--app-text-2);
+  background: rgba(255, 255, 255, 0.06);
 }
 </style>

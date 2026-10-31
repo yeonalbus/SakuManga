@@ -68,6 +68,8 @@ export const useBookmarkMigrate = () => {
       token: cand.token,
       title: cand.title,
       postedAt: cand.postedAt || prev?.postedAt,
+      // Round49：迁移时一并换封面（候选画廊的封面）；取不到则保留旧封面，避免丢图
+      coverUrl: cand.coverUrl || prev?.coverUrl || undefined,
       invalid: null,
       migratedFrom: prev
         ? { gid: prev.gid, token: prev.token, title: prev.title, postedAt: prev.postedAt }

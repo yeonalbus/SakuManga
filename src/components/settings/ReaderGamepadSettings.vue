@@ -23,7 +23,11 @@
       <div class="item-info">
         <div class="item-title">手柄连接状态</div>
         <div class="item-subtext" :class="{ 'text-connected': gamepadConnected }">
-          {{ gamepadConnected ? `已连接：${gamepadName}` : '未检测到手柄' }}
+          {{
+            gamepadConnected
+              ? `已连接：${gamepadName}`
+              : '未检测到手柄（请先按一下手柄任意键唤醒，或尝试充电手柄）'
+          }}
         </div>
       </div>
     </div>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#2b2f22"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <circle cx="434" cy="203" r="152" fill="#b6d96a" opacity="0.10"/>
+  <circle cx="434" cy="203" r="152" fill="none" stroke="#b6d96a" stroke-width="1.5" opacity="0.35"/>
+  <circle cx="434" cy="203" r="94.24" fill="none" stroke="#b6d96a" stroke-width="1" opacity="0.20"/>
+  <line x1="30" y1="760" x2="150" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="64" y1="760" x2="184" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="98" y1="760" x2="218" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="132" y1="760" x2="252" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="166" y1="760" x2="286" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="200" y1="760" x2="320" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/><line x1="234" y1="760" x2="354" y2="590" stroke="#b6d96a" stroke-width="2" opacity="0.18"/>
+  <rect x="40" y="40" width="8" height="8" fill="#b6d96a" opacity="0.28304638816043737"/><rect x="56" y="40" width="8" height="8" fill="#b6d96a" opacity="0.2796875972300768"/><rect x="72" y="40" width="8" height="8" fill="#b6d96a" opacity="0.46514189438894393"/><rect x="88" y="40" width="8" height="8" fill="#b6d96a" opacity="0.5088676155544818"/><rect x="40" y="56" width="8" height="8" fill="#b6d96a" opacity="0.5438456957228481"/><rect x="56" y="56" width="8" height="8" fill="#b6d96a" opacity="0.6421993223950266"/><rect x="72" y="56" width="8" height="8" fill="#b6d96a" opacity="0.30996997905895113"/><rect x="88" y="56" width="8" height="8" fill="#b6d96a" opacity="0.2857607054524124"/><rect x="40" y="72" width="8" height="8" fill="#b6d96a" opacity="0.44823638992384074"/><rect x="56" y="72" width="8" height="8" fill="#b6d96a" opacity="0.5693650695495307"/><rect x="72" y="72" width="8" height="8" fill="#b6d96a" opacity="0.3396680819801986"/><rect x="88" y="72" width="8" height="8" fill="#b6d96a" opacity="0.42325530052185056"/><rect x="72" y="88" width="8" height="8" fill="#b6d96a" opacity="0.32036450076848266"/>
+  <rect x="36" y="36" width="528" height="728" fill="none" stroke="#b6d96a" stroke-width="1" opacity="0.18" rx="6"/>
+  <text x="56" y="568" fill="#b6d96a" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13" letter-spacing="4" opacity="0.75">SAMPLE ARTWORK</text>
+  <text x="56" y="650" fill="#f2f5fa" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="52" font-weight="700">纸鸢与风</text>
+  <text x="58" y="692" fill="#b6d96a" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="19" opacity="0.9">Paper Kite &amp; Wind</text>
+  <rect x="56" y="48" width="46" height="3" fill="#b6d96a" opacity="0.7"/>
+  <text x="544" y="744" text-anchor="end" fill="#8b93a3" font-family="monospace" font-size="12">demo / 53</text>
+</svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1160" viewBox="0 0 800 1160">
+  <rect width="800" height="1160" fill="#f7f5ee"/>
+  <rect x="56" y="56" width="688" height="336" fill="#eceade" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="64" width="672" height="320" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="96" x2="724" y2="96" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="147.2" x2="724" y2="147.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="198.4" x2="724" y2="198.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="249.60000000000002" x2="724" y2="249.60000000000002" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="300.8" x2="724" y2="300.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="352" x2="724" y2="352" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="485.56454863734547" cy="227.08914557136595" r="120.23861678570509" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="485.56454863734547" cy="227.08914557136595" r="120.23861678570509" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><rect x="143.848738809824" y="323.3941019594669" width="248.8354820743203" height="71.0935441891104" fill="#b9b5a4" opacity="0.6"/>
+           <rect x="143.848738809824" y="323.3941019594669" width="248.8354820743203" height="71.0935441891104" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.45"/>
+      <g opacity="0.9">
+        <rect x="305.0651058459282" y="117.27365174606443" width="204.85310810908675" height="53.76" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M325.0651058459282 171.03365174606444 L329.0651058459282 189.03365174606444 L349.0651058459282 171.03365174606444" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g><rect x="56" y="410" width="688" height="395" fill="#e6e3d6" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="418" width="672" height="379" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="450" x2="724" y2="450" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="513" x2="724" y2="513" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="576" x2="724" y2="576" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="639" x2="724" y2="639" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="702" x2="724" y2="702" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="765" x2="724" y2="765" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="417.06222657449547" cy="625.9304474802921" r="77.80269613619893" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="417.06222657449547" cy="625.9304474802921" r="77.80269613619893" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><rect x="133.10274374678733" y="697.0119240023196" width="193.81895195618273" height="98.70346474440304" fill="#b9b5a4" opacity="0.6"/>
+           <rect x="133.10274374678733" y="697.0119240023196" width="193.81895195618273" height="98.70346474440304" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.45"/>
+      <g opacity="0.9">
+        <rect x="276.980000448674" y="532.0797301934333" width="197.8389716026187" height="63.2" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M296.980000448674 595.2797301934334 L300.980000448674 613.2797301934334 L320.980000448674 595.2797301934334" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g><rect x="56" y="823" width="688" height="257" fill="#eceade" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="831" width="672" height="241" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="863" x2="724" y2="863" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="898.4" x2="724" y2="898.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="933.8" x2="724" y2="933.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="969.2" x2="724" y2="969.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="1004.6" x2="724" y2="1004.6" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="1040" x2="724" y2="1040" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="455.40710130520165" cy="932.4442972746212" r="73.19178390744142" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="455.40710130520165" cy="932.4442972746212" r="73.19178390744142" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><rect x="144.05848284706474" y="954.6872323754011" width="203.23903625980023" height="31.626583073530345" fill="#b9b5a4" opacity="0.6"/>
+           <rect x="144.05848284706474" y="954.6872323754011" width="203.23903625980023" height="31.626583073530345" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.45"/><line x1="434.40000000000003" y1="847" x2="668.32" y2="847" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="859.85" x2="668.32" y2="859.85" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="872.7" x2="668.32" y2="872.7" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="885.55" x2="668.32" y2="885.55" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="898.4" x2="668.32" y2="898.4" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="911.25" x2="668.32" y2="911.25" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/>
+      <g opacity="0.9">
+        <rect x="335.4866744197905" y="898.1947410247475" width="247.48755476281045" height="41.12" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M355.4866744197905 939.3147410247475 L359.4866744197905 957.3147410247475 L379.4866744197905 939.3147410247475" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g>
+  <text x="744" y="1138" text-anchor="end" fill="#9a968a" font-family="monospace" font-size="15">11</text>
+</svg>

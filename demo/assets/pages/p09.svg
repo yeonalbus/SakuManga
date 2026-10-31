@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1160" viewBox="0 0 800 1160">
+  <rect width="800" height="1160" fill="#f7f5ee"/>
+  <rect x="56" y="56" width="688" height="514" fill="#eceade" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="64" width="672" height="498" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="96" x2="724" y2="96" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="182.8" x2="724" y2="182.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="269.6" x2="724" y2="269.6" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="356.4" x2="724" y2="356.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="443.2" x2="724" y2="443.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="530" x2="724" y2="530" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="561.1550760854036" cy="281.25631663380193" r="131.30618090897798" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="561.1550760854036" cy="281.25631663380193" r="131.30618090897798" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><rect x="157.89215324983" y="406.2627143318299" width="271.2944501750171" height="101.76965199804864" fill="#b9b5a4" opacity="0.6"/>
+           <rect x="157.89215324983" y="406.2627143318299" width="271.2944501750171" height="101.76965199804864" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.45"/><line x1="434.40000000000003" y1="80" x2="668.32" y2="80" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="105.7" x2="668.32" y2="105.7" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="131.4" x2="668.32" y2="131.4" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="157.1" x2="668.32" y2="157.1" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="182.8" x2="668.32" y2="182.8" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="208.5" x2="668.32" y2="208.5" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/>
+      <g opacity="0.9">
+        <rect x="282.77659788474443" y="221.8517205478996" width="201.7884608221054" height="82.24" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M302.77659788474443 304.09172054789957 L306.77659788474443 322.09172054789957 L326.77659788474443 304.09172054789957" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g><rect x="56" y="588" width="688" height="492" fill="#e6e3d6" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="596" width="672" height="476" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="628" x2="724" y2="628" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="710.4" x2="724" y2="710.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="792.8" x2="724" y2="792.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="875.2" x2="724" y2="875.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="957.6" x2="724" y2="957.6" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="1040" x2="724" y2="1040" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="511.33661767505106" cy="803.9780368560926" r="136.42045891586693" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="511.33661767505106" cy="803.9780368560926" r="136.42045891586693" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/>
+      <g opacity="0.9">
+        <rect x="358.3587518268824" y="711.3748273528554" width="256.1343304689228" height="78.72" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M378.3587518268824 790.0948273528554 L382.3587518268824 808.0948273528554 L402.3587518268824 790.0948273528554" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g>
+  <text x="744" y="1138" text-anchor="end" fill="#9a968a" font-family="monospace" font-size="15">9</text>
+</svg>

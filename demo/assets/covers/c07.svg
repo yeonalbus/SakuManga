@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#152238"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <circle cx="476" cy="176" r="174" fill="#8fb8ff" opacity="0.10"/>
+  <circle cx="476" cy="176" r="174" fill="none" stroke="#8fb8ff" stroke-width="1.5" opacity="0.35"/>
+  <circle cx="476" cy="176" r="107.88" fill="none" stroke="#8fb8ff" stroke-width="1" opacity="0.20"/>
+  <line x1="30" y1="760" x2="150" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="64" y1="760" x2="184" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="98" y1="760" x2="218" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="132" y1="760" x2="252" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="166" y1="760" x2="286" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="200" y1="760" x2="320" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/><line x1="234" y1="760" x2="354" y2="590" stroke="#8fb8ff" stroke-width="2" opacity="0.18"/>
+  <rect x="40" y="40" width="8" height="8" fill="#8fb8ff" opacity="0.44571344312280414"/><rect x="88" y="40" width="8" height="8" fill="#8fb8ff" opacity="0.3716102512553334"/><rect x="56" y="56" width="8" height="8" fill="#8fb8ff" opacity="0.5281689525581896"/><rect x="72" y="56" width="8" height="8" fill="#8fb8ff" opacity="0.4679183320142329"/><rect x="88" y="56" width="8" height="8" fill="#8fb8ff" opacity="0.46060328371822834"/><rect x="40" y="72" width="8" height="8" fill="#8fb8ff" opacity="0.43395619513466954"/><rect x="56" y="72" width="8" height="8" fill="#8fb8ff" opacity="0.4666138707660139"/><rect x="72" y="72" width="8" height="8" fill="#8fb8ff" opacity="0.2928461279720068"/><rect x="88" y="72" width="8" height="8" fill="#8fb8ff" opacity="0.5111737976782025"/><rect x="88" y="88" width="8" height="8" fill="#8fb8ff" opacity="0.30740479649975894"/>
+  <rect x="36" y="36" width="528" height="728" fill="none" stroke="#8fb8ff" stroke-width="1" opacity="0.18" rx="6"/>
+  <text x="56" y="568" fill="#8fb8ff" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13" letter-spacing="4" opacity="0.75">SAMPLE ARTWORK</text>
+  <text x="56" y="650" fill="#f2f5fa" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="52" font-weight="700">海边的天文台</text>
+  <text x="58" y="692" fill="#8fb8ff" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="19" opacity="0.9">Observatory by the Sea</text>
+  <rect x="56" y="48" width="46" height="3" fill="#8fb8ff" opacity="0.7"/>
+  <text x="544" y="744" text-anchor="end" fill="#8b93a3" font-family="monospace" font-size="12">demo / 71</text>
+</svg>

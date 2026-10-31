@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#2c1f3d"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <circle cx="436" cy="173" r="175" fill="#b98cff" opacity="0.10"/>
+  <circle cx="436" cy="173" r="175" fill="none" stroke="#b98cff" stroke-width="1.5" opacity="0.35"/>
+  <circle cx="436" cy="173" r="108.5" fill="none" stroke="#b98cff" stroke-width="1" opacity="0.20"/>
+  <line x1="30" y1="760" x2="150" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="64" y1="760" x2="184" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="98" y1="760" x2="218" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="132" y1="760" x2="252" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="166" y1="760" x2="286" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="200" y1="760" x2="320" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/><line x1="234" y1="760" x2="354" y2="590" stroke="#b98cff" stroke-width="2" opacity="0.18"/>
+  <rect x="88" y="40" width="8" height="8" fill="#b98cff" opacity="0.6313735822215676"/><rect x="40" y="56" width="8" height="8" fill="#b98cff" opacity="0.253574379067868"/><rect x="56" y="56" width="8" height="8" fill="#b98cff" opacity="0.3334931399673223"/><rect x="88" y="56" width="8" height="8" fill="#b98cff" opacity="0.5857811479829251"/><rect x="40" y="72" width="8" height="8" fill="#b98cff" opacity="0.5465268707834184"/><rect x="72" y="72" width="8" height="8" fill="#b98cff" opacity="0.5120818394236266"/><rect x="88" y="72" width="8" height="8" fill="#b98cff" opacity="0.3351938735693693"/><rect x="40" y="88" width="8" height="8" fill="#b98cff" opacity="0.34207320408895614"/><rect x="72" y="88" width="8" height="8" fill="#b98cff" opacity="0.31287776967510583"/><rect x="88" y="88" width="8" height="8" fill="#b98cff" opacity="0.3985356005840004"/>
+  <rect x="36" y="36" width="528" height="728" fill="none" stroke="#b98cff" stroke-width="1" opacity="0.18" rx="6"/>
+  <text x="56" y="568" fill="#b98cff" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13" letter-spacing="4" opacity="0.75">SAMPLE ARTWORK</text>
+  <text x="56" y="650" fill="#f2f5fa" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="52" font-weight="700">机械之心</text>
+  <text x="58" y="692" fill="#b98cff" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="19" opacity="0.9">Mechanical Heart</text>
+  <rect x="56" y="48" width="46" height="3" fill="#b98cff" opacity="0.7"/>
+  <text x="544" y="744" text-anchor="end" fill="#8b93a3" font-family="monospace" font-size="12">demo / 23</text>
+</svg>

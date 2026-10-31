@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#2f2418"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <circle cx="472" cy="180" r="173" fill="#f0c070" opacity="0.10"/>
+  <circle cx="472" cy="180" r="173" fill="none" stroke="#f0c070" stroke-width="1.5" opacity="0.35"/>
+  <circle cx="472" cy="180" r="107.26" fill="none" stroke="#f0c070" stroke-width="1" opacity="0.20"/>
+  <line x1="30" y1="760" x2="150" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="64" y1="760" x2="184" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="98" y1="760" x2="218" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="132" y1="760" x2="252" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="166" y1="760" x2="286" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="200" y1="760" x2="320" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/><line x1="234" y1="760" x2="354" y2="590" stroke="#f0c070" stroke-width="2" opacity="0.18"/>
+  <rect x="40" y="40" width="8" height="8" fill="#f0c070" opacity="0.5191262674517929"/><rect x="56" y="56" width="8" height="8" fill="#f0c070" opacity="0.4526497080922127"/><rect x="72" y="56" width="8" height="8" fill="#f0c070" opacity="0.4613019610755146"/><rect x="88" y="56" width="8" height="8" fill="#f0c070" opacity="0.27937349090352653"/><rect x="40" y="72" width="8" height="8" fill="#f0c070" opacity="0.5315828300081193"/><rect x="56" y="72" width="8" height="8" fill="#f0c070" opacity="0.4287602534517646"/><rect x="40" y="88" width="8" height="8" fill="#f0c070" opacity="0.5826548243872822"/><rect x="88" y="88" width="8" height="8" fill="#f0c070" opacity="0.31610354464501145"/>
+  <rect x="36" y="36" width="528" height="728" fill="none" stroke="#f0c070" stroke-width="1" opacity="0.18" rx="6"/>
+  <text x="56" y="568" fill="#f0c070" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13" letter-spacing="4" opacity="0.75">SAMPLE ARTWORK</text>
+  <text x="56" y="650" fill="#f2f5fa" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="52" font-weight="700">午后三点的猫</text>
+  <text x="58" y="692" fill="#f0c070" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="19" opacity="0.9">Cat at Three O'Clock</text>
+  <rect x="56" y="48" width="46" height="3" fill="#f0c070" opacity="0.7"/>
+  <text x="544" y="744" text-anchor="end" fill="#8b93a3" font-family="monospace" font-size="12">demo / 83</text>
+</svg>

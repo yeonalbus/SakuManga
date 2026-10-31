@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1160" viewBox="0 0 800 1160">
+  <rect width="800" height="1160" fill="#f7f5ee"/>
+  <rect x="56" y="56" width="688" height="494" fill="#eceade" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="64" width="672" height="478" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="96" x2="724" y2="96" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="178.8" x2="724" y2="178.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="261.6" x2="724" y2="261.6" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="344.4" x2="724" y2="344.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="427.2" x2="724" y2="427.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="510" x2="724" y2="510" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="557.2094150766917" cy="363.2094150766917" r="170.79058492330833" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="557.2094150766917" cy="363.2094150766917" r="170.79058492330833" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><rect x="172.08844792589545" y="403.60128807812" width="269.28914304301145" height="107.80458724734373" fill="#b9b5a4" opacity="0.6"/>
+           <rect x="172.08844792589545" y="403.60128807812" width="269.28914304301145" height="107.80458724734373" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.45"/>
+      <g opacity="0.9">
+        <rect x="284.1643763819337" y="144.99326296849176" width="251.9744794972241" height="79.04" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M304.1643763819337 224.03326296849178 L308.1643763819337 242.03326296849178 L328.1643763819337 224.03326296849178" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g><rect x="56" y="568" width="688" height="512" fill="#e6e3d6" stroke="#3d3d38" stroke-width="2"/>
+      <rect x="64" y="576" width="672" height="496" fill="none" stroke="#3d3d38" stroke-width="1" opacity="0.25"/>
+      <line x1="76" y1="608" x2="724" y2="608" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="694.4" x2="724" y2="694.4" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="780.8" x2="724" y2="780.8" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="867.2" x2="724" y2="867.2" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="953.6" x2="724" y2="953.6" stroke="#cfccc2" stroke-width="1" opacity="0.45"/><line x1="76" y1="1040" x2="724" y2="1040" stroke="#cfccc2" stroke-width="1" opacity="0.45"/>
+      <circle cx="404.77388420030474" cy="902.3299626588821" r="160.50516491889954" fill="#d9d6c8" opacity="0.75"/>
+           <circle cx="404.77388420030474" cy="902.3299626588821" r="160.50516491889954" fill="none" stroke="#3d3d38" stroke-width="1.2" opacity="0.5"/><line x1="434.40000000000003" y1="592" x2="668.32" y2="592" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="617.6" x2="668.32" y2="617.6" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="643.2" x2="668.32" y2="643.2" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="668.8" x2="668.32" y2="668.8" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="694.4" x2="668.32" y2="694.4" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/><line x1="434.40000000000003" y1="720" x2="668.32" y2="720" stroke="#8f8b7d" stroke-width="1" opacity="0.5"/>
+      <g opacity="0.9">
+        <rect x="192.02946762114763" y="712.279999051094" width="219.8166539891064" height="81.92" rx="16" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+        <path d="M212.02946762114763 794.199999051094 L216.02946762114763 812.199999051094 L236.02946762114763 794.199999051094" fill="#fffdf8" stroke="#5a5a52" stroke-width="1.5"/>
+      </g>
+  <text x="744" y="1138" text-anchor="end" fill="#9a968a" font-family="monospace" font-size="15">6</text>
+</svg>

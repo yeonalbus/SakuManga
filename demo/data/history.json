@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "comicId": "demo-c04",
+      "source": "offline",
+      "gid": "1001004",
+      "comicTitle": "雨后的图书馆",
+      "coverUrl": "/api/v1/comics/demo-c04/cover",
+      "lastChapterTitle": "第 01 话",
+      "lastPageIndex": 21,
+      "totalPageCount": 52,
+      "lastReadAt": "2026-10-30T21:40:00+08:00"
+    },
+    {
+      "id": 2,
+      "comicId": "1002002",
+      "source": "online",
+      "gid": "1002002",
+      "comicTitle": "機械の心 -メカニカルハート-",
+      "coverUrl": "/demo-assets/covers/c02.svg",
+      "token": "9c31e5d248",
+      "lastChapterTitle": "第 02 话",
+      "lastPageIndex": 38,
+      "totalPageCount": 62,
+      "lastReadAt": "2026-10-30T19:05:00+08:00"
+    },
+    {
+      "id": 3,
+      "comicId": "demo-c02",
+      "source": "offline",
+      "gid": "1001002",
+      "comicTitle": "机械之心",
+      "coverUrl": "/api/v1/comics/demo-c02/cover",
+      "lastChapterTitle": "第 01 话",
+      "lastPageIndex": 12,
+      "totalPageCount": 38,
+      "lastReadAt": "2026-10-29T23:12:00+08:00"
+    },
+    {
+      "id": 4,
+      "comicId": "1002001",
+      "source": "online",
+      "gid": "1002001",
+      "comicTitle": "夜行電車 -ナイトトレイン- 総集編",
+      "coverUrl": "/demo-assets/covers/c01.svg",
+      "token": "4f9a2c1b7e",
+      "lastChapterTitle": "第 01 话",
+      "lastPageIndex": 5,
+      "totalPageCount": 46,
+      "lastReadAt": "2026-10-29T20:47:00+08:00"
+    },
+    {
+      "id": 5,
+      "comicId": "demo-c01",
+      "source": "offline",
+      "gid": "1001001",
+      "comicTitle": "夜行電車",
+      "coverUrl": "/api/v1/comics/demo-c01/cover",
+      "lastChapterTitle": "第 01 话",
+      "lastPageIndex": 9,
+      "totalPageCount": 24,
+      "lastReadAt": "2026-10-28T22:30:00+08:00"
+    }
+  ],
+  "total": 5
+}

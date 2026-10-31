@@ -1,0 +1,10 @@
+[
+  { "namespace": "language", "key": "chinese", "name": "中文", "intro": "演示标签：语言为中文", "count": 0 },
+  { "namespace": "language", "key": "japanese", "name": "日文", "intro": "演示标签：语言为日文", "count": 0 },
+  { "namespace": "language", "key": "english", "name": "英文", "intro": "演示标签：语言为英文", "count": 0 },
+  { "namespace": "other", "key": "full color", "name": "全彩", "intro": "演示标签：全彩页面", "count": 0 },
+  { "namespace": "other", "key": "sample", "name": "示例", "intro": "演示标签：示例内容", "count": 0 },
+  { "namespace": "parody", "key": "original", "name": "原创", "intro": "演示标签：原创作品", "count": 0 },
+  { "namespace": "artist", "key": "demo artist", "name": "演示画师", "intro": "演示标签：画师", "count": 0 },
+  { "namespace": "group", "key": "demo circle", "name": "演示社团", "intro": "演示标签：社团", "count": 0 }
+]

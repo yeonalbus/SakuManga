@@ -1,0 +1,90 @@
+{
+  "offline": [
+    {
+      "id": "demo-c01",
+      "title": "夜行電車",
+      "titleJpn": "夜行電車 -ナイトトレイン-",
+      "coverUrl": "/api/v1/comics/demo-c01/cover",
+      "coverFile": "c01.svg",
+      "source": "offline",
+      "tags": ["中文", "全彩", "原创"],
+      "tagRaws": ["language:chinese", "other:full color", "parody:original"],
+      "category": "Doujinshi",
+      "rating": 4.6,
+      "pageCount": 24,
+      "readCount": 7,
+      "updatedAt": "2026-10-24T21:10:00+08:00",
+      "localPath": "D:\\DemoLibrary\\Doujinshi\\[演示社团] 夜行電車",
+      "fileSize": 148589312,
+      "isDownloaded": true
+    },
+    {
+      "id": "demo-c02",
+      "title": "机械之心",
+      "titleJpn": "機械の心 -メカニカルハート-",
+      "coverUrl": "/api/v1/comics/demo-c02/cover",
+      "coverFile": "c02.svg",
+      "source": "offline",
+      "tags": ["中文", "全彩", "演示社团"],
+      "tagRaws": ["language:chinese", "other:full color", "group:demo circle"],
+      "category": "Manga",
+      "rating": 4.8,
+      "pageCount": 38,
+      "readCount": 12,
+      "updatedAt": "2026-10-23T19:42:00+08:00",
+      "localPath": "D:\\DemoLibrary\\Manga\\[演示社团] 机械之心",
+      "fileSize": 236421120,
+      "isDownloaded": true
+    },
+    {
+      "id": "demo-c04",
+      "title": "雨后的图书馆",
+      "titleJpn": "雨上がりの図書館",
+      "coverUrl": "/api/v1/comics/demo-c04/cover",
+      "coverFile": "c04.svg",
+      "source": "offline",
+      "tags": ["中文", "全彩"],
+      "tagRaws": ["language:chinese", "other:full color"],
+      "category": "Non-H",
+      "rating": 4.9,
+      "pageCount": 52,
+      "readCount": 21,
+      "updatedAt": "2026-10-20T08:30:00+08:00",
+      "localPath": "D:\\DemoLibrary\\Non-H\\雨后的图书馆",
+      "fileSize": 412065792,
+      "isDownloaded": true
+    }
+  ],
+  "online": [
+    {
+      "id": "1002002",
+      "token": "9c31e5d248",
+      "title": "機械の心 -メカニカルハート-",
+      "coverUrl": "/demo-assets/covers/c02.svg",
+      "source": "online",
+      "category": "Manga",
+      "rating": 4.9,
+      "tags": ["language:chinese", "other:full color", "group:demo circle"],
+      "pageCount": 62,
+      "updatedAt": "2026-10-30 18:02",
+      "uploader": "demo_uploader",
+      "isFavorite": true,
+      "isDownloaded": true
+    },
+    {
+      "id": "1002007",
+      "token": "2c8a9f3d15",
+      "title": "海辺の天文台 -Observatory-",
+      "coverUrl": "/demo-assets/covers/c07.svg",
+      "source": "online",
+      "category": "Doujinshi",
+      "rating": 4.6,
+      "tags": ["language:chinese", "other:full color", "parody:original"],
+      "pageCount": 40,
+      "updatedAt": "2026-10-25 11:20",
+      "uploader": "seaside_obs",
+      "isFavorite": false,
+      "isDownloaded": false
+    }
+  ]
+}

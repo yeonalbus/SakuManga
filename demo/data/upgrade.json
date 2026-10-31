@@ -1,0 +1,47 @@
+{
+  "items": [
+    {
+      "id": "demo-c03",
+      "title": "星海回响",
+      "coverUrl": "/api/v1/comics/demo-c03/cover",
+      "category": "Doujinshi",
+      "pageCount": 18,
+      "fileSize": 98566144,
+      "localPath": "D:\\DemoLibrary\\Doujinshi\\星海回响",
+      "gid": "1001003",
+      "updatedAt": "2026-10-21T11:05:00+08:00",
+      "sourceMode": "gallery",
+      "downloadScheme": "",
+      "upgrading": false
+    },
+    {
+      "id": "demo-c05",
+      "title": "纸鸢与风",
+      "coverUrl": "/api/v1/comics/demo-c05/cover",
+      "category": "Artist CG",
+      "pageCount": 30,
+      "fileSize": 173015040,
+      "localPath": "D:\\DemoLibrary\\ArtistCG\\纸鸢与风",
+      "gid": "1001005",
+      "updatedAt": "2026-10-18T16:48:00+08:00",
+      "sourceMode": "archive",
+      "downloadScheme": "archiveResample",
+      "upgrading": false
+    },
+    {
+      "id": "demo-c06",
+      "title": "像素迷宫",
+      "coverUrl": "/api/v1/comics/demo-c06/cover",
+      "category": "Game CG",
+      "pageCount": 22,
+      "fileSize": 120586240,
+      "localPath": "D:\\DemoLibrary\\GameCG\\像素迷宫",
+      "gid": "1001006",
+      "updatedAt": "2026-10-15T22:20:00+08:00",
+      "sourceMode": "gallery",
+      "downloadScheme": "gallery",
+      "upgrading": false
+    }
+  ],
+  "total": 3
+}

@@ -12,7 +12,10 @@
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write --experimental-cli src/",
+    "demo": "node demo/serve.mjs",
+    "demo:assets": "node demo/assets/generate.mjs",
+    "demo:shots": "node demo/shots.mjs"
   },
   "dependencies": {
     "@phosphor-icons/vue": "^2.2.1",
@@ -33,6 +36,7 @@
     "jiti": "^2.7.0",
     "npm-run-all2": "^9.0.2",
     "oxlint": "~1.74.0",
+    "playwright-core": "^1.64.1",
     "prettier": "3.9.5",
     "typescript": "~6.0.0",
     "vite": "^8.1.5",

@@ -1,0 +1,40 @@
+{
+  "tags": [
+    { "namespace": "other", "key": "full color", "name": "全彩", "group": "core", "weight": 1.0, "libWeight": 0.92, "readWeight": 1.0, "comicCount": 6 },
+    { "namespace": "language", "key": "chinese", "name": "中文", "group": "misc", "weight": 0.93, "libWeight": 1.0, "readWeight": 0.86, "comicCount": 5 },
+    { "namespace": "parody", "key": "original", "name": "原创", "group": "ip", "weight": 0.84, "libWeight": 0.78, "readWeight": 0.9, "comicCount": 4 },
+    { "namespace": "other", "key": "school uniform", "name": "校服", "group": "core", "weight": 0.79, "libWeight": 0.7, "readWeight": 0.88, "comicCount": 3 },
+    { "namespace": "other", "key": "landscape", "name": "风景", "group": "misc", "weight": 0.72, "libWeight": 0.66, "readWeight": 0.78, "comicCount": 4 },
+    { "namespace": "other", "key": "animal ears", "name": "兽耳", "group": "core", "weight": 0.68, "libWeight": 0.6, "readWeight": 0.76, "comicCount": 3 },
+    { "namespace": "language", "key": "japanese", "name": "日文", "group": "misc", "weight": 0.63, "libWeight": 0.58, "readWeight": 0.68, "comicCount": 3 },
+    { "namespace": "other", "key": "glasses", "name": "眼镜", "group": "core", "weight": 0.58, "libWeight": 0.5, "readWeight": 0.66, "comicCount": 2 },
+    { "namespace": "location", "key": "night", "name": "夜景", "group": "misc", "weight": 0.55, "libWeight": 0.52, "readWeight": 0.58, "comicCount": 3 },
+    { "namespace": "other", "key": "kimono", "name": "和服", "group": "core", "weight": 0.5, "libWeight": 0.46, "readWeight": 0.54, "comicCount": 2 },
+    { "namespace": "other", "key": "sci-fi", "name": "科幻", "group": "misc", "weight": 0.47, "libWeight": 0.44, "readWeight": 0.5, "comicCount": 2 },
+    { "namespace": "other", "key": "cat", "name": "猫", "group": "core", "weight": 0.44, "libWeight": 0.4, "readWeight": 0.48, "comicCount": 2 },
+    { "namespace": "location", "key": "library", "name": "图书馆", "group": "misc", "weight": 0.41, "libWeight": 0.3, "readWeight": 0.52, "comicCount": 1 },
+    { "namespace": "other", "key": "mecha", "name": "机甲", "group": "core", "weight": 0.38, "libWeight": 0.36, "readWeight": 0.4, "comicCount": 2 },
+    { "namespace": "location", "key": "rain", "name": "雨", "group": "misc", "weight": 0.35, "libWeight": 0.28, "readWeight": 0.42, "comicCount": 1 },
+    { "namespace": "other", "key": "fantasy", "name": "幻想", "group": "core", "weight": 0.33, "libWeight": 0.34, "readWeight": 0.32, "comicCount": 2 },
+    { "namespace": "other", "key": "starry sky", "name": "星空", "group": "misc", "weight": 0.3, "libWeight": 0.26, "readWeight": 0.34, "comicCount": 1 },
+    { "namespace": "other", "key": "tail", "name": "尾巴", "group": "core", "weight": 0.28, "libWeight": 0.24, "readWeight": 0.32, "comicCount": 1 },
+    { "namespace": "location", "key": "rooftop", "name": "天台", "group": "misc", "weight": 0.26, "libWeight": 0.2, "readWeight": 0.32, "comicCount": 1 },
+    { "namespace": "other", "key": "wings", "name": "翅膀", "group": "core", "weight": 0.24, "libWeight": 0.22, "readWeight": 0.26, "comicCount": 1 },
+    { "namespace": "other", "key": "sunset", "name": "夕阳", "group": "misc", "weight": 0.22, "libWeight": 0.18, "readWeight": 0.26, "comicCount": 1 },
+    { "namespace": "other", "key": "yukata", "name": "浴衣", "group": "core", "weight": 0.2, "libWeight": 0.2, "readWeight": 0.2, "comicCount": 1 },
+    { "namespace": "other", "key": "monochrome", "name": "黑白", "group": "core", "weight": 0.19, "libWeight": 0.24, "readWeight": 0.14, "comicCount": 2 },
+    { "namespace": "other", "key": "food", "name": "美食", "group": "misc", "weight": 0.17, "libWeight": 0.14, "readWeight": 0.2, "comicCount": 1 },
+    { "namespace": "group", "key": "demo circle", "name": "演示社团", "group": "misc", "weight": 0.15, "libWeight": 0.16, "readWeight": 0.14, "comicCount": 1 }
+  ],
+  "artists": [
+    { "namespace": "artist", "key": "demo artist", "name": "演示画师", "comicCount": 3, "readWeight": 0.82 },
+    { "namespace": "group", "key": "demo circle", "name": "演示社团", "comicCount": 1, "readWeight": 0.2 }
+  ],
+  "meta": {
+    "totalComics": 6,
+    "taggedComics": 6,
+    "readSignalComics": 5,
+    "lastRebuildAt": 1761900000000,
+    "formulaVersion": 2
+  }
+}

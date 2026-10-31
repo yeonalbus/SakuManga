@@ -1,0 +1,40 @@
+{
+  "bookshelves": [
+    {
+      "id": "demo-shelf-1",
+      "name": "夜读精选",
+      "count": 2,
+      "comicIds": ["demo-c01", "demo-c02"],
+      "pinned": true,
+      "sortKey": 1000,
+      "sortKeys": { "demo-c01": 1000, "demo-c02": 2000 },
+      "unreadCount": 1,
+      "coverUrl": "/api/v1/comics/demo-c01/cover",
+      "coverComicId": ""
+    },
+    {
+      "id": "demo-shelf-2",
+      "name": "科幻系列",
+      "count": 2,
+      "comicIds": ["demo-c03", "demo-c04"],
+      "pinned": true,
+      "sortKey": 2000,
+      "sortKeys": { "demo-c03": 1000, "demo-c04": 2000 },
+      "unreadCount": 2,
+      "coverUrl": "/api/v1/comics/demo-c04/cover",
+      "coverComicId": ""
+    },
+    {
+      "id": "demo-shelf-3",
+      "name": "待读清单",
+      "count": 2,
+      "comicIds": ["demo-c05", "demo-c06"],
+      "pinned": false,
+      "sortKey": 3000,
+      "sortKeys": { "demo-c05": 1000, "demo-c06": 2000 },
+      "unreadCount": 1,
+      "coverUrl": "/api/v1/comics/demo-c05/cover",
+      "coverComicId": ""
+    }
+  ]
+}

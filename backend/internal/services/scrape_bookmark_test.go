@@ -136,17 +136,26 @@ func TestScrapeBookmarkNormalizeLenient(t *testing.T) {
 	}
 }
 
-func TestScrapeBookmarkRenameEmptyIgnored(t *testing.T) {
+// Round49：name 只表示「用户自定义名称」——留空即清空，卡片回退默认显示（检索条件 / uploader 名）
+func TestScrapeBookmarkRenameEmptyClearsName(t *testing.T) {
 	db := newScrapeBookmarkTestDB(t)
 	user := uint(1)
 	created, _ := CreateScrapeBookmark(db, user, validInput())
-	// 空名重命名：忽略（保持原名，不报错）
+	// 空名重命名：清空自定义名称，不报错
 	if err := RenameScrapeBookmark(db, user, created.ID, "   "); err != nil {
-		t.Fatalf("空名重命名应忽略不报错: %v", err)
+		t.Fatalf("空名重命名应清空名称且不报错: %v", err)
 	}
 	items, _ := ListScrapeBookmarks(db, user)
-	if items[0].Name != "测试书签" {
-		t.Fatalf("空名重命名不应改名称: %s", items[0].Name)
+	if items[0].Name != "" {
+		t.Fatalf("空名重命名应清空名称，实际保留: %q", items[0].Name)
+	}
+	// 非空名重命名仍生效（自动去首尾空格）
+	if err := RenameScrapeBookmark(db, user, created.ID, "  新名字 "); err != nil {
+		t.Fatalf("非空重命名失败: %v", err)
+	}
+	items, _ = ListScrapeBookmarks(db, user)
+	if items[0].Name != "新名字" {
+		t.Fatalf("非空重命名应去空格后写入，实际: %q", items[0].Name)
 	}
 }
 

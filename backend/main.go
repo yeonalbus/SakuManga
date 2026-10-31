@@ -72,6 +72,14 @@ func main() {
 		log.Printf("[DB] 已回填 %d 条忽略条目的成员快照（Round44 新增感知）", n)
 	}
 
+	// 1.3 Round49：回填搜刮书签的新增字段（幂等）。
+	//     老书签没有 role / 已囤货 / 置顶 / 更新开关等字段，这里按旧名字语义
+	//     提取一次初值（最新/最旧/已下载完），并清除失效检测剪枝后残留的
+	//     anchor.invalid 标记。pinned / updateWatch 保持 false（只能用户手动开启）。
+	if n := services.MigrateScrapeBookmarkFields(database.DB); n > 0 {
+		log.Printf("[DB] 已回填 %d 条书签的新字段（Round49）", n)
+	}
+
 	// 2. 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 

@@ -82,6 +82,12 @@ func (h *ScrapeBookmarkHandler) Update(c *gin.Context) {
 	var req struct {
 		Name   *string         `json:"name"`
 		Anchor json.RawMessage `json:"anchor"`
+		// Round49：书签项配置（部分更新，nil = 不修改）
+		Role        *string `json:"role"`
+		Note        *string `json:"note"`
+		Pinned      *bool   `json:"pinned"`
+		UpdateWatch *bool   `json:"updateWatch"`
+		BulkDone    *bool   `json:"bulkDone"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不合法"})
@@ -113,11 +119,36 @@ func (h *ScrapeBookmarkHandler) Update(c *gin.Context) {
 			return
 		}
 	}
+	// 书签项配置（Round49）：role / 备注 / 置顶 / 更新开关 / 已囤货
+	if req.Role != nil || req.Note != nil || req.Pinned != nil ||
+		req.UpdateWatch != nil || req.BulkDone != nil {
+		err := services.UpdateScrapeBookmarkFields(h.db, user.ID, uint(id), services.ScrapeBookmarkPatch{
+			Role:        req.Role,
+			Note:        req.Note,
+			Pinned:      req.Pinned,
+			UpdateWatch: req.UpdateWatch,
+			BulkDone:    req.BulkDone,
+		})
+		if err != nil {
+			if errors.Is(err, services.ErrBookmarkNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, services.ErrBookmarkPinLimit) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "书签配置更新失败: " + err.Error()})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// Check 批量失效检测（Round33）：探测锚定画廊是否已被删除 / 下架 / 被新版本取代
-func (h *ScrapeBookmarkHandler) Check(c *gin.Context) {
+// Probe 手动更新探测（Round49）：对开启更新开关的书签各取一页列表，
+// 判定「列表首条发布时间是否晚于锚定时间」。ids 为空 = 全部开启开关的书签。
+// POST /api/v1/scrape-bookmarks/probe  body {ids?: [...]}
+func (h *ScrapeBookmarkHandler) Probe(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
@@ -131,12 +162,12 @@ func (h *ScrapeBookmarkHandler) Check(c *gin.Context) {
 	var req struct {
 		IDs []uint `json:"ids"`
 	}
-	_ = c.ShouldBindJSON(&req) // 允许空 body（检测全部）
+	_ = c.ShouldBindJSON(&req) // 允许空 body（探测全部开启开关的书签）
 
 	ehSetting := getEHSetting(h.db, account.ID)
-	results, err := services.CheckScrapeBookmarks(h.db, h.eh, user.ID, account, ehSetting, req.IDs)
+	results, err := services.ProbeScrapeBookmarks(h.db, h.eh, user.ID, account, ehSetting, req.IDs)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "失效检测失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新探测失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"results": results})

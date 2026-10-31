@@ -11,16 +11,21 @@ import { useOnlineStore } from '@/stores/onlineStore'
 import { onlineSearchConfig, applySearchOptionsInherit } from '@/stores/searchStore'
 import {
   addScrapeBookmark,
+  updateBookmarkAnchor,
+  scrapeBookmarks,
   scopedBookmarkedGids,
   getBookmarkById,
   snapshotOnlineSearchConfig,
   cloneSearchConfig,
   bookmarkLocationLabel,
+  bookmarkDisplayTitle,
 } from '@/stores/scrapeBookmarksStore'
-import type { ScrapeBookmark } from '@/types/comic'
+import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import { useDetailPanel } from '@/composables/useDetailPanel'
 import { useUI } from '@/composables/useUI'
+// Round49：锚点转移判据（同检索条件 + 同书签标记 → 提示转移而非新建）
+import { isSameTransferScope } from '@/utils/bookmarkScope'
 // Round34：书签「按日期定位」编排（seek 到 postedAt 当天 → 自动向下翻页寻找锚定卡片）
 import { useBookmarkLocate } from '@/composables/useBookmarkLocate'
 // Round36：「加载较新内容」滚动锚定（前置插入后保持锚点卡不动 + 脉冲高亮）
@@ -38,7 +43,7 @@ import {
 } from '@/utils/scrollMemory'
 
 const onlineStore = useOnlineStore()
-const { toast } = useUI()
+const { toast, modal } = useUI()
 
 // ─── Round3-任务6：在线列表负向过滤（负向项不参与服务端搜索，仅渲染前本地剔除）───
 const filteredComics = computed(() => {
@@ -69,7 +74,8 @@ const { isWide, isPanelOpen, panelGid, panelToken, openDetail, closePanel, toggl
 // ─── Round34：书签「按日期定位」编排 ───
 // 首屏按书签发布时间 seek 到当天，再自动向下翻页（next 游标）寻找锚定卡片，
 // 命中后滚动居中 + 脉冲高亮；越过时间点/翻到尽头则交回现有失效探测兜底。
-const { locateInfo, locating, beginLocate, runLocate, abortLocate } = useBookmarkLocate()
+const { locateInfo, locating, beginLocate, runLocate, abortLocate, relocateRequest } =
+  useBookmarkLocate()
 /** 书签跳转首屏一次性 seek 日期（initSearch 消费后清空，不污染后续搜索/刷新） */
 let pendingSeekDate = ''
 
@@ -182,6 +188,17 @@ const handleRefresh = () => {
   void initSearch()
 }
 
+// Round49：锚点缺失优化——定位失败 → 时间锚迁移成功 → 用新锚点自动续定位
+// （先写库成功才触发，用户不需要从侧栏重新点一次书签）
+watch(relocateRequest, async (bm) => {
+  if (!bm) return
+  relocateRequest.value = null
+  if (!isActivePage.value || route.fullPath !== myFullPath) return
+  pendingSeekDate = beginLocate(bm)
+  await initSearch()
+  void runLocate()
+})
+
 // ─── Round36：「加载较新内容」滚动锚定 ───
 // 前置插入新一页后平移 scrollTop，让「加载前列表第一本」（= 上一次那页的最新一本）
 // 保持像素级原地不动，并给它加脉冲金框作为「新内容边界」标记：
@@ -218,16 +235,48 @@ const handleBookmarkCreate = () => {
 }
 
 // 创建书签（弹窗「确认」）：Round28 后端化为异步（乐观 + 失败回滚），失败返回 null 并已提示
-const handleBookmarkSave = async (payload: { name: string }) => {
+// Round49：先做「锚点转移」检测——同检索条件 + 同书签标记已存在时，提示转移而非新建
+const handleBookmarkSave = async (payload: {
+  name: string
+  role: ScrapeBookmarkRole
+  note: string
+  updateWatch: boolean
+  bulkDone: boolean
+}) => {
   const anchor = pendingAnchor.value
   if (!anchor) return // 未锚定不应走到这里（按钮已不提供纯位置保存）
-  const bm = await addScrapeBookmark(
-    payload.name,
-    bmType.value,
-    bmKeyword.value,
-    snapshotOnlineSearchConfig(),
-    anchor,
+  const cfg = snapshotOnlineSearchConfig()
+
+  const existing = scrapeBookmarks.value.find(
+    (b) => b.role === payload.role && isSameTransferScope(b.config, cfg),
   )
+  if (existing) {
+    const transfer = await modal.confirm(
+      `已存在相同配置的书签「${bookmarkDisplayTitle(existing)}」。\n\n` +
+        '是否把它的锚点转移到当前画廊？（不会新建书签，更新标记会被清除）',
+      '锚点转移',
+    )
+    if (transfer) {
+      const ok = await updateBookmarkAnchor(existing.id, {
+        ...anchor,
+        invalid: null,
+        migratedFrom: null,
+      })
+      if (!ok) return // 失败已由 store toast 提示
+      bmModalOpen.value = false
+      pickMode.value = false
+      pendingAnchor.value = null
+      toast.success('锚点已转移（更新标记已清除）')
+      return
+    }
+  }
+
+  const bm = await addScrapeBookmark(payload.name, bmType.value, bmKeyword.value, cfg, anchor, {
+    role: payload.role,
+    note: payload.note,
+    updateWatch: payload.updateWatch,
+    bulkDone: payload.bulkDone,
+  })
   if (!bm) return // 保存失败已由 store toast 提示
   bmModalOpen.value = false
   pickMode.value = false
@@ -254,12 +303,14 @@ const handlePickClick = (e: MouseEvent) => {
     // Round33：记录卡片在列表中的位置（老书签无发布时间时的迁移兜底）
     const listIndex = filteredComics.value.findIndex((c) => c.id === gid)
     // Round29：自动记录锚定画廊的发布时间（E 站 posted 日期 → OnlineComic.updatedAt）
+    // Round49：一并记录封面（书签页名片直接显示，避免逐条再请求）
     pendingAnchor.value = comic
       ? {
           gid,
           token: comic.source === 'online' ? comic.token : undefined,
           title: comic.title,
           postedAt: comic.updatedAt || undefined,
+          coverUrl: comic.coverUrl || undefined,
           listIndex: listIndex >= 0 ? listIndex : undefined,
         }
       : { gid }

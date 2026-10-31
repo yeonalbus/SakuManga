@@ -27,10 +27,12 @@ import { useOnlineStore } from '@/stores/onlineStore'
 import {
   bookmarkLocationLabel,
   clearAnchorFailed,
+  getBookmarkById,
   markAnchorFailed,
 } from '@/stores/scrapeBookmarksStore'
 import { hasPassedTarget, seekDateOf } from '@/utils/bookmarkTimeAnchor'
-import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
+// Round49：失效检测剪枝后，定位失败统一走「时间锚迁移 + 自动续定位」
+import { useBookmarkMigrate } from '@/composables/useBookmarkMigrate'
 import { useUI } from '@/composables/useUI'
 
 /** 自动向下翻页的硬异常上限（页）：正常终止条件是「本页最旧一条已早于锚定时间」，
@@ -94,6 +96,13 @@ export const useBookmarkLocate = () => {
   const locating = computed(() => locateState.value !== null)
   const locateInfo = computed(() => locateState.value)
 
+  /**
+   * Round49：锚点迁移成功后的「续定位请求」。
+   * 页面 watch 它 → 用新锚点重新 beginLocate + initSearch（seek 新日期）+ runLocate，
+   * 用户无需手动从侧栏重新点书签。
+   */
+  const relocateRequest = ref<ScrapeBookmark | null>(null)
+
   /** 结束定位（清状态 + 按原因提示/兜底） */
   const finish = async (
     reason: LocateFinishReason,
@@ -123,19 +132,26 @@ export const useBookmarkLocate = () => {
       case 'passed':
       case 'exhausted': {
         markAnchorFailed(st.gid)
+        // Round49：失效检测已剪枝——定位失败即进入「锚点缺失优化」：
+        // 按发布时间检索同时刻画廊（需用户确认）→ 成功则写库并请求页面续定位。
+        // 顺序：先写库成功，再触发重新定位（避免「界面跳了、库里没改」）。
+        const bm = getBookmarkById(st.bookmarkId)
+        if (bm?.anchor?.postedAt) {
+          const { migrateByTimeAnchor } = useBookmarkMigrate()
+          const migrated = await migrateByTimeAnchor(bm)
+          if (migrated) {
+            const updated = getBookmarkById(st.bookmarkId)
+            if (updated) {
+              relocateRequest.value = updated
+              return
+            }
+          }
+        }
         toast.warning(
           reason === 'passed'
             ? `书签「${st.name}」在当前搜索&筛选条件下已看不到锚定画廊（可能已失效）`
             : `已翻到列表尽头仍未找到书签「${st.name}」的锚定画廊（该条件下已不可见）`,
         )
-        // 兜底：按书签原始搜索条件复核单条（Round35：与定位循环同一判据）
-        const { runCheck } = useBookmarkCheck()
-        const summary = await runCheck([st.bookmarkId])
-        if (summary && summary.migrated > 0) {
-          toast.info('锚点已迁移到同时刻的画廊；请从侧栏重新打开该书签')
-        } else if (summary && summary.invalid === 0 && summary.errors === 0) {
-          toast.info('复核检索仍能看到锚定画廊，可重试定位（列表结果可能已变化）')
-        }
         return
       }
     }
@@ -260,5 +276,5 @@ export const useBookmarkLocate = () => {
     }
   }
 
-  return { locateInfo, locating, beginLocate, runLocate, abortLocate }
+  return { locateInfo, locating, beginLocate, runLocate, abortLocate, relocateRequest }
 }

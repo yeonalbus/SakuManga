@@ -13,14 +13,12 @@
 import { ref, computed } from 'vue'
 import type {
   ScrapeBookmark,
-  ScrapeBookmarkCheckResult,
-  ScrapeBookmarkInvalidKind,
+  ScrapeBookmarkProbeResult,
+  ScrapeBookmarkRole,
   SearchConfig,
 } from '@/types/comic'
 import { onlineSearchConfig } from '@/stores/searchStore'
 import { isSameOnlineScope } from '@/utils/bookmarkScope'
-// Round37：侧栏拖动排序权值（与书架列表同一套 LexoRank 工具）
-import { between, needsReweight, reweightAll } from '@/utils/lexoRank'
 import { loadStorage } from '@/utils/storage'
 import { http } from '@/utils/request'
 import { useUI } from '@/composables/useUI'
@@ -98,11 +96,19 @@ const restoreAnchor = (raw: unknown): ScrapeBookmark['anchor'] => {
     token: typeof a.token === 'string' ? a.token : undefined,
     title: typeof a.title === 'string' ? a.title : undefined,
     postedAt: typeof a.postedAt === 'string' ? a.postedAt : undefined,
+    // Round49：锚定画廊封面（书签页名片用；老书签无此字段 → undefined）
+    coverUrl: typeof a.coverUrl === 'string' ? a.coverUrl : undefined,
     // Round33：失效标记 / 迁移来源 / 列表位置（宽松透传，不丢字段）
     invalid: restoreInvalid(a.invalid),
     migratedFrom: restoreMigratedFrom(a.migratedFrom),
     listIndex: typeof a.listIndex === 'number' ? a.listIndex : undefined,
   }
+}
+
+/** Round49：归一化书签标记（仅 newest/oldest/interest，其余归 interest） */
+const normalizeRole = (raw: unknown): ScrapeBookmarkRole => {
+  if (raw === 'newest' || raw === 'oldest' || raw === 'interest') return raw
+  return 'interest'
 }
 
 /** 任意来源（后端 DTO / 旧 localStorage）→ ScrapeBookmark：字段全部兜底 */
@@ -120,6 +126,17 @@ const fromRaw = (raw: unknown): ScrapeBookmark | null => {
     // Round37：排序权值（老数据 0 / 缺失 → 0，排序时按原列表顺序兜底）
     sortKey: typeof r.sortKey === 'number' && Number.isFinite(r.sortKey) ? r.sortKey : 0,
     createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
+
+    // Round49：书签项配置兜底（老数据缺字段 → 默认值；role 初值由后端迁移按名字回填）
+    role: normalizeRole(r.role),
+    note: typeof r.note === 'string' ? r.note : '',
+    pinned: r.pinned === true,
+    updateWatch: r.updateWatch === true,
+    hasUpdate: r.hasUpdate === true,
+    updateCheckedAt: typeof r.updateCheckedAt === 'number' ? r.updateCheckedAt : 0,
+    updateError: typeof r.updateError === 'string' ? r.updateError : '',
+    bulkDone: r.bulkDone === true,
+    bulkDoneAt: typeof r.bulkDoneAt === 'number' ? r.bulkDoneAt : 0,
   }
 }
 
@@ -182,6 +199,62 @@ export const scopedBookmarkedGids = computed<Set<string>>(() =>
 /** 按 id 取书签（跳转恢复用；不存在返回 undefined） */
 export const getBookmarkById = (id: string): ScrapeBookmark | undefined =>
   scrapeBookmarks.value.find((b) => b.id === id)
+
+// ─────────────────────────────────────────────────────────────
+// Round49：书签展示与排序（名称序 + 有更新置前）
+// ─────────────────────────────────────────────────────────────
+
+/** 侧栏置顶书签上限（与后端 PinnedBookmarkLimit 一致） */
+export const PINNED_BOOKMARK_LIMIT = 5
+
+/** 语言筛选项 → 中文标签（标题摘要用） */
+const languageLabel = (lang: string): string => {
+  switch (lang) {
+    case 'Chinese':
+      return '中文'
+    case 'Japanese':
+      return '日语'
+    case 'English':
+      return '英语'
+    default:
+      return lang
+  }
+}
+
+/**
+ * Round49：书签标题（固定，不支持手改）。
+ * = 位置字段 + 非默认筛选摘要（仅删除 / 语言 / 评分下限）。
+ * 位置字段沿用旧 bookmarkLocationLabel：`搜索: <词>` 或 `首页`。
+ * 这样首页与"删除页"（onlyRemoved）不再重名，书签页里可区分。
+ */
+export const bookmarkDisplayTitle = (
+  bm: Pick<ScrapeBookmark, 'type' | 'keyword' | 'config'>,
+): string => {
+  const kw = (bm.keyword || bm.config?.keyword || '').trim()
+  const base = bm.type === 'search' && kw ? `搜索: ${kw}` : '首页'
+  const extras: string[] = []
+  if (bm.config?.onlyRemoved) extras.push('仅删除')
+  const lang = bm.config?.language
+  if (lang && lang !== 'All') extras.push(languageLabel(lang))
+  if (bm.config?.minRating && bm.config.minRating > 0) extras.push(`评分≥${bm.config.minRating}`)
+  return extras.length > 0 ? `${base} · ${extras.join(' · ')}` : base
+}
+
+/** 名称序比较器（中文拼音 + 数字自然序） */
+const titleCollator = new Intl.Collator('zh-CN', { numeric: true })
+
+/** Round49：书签展示顺序——有更新的排最前，同层按标题名称序 */
+export const sortedBookmarks = computed<ScrapeBookmark[]>(() =>
+  [...scrapeBookmarks.value].sort((a, b) => {
+    if (a.hasUpdate !== b.hasUpdate) return a.hasUpdate ? -1 : 1
+    return titleCollator.compare(bookmarkDisplayTitle(a), bookmarkDisplayTitle(b))
+  }),
+)
+
+/** Round49：侧栏常驻的置顶书签（最多 PINNED_BOOKMARK_LIMIT 条，按展示顺序） */
+export const pinnedBookmarks = computed<ScrapeBookmark[]>(() =>
+  sortedBookmarks.value.filter((b) => b.pinned).slice(0, PINNED_BOOKMARK_LIMIT),
+)
 
 // ─── 锚点失效标记（Round28：BUG2 修复）───
 
@@ -312,10 +385,11 @@ export const addScrapeBookmark = async (
   keyword: string,
   config: SearchConfig,
   anchor: ScrapeBookmark['anchor'],
+  extra?: Partial<Pick<ScrapeBookmark, 'role' | 'note' | 'updateWatch' | 'bulkDone'>>,
 ): Promise<ScrapeBookmark | null> => {
   const temp: ScrapeBookmark = {
     id: genBookmarkId(),
-    // Round29：名称默认留空（不再自动生成「首页快照 HH:MM」）——留空时侧栏展示「位置 + 发布时间」
+    // Round29：名称默认留空（Round49：标题改由 bookmarkDisplayTitle 生成，name 仅作历史保留）
     name: name.trim(),
     type,
     keyword,
@@ -324,6 +398,17 @@ export const addScrapeBookmark = async (
     // Round37：乐观插入追加到末尾（后端返回真实权值后覆盖）
     sortKey: nextLocalSortKey(),
     createdAt: Date.now(),
+
+    // Round49：书签项配置（创建时可选带 role/备注/更新开关/已囤货）
+    role: extra?.role ?? 'interest',
+    note: (extra?.note ?? '').trim(),
+    pinned: false,
+    updateWatch: extra?.updateWatch ?? false,
+    hasUpdate: false,
+    updateCheckedAt: 0,
+    updateError: '',
+    bulkDone: extra?.bulkDone ?? false,
+    bulkDoneAt: extra?.bulkDone ? Date.now() : 0,
   }
   // 降级模式：拒绝写操作
   if (rejectWhenOffline()) return null
@@ -338,6 +423,11 @@ export const addScrapeBookmark = async (
         keyword,
         config: cloneSearchConfig(config),
         anchor,
+        // Round49：书签项配置随创建一并写入
+        role: temp.role,
+        note: temp.note,
+        updateWatch: temp.updateWatch,
+        bulkDone: temp.bulkDone,
       }),
     })
     const real = fromRaw(res.item)
@@ -397,27 +487,8 @@ export const renameScrapeBookmark = async (id: string, name: string): Promise<bo
 }
 
 // ─────────────────────────────────────────────────────────────
-// Round33：失效检测 / 迁移 / 失效判定
+// Round33：迁移（Round49：失效检测已剪枝，仅保留迁移相关）
 // ─────────────────────────────────────────────────────────────
-
-/** 书签是否已确认失效（检测后写入 invalid 标记） */
-export const isBookmarkInvalid = (bm: ScrapeBookmark): boolean => !!bm.anchor?.invalid
-
-/**
- * 失效原因文案（Round35：不细分原因）
- *
- * 语义：书签是「位置快照」——失效只意味着「在书签当时的搜索&筛选条件下已看不到锚定画廊，
- * 因此无法得知上次搜刮到的位置」，用户并不关心底层原因是删除/下架/被移除。
- */
-export const invalidReasonText = (bm: ScrapeBookmark): string => {
-  if (!bm.anchor?.invalid) return ''
-  return '在当前搜索&筛选条件下已看不到锚定画廊（书签已失效）'
-}
-
-/** 全部失效书签 */
-export const invalidBookmarks = computed<ScrapeBookmark[]>(() =>
-  scrapeBookmarks.value.filter((b) => isBookmarkInvalid(b)),
-)
 
 /** 书签是否由迁移而来（带迁移来源） */
 export const isBookmarkMigrated = (bm: ScrapeBookmark): boolean => !!bm.anchor?.migratedFrom?.gid
@@ -449,172 +520,93 @@ export const updateBookmarkAnchor = async (
   }
 }
 
-/**
- * 批量失效检测：ids 为空 = 检测全部。
- *
- * Round35：后端改为「按各书签原始搜索&筛选条件复刻检索 + 动态越过判定」，
- * 因此单次检测可能翻若干页列表（每条书签耗时取决于当日画廊密度）——
- * 这里给足超时（10 分钟），避免被默认 60s 超时打断而误报检测失败。
- */
-export const checkScrapeBookmarks = async (
-  ids?: string[],
-): Promise<ScrapeBookmarkCheckResult[]> => {
-  const numeric = (ids ?? []).map((i) => Number(i)).filter((n) => Number.isFinite(n))
-  const res = await http<{ results?: ScrapeBookmarkCheckResult[] }>('/scrape-bookmarks/check', {
-    method: 'POST',
-    body: JSON.stringify(ids && ids.length > 0 ? { ids: numeric } : {}),
-    signal: AbortSignal.timeout(10 * 60 * 1000),
-  })
-  return res.results || []
-}
+// ─────────────────────────────────────────────────────────────
+// Round49：书签项配置更新 / 更新探测
+// ─────────────────────────────────────────────────────────────
 
-/**
- * 应用检测结果到书签（写入失效标记）。
- * replaced / ok 由调用方按策略处理（自动精确迁移 / 刷新元信息），此处只处理判定性状态。
- */
-export const markBookmarkInvalid = async (
+/** 书签项配置的部分更新（乐观 + 失败回滚） */
+export type BookmarkFieldsPatch = Partial<
+  Pick<ScrapeBookmark, 'role' | 'note' | 'pinned' | 'updateWatch' | 'bulkDone'>
+>
+
+export const updateBookmarkFields = async (
   id: string,
-  kind: ScrapeBookmarkInvalidKind,
+  patch: BookmarkFieldsPatch,
 ): Promise<boolean> => {
+  if (rejectWhenOffline()) return false
   const bm = scrapeBookmarks.value.find((b) => b.id === id)
-  if (!bm || !bm.anchor) return false
-  return updateBookmarkAnchor(id, {
-    ...bm.anchor,
-    invalid: { kind, at: Date.now() },
-  })
-}
-
-/** 清除失效标记（检测恢复正常时） */
-export const clearBookmarkInvalid = async (id: string): Promise<boolean> => {
-  const bm = scrapeBookmarks.value.find((b) => b.id === id)
-  if (!bm || !bm.anchor || !bm.anchor.invalid) return true
-  const next = { ...bm.anchor }
-  delete next.invalid
-  return updateBookmarkAnchor(id, next)
-}
-
-/** 一键清理全部失效书签，返回删除数量 */
-export const clearInvalidBookmarks = async (): Promise<number> => {
-  const targets = invalidBookmarks.value.map((b) => b.id)
-  let removed = 0
-  for (const id of targets) {
-    if (await removeScrapeBookmark(id)) removed++
+  if (!bm) return false
+  const prev = {
+    role: bm.role,
+    note: bm.note,
+    pinned: bm.pinned,
+    updateWatch: bm.updateWatch,
+    bulkDone: bm.bulkDone,
+    bulkDoneAt: bm.bulkDoneAt,
+    hasUpdate: bm.hasUpdate,
   }
-  return removed
-}
-
-// ─────────────────────────────────────────────────────────────
-// Round37：侧栏拖动排序（LexoRank，与 Round22 书架列表同构）
-//
-// 语义：只更新被拖动项的权值（单点移动），连续拖动经 300ms 防抖后写一次；
-// 老书签（sortKey=0，升级前未赋权）在首次拖动前按当前展示顺序惰性全量赋权。
-// ─────────────────────────────────────────────────────────────
-
-/** 全量提交顺序（新顺序即 ids 数组顺序，后端赋 1000*(i+1)）：惰性赋权 / 精度用尽兜底 */
-const persistBookmarkOrder = async (list: ScrapeBookmark[]): Promise<void> => {
-  // 临时书签（乐观插入中，id 非数字）不进后端请求
-  const numericIds = list.map((b) => Number(b.id)).filter((n) => Number.isFinite(n))
+  // 乐观更新（置顶超限由后端 400 拒绝，随后回滚）
+  if (patch.role !== undefined) bm.role = normalizeRole(patch.role)
+  if (patch.note !== undefined) bm.note = patch.note.trim()
+  if (patch.pinned !== undefined) bm.pinned = patch.pinned
+  if (patch.updateWatch !== undefined) {
+    bm.updateWatch = patch.updateWatch
+    if (!patch.updateWatch) bm.hasUpdate = false
+  }
+  if (patch.bulkDone !== undefined) {
+    bm.bulkDone = patch.bulkDone
+    bm.bulkDoneAt = patch.bulkDone ? Date.now() : 0
+  }
   try {
-    await http('/scrape-bookmarks/order', {
-      method: 'POST',
-      body: JSON.stringify({ ids: numericIds }),
+    await http(`/scrape-bookmarks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
     })
+    return true
   } catch (e) {
-    console.error('保存书签顺序失败:', e)
-    toast.error('书签排序保存失败，请重试')
+    bm.role = prev.role
+    bm.note = prev.note
+    bm.pinned = prev.pinned
+    bm.updateWatch = prev.updateWatch
+    bm.bulkDone = prev.bulkDone
+    bm.bulkDoneAt = prev.bulkDoneAt
+    bm.hasUpdate = prev.hasUpdate
+    console.error('书签配置更新失败:', e)
+    toast.error(e instanceof Error ? e.message : '书签配置更新失败，请重试')
+    return false
   }
 }
 
-// ── 排序防抖持久化（拖动连续移动只在停顿 300ms 后写一次）──
-let bookmarkFlushTimer: ReturnType<typeof setTimeout> | null = null
-const pendingBookmarkPositions = new Map<string, number>()
-
-const scheduleBookmarkPositionFlush = (id: string, weight: number) => {
-  pendingBookmarkPositions.set(id, weight)
-  if (bookmarkFlushTimer) clearTimeout(bookmarkFlushTimer)
-  bookmarkFlushTimer = setTimeout(() => {
-    void flushBookmarkPositions()
-  }, 300)
-}
-
-const flushBookmarkPositions = async () => {
-  bookmarkFlushTimer = null
-  const pending = new Map(pendingBookmarkPositions)
-  pendingBookmarkPositions.clear()
-  for (const [id, weight] of pending) {
-    try {
-      await http(`/scrape-bookmarks/${encodeURIComponent(id)}/position`, {
-        method: 'PUT',
-        body: JSON.stringify({ sortKey: weight }),
-      })
-    } catch (e) {
-      console.error('保存书签顺序失败:', e)
+/**
+ * 手动触发更新探测（ids 为空 = 全部开启更新开关的书签）。
+ *
+ * 后端对每条书签各发 1 次列表请求（只取一页），判据：
+ * 列表首条 postedAt > 书签.anchor.postedAt。
+ * 失败（skipped / error）只记 updateError，**不动红点**。
+ */
+export const probeScrapeBookmarks = async (
+  ids?: string[],
+): Promise<ScrapeBookmarkProbeResult[]> => {
+  const numeric = (ids ?? []).map((i) => Number(i)).filter((n) => Number.isFinite(n))
+  const res = await http<{ results?: ScrapeBookmarkProbeResult[] }>(
+    '/scrape-bookmarks/probe',
+    {
+      method: 'POST',
+      body: JSON.stringify(ids && ids.length > 0 ? { ids: numeric } : {}),
+      signal: AbortSignal.timeout(120 * 1000),
+    },
+  )
+  const results = res.results || []
+  for (const r of results) {
+    const bm = scrapeBookmarks.value.find((b) => b.id === String(r.id))
+    if (!bm) continue
+    bm.updateCheckedAt = r.checkedAt
+    if (r.status === 'ok') {
+      bm.hasUpdate = r.hasUpdate
+      bm.updateError = ''
+    } else {
+      bm.updateError = r.message || '未判定'
     }
   }
-}
-
-/** 立即冲刷未持久化的排序改动（离开页面 / 拖动结束时调用） */
-export const flushPendingBookmarkSort = () => {
-  if (bookmarkFlushTimer) {
-    clearTimeout(bookmarkFlushTimer)
-    void flushBookmarkPositions()
-  }
-}
-
-/**
- * 把书签移动到第 position 位（1-based，作用于当前展示顺序）。
- *
- * 本地先行（同步重排，拖动落位无等待）；持久化分两条路径：
- * - 老数据（sortKey<=0，升级前未赋权）首次拖动：按新顺序全量赋 1000*(i+1) 并整单提交
- *   ——一次请求同时完成「惰性赋权 + 落位」；
- * - 常规拖动：只算相邻中点权值，300ms 防抖后单点提交；精度用尽时退回全量提交。
- */
-export const moveBookmarkToPosition = async (id: string, position: number): Promise<void> => {
-  if (rejectWhenOffline()) return
-
-  const arr = [...scrapeBookmarks.value]
-  const idx = arr.findIndex((b) => b.id === id)
-  if (idx < 0) return
-  const target = Math.max(0, Math.min(position - 1, arr.length - 1))
-  if (target === idx) return
-
-  /** 按当前数组顺序全量赋权（1000*(i+1)） */
-  const applyFullReweight = () => {
-    const { weights } = reweightAll(arr.map((b) => b.id))
-    arr.forEach((b) => {
-      b.sortKey = weights.get(b.id) ?? 0
-    })
-  }
-
-  // 升级前老书签未赋权（sortKey 恰好等于哨兵值 0；负值属正常 LexoRank 权值）：
-  // 先按当前顺序赋权，保证 between 有可用邻项
-  const legacy = arr.some((b) => (b.sortKey ?? 0) === 0)
-  if (legacy) applyFullReweight()
-
-  const [item] = arr.splice(idx, 1)
-  arr.splice(target, 0, item)
-
-  if (legacy) {
-    // 全量路径：新顺序 + 权值一次提交
-    applyFullReweight()
-    scrapeBookmarks.value = arr
-    await persistBookmarkOrder(arr)
-    return
-  }
-
-  const prevW = target > 0 ? (arr[target - 1].sortKey ?? 0) : undefined
-  const nextW = target < arr.length - 1 ? (arr[target + 1].sortKey ?? 0) : undefined
-
-  if (prevW !== undefined && nextW !== undefined && needsReweight(prevW, nextW)) {
-    // 精度用尽：按新顺序全量重置（该项天然落在目标位）
-    applyFullReweight()
-    scrapeBookmarks.value = arr
-    await persistBookmarkOrder(arr)
-    return
-  }
-
-  const w = between(prevW, nextW)
-  item.sortKey = w
-  scrapeBookmarks.value = arr
-  scheduleBookmarkPositionFlush(id, w)
+  return results
 }

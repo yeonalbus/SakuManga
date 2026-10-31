@@ -31,8 +31,19 @@ type ScrapeBookmarkDTO struct {
 	Keyword   string          `json:"keyword"`
 	Config    json.RawMessage `json:"config"`
 	Anchor    json.RawMessage `json:"anchor"`
-	SortKey   float64         `json:"sortKey"` // Round37：LexoRank 权值（0 = 未赋权老数据）
+	SortKey   float64         `json:"sortKey"` // Round37：LexoRank 权值（0 = 未赋权老数据；Round49 起不参与排序）
 	CreatedAt time.Time       `json:"createdAt"`
+
+	// Round49：书签项级配置
+	Role            string `json:"role"`
+	Note            string `json:"note"`
+	Pinned          bool   `json:"pinned"`
+	UpdateWatch     bool   `json:"updateWatch"`
+	HasUpdate       bool   `json:"hasUpdate"`
+	UpdateCheckedAt int64  `json:"updateCheckedAt"`
+	UpdateError     string `json:"updateError"`
+	BulkDone        bool   `json:"bulkDone"`
+	BulkDoneAt      int64  `json:"bulkDoneAt"`
 }
 
 // ScrapeBookmarkInput 创建入参
@@ -42,6 +53,12 @@ type ScrapeBookmarkInput struct {
 	Keyword string          `json:"keyword"`
 	Config  json.RawMessage `json:"config"`
 	Anchor  json.RawMessage `json:"anchor"`
+
+	// Round49：创建时可一并配置（pinned 除外——置顶只能由用户在书签页手动设置）
+	Role        string `json:"role"`
+	Note        string `json:"note"`
+	UpdateWatch bool   `json:"updateWatch"`
+	BulkDone    bool   `json:"bulkDone"`
 }
 
 // normalizeScrapeBookmark 宽松归一化：坏字段兜底，不拒绝（防丢数据）。
@@ -86,6 +103,16 @@ func toScrapeBookmarkDTO(m *models.ScrapeBookmark) ScrapeBookmarkDTO {
 		Anchor:    json.RawMessage(m.Anchor),
 		SortKey:   m.SortKey,
 		CreatedAt: m.CreatedAt,
+
+		Role:            m.Role,
+		Note:            m.Note,
+		Pinned:          m.Pinned,
+		UpdateWatch:     m.UpdateWatch,
+		HasUpdate:       m.HasUpdate,
+		UpdateCheckedAt: m.UpdateCheckedAt,
+		UpdateError:     m.UpdateError,
+		BulkDone:        m.BulkDone,
+		BulkDoneAt:      m.BulkDoneAt,
 	}
 }
 
@@ -127,6 +154,10 @@ func nextBookmarkSortKey(db *gorm.DB, userID uint) float64 {
 // CreateScrapeBookmark 新增书签，返回带 id 的完整结构
 func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*ScrapeBookmarkDTO, error) {
 	name, typ, config, anchor := normalizeScrapeBookmark(in)
+	var bulkDoneAt int64
+	if in.BulkDone {
+		bulkDoneAt = time.Now().UnixMilli()
+	}
 	m := models.ScrapeBookmark{
 		UserID:    userID,
 		Name:      name,
@@ -136,6 +167,13 @@ func CreateScrapeBookmark(db *gorm.DB, userID uint, in ScrapeBookmarkInput) (*Sc
 		Anchor:    anchor,
 		SortKey:   nextBookmarkSortKey(db, userID), // Round37：追加到末尾
 		CreatedAt: time.Now(),
+
+		// Round49：创建时可直接带上的书签项配置（pinned 只能由书签页手动设置）
+		Role:        normalizeRole(in.Role),
+		Note:        strings.TrimSpace(in.Note),
+		UpdateWatch: in.UpdateWatch,
+		BulkDone:    in.BulkDone,
+		BulkDoneAt:  bulkDoneAt,
 	}
 	if err := db.Create(&m).Error; err != nil {
 		return nil, err
@@ -183,9 +221,11 @@ func UpdateScrapeBookmarkAnchor(db *gorm.DB, userID uint, id uint, anchor json.R
 			return ErrBookmarkInvalidAnchor
 		}
 	}
+	// Round49：锚点变更（创建时转移 / 失效迁移）后强制清除更新标记——
+	// 红点语义是「锚点之后有新内容」，锚点一动旧判定即失效。
 	res := db.Model(&models.ScrapeBookmark{}).
 		Where("id = ? AND user_id = ?", id, userID).
-		Update("anchor", s)
+		Updates(map[string]any{"anchor": s, "has_update": false})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -240,6 +280,101 @@ func ReorderScrapeBookmarks(db *gorm.DB, userID uint, ids []uint) error {
 			Update("sort_key", float64((i+1)*1000)).Error; err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round49：书签项配置（书签级，彼此独立，无跨书签联动）
+// ─────────────────────────────────────────────────────────────
+
+// PinnedBookmarkLimit 侧栏置顶书签上限（与书架 PIN_LIMIT 同口径）
+const PinnedBookmarkLimit = 5
+
+// ErrBookmarkPinLimit 置顶数量已达上限
+var ErrBookmarkPinLimit = errors.New("置顶书签已达上限")
+
+// normalizeRole 归一化书签标记：仅 newest / oldest / interest，其余归 interest
+func normalizeRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "newest", "oldest", "interest":
+		return strings.TrimSpace(role)
+	default:
+		return "interest"
+	}
+}
+
+// ScrapeBookmarkPatch 书签项配置的部分更新入参（nil = 不修改）
+type ScrapeBookmarkPatch struct {
+	Role        *string
+	Note        *string
+	Pinned      *bool
+	UpdateWatch *bool
+	BulkDone    *bool
+}
+
+// UpdateScrapeBookmarkFields 部分更新书签项配置。
+//
+// 置顶规则：
+//  1. 上限 PinnedBookmarkLimit（5），超限返回 ErrBookmarkPinLimit；
+//  2. 对已置顶的书签重复置顶不触发上限校验；
+//  3. 置顶/取消置顶只能由用户操作（创建接口不接收 pinned）。
+//
+// 已囤货写入时记录时间戳（证据）；取消时清零。
+// 关闭更新开关时顺带清红点——不再探测就不该继续亮。
+func UpdateScrapeBookmarkFields(db *gorm.DB, userID uint, id uint, p ScrapeBookmarkPatch) error {
+	updates := map[string]any{}
+	if p.Role != nil {
+		updates["role"] = normalizeRole(*p.Role)
+	}
+	if p.Note != nil {
+		updates["note"] = strings.TrimSpace(*p.Note)
+	}
+	if p.UpdateWatch != nil {
+		updates["update_watch"] = *p.UpdateWatch
+		if !*p.UpdateWatch {
+			updates["has_update"] = false
+		}
+	}
+	if p.Pinned != nil {
+		if *p.Pinned {
+			var self models.ScrapeBookmark
+			if err := db.Where("id = ? AND user_id = ?", id, userID).First(&self).Error; err != nil {
+				return ErrBookmarkNotFound
+			}
+			if !self.Pinned {
+				var count int64
+				if err := db.Model(&models.ScrapeBookmark{}).
+					Where("user_id = ? AND pinned = ?", userID, true).
+					Count(&count).Error; err != nil {
+					return err
+				}
+				if count >= PinnedBookmarkLimit {
+					return ErrBookmarkPinLimit
+				}
+			}
+		}
+		updates["pinned"] = *p.Pinned
+	}
+	if p.BulkDone != nil {
+		updates["bulk_done"] = *p.BulkDone
+		if *p.BulkDone {
+			updates["bulk_done_at"] = time.Now().UnixMilli()
+		} else {
+			updates["bulk_done_at"] = 0
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	res := db.Model(&models.ScrapeBookmark{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrBookmarkNotFound
 	}
 	return nil
 }

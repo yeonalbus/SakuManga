@@ -298,7 +298,7 @@ export type ScrapeBookmarkType = 'home' | 'search'
  */
 export interface ScrapeBookmark {
   id: string // 唯一标识（bm_ 前缀）
-  name: string // 自定义名称（可为空串：留空时侧栏展示位置 + 发布时间）
+  name: string // 旧自定义名称（Round49：UI 不再可编辑，标题改由 bookmarkDisplayTitle 生成）
   type: ScrapeBookmarkType
   keyword: string // type=search 时的搜索词（冗余于 config.keyword，便于侧栏展示）
   config: SearchConfig // 创建时深拷贝快照
@@ -307,7 +307,9 @@ export interface ScrapeBookmark {
     token?: string
     title?: string
     postedAt?: string // 锚定画廊发布时间（如 "2026-09-12 01:20"）
-    /** Round33：失效标记（检测确认后写入；null/缺省 = 未确认失效） */
+    /** Round49：锚定画廊封面（列表返回的 cover-proxy URL；老书签可能没有） */
+    coverUrl?: string
+    /** Round33：失效标记（Round49 失效检测剪枝后仅历史数据兼容，不再写入） */
     invalid?: { kind: ScrapeBookmarkInvalidKind; at: number } | null
     /** Round33：迁移来源（原锚点快照，供撤销与展示） */
     migratedFrom?: {
@@ -321,30 +323,52 @@ export interface ScrapeBookmark {
   } | null
   /**
    * Round37：侧栏拖动排序的 LexoRank 权值（越小越靠前）。
-   * 0 = 升级前老书签未赋权，读取顺序按 id 兜底（等价于原创建顺序）；
-   * 首次拖动时由 ensureBookmarkWeights 按当前展示顺序全量赋 1000*(i+1)。
+   * Round49：书签页改为自动排序（名称序 + 有更新置前），该字段保留但不再参与排序。
    */
   sortKey?: number
   createdAt: number
+
+  // ─── Round49：书签项级配置（每条书签独立，无跨书签联动）───
+  /** 书签标记：追新锚点 / 续扫锚点 / 仅感兴趣 */
+  role: ScrapeBookmarkRole
+  /** 备注（上限 40 个中文字符，前端限制） */
+  note: string
+  /** 侧栏常驻（上限 5，仅用户手动设置） */
+  pinned: boolean
+  /** 更新开关：开启后参与每日更新探测 */
+  updateWatch: boolean
+  /** 更新标记（红点）：列表首条发布时间晚于锚定时间 */
+  hasUpdate: boolean
+  /** 上次探测时间（毫秒时间戳） */
+  updateCheckedAt: number
+  /** 探测失败原因（成功时为空） */
+  updateError: string
+  /** 已囤货：显式确认该 tag 已做过无差别下载→筛选 */
+  bulkDone: boolean
+  /** 已囤货确认时间（毫秒时间戳，作证据） */
+  bulkDoneAt: number
 }
+
+/** 书签标记（Round49：单选，替代旧方案里靠名字手写"最新/最旧"） */
+export type ScrapeBookmarkRole = 'newest' | 'oldest' | 'interest'
 
 /**
  * 书签失效类型（Round35：语义 = 书签级可见性）
- * - 'unreachable'：在书签自带的搜索&筛选条件下已看不到锚定画廊（新判定唯一产出）
- * - 'removed' | 'copyright' | 'invalid'：Round33 旧实现的画廊状态判定结果，仅历史数据兼容
+ * Round49：失效检测已剪枝，该类型仅用于兼容历史 anchor.invalid 数据。
  */
 export type ScrapeBookmarkInvalidKind = 'unreachable' | 'removed' | 'copyright' | 'invalid'
 
-/** 失效检测单条结果（后端 POST /scrape-bookmarks/check 返回） */
-export interface ScrapeBookmarkCheckResult {
+/** 书签更新探测单条结果（Round49：POST /scrape-bookmarks/probe 返回） */
+export interface ScrapeBookmarkProbeResult {
   id: number
-  /** Round35：unreachable = 原检索条件下不可见（失效）；ok = 仍可见；error = 未判定 */
-  status: 'ok' | 'unreachable' | 'removed' | 'copyright' | 'invalid' | 'replaced' | 'error'
+  /** ok = 完成判定；skipped = 信息不全未判定；error = 请求失败未判定 */
+  status: 'ok' | 'skipped' | 'error'
+  hasUpdate: boolean
+  /** 本次看到的列表首条发布时间 */
+  headPostedAt?: string
   message?: string
-  /** status=replaced：精确迁移目标（E 站标记的新版本画廊） */
-  newVersion?: { gid: string; token?: string; title?: string; postedAt?: string }
-  /** status=ok：刷新后的元信息（标题可能改名、发布时间补齐） */
-  refreshed?: { gid: string; token?: string; title?: string; postedAt?: string }
+  /** 探测时间（毫秒时间戳） */
+  checkedAt: number
 }
 
 // ==========================================

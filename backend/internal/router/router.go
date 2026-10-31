@@ -55,6 +55,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	updateScanHandler := handlers.NewUpdateScanHandler(db)
 	services.StartUpdateScanScheduler(db, ehService, downloadManager)
 
+	// Round49：书签更新探测（每日一轮，触发时刻复用 Tag 维护的「每日刷新时刻」，
+	// 但不受 EnableDailyRefresh 开关影响；只探测书签自身 updateWatch=true 的项）
+	services.StartScrapeBookmarkProbeScheduler(db, ehService)
+
 	toplistHandler := handlers.NewToplistHandler(db, toplistService)
 	favHandler := handlers.NewFavoritesHandler(db, favService)
 	scrapeBookmarkHandler := handlers.NewScrapeBookmarkHandler(db, ehService) // Round28/31：搜刮书签（后端化 + 失效检测）
@@ -230,8 +234,9 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		api.POST("/scrape-bookmarks", scrapeBookmarkHandler.Create)
 		api.PUT("/scrape-bookmarks/:id", scrapeBookmarkHandler.Update)
 		api.DELETE("/scrape-bookmarks/:id", scrapeBookmarkHandler.Delete)
-		// Round33：批量失效检测（探测锚定画廊是否被删除 / 下架 / 被新版本取代）
-		api.POST("/scrape-bookmarks/check", scrapeBookmarkHandler.Check)
+		// Round49：更新探测——对开启更新开关的书签各取一页列表，
+		// 判定「列表首条发布时间是否晚于锚定时间」（每条 1 次请求，不翻页）
+		api.POST("/scrape-bookmarks/probe", scrapeBookmarkHandler.Probe)
 		// Round37：侧栏拖动排序——单点 LexoRank 移动（只更新一项权值）
 		api.PUT("/scrape-bookmarks/:id/position", scrapeBookmarkHandler.MovePosition)
 		// Round37：全量重置权值（拖动前惰性赋权 / 精度用尽兜底）

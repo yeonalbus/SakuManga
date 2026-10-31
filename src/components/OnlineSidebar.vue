@@ -1,211 +1,75 @@
 <script setup lang="ts">
-// 🔖 搜刮书签（Round27）：侧栏快速跳转 + hover 删除
-// Round28：后端化（多端同步）+ 失效锚点 ⚠️ 标记（BUG2 修复）
-// Round33：失效检测入口 + 一键清理 + 迁移来源展示
-// Round37：拖动排序（LexoRank）+ 分段收纳（前 6 条平铺，其余原位内联展开）+ 组折叠记忆
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+// 🔖 搜刮书签（Round49 重构）
+//
+// 书签主战场已迁到独立页面 `/online/bookmarks`；侧栏只保留：
+//   - 标题行：点击进入书签页 + 计数 + 手动「检查更新」按钮
+//   - 置顶书签（最多 5 条）：点击沿用「跳转到在线列表并定位锚点」链路
+// 不再折叠、不再内联展开全部、不再拖动排序、不再有失效检测/清理按钮
+// （Round37 的分段收纳与失效检测已在 Round49 剪枝）。
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  pinnedBookmarks,
   scrapeBookmarks,
-  removeScrapeBookmark,
-  failedAnchorGids,
-  bookmarkLocationLabel,
-  isBookmarkInvalid,
-  invalidBookmarks,
-  invalidReasonText,
-  isBookmarkMigrated,
-  clearInvalidBookmarks,
-  // Round37：拖动排序
-  moveBookmarkToPosition,
-  flushPendingBookmarkSort,
+  bookmarkDisplayTitle,
+  probeScrapeBookmarks,
+  PINNED_BOOKMARK_LIMIT,
 } from '@/stores/scrapeBookmarksStore'
-import type { ScrapeBookmark } from '@/types/comic'
+import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
 import { isStandalonePWA } from '@/utils/detailNav'
 import { useUI } from '@/composables/useUI'
-import { useBookmarkCheck } from '@/composables/useBookmarkCheck'
-// Round37：拖动原语（与书架列表 / 全部书架浮层共用）
-import { useDragReorder } from '@/composables/useDragReorder'
-// Round39：折叠分组标题行（与书架共用，统一样式与结构）
-import SidebarGroupHeader from '@/components/SidebarGroupHeader.vue'
-import { loadStorage, saveStorage } from '@/utils/storage'
 
 const router = useRouter()
-const { toast, modal } = useUI()
-const { checking, runCheck } = useBookmarkCheck()
+const { toast } = useUI()
 
-// 点击书签跳转：PWA 同标签 / 桌面新标签（与搜索分流一致，isStandalonePWA 判定）
-const handleBookmarkJump = (bm: ScrapeBookmark) => {
-  // Round37：拖动刚结束时抑制本次点击（避免拖拽落点误触跳转）
-  if (bmConsumeClick()) return
+const probing = ref(false)
+
+const roleLabels: Record<ScrapeBookmarkRole, string> = {
+  newest: '追新',
+  oldest: '续扫',
+  interest: '兴趣',
+}
+
+const total = computed(() => scrapeBookmarks.value.length)
+
+/** 进入书签页 */
+const goBookmarks = () => {
+  router.push('/online/bookmarks').catch(() => {})
+}
+
+/** 点击置顶书签：跳转到对应在线列表并定位锚点（PWA 同标签 / 桌面新标签） */
+const jumpToBookmark = (bm: ScrapeBookmark) => {
   const routeObj = { path: '/online/home', query: { bm: bm.id } }
   if (isStandalonePWA()) {
     router.push(routeObj).catch(() => {})
   } else {
-    const url = router.resolve(routeObj).href
-    window.open(url, '_blank')
+    window.open(router.resolve(routeObj).href, '_blank')
   }
 }
 
-/** 书签展示名（名称优先，无名则位置标签） */
-const displayName = (bm: ScrapeBookmark): string =>
-  bm.name.trim() || bookmarkLocationLabel(bm)
-
-const handleBookmarkRemove = async (bm: ScrapeBookmark) => {
-  const ok = await modal.confirm(`确定删除书签「${displayName(bm)}」吗？`, '删除书签')
-  if (!ok) return
-  // Round28：后端化后为异步删除（乐观 + 失败回滚），成功才提示
-  const removed = await removeScrapeBookmark(bm.id)
-  if (removed) toast.success(`书签「${displayName(bm)}」已删除`)
-}
-
-/** 某书签是否已在锚点失效状态（持久化标记 或 本会话定位失败） */
-const isAnchorFailed = (bm: ScrapeBookmark): boolean =>
-  isBookmarkInvalid(bm) || (!!bm.anchor && failedAnchorGids.value.has(bm.anchor.gid))
-
-/** Round33：检测失效（手动全量） */
-const handleCheck = async () => {
-  await runCheck()
-}
-
-/** Round33：一键清理失效书签 */
-const handleClearInvalid = async () => {
-  const n = invalidBookmarks.value.length
-  if (n === 0) return
-  const ok = await modal.confirm(`确定删除全部 ${n} 条失效书签吗？`, '清理失效书签')
-  if (!ok) return
-  const removed = await clearInvalidBookmarks()
-  toast.success(`已清理 ${removed} 条失效书签`)
-}
-
-/** 失效书签数量（用于清理入口显隐） */
-const invalidCount = computed(() => invalidBookmarks.value.length)
-
-// ─── Round30：邮件列表式双行排版（行1 主文本 + 日期；行2 搜索词 + 时间）───
-
-/** 行1 主文本：名称优先；无名时搜索类型显示搜索词、首页类型显示「首页」 */
-const primaryText = (bm: ScrapeBookmark): string => {
-  const name = bm.name.trim()
-  if (name) return name
-  const kw = (bm.keyword || '').trim()
-  return bm.type === 'search' && kw ? kw : '首页'
-}
-
-/** 行2 副文本：固定显示搜索词（仅当行1 已被名称占用，避免与主文本重复） */
-const subText = (bm: ScrapeBookmark): string => {
-  if (!bm.name.trim()) return ''
-  const kw = (bm.keyword || '').trim()
-  return bm.type === 'search' ? kw : ''
-}
-
-/** 发布时间拆两行：`2026-09-12 01:47` → 日期 + 时间（缺则留空，老书签无此字段） */
-const postedParts = (bm: ScrapeBookmark): { date: string; time: string } => {
-  const raw = bm.anchor?.postedAt?.trim() || ''
-  if (!raw) return { date: '', time: '' }
-  const [date, time = ''] = raw.split(/\s+/)
-  return { date, time }
-}
-
-/** 类型图标：搜索 / 首页 */
-const typeIcon = (bm: ScrapeBookmark): string => (bm.type === 'search' ? '🔍' : '🏠')
-
-/** 悬停提示：完整信息（失效原因 / 位置 / 时间 / 迁移来源 / 锚定画廊标题） */
-const bookmarkTooltip = (bm: ScrapeBookmark): string => {
-  const parts: string[] = []
-  if (isAnchorFailed(bm)) {
-    parts.push(`⚠️ ${invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'}`)
+/** 手动检查更新：探测全部开启更新开关的书签 */
+const runProbe = async () => {
+  if (probing.value) return
+  probing.value = true
+  try {
+    const results = await probeScrapeBookmarks()
+    if (results.length === 0) {
+      toast.info('没有开启更新开关的书签')
+      return
+    }
+    const withUpdate = results.filter((r) => r.status === 'ok' && r.hasUpdate).length
+    const failed = results.filter((r) => r.status !== 'ok').length
+    if (failed > 0) {
+      toast.warning(`探测完成：有更新 ${withUpdate} 条，未判定 ${failed} 条`)
+    } else {
+      toast.success(`探测完成：有更新 ${withUpdate} 条`)
+    }
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : '更新探测失败，请重试')
+  } finally {
+    probing.value = false
   }
-  parts.push(bookmarkLocationLabel(bm))
-  const { date, time } = postedParts(bm)
-  if (date) parts.push(`${date} ${time}`.trim())
-  if (isBookmarkMigrated(bm) && bm.anchor?.migratedFrom) {
-    parts.push(`已从「${bm.anchor.migratedFrom.title || bm.anchor.migratedFrom.gid}」迁移`)
-  } else if (bm.anchor?.title) {
-    parts.push(bm.anchor.title)
-  } else if (!bm.anchor) {
-    parts.push('未锚定卡片')
-  }
-  return parts.join(' · ') + '（点击跳转）'
 }
-
-// ─────────────────────────────────────────────────────────────
-// Round37：分段收纳 + 组折叠（状态记忆）
-//
-// 取舍（与用户对齐）：不做书架那样的浮层抽屉——书签的核心诉求是「一点回现场」，
-// 多一层浮层等于给最高频动作加点击成本。改为常驻前 N 条平铺 + 其余「原位内联展开」，
-// 书签不多时形态与旧版完全一致（零额外点击），多了也不会把下方分组顶出视口。
-// ─────────────────────────────────────────────────────────────
-
-/** 常驻区条数（前 N 条平铺，其余进收纳区） */
-const RESIDENT_LIMIT = 6
-
-const GROUP_OPEN_KEY = 'saku_bookmark_group_open'
-const OVERFLOW_OPEN_KEY = 'saku_bookmark_overflow_open'
-
-/** 书签组折叠状态（记忆；折叠后仅剩标题行） */
-const groupOpen = ref(loadStorage<boolean>(GROUP_OPEN_KEY, true))
-/** 收纳区展开状态（记忆） */
-const overflowOpen = ref(loadStorage<boolean>(OVERFLOW_OPEN_KEY, false))
-
-watch(groupOpen, (v) => saveStorage(GROUP_OPEN_KEY, v))
-watch(overflowOpen, (v) => saveStorage(OVERFLOW_OPEN_KEY, v))
-
-const hasOverflow = computed(() => scrapeBookmarks.value.length > RESIDENT_LIMIT)
-const overflowCount = computed(() => Math.max(0, scrapeBookmarks.value.length - RESIDENT_LIMIT))
-
-/**
- * 实际渲染的书签：未展开时只渲染常驻区。
- * 未展开时索引与完整列表前 N 位一一对应，故拖动落位可直接换算为全局位置。
- */
-const renderedBookmarks = computed(() =>
-  overflowOpen.value ? scrapeBookmarks.value : scrapeBookmarks.value.slice(0, RESIDENT_LIMIT),
-)
-
-const toggleGroup = () => {
-  groupOpen.value = !groupOpen.value
-}
-
-const toggleOverflow = () => {
-  overflowOpen.value = !overflowOpen.value
-}
-
-// ─────────────────────────────────────────────────────────────
-// Round37：拖动排序（把手拖动 → LexoRank 单点移动）
-// ─────────────────────────────────────────────────────────────
-
-/** 书签列表滚动容器（展开后限高滚动；拖动落位与边缘自动滚动均以它为准） */
-const bookmarkListEl = ref<HTMLElement | null>(null)
-
-const bmDrag = useDragReorder({
-  getScrollContainer: () => bookmarkListEl.value,
-  rowSelector: '.bookmark-item',
-  getGhostText: (i) => {
-    const bm = renderedBookmarks.value[i]
-    return bm ? primaryText(bm) : ''
-  },
-  // to 为「移除被拖项后数组」的插入下标 → 目标位置 = to + 1（1-based）
-  onReorder: (from, to) => {
-    const moved = renderedBookmarks.value[from]
-    if (!moved) return
-    void moveBookmarkToPosition(moved.id, to + 1)
-  },
-})
-
-// 解构 ref 供模板自动解包（模板内嵌套对象的 ref 不会自动解包）
-const {
-  dragging: bmDragging,
-  dragIndex: bmDragIndex,
-  indicatorIndex: bmIndicatorIndex,
-  ghostTop: bmGhostTop,
-  ghostLeft: bmGhostLeft,
-  ghostWidth: bmGhostWidth,
-  ghostHeight: bmGhostHeight,
-  onHandlePointerDown: bmHandleDown,
-  consumeSuppressClick: bmConsumeClick,
-  ghostText: bmGhostText,
-} = bmDrag
-
-// 离开页面时冲刷未落库的排序改动（拖动防抖 300ms）
-onBeforeUnmount(flushPendingBookmarkSort)
 </script>
 
 <template>
@@ -219,426 +83,160 @@ onBeforeUnmount(flushPendingBookmarkSort)
     <router-link to="/online/history">历史记录</router-link>
   </div>
 
-  <!-- 🔖 搜刮书签（Round27 / Round30 邮件列表式排版；Round33 检测与清理入口；Round37 拖动排序 + 分段收纳）
-       行1：图标位（hover 让位给 ⠿ ✕） + 主文本 + 日期；行2：搜索词 + 时间
-       Round39：标题行改用 SidebarGroupHeader（与书架同字体、同结构）——去掉 🔖 前缀，
-       放大镜（检测）紧跟「书签」右侧，折叠箭头移至行右端 -->
+  <!-- 🔖 搜刮书签（Round49：常驻置顶 + 进书签页；不折叠、不收纳、不拖动） -->
   <div class="nav-group bm-nav-group">
-    <SidebarGroupHeader
-      title="书签"
-      :open="groupOpen"
-      :badge="!groupOpen && scrapeBookmarks.length > 0 ? scrapeBookmarks.length : undefined"
-      badge-title="书签总数"
-      @toggle="toggleGroup"
-    >
-      <template #actions>
-        <button
-          class="bm-action"
-          :class="{ spinning: checking }"
-          :disabled="checking"
-          :title="checking ? '检测中…' : '检测失效书签（按各书签原始搜索&筛选条件复核锚定画廊是否仍可见）'"
-          @click="handleCheck"
-        >
-          {{ checking ? '⏳' : '🔍' }}
-        </button>
-        <button
-          v-if="invalidCount > 0"
-          class="bm-action danger"
-          :title="`清理 ${invalidCount} 条失效书签`"
-          @click="handleClearInvalid"
-        >
-          🧹<span class="bm-badge">{{ invalidCount }}</span>
-        </button>
-      </template>
-    </SidebarGroupHeader>
-
-    <template v-if="groupOpen">
-      <template v-if="scrapeBookmarks.length > 0">
-        <!-- 书签列表（展开收纳区时限高滚动，避免顶掉下方「🎲 工具 / 系统」分组） -->
-        <div ref="bookmarkListEl" class="bm-list" :class="{ scrollable: overflowOpen && hasOverflow }">
-          <template v-for="(bm, idx) in renderedBookmarks" :key="bm.id">
-            <button
-              class="bookmark-item"
-              :class="{ 'anchor-failed': isAnchorFailed(bm) }"
-              :title="bookmarkTooltip(bm)"
-              @click="handleBookmarkJump(bm)"
-            >
-              <!-- 行1 -->
-              <span class="bm-line1">
-                <!-- 左侧图标位：平时显示类型图标，hover 时扩宽让位给「⠿ 拖动 / ✕ 删除」（日期不受影响） -->
-                <span class="bm-lead">
-                  <span class="bm-icon">{{ typeIcon(bm) }}</span>
-                  <span
-                    class="bm-drag"
-                    title="拖动排序"
-                    @pointerdown="(e) => bmHandleDown(e as PointerEvent, idx)"
-                    @click.stop.prevent
-                  >
-                    ⠿
-                  </span>
-                  <span class="bm-delete" title="删除书签" @click.stop="handleBookmarkRemove(bm)">✕</span>
-                </span>
-                <span v-if="isAnchorFailed(bm)" class="bm-warn" :title="invalidReasonText(bm) || '会话内定位失败：当前搜索&筛选条件下未找到锚定画廊'">⚠️</span>
-                <span class="bm-primary">{{ primaryText(bm) }}</span>
-                <span v-if="postedParts(bm).date" class="bm-date">{{ postedParts(bm).date }}</span>
-              </span>
-              <!-- 行2（日期/时间或副文本存在时才渲染） -->
-              <span v-if="subText(bm) || postedParts(bm).time" class="bm-line2">
-                <span class="bm-sub" :title="subText(bm)">{{ subText(bm) }}</span>
-                <span v-if="postedParts(bm).time" class="bm-time" :title="`锚定画廊发布时间 ${postedParts(bm).date} ${postedParts(bm).time}`">
-                  {{ postedParts(bm).time }}
-                </span>
-              </span>
-            </button>
-            <!-- Round37：拖拽落位指示线 -->
-            <div v-if="bmDragging && bmIndicatorIndex === idx" class="drop-line bm-drop-line" />
-          </template>
-          <!-- 拖到末尾的落位指示线 -->
-          <div
-            v-if="bmDragging && bmIndicatorIndex === renderedBookmarks.length"
-            class="drop-line bm-drop-line"
-          />
-        </div>
-
-        <!-- Round37：收纳区入口（原位内联展开，无浮层/无遮罩，展开后仍是原位单击直达） -->
-        <button v-if="hasOverflow" class="bm-more" @click="toggleOverflow">
-          {{ overflowOpen ? '▴ 收起' : `⋯ 其余 ${overflowCount} 条` }}
-        </button>
-      </template>
-      <span v-else class="bm-empty">暂无书签</span>
-    </template>
-
-    <!-- Round37：拖拽幽灵卡（fixed 跟随指针） -->
-    <Teleport to="body">
-      <div
-        v-if="bmDragging"
-        class="drag-ghost"
-        :style="{
-          top: bmGhostTop + 'px',
-          left: bmGhostLeft + 'px',
-          width: bmGhostWidth + 'px',
-          height: bmGhostHeight + 'px',
-        }"
+    <div class="bm-group-head" title="打开书签页" @click="goBookmarks">
+      <span class="bm-group-title">🔖 书签</span>
+      <span class="bm-group-count">{{ total }}</span>
+      <button
+        class="bm-probe-btn"
+        :class="{ spinning: probing }"
+        :disabled="probing"
+        :title="probing ? '探测中…' : '检查更新（对开启更新开关的书签）'"
+        @click.stop="runProbe"
       >
-        🔖 {{ bmGhostText(bmDragIndex) }}
-      </div>
-    </Teleport>
-  </div>
+        {{ probing ? '⏳' : '🔄' }}
+      </button>
+    </div>
 
-  <!-- 🎲 工具：跨模式全局功能（骰子支持全库、清单有在线/离线双 tab） -->
-  <div class="nav-group">
-    <span class="group-title">🎲 工具</span>
-    <router-link to="/random">手气不错</router-link>
-    <router-link to="/reading-list">阅读清单</router-link>
-    <router-link to="/upgrade">画质升级</router-link>
+    <div v-if="pinnedBookmarks.length === 0" class="bm-pin-hint">
+      💡 在书签页点 📌 置顶常用书签（最多 {{ PINNED_BOOKMARK_LIMIT }} 个）
+    </div>
+
+    <button
+      v-for="bm in pinnedBookmarks"
+      :key="bm.id"
+      class="bm-pinned-item"
+      :class="{ 'has-update': bm.hasUpdate }"
+      :title="`${bookmarkDisplayTitle(bm)}（点击跳转并定位）`"
+      @click="jumpToBookmark(bm)"
+    >
+      <span class="bm-pinned-title">{{ bookmarkDisplayTitle(bm) }}</span>
+      <span v-if="bm.hasUpdate" class="bm-pinned-dot" title="锚点之后有新内容" />
+      <span class="bm-pinned-role" :class="bm.role">{{ roleLabels[bm.role] }}</span>
+    </button>
   </div>
 </template>
 
 <style scoped>
-/* Round39：书签组紧跟上方「历史记录」，不再按分组间距（App.vue .nav-group margin-bottom:20px）
-   单独隔开——负 margin 精确抵消该值，使「历史记录 → 书签」的间隔与「收藏 → 历史记录」
-   等相邻链接完全一致（盒间距 2px / 文字间距 18px）。 */
 .bm-nav-group {
-  margin-top: -20px;
+  gap: 2px;
 }
 
-/* 书签按钮：与 App.vue 的 .nav-menu a 视觉一致；
-   Round30：邮件列表式双行排版（行1 图标+主文本+日期，行2 搜索词+时间），日期/时间右对齐 */
-.bookmark-item {
+/* 标题行：点击整行进书签页；探测按钮独立触发（stop 冒泡） */
+.bm-group-head {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: var(--app-text-2);
-  padding: 6px 10px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
   border-radius: 6px;
-  font-size: 0.86rem;
-  margin-bottom: 2px;
+  color: var(--app-text-2);
+  font-size: 0.9rem;
   cursor: pointer;
   transition: all 0.2s;
-  text-align: left;
+}
+.bm-group-head:hover {
+  background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
 }
 
-.bookmark-item:hover {
-  background-color: var(--app-surface-hover);
-  color: var(--app-fg);
+.bm-group-title {
+  flex-shrink: 0;
 }
 
-/* 行1：图标位 + 主文本 + 日期 */
-.bm-line1 {
+.bm-group-count {
+  font-size: 0.7rem;
+  color: var(--app-text-muted);
+  background-color: var(--app-surface-3);
+  padding: 0 5px;
+  border-radius: 8px;
+}
+
+.bm-probe-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--app-text-3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.bm-probe-btn:hover:not(:disabled) {
+  color: var(--app-text-strong);
+  background-color: var(--app-surface-3);
+}
+.bm-probe-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.bm-probe-btn.spinning {
+  opacity: 1;
+}
+
+.bm-pin-hint {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+  padding: 2px 12px 6px;
+}
+
+/* 置顶书签项：一行（标题 + 红点 + 标记） */
+.bm-pinned-item {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  min-width: 0;
-}
-
-/* 左侧图标位（固定 16px）：平时放类型图标；
-   Round37：hover 时扩到 34px，同位置换成「⠿ 拖动 / ✕ 删除」，右侧日期不受影响 */
-.bm-lead {
-  position: relative;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  transition: width 0.15s ease;
-}
-
-.bookmark-item:hover .bm-lead {
-  width: 34px;
-}
-
-.bm-icon,
-.bm-drag,
-.bm-delete {
-  position: absolute;
-  top: 0;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  border-radius: 4px;
-  transition:
-    opacity 0.15s ease,
-    color 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.bm-icon {
-  left: 0;
-  width: 16px;
-  font-size: 0.8rem;
-  opacity: 1;
-}
-
-/* Round37：拖动把手（touch-action:none 保证把手上触摸拖动不触发侧栏滚动） */
-.bm-drag {
-  left: 0;
-  width: 16px;
-  font-size: 0.78rem;
-  color: var(--app-text-muted);
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  opacity: 0;
-}
-
-.bm-drag:active {
-  cursor: grabbing;
-}
-
-.bm-drag:hover {
-  color: var(--app-text-strong);
-  background-color: var(--app-surface-3);
-}
-
-/* 删除按钮：hover 时出现在把手右侧 */
-.bm-delete {
-  left: 18px;
-  width: 16px;
-  font-size: 0.75rem;
-  color: var(--app-text-muted);
-  cursor: pointer;
-  opacity: 0;
-}
-
-.bm-delete:hover {
-  color: #ef4444;
-  background-color: var(--app-surface-3);
-}
-
-.bookmark-item:hover .bm-icon {
-  opacity: 0;
-}
-
-.bookmark-item:hover .bm-drag,
-.bookmark-item:hover .bm-delete {
-  opacity: 1;
-}
-
-/* 📱 触摸设备（无 hover）：把手与删除常驻显示、图标位直接让位。
-   否则移动端永远无法拖动排序，也没有任何删除入口（✕ 原本只在 hover 出现）。 */
-@media (hover: none) {
-  .bm-lead {
-    width: 34px;
-  }
-
-  .bm-icon {
-    opacity: 0;
-  }
-
-  .bm-drag,
-  .bm-delete {
-    opacity: 1;
-  }
-}
-
-/* ⚠️ 失效锚点标记（Round28）：主文本前，弱化色 */
-.bm-warn {
-  font-size: 0.78rem;
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-/* 失效书签整体弱化 + 主文本划线，提示不再可跳转定位 */
-.bookmark-item.anchor-failed .bm-primary {
-  color: var(--app-text-muted);
-  text-decoration: line-through;
-}
-
-.bm-primary {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 日期（行1 右侧，不参与省略，主文本过长时优先让位） */
-.bm-date {
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  color: var(--app-text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 行2：搜索词 + 时间（缩进与行1 主文本列对齐：图标位 16px + gap 6px） */
-.bm-line2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding-left: 22px;
-  font-size: 0.7rem;
-  line-height: 1.4;
-  color: var(--app-text-muted);
-}
-
-.bm-sub {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bm-time {
-  flex-shrink: 0;
-  color: var(--app-text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.bm-empty {
-  font-size: 0.78rem;
-  color: var(--app-text-muted);
-  padding: 6px 12px;
-}
-
-/* ─── Round37：分段收纳 ─── */
-
-.bm-list {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  /* Round39：与书架折叠体（.foldable-body margin-top:2px）保持同一标题-内容间距 */
-  margin-top: 2px;
-}
-
-/* 收纳区展开后限高滚动：书签再多也不会把下方分组顶出视口 */
-.bm-list.scrollable {
-  max-height: min(46vh, 420px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.bm-list.scrollable::-webkit-scrollbar {
-  width: 6px;
-}
-
-.bm-list.scrollable::-webkit-scrollbar-thumb {
-  background-color: var(--app-border-3);
-  border-radius: 3px;
-}
-
-/* 收纳区入口：⋯ 其余 N 条 / ▴ 收起 */
-.bm-more {
-  background: transparent;
+  padding: 6px 10px 6px 14px;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
+  background: transparent;
   color: var(--app-text-3);
-  font-size: 0.76rem;
+  font-size: 0.85rem;
   text-align: left;
-  padding: 4px 10px;
-  margin-top: 2px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s;
 }
-
-.bm-more:hover {
-  background-color: var(--app-surface-hover);
-  color: var(--app-text-strong);
-}
-
-/* Round37：拖拽落位指示线（行内边距） */
-.bm-drop-line {
-  margin-left: 10px;
-  margin-right: 10px;
-}
-
-/* ─── Round39：标题行结构与字体统一到 SidebarGroupHeader（与书架同款），
-       本文件只保留操作按钮样式 ─── */
-.bm-action {
-  position: relative;
-  background: transparent;
-  border: none;
-  color: var(--app-text-muted);
-  font-size: 0.72rem;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.bm-action:hover:not(:disabled) {
-  color: var(--app-text-strong);
+.bm-pinned-item:hover {
   background-color: var(--app-surface-3);
+  color: var(--app-text-strong);
+}
+.bm-pinned-item.has-update {
+  color: var(--app-text-strong);
 }
 
-.bm-action:disabled {
-  cursor: default;
-  opacity: 0.8;
+.bm-pinned-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.bm-action.spinning {
-  animation: bm-spin 1.2s linear infinite;
+.bm-pinned-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #ff4d4f;
 }
 
-@keyframes bm-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.bm-pinned-role {
+  flex-shrink: 0;
+  font-size: 0.66rem;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-muted);
 }
-
-.bm-action.danger:hover {
-  color: #ef4444;
+.bm-pinned-role.newest {
+  border-color: rgba(0, 122, 204, 0.5);
+  color: #4fa3e3;
 }
-
-/* 失效数量角标 */
-.bm-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0 2px;
-  border-radius: 6px;
-  background-color: #ef4444;
-  color: #ffffff;
-  font-size: 0.6rem;
-  line-height: 12px;
-  text-align: center;
+.bm-pinned-role.oldest {
+  border-color: rgba(76, 195, 138, 0.5);
+  color: #4cc38a;
 }
 </style>

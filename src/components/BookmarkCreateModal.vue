@@ -6,6 +6,7 @@
 //   · 「确认」保存；「取消」回到拾取模式（可改锚定其他卡片）
 // 样式沿用 DateJumpModal 的 overlay/panel 暗色主题结构
 import { ref, watch } from 'vue'
+import type { ScrapeBookmarkRole } from '@/types/comic'
 
 const props = defineProps<{
   show: boolean
@@ -21,21 +22,53 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'create', payload: { name: string }): void
+  (
+    e: 'create',
+    payload: {
+      name: string
+      role: ScrapeBookmarkRole
+      note: string
+      updateWatch: boolean
+      bulkDone: boolean
+    },
+  ): void
 }>()
 
 const name = ref('')
+/** Round49：书签标记（默认追新——最常见的创建场景就是搜刮到最新后存书签） */
+const role = ref<ScrapeBookmarkRole>('newest')
+const note = ref('')
+const updateWatch = ref(false)
+const bulkDone = ref(false)
 
-// 每次打开重置为空（默认留空）
+const roleOptions: { value: ScrapeBookmarkRole; label: string; hint: string }[] = [
+  { value: 'newest', label: '追新', hint: '标记上次搜刮到的最新位置' },
+  { value: 'oldest', label: '续扫', hint: '标记上次搜刮到的最旧位置，下次继续向下扫' },
+  { value: 'interest', label: '兴趣', hint: '只是感兴趣，暂未搜刮' },
+]
+
+// 每次打开重置
 watch(
   () => props.show,
   (v) => {
-    if (v) name.value = ''
+    if (v) {
+      name.value = ''
+      role.value = 'newest'
+      note.value = ''
+      updateWatch.value = false
+      bulkDone.value = false
+    }
   },
 )
 
 const handleConfirm = () => {
-  emit('create', { name: name.value.trim() })
+  emit('create', {
+    name: name.value.trim(),
+    role: role.value,
+    note: note.value.trim().slice(0, 40),
+    updateWatch: updateWatch.value,
+    bulkDone: bulkDone.value,
+  })
 }
 </script>
 
@@ -76,18 +109,48 @@ const handleConfirm = () => {
               </div>
             </div>
 
-            <!-- 自定义名称（可选，默认留空） -->
+            <!-- Round49：书签标题固定为「位置字段 + 非默认筛选摘要」，不再由用户手填； -->
+            <!-- 书签标记 / 备注 / 更新探测 / 已囤货 均为书签项级配置 -->
+
+            <div class="bm-field">
+              <span class="bm-label">书签标记</span>
+              <div class="bm-role-chips">
+                <button
+                  v-for="opt in roleOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="bm-chip"
+                  :class="{ active: role === opt.value }"
+                  :title="opt.hint"
+                  @click="role = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+
             <label class="bm-field">
-              <span class="bm-label">书签名称（可选）</span>
+              <span class="bm-label">备注（可选，最多 40 字）</span>
               <input
-                v-model="name"
+                v-model="note"
                 type="text"
                 class="bm-input"
-                placeholder="留空则显示「位置 + 发布时间」"
+                placeholder="例如：2026-10 已筛完这批"
                 maxlength="40"
                 @keyup.enter="handleConfirm"
               />
             </label>
+
+            <div class="bm-toggles">
+              <label class="bm-toggle">
+                <input v-model="updateWatch" type="checkbox" />
+                开启更新探测（每日检查是否有新内容）
+              </label>
+              <label class="bm-toggle">
+                <input v-model="bulkDone" type="checkbox" />
+                标记已囤货（该 tag 已做过无差别下载→筛选）
+              </label>
+            </div>
           </div>
 
           <div class="bm-footer">
@@ -298,5 +361,53 @@ const handleConfirm = () => {
 .bm-fade-enter-from,
 .bm-fade-leave-to {
   opacity: 0;
+}
+
+/* Round49：书签标记 chips / 开关行 */
+.bm-role-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.bm-chip {
+  flex: 1;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-3);
+  color: var(--app-text-2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.bm-chip:hover {
+  color: var(--app-text-strong);
+}
+.bm-chip.active {
+  border-color: #00a896;
+  color: #00a896;
+  background-color: rgba(0, 168, 150, 0.12);
+}
+
+.bm-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+}
+
+.bm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--app-text-2);
+  cursor: pointer;
+}
+.bm-toggle input {
+  accent-color: #00a896;
 }
 </style>

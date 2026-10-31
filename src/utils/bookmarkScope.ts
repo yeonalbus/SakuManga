@@ -16,6 +16,7 @@
  *          「全部分类」与「空分类」折叠为同一形态（后端 CalculateFCats 对二者都返回 0 = 不排除任何分类）。
  */
 import type { SearchConfig } from '@/types/comic'
+import { parseKeywordQueue } from '@/utils/tagFilter'
 
 /**
  * E 站全部分类（与 `searchStore.createDefaultSearchConfig` / `FilterDrawer.categories` 保持一致）。
@@ -101,3 +102,36 @@ export const isSameOnlineScope = (
   a?: Partial<SearchConfig> | null,
   b?: Partial<SearchConfig> | null,
 ): boolean => scopeKey(a) === scopeKey(b)
+
+// ─────────────────────────────────────────────────────────────
+// Round49：「锚点转移」判据（比 isSameOnlineScope 更宽松）
+//
+// 语义（与用户对齐）：创建书签时，若已存在「同一检索条件 + 同一书签标记」
+// 的书签，提示用户改走「转移锚点」而非新建一条重复书签。
+//
+// 只比较决定「看的是哪个列表」的三项：
+//   - 规范化后的 keyword tokens（顶栏搜索词 + 筛选抽屉关键词队列，正向项合并）
+//   - language
+//   - onlyRemoved
+// 不比较 minRating / onlyTorrents / disable*Filter / excludeTags 等「筛掉了什么」
+// 的参数——那些调参频繁，纳入会导致同一 tag 被判成两条不同书签。
+// ─────────────────────────────────────────────────────────────
+
+/** 转移判据指纹（keyword tokens + language + onlyRemoved） */
+export const transferKey = (cfg?: Partial<SearchConfig> | null): string => {
+  const c = (cfg || {}) as Partial<SearchConfig>
+  const searchBar = c.keyword?.trim() ? parseKeywordQueue([c.keyword]) : { positive: [] as string[] }
+  const queue = parseKeywordQueue(c.keywords)
+  const tokens = [...searchBar.positive, ...queue.positive]
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+  const language = (c.language || 'All').trim() || 'All'
+  return JSON.stringify({ tokens, language, onlyRemoved: !!c.onlyRemoved })
+}
+
+/** 两份配置是否命中同一「转移判据」 */
+export const isSameTransferScope = (
+  a?: Partial<SearchConfig> | null,
+  b?: Partial<SearchConfig> | null,
+): boolean => transferKey(a) === transferKey(b)

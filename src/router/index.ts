@@ -66,6 +66,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/online/OnlineTop.vue'),
   },
   {
+    // Round49：书签独立页面（侧栏「书签」标题点击进入，不进主导航）
+    path: '/online/bookmarks',
+    name: 'OnlineBookmarks',
+    component: () => import('@/views/online/OnlineBookmarks.vue'),
+  },
+  {
     path: '/offline/home',
     name: 'OfflineHome',
     component: () => import('@/views/offline/OfflineHome.vue'),

@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v2.2.0 · 最近更新：2026-09
+> 版本：v2.3.0 · 最近更新：2026-10
 
 ## 一、目录总览
 
@@ -13,12 +13,15 @@ SakuManga/
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / verify-round*.mjs 回归验证）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
-├── DSPlans/                        # AI 文档区（仅 AI 编写）：方案 / 问题处理 / 发布文案
-│   ├── plans/                      # 功能开发方案文档（Round1~47 + 路线图与早期规划）
+├── DSPlans/                        # AI 文档区（仅 AI 编写）：方案 / 问题处理 / 发布文档
+│   ├── plans/                      # 功能开发方案文档（Round1~49 + 路线图与早期规划）
 │   ├── Problems/                   # 问题反馈处理记录（群友反馈 + 修复说明 + 答疑话术）
 │   ├── VerNotes/                   # 版本发布说明（RELEASE_NOTES_vX.Y.Z.md）+ 发布流程 + 用户 FAQ
+│   ├── YeonBriefs/                 # 给珱垣的版本简报（BRIEF_vX.Y.Z.md，写作素材，按 Round 增量累积）
 │   └── readme.md                   # DSPlans 目录规则
-├── YeonPlans/                      # 用户文档区（仅用户编写）：学习笔记 / 个人决策
+├── YeonPlans/                      # 用户文档区（珱垣独写，AI 只读）：功能设计 / 协作方案 / 学习笔记
+│   ├── 功能设计/                    # 功能方案手稿（书签栏位、大批量下载等）
+│   ├── 协作方案/                    # 双方职责分配
 │   ├── 学习笔记/                    # Vue / 前端学习笔记
 │   └── 注意.md                      # YeonPlans 目录规则
 ├── CHANGELOG.md                    # 更新日志（跨版本更新状态一览；README 只写当前版本）
@@ -50,7 +53,8 @@ src/
 │
 ├── api/                            # 领域 API 封装（薄层，基于 utils/request）
 │   ├── comic.ts                    # 在线漫画列表 / 随机抽卡 API 封装（含 Round32 推荐模式参数）
-│   ├── download.ts                 # 下载任务 API 封装（创建/列表/优先级/设置）
+│   ├── download.ts                 # 下载任务 API 封装（创建/列表/优先级/设置；Round47 stats + 批量动作）
+│   ├── network.ts                  # Round48：高级代理 API（advanced 读写 / clash 测试 / 组枚举）
 │   └── xpCloud.ts                  # XP 词云查询与统计重算 API 封装（Round32）
 │
 ├── components/                     # 通用 UI 组件
@@ -74,7 +78,12 @@ src/
 │   ├── OfflineDetailPanel.vue      # 离线详情紧凑面板（对比页/移动形态复用）
 │   ├── BookshelfPickerOverlay.vue  # 全部书架检索/多选加入书架浮层（Round13；navigate 模式已被书架墙取代，保留给多选加入）
 │   ├── ShelfCoverPickerOverlay.vue # 书架封面选择浮层（Round38-R5：架内本子点选 + 恢复自动封面）
-│   ├── BookmarkCreateModal.vue     # 搜刮书签创建弹窗（Round27~29：拾取卡片即记录发布时间与位置）
+│   ├── BookmarkCreateModal.vue     # 搜刮书签创建弹窗（Round49：role / 备注 / 更新开关 / 已囤货 + 同条件转移提示）
+│   ├── BookmarkCard.vue            # 书签卡片（Round49：四区固定高度 + 三标记色条 + 已囤货/更新徽章 + 配置菜单）
+│   ├── BookmarkNoteModal.vue       # 书签备注编辑弹窗（Round49：3 行输入 + 折算行数校验）
+│   ├── icons/                      # 全站矢量图标（Round49）
+│   │   ├── AppIcon.vue             # 图标封装组件（name/size/状态位切换 regular→fill）
+│   │   └── iconMap.ts              # 语义图标映射（@phosphor-icons/vue，激活态沿用状态色）
 │   ├── XpWordCloud.vue             # XP 词云（Round32：Canvas 自研螺旋布局，库藏/阅读双视图）
 │   ├── ArtistTopList.vue           # 画师/社团 Top 列表（Round32：从词云体系剥离的独立榜单）
 │   ├── common/
@@ -92,7 +101,7 @@ src/
 │   ├── useShelfStats.ts            # 书架统计口径（Round38：未读统计/书架墙汇总，后端聚合值优先）
 │   ├── useShelfImport.ts           # 书架→本地阅读清单增量导入（Round38：书架墙/书架页一键导入）
 │   ├── usePrependAnchor.ts         # 「加载较新内容」滚动锚定（记录锚点偏移 + 布局稳定后平移 scrollTop）
-│   ├── useBookmarkCheck.ts         # 搜刮书签失效检测（批量探测 + 结果落库 + 侧栏角标）
+│   ├── useBookmarkMigrate.ts       # Round49：书签锚点缺失时按发布时间迁移（迁移成功自动续定位）
 │   ├── useBookmarkLocate.ts        # 搜刮书签跳转定位（按发布时间 seek + 自动翻页寻找锚点卡）
 │   └── useTagSuggest.ts            # tag 联想补全（筛选/抽卡共用，支持 - 前缀排除候选）
 │
@@ -144,8 +153,10 @@ src/
 │   ├── tagColor.ts                 # 命名空间配色与分组（Round32：TagChip 与 XP 词云共用色板）
 │   ├── detailNav.ts                # 详情新标签导航（记录来源状态，返回时恢复位置/页码）
 │   ├── lexoRank.ts                 # LexoRank 排序权重（书架/书架内项目/搜刮书签拖动排序）
-│   ├── bookmarkScope.ts            # 搜刮书签标记作用域（限定创建时的搜索 & 筛选条件）
-│   ├── bookmarkTimeAnchor.ts       # 搜刮书签时间锚（seek 日期与越过判定，失效书签按发布时间迁移）
+│   ├── bookmarkScope.ts            # 搜刮书签标记作用域（限定创建时的搜索 & 筛选条件；Round49 含 transferKey 转移判据）
+│   ├── bookmarkTitle.ts            # Round49：书签标题兜底（无翻译时回退 uploader 名）
+│   ├── noteLimit.ts                # Round49：备注折算显示行数校验（中英混排按宽度折算）
+│   ├── bookmarkTimeAnchor.ts       # 搜刮书签时间锚（seek 日期与越过判定，锚点失效时按发布时间迁移）
 │   ├── onlineSearchParams.ts       # 在线搜索参数构造/比对（书签作用域与跳转复用）
 │   ├── pageHideFlush.ts            # 页面隐藏时冲刷进度/持久化（防丢失）
 │   ├── readingProgress.ts          # 阅读进度恢复决策（本地/后端取较新，偏好开关）
@@ -165,6 +176,7 @@ src/
     ├── NotFound.vue                # 404 页面
     ├── online/
     │   ├── OnlineHome.vue          # 在线首页（负向排除本地丢弃）
+    │   ├── OnlineBookmarks.vue     # 搜刮书签独立页（Round49：三列名片墙 + 置顶区 + 检查更新 + 备注弹窗）
     │   ├── OnlineFavorites.vue     # 在线收藏夹（0~9 分类 + 游标加载）
     │   ├── OnlineHistory.vue       # 在线历史
     │   ├── OnlineHot.vue           # 在线热门
@@ -250,10 +262,11 @@ backend/
     │   ├── reading_list.go         # 阅读清单模型
     │   ├── ignore.go               # Round26 O2：忽略标记模型（title/gid 两型）
     │   ├── xp_stat.go              # Round32：XP 词云统计模型（单本快照/tag 聚合/元信息）
-    │   ├── scrape_bookmark.go      # Round28：搜刮书签模型（按用户隔离，config/anchor 以 JSON 落库；Round37 加 sort_key 权值）
+    │   ├── scrape_bookmark.go      # Round28/49：搜刮书签模型（按用户隔离，config/anchor JSON；Round49 加 role/note/pinned/updateWatch/hasUpdate/bulkDone 等 9 字段 + fields_migrated 迁移标记）
     │   ├── maintain_snapshot.go    # Round42：维护结果持久化模型（单行快照表，进维护页秒开上次结果）
     │   ├── dedup_setting.go        # Round42：查重设置模型（联网复核开关 / 「移除时删除本地文件」默认值）
-    │   └── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案）
+    │   ├── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案；Round48 加 NodeName 所用节点）
+    │   └── network.go              # Round48：NetworkSetting（高级代理单行表）+ ArchiveBinding（归档 ↔ 节点绑定，20h TTL）
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
     ├── router/
@@ -273,7 +286,7 @@ backend/
     │   ├── random.go               # 随机抽卡（在线/离线混合 + 排除项）
     │   ├── favorites.go            # 在线收藏（列表/排序/增删）
     │   ├── toplist.go              # 在线榜单（4 种类型）
-    │   ├── download.go             # 下载任务（创建/列表/GP/设置/暂停/恢复/取消/优先级）
+    │   ├── download.go             # 下载任务（创建/列表/GP/设置/暂停/恢复/取消/优先级；Round47 加 stats 与 batch-action）
     │   ├── offline.go              # 离线更新检测 + 维护查重（Round42~44：结果快照 / 查重设置 / 忽略成员快照与 ack 接口）
     │   ├── update_scan.go          # 更新扫描（周扫描调度/进度/结果/自动入队下载）
     │   ├── scan_path.go            # 扫描路径管理
@@ -286,8 +299,8 @@ backend/
     │   ├── client_log.go           # 前端错误日志上报/大小查询/清除
     │   ├── log.go                  # 服务端日志（四类日志查询/监控；Round41 tail 接口尾部反向增量读取 + limit 安全阀）
     │   ├── xp_cloud.go             # Round32：XP 词云查询 / 统计重算接口
-    │   ├── scrape_bookmark.go      # Round28：搜刮书签 CRUD（列表 / 创建 / 重命名 / 删除；Round37 排序移动 / 全量重置）
-    │   └── network_handler.go      # 网络/代理配置
+    │   ├── scrape_bookmark.go      # Round28/49：搜刮书签 CRUD + `POST /probe`（Round49 删除 position / order 手工排序接口与 check 失效检测）
+    │   └── network_handler.go      # 网络/代理配置 + Round48 高级代理（`/network/advanced` / `clash/test` / `clash/groups`，仅管理员）
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
         ├── eh_auth.go              # E 站登录认证（含账号密码模拟登录 LoginWithPassword，v2.0.1）
@@ -314,10 +327,12 @@ backend/
         ├── scan_manager.go         # 扫描任务管理器（内存态进度，异步轮询）
         ├── favorites.go            # 在线收藏服务
         ├── toplist.go              # 榜单（4 种类型 + 定时刷新缓存）
-        ├── download.go             # 下载管理器（收尾：更新标记消除/DB 比对）
-        ├── download_archive.go     # 下载压缩包归档（H@H 直链/解锁/分块）
+        ├── download.go             # 下载管理器（收尾：更新标记消除/DB 比对；Round48 RetryTask / 解锁时解除熔断）
+        ├── download_archive.go     # 下载压缩包归档（H@H 直链/解锁/分块；Round48 阶梯重试：原地退避 → 换节点 → 熔断，扣费后写绑定）
         ├── download_gallery.go     # 下载画廊抓取（逐图并发）
-        ├── download_scheduler.go   # 下载调度（优先级 + 抢占式）
+        ├── download_queue.go       # Round45：无界待调度队列（替代容量 256 的 channel，任务不丢）
+        ├── download_batch.go       # Round47：下载列表批量操作（状态统计 / 五种批量动作 / 按用户分组批量解锁）
+        ├── download_scheduler.go   # 下载调度（优先级 + 抢占式；Round45 等窗口改非阻塞预留）
         ├── archive_chunk.go        # 归档分块下载（Range 探测/断点续传/.bits）
         ├── archive_thread_pool.go  # 全局下载并发额度池（归档+画廊统一门控）
         ├── offline.go              # 离线更新/查重/老化判定/删除持久化
@@ -329,13 +344,20 @@ backend/
         ├── dedup_verify.go         # Round42：联网复核（归一核心名走 E 站反查，仅校验非高置信簇，默认关闭）
         ├── maintain_snapshot.go    # Round42：维护结果快照读写（三处写入落库 + handler 读前回填）
         ├── cover_cache_gc.go       # 封面缓存回收（命中即刷新 mtime，回收 7 天未访问文件，后台每 6 小时一轮）
-        ├── scrape_bookmark_check.go # Round42：搜刮书签失效检测（410/403 已删除、gid 不存在、被新版本取代）
+        ├── scrape_bookmark_probe.go     # Round49：书签更新探测（1 请求/书签，首条 postedAt > anchor 判据，失败只记 error）
+        ├── scrape_bookmark_scheduler.go # Round49：书签每日探测调度器（复用 TagMaintainSetting.RefreshHour，多用户按凭据串行）
+        ├── scrape_bookmark_migrate.go   # Round49：书签字段一次性回填（role/bulkDone 按旧名提取，清 anchor.invalid，幂等）
+        ├── scrape_bookmark_search.go    # Round49：书签检索条件复用工具（从 check 服务迁入）
+        ├── clash_client.go         # Round48：mihomo / Clash 控制面客户端（版本/组/延迟/切节点，独立无代理 Transport，GLOBAL 保护）
+        ├── network_setting.go      # Round48：高级代理设置读写与校验、客户端单例、出口 IP 探测
+        ├── archive_binding.go      # Round48：归档 ↔ 节点绑定（Upsert/Find/Consume/GC 20h TTL）
+        ├── archive_circuit.go      # Round48：画廊级连续网络失败熔断（窗口 3）
         ├── eh_ratelimit.go         # Round26 性能：E 站请求自适应限流（成功提速/失败退避）
         ├── comic_refs.go           # 漫画删除/替换后的引用清理与迁移（历史/书架/阅读清单，Round20）
         ├── comic_mark.go           # 漫画书签服务（Round24）
         ├── page_hide.go            # 隐藏页服务（Round24，物理页索引偏移）
         ├── upgrade.go              # 画质升级服务（存量方案判定/下载，Round25）
-        ├── tagfilter.go            # E-Hentai f_search tag 解析器（$ 精确/无 $ 前缀，Round20）
+        ├── tagfilter.go            # E-Hentai f_search tag 解析器（$ 精确/无 $ 前缀，Round20；Round46 只取规范 key + 别名脏数据自愈）
         ├── maintain_auto.go        # 维护自动比对（下载后 Reconcile）
         ├── update_scheduler.go     # 更新扫描定时调度（周扫描）
         ├── log_store.go            # 服务端日志存储（四类日志日归档）
@@ -345,10 +367,10 @@ backend/
         ├── tag_scheduler.go        # Tag 维护定时调度
         ├── xp_cloud.go             # Round32 阶段一：XP 词云统计（合并口径/稀释加权/差分/重建/查询）
         ├── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
-        └── scrape_bookmark.go      # Round28：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD；Round37 LexoRank 排序）
+        └── scrape_bookmark.go      # Round28/49：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD + role/note/pinned 部分更新）
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化；Round37 排序输出 / 单点移动 / 全量重置）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）、`dedup_match_test.go` / `dedup_verify_test.go`（Round42 Tier2 打分分档与联网复核）、`maintain_snapshot_test.go`（结果持久化）、`offline_sig_cache_test.go`（查重签名目录 mtime 缓存）、`ignore_members_test.go` / `ignore_round42_test.go`（成员快照新增感知 / 旧 key 兼容）、`cover_cache_gc_test.go`（封面回收）、`scrape_bookmark_check_test.go`（书签失效检测）、`tag_engine_settings_test.go`（标签设置持久化）、`download_state_local_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`、`log_tail_test.go`、`random_titlejpn_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化；Round37 排序输出 / 单点移动 / 全量重置）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）、`dedup_match_test.go` / `dedup_verify_test.go`（Round42 Tier2 打分分档与联网复核）、`maintain_snapshot_test.go`（结果持久化）、`offline_sig_cache_test.go`（查重签名目录 mtime 缓存）、`ignore_members_test.go` / `ignore_round42_test.go`（成员快照新增感知 / 旧 key 兼容）、`cover_cache_gc_test.go`（封面回收）、`download_queue_test.go` / `download_dispatcher_test.go`（Round45 无界队列 / 统一调度 / 重启恢复 / 优先级门控）、`download_nofallback_test.go`（普通下载不降级、更新任务按开关降级）、`download_batch_test.go`（Round47 状态统计 / 五种批量动作 / 权限隔离）、`clash_client_test.go` / `archive_binding_test.go`（Round48 控制面客户端 / 绑定生命周期 / 熔断窗口）、`scrape_bookmark_migrate_test.go` / `scrape_bookmark_probe_test.go` / `scrape_bookmark_note_test.go`（Round49 字段回填幂等 / 更新探测判据 / 备注校验）、`eh_tags_test.go`（tag 别名后缀自愈）、`tag_engine_settings_test.go`（标签设置持久化）、`download_state_local_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`、`log_tail_test.go`、`random_titlejpn_test.go`、`network_handler_test.go`、`download_batch_handler_test.go`。
 
 ---
 
@@ -394,8 +416,11 @@ backend/
 | 改离线历史 gid 合并去重/孤儿剔除                   | `stores/historyStore.ts`、`backend/internal/handlers/library.go`、`services/comic_refs.go`                                |
 | 改书架 404 自愈/弹窗粘滞                           | `views/ComicReader.vue`、`views/offline/OfflineDetail.vue`、`stores/comicStore.ts`、`router/index.ts`                     |
 | 改画质升级（/upgrade）                             | `views/UpgradeView.vue`、`backend/internal/handlers/upgrade.go`、`services/upgrade.go`                                   |
-| 改搜刮书签（Round27~37）                          | `components/BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`components/SidebarGroupHeader.vue`、`stores/scrapeBookmarksStore.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`models/scrape_bookmark.go`、`DSPlans/plans/round27-scrape-bookmark-plan.md`、`DSPlans/plans/round37-bookmark-reorder-plan.md` |
-| 改书签失效检测 / 时间锚迁移（Round42）             | `src/composables/useBookmarkCheck.ts`、`useBookmarkLocate.ts`、`src/utils/bookmarkTimeAnchor.ts`、`bookmarkScope.ts`、`onlineSearchParams.ts`、`backend/internal/services/scrape_bookmark_check.go`、`handlers/scrape_bookmark.go`、`stores/scrapeBookmarksStore.ts`、`stores/onlineStore.ts`（loadMore 返回值 / clearAnchorFailed） |
+| 改搜刮书签（Round27~49）                          | `views/online/OnlineBookmarks.vue`（独立页）、`components/BookmarkCard.vue`、`BookmarkNoteModal.vue`、`BookmarkCreateModal.vue`、`components/OnlineSidebar.vue`、`stores/scrapeBookmarksStore.ts`、`utils/bookmarkTitle.ts`、`noteLimit.ts`、`backend/internal/handlers/scrape_bookmark.go`、`services/scrape_bookmark.go`、`scrape_bookmark_probe.go`、`scrape_bookmark_scheduler.go`、`scrape_bookmark_migrate.go`、`models/scrape_bookmark.go`、`DSPlans/plans/round49-bookmark-wall-probe-plan.md` |
+| 改书签定位 / 锚点迁移（Round49）                   | `src/composables/useBookmarkLocate.ts`、`useBookmarkMigrate.ts`、`src/utils/bookmarkTimeAnchor.ts`、`bookmarkScope.ts`、`onlineSearchParams.ts`、`stores/scrapeBookmarksStore.ts`、`stores/onlineStore.ts`（loadMore 返回值 / clearAnchorFailed） |
+| 改高级代理 / Clash 联动（Round48）                 | `components/settings/NetworkSettings.vue`、`api/network.ts`、`backend/internal/handlers/network_handler.go`、`services/clash_client.go`、`network_setting.go`、`archive_binding.go`、`archive_circuit.go`、`models/network.go`、`services/download_archive.go`（换节点阶梯）、`DSPlans/plans/round48-advanced-proxy-plan.md` |
+| 改下载列表批量操作（Round47）                      | `views/DownloadsView.vue`、`api/download.ts`、`backend/internal/handlers/download.go`、`services/download_batch.go`、`DSPlans/plans/round47-downloads-bulk-actions-plan.md` |
+| 改全站图标                                         | `src/components/icons/AppIcon.vue`、`iconMap.ts`（新增图标先在此登记语义名） |
 | 改「加载较新内容」滚动锚定                         | `src/composables/usePrependAnchor.ts`、`views/online/OnlineHome.vue`、`OnlineSub.vue`、`OnlineFavorites.vue` |
 | 改在线详情「本地副本」跳转                         | `src/views/online/OnlineDetail.vue`、`components/OnlineDetailPanel.vue`、`backend/internal/handlers/online.go`（DTO 回填 localId）、`services/eh_gallery.go` |
 | 改阅读器书签/章节（Round24）                       | `views/ComicReader.vue`、`components/reader/ReaderSidebar.vue`、`services/comic_mark.go`、`models/comic_mark.go`          |
@@ -417,8 +442,8 @@ backend/
 | 改 E 站账号/设置/我的标签  | `backend/internal/handlers/account.go`、`eh_setting.go`、`eh_uconfig.go` + 对应 services              |
 | 改标签引擎/词典同步        | `backend/internal/handlers/tag.go`、`services/tag_engine.go`                                          |
 | 改 Tag 维护                | `backend/internal/handlers/tag_maintain.go`、`services/tag_maintain.go`、`tag_scheduler.go`           |
-| 改下载系统                 | `backend/internal/handlers/download.go`、`services/download*.go`、`archive_chunk.go`、`archive_thread_pool.go` |
-| 改下载并发/优先级调度      | `services/download_scheduler.go`、`archive_thread_pool.go`、`models/download.go`                      |
+| 改下载系统                 | `backend/internal/handlers/download.go`、`services/download*.go`、`download_queue.go`、`download_batch.go`、`archive_chunk.go`、`archive_thread_pool.go` |
+| 改下载并发/优先级调度      | `services/download_scheduler.go`、`download_queue.go`（Round45 无界队列）、`archive_thread_pool.go`、`models/download.go` |
 | 改更新扫描（周扫描/老化）  | `backend/internal/handlers/update_scan.go`、`services/update_scheduler.go`、`offline.go`（AgedStatus） |
 | 改离线更新/维护/删除标记   | `backend/internal/handlers/offline.go`、`services/offline.go`、`offline_task.go`、`offline_removed.go` |
 | 改维护查重/忽略标记（O2） | `backend/internal/handlers/offline.go`（ignore 三接口）、`services/ignore.go`、`models/ignore.go`、`src/views/offline/OfflineMaintain.vue` |
@@ -471,14 +496,14 @@ backend/
 
 ---
 
-## 六、发布注意（v2.2.0）
+## 六、发布注意（v2.3.0）
 
 - **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.2.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
-- **更新日志**：[`CHANGELOG.md`](CHANGELOG.md) 是跨版本更新状态归档（自 v2.0.0 起），README「当前状态」**只写当前版本**；每次发布在 CHANGELOG **顶部追加**新版本区块，历史区块不改写。维护要求见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md) 第 5~6 节。
+- **更新日志**：[`CHANGELOG.md`](CHANGELOG.md) 是跨版本更新状态归档（自 v2.0.0 起），由 AI 维护；每次发布在 **顶部追加**新版本区块，历史区块不改写。`README.md` 由珱垣本人维护，AI 只读；给珱垣的写作素材见 [`DSPlans/YeonBriefs/`](DSPlans/YeonBriefs/) 下 `BRIEF_vX.Y.Z.md`。维护要求见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md) 第 6 节。
 - **Docker 镜像（v2.1.1 起）**：推送 `SakuManga-X.Y.Z` tag 时由 `.github/workflows/docker-publish.yml` 自动构建 `linux/amd64` + `linux/arm64` 并推送到 `ghcr.io/yeonalbus/sakumanga`（标签 `X.Y.Z` / `X.Y` / `latest`）；也可在仓库 Actions 页面手动触发（`Docker Image (GHCR)` → Run workflow），无需任何 Secrets（用自带 `GITHUB_TOKEN` + `permissions: packages: write`）。本地构建用 `build-docker.bat`（本地测试）/ `build-docker.bat push`（多架构推 GHCR）。
   ⚠️ 镜像构建阶段不跑 Node，用的是仓库里已提交的 `backend/webui/dist`；**前端源码改动后必须先 `npm run build` 并同步产物再打 tag**，否则镜像内是旧前端（「关于」页版本号也会是旧的）。
 - **打包**：运行根目录 `build-release.bat` 生成单文件 `SakuManga.exe`（内嵌前端 + 后端 + 托盘 + 自定义图标），脚本标题自动读取 `package.json` 版本号；exe 图标由 `rsrc` 从 `app.ico` 自动生成。双击运行后最小化到系统托盘，右键菜单「打开界面 / 退出程序」；NAS/无界面环境用 `SakuManga.exe --headless` 纯后端运行。
-- **发布流程**：完整发布检查清单见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md)（版本号 → 项目树 → README + CHANGELOG → Release Notes → 验证 → 打包 → 提交 + tag）。
+- **发布流程**：完整检查清单见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md)（版本号 → 改动清单 → 版本简报 → 项目树 → CHANGELOG → Release Notes → 验证 → 同步产物 + 打包 → 提交 + tag + 推送 → 通知珱垣发布 Release；Docker 由 tag 自动构建）。
 - **运行目录**：exe 启动时自动切换到自身所在目录，`manga.db` / `config.json` / `data/` 均跟随 exe 位置（首次运行自动生成）。
 - **端口**：默认监听 `0.0.0.0:8081`（「高级设置」可改）；若被占用自动切换随机空闲端口。
 - `manga.db`、`data/` 为**运行时数据**，已加入 `.gitignore`；`backend/config.json` 仍被追踪（含本机 Clash 代理 `127.0.0.1:7897`，属通用配置，如需开源可自行删除）。

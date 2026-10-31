@@ -208,6 +208,14 @@ Hmmm遇到了点小问题...
 我看你在尝试自己回忆，不需要，你可以让一个子代理来检索我们的对话文件，dsh的对话都是存在本地的，这样也更精确，不怕出错
 ```
 
+### 18. uploader 也要防止退化
+
+```
+然后，唉，我现在又想起来一个问题，有点烦说实话，你现在上下文也够长了，不是很想继续在这里不断堆任务，但是也没办法
+
+除了artist外，还有个字段也需要防止退化：uploader。比如uploader:"Jean Lenegre$"，退化成了搜索uploader:"Jean Lenegre$"。但是这个应该比较简单？我想的话就是直接看是否是uploader:XXX$或者uploader:"XXX XXX$"。不过为了严谨起见，还是看一下现在的uploader实现字段是怎么样的吧
+```
+
 ## 第二部分：过程记录
 
 > 落档来源：本会话 JSONL（`.tmp-session.jsonl`，原为 zstd 压缩的 `session.v4.jsonl.zstd`），起点为第 1111 行 `user/message`（「首先是优化这个输入框」），至文件末行；共 17 条用户消息。
@@ -282,3 +290,11 @@ Hmmm遇到了点小问题...
 - **决策**：文件夹命名取英文 `DshChats`（与 `plans`/`Problems`/`Research`/`VerNotes` 队列一致，不破坏命名风格）；文件 `round49-bookmark-ui-iteration.md`；原话部分用围栏代码块承载以保证逐字（`[截图]` 占位放在代码块外，不污染原文）；`agent/inbox/spliced` 里重复的同一用户消息一律忽略，只取 `user/message`。
 - **实现**：会话原始文件为 `~/.dsh/sessions/--G-SakuProjects-SakuManga--/<session>/session.v4.jsonl.zstd`，先用 `zstd -d` 解压为 `.tmp-session.jsonl`，再用 Python 脚本（`DSPlans/DshChats/_extract.py`）从第 1111 行起提取 `user/message` 与 `assistant/message`，生成第一部分并拼接第二部分。
 - **踩坑/bug**：全盘 `Select-String` 递归搜索太慢，应直接定位会话目录；`.jsonl.zstd` 需先解压才能解析。
+
+### 迭代 9：uploader 豁免（无翻译显示上传者名）
+
+- **诉求**：除 artist 外，`uploader` 字段也防止退化——`uploader:"Jean Lenegre$"` 不应显示成 `搜索: uploader:"Jean Lenegre$"` 长串；先确认现有 uploader 实现。
+- **查证**：详情页点击上传者走 `formatFSearchTag('uploader', key, false)`——多词 key 生成 `uploader:"key$"`、单词生成 `uploader:key$`（`src/utils/tagFilter.ts`）；EhTagTranslation 词典没有 `uploader` 命名空间，查翻译必然落空，因此与 artist 同类退化。
+- **方案**：`src/utils/bookmarkTitle.ts` 把豁免从硬编码 artist 扩展为命名空间名单 `KEY_SELF_DISPLAY_NAMESPACES = ['artist', 'uploader']`——有翻译用翻译，无翻译显示 tag key 本身（`Jean Lenegre`），不回退长串；`extractBookmarkTagKey` 的引号/无引号两条正则已覆盖 uploader，无需改动。
+- **实现**：`src/utils/bookmarkTitle.ts`；commit `0dc25c5`（含 `backend/webui/dist` 同步）。
+- **踩坑/bug**：无。

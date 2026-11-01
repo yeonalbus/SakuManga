@@ -6,13 +6,10 @@ import AppIcon from '@/components/icons/AppIcon.vue'
 
 // ─────────────────────────────────────────────────────────────
 // Round44：忽略清单独立页（从维护页弹层剥离）
-//
-// 语义（珱垣拍板）：
-//   - 忽略 = "不再提示，随时可恢复"；被忽略的内容不占维护页主列表；
-//   - 成员按「宽松口径」展示：列出该指纹匹配到的全部本地本子，并标注
-//     「同组（会构成重复）」/「未构成重复组」，让用户看清自己到底忽略过哪些本子；
-//   - 成员快照 + 新增感知：忽略之后新入库的本子会被标记「忽略后新增」，
-//     确认后（更新快照）继续静默；失效条目（匹配 0 本 / 仅剩 1 本）可清理。
+// Round51：忽略语义改为「按组成员」——
+//   - 忽略 = 「这一组（维护页上的那个簇）」，条目展示忽略时记录的那批本子；
+//   - 出现「忽略之后新入库」的成员时，维护页会重新列出该组并允许「确认新增」；
+//   - 旧逻辑条目已由后端在升级时清空（破坏性更新），本页一次性提示用户重新忽略。
 // ─────────────────────────────────────────────────────────────
 
 const { modal, toast } = useUI()
@@ -33,17 +30,14 @@ interface IgnoreMemberDTO {
   lang?: string
   artist?: string
   grouped: boolean
-  isNew: boolean
 }
 
 interface IgnoreItemDTO {
   id: string
-  type: 'title' | 'gid' | 'comic'
+  type: 'title' | 'gid'
   titleKey?: string
   artist?: string
   gid?: string
-  comicId?: string
-  comicTitle?: string
   note?: string
   createdAt: string
   members?: IgnoreMemberDTO[]
@@ -51,6 +45,14 @@ interface IgnoreItemDTO {
   groupCount: number
   groupedCount: number
   newCount: number
+}
+
+// Round51：忽略逻辑升级（破坏性更新）一次性提示（不随刷新消失，点「知道了」后不再显示）
+const UPGRADE_NOTICE_KEY = 'sakumanga.ignoreUpgradeNoticeDismissed'
+const showUpgradeNotice = ref(localStorage.getItem(UPGRADE_NOTICE_KEY) !== '1')
+const dismissUpgradeNotice = () => {
+  showUpgradeNotice.value = false
+  localStorage.setItem(UPGRADE_NOTICE_KEY, '1')
 }
 
 const items = ref<IgnoreItemDTO[]>([])
@@ -61,10 +63,9 @@ const busyId = ref('')
 
 const titleItems = computed(() => items.value.filter((i) => i.type === 'title'))
 const gidItems = computed(() => items.value.filter((i) => i.type === 'gid'))
-const comicItems = computed(() => items.value.filter((i) => i.type === 'comic'))
 const newItems = computed(() => items.value.filter((i) => i.newCount > 0))
 const newMemberTotal = computed(() => newItems.value.reduce((s, i) => s + i.newCount, 0))
-// 失效：title 型匹配 0 本；或仅剩 1 本（已不构成重复）
+// 已不构成重复：组成员的现存成员 < 2（含全部被删除 → 0 本）
 const staleItems = computed(() => items.value.filter((i) => i.matchedCount <= 1))
 
 const load = async () => {
@@ -106,7 +107,7 @@ const ackNew = async (item: IgnoreItemDTO) => {
 
 // 恢复忽略：该作品重新参与疑似重复判定
 const restore = async (item: IgnoreItemDTO) => {
-  const name = item.titleKey || item.comicTitle || item.gid || '该条目'
+  const name = item.titleKey || item.gid || '该条目'
   const confirmed = await modal.confirm(
     `恢复后「${name}」会重新参与疑似重复判定，下次查重（或立即）回到维护页列表。\n\n确定恢复吗？`,
     '↩ 恢复忽略',
@@ -115,7 +116,7 @@ const restore = async (item: IgnoreItemDTO) => {
   busyId.value = item.id
   try {
     await http(`/offline/ignore/${item.id}/restore`, { method: 'POST' })
-    toast.success('已恢复，已即时回到查重列表')
+    toast.success('已恢复，将在下次重新扫描后出现在维护列表')
     await load()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '恢复失败')
@@ -145,8 +146,7 @@ const onCoverError = (id: string) => {
   coverFailed.value[id] = true
 }
 
-const typeLabel = (t: IgnoreItemDTO['type']) =>
-  t === 'title' ? '作品指纹' : t === 'gid' ? '父画廊' : '成员级'
+const typeLabel = (t: IgnoreItemDTO['type']) => (t === 'title' ? '忽略组' : '父画廊')
 
 onMounted(load)
 </script>
@@ -170,6 +170,15 @@ onMounted(load)
       </div>
     </div>
 
+    <!-- Round51：忽略逻辑升级（破坏性更新）一次性提示 -->
+    <div v-if="showUpgradeNotice" class="alert-bar upgrade-bar">
+      <span class="alert-icon"><AppIcon name="eyeClosed" :size="18" /></span>
+      <div class="alert-text">
+        忽略逻辑已升级为「按组忽略」，旧忽略记录已重置 —— 请在维护页重新忽略需要的组。重新忽略时记录的是整组本子，新入库的本子会单独提醒。
+      </div>
+      <button class="action-btn ghost-gray sm" @click="dismissUpgradeNotice">知道了</button>
+    </div>
+
     <!-- 忽略后新增提醒 -->
     <div v-if="newItems.length > 0" class="alert-bar">
       <span class="alert-icon"><AppIcon name="eyeClosed" :size="18" /></span>
@@ -183,12 +192,11 @@ onMounted(load)
     <div class="stat-bar">
       <span class="stat-item">{{ items.length }} 条忽略</span>
       <span v-if="staleItems.length > 0" class="stat-item warn"
-        >{{ staleItems.length }} 条已失效 / 仅剩 1 本（可清理）</span
+        >{{ staleItems.length }} 条已不构成重复（可清理）</span
       >
       <span class="spacer"></span>
-      <span class="chip">作品指纹（title 型） {{ titleItems.length }}</span>
+      <span class="chip">忽略组（title 型） {{ titleItems.length }}</span>
       <span class="chip">父画廊（gid 型） {{ gidItems.length }}</span>
-      <span class="chip">成员级（comic 型） {{ comicItems.length }}</span>
     </div>
 
     <div v-if="loading" class="empty-box">
@@ -214,8 +222,8 @@ onMounted(load)
       >
         <div class="ignore-head" @click="toggle(item.id)">
           <span class="type-chip">{{ typeLabel(item.type) }}</span>
-          <span class="ignore-key" :title="item.titleKey || item.comicTitle">
-            {{ item.titleKey || item.comicTitle || `gid ${item.gid}` }}
+          <span class="ignore-key" :title="item.titleKey || `gid ${item.gid}`">
+            {{ item.titleKey || `gid ${item.gid}` }}
           </span>
           <span class="ignore-sub">
             <template v-if="item.artist">artist: {{ item.artist }} · </template>
@@ -224,10 +232,10 @@ onMounted(load)
           <span class="spacer"></span>
           <span v-if="item.newCount > 0" class="flag new">忽略后新增 {{ item.newCount }} 本</span>
           <span v-else-if="item.matchedCount === 0" class="flag stale"
-            >已失效：当前匹配 0 本 · 可清理</span
+            >组成员已被删除 · 可清理</span
           >
           <span v-else-if="item.matchedCount === 1" class="flag stale"
-            >仅剩 1 本，已不构成重复</span
+            >该忽略组当前已不构成重复</span
           >
           <span v-else class="flag ok"
             >覆盖 {{ item.matchedCount }} 本 · 压制 {{ item.groupCount }} 组</span
@@ -241,8 +249,8 @@ onMounted(load)
         <div v-show="isOpen(item.id)" class="ignore-body">
           <template v-if="(item.members || []).length > 0">
             <div class="diffline">
-              按「核心名 + 画师」匹配到 <b>{{ item.matchedCount }}</b> 本：标记「同组」的
-              {{ item.groupedCount }} 本之间才会构成重复，其余本子只是同作品 / 同指纹但不会聚成同一组。
+              忽略时记录了 <b>{{ item.matchedCount }}</b> 本：标记「同组」的
+              {{ item.groupedCount }} 本之间构成重复；其余本子只是同组内的其他成员（当前不构成重复）。
             </div>
             <div class="members">
               <div v-for="m in item.members" :key="m.comic.id" class="member">
@@ -267,7 +275,6 @@ onMounted(load)
                     <span class="member-flag" :class="{ grouped: m.grouped }">
                       {{ m.grouped ? '同组（会构成重复）' : '未构成重复组' }}
                     </span>
-                    <span v-if="m.isNew" class="member-flag new">忽略后新增</span>
                   </div>
                   <div class="member-path">
                     <AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}
@@ -376,6 +383,18 @@ onMounted(load)
 }
 .alert-text b {
   color: #ffd98a;
+}
+.upgrade-bar {
+  border-left-color: #007acc;
+  background: #14283a;
+  border-color: #24425c;
+  color: #a9c8dd;
+}
+.upgrade-bar .alert-text {
+  flex: 1;
+}
+.upgrade-bar .action-btn {
+  flex: 0 0 auto;
 }
 
 .stat-bar {

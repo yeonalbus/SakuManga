@@ -204,11 +204,8 @@ func scorePair(a, b *approxCandidate) (score, bodySim float64) {
 	return score, bodySim
 }
 
-// newApproxCandidate 由离线漫画构造 Tier 2 候选（忽略成员或核心名为空者返回 nil）
+// newApproxCandidate 由离线漫画构造 Tier 2 候选（核心名为空者返回 nil）
 func newApproxCandidate(c *models.OfflineComic, ignoreIdx *IgnoreIndex) *approxCandidate {
-	if ignoreIdx != nil && ignoreIdx.IsComicIgnored(c.ID) {
-		return nil
-	}
 	tags := UnmarshalTagSlice(c.OnlineTags)
 	artist := extractNamespaceTag(tags, "artist")
 
@@ -462,10 +459,10 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 			Reason:     reason,
 			Members:    membersOut,
 		}
-		if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
-			// Round44：同 Tier1 —— 有快照外的新成员才列出，否则静默
-			newCnt := entry.CountNewMembers(cl.Members)
-			if newCnt == 0 {
+		if entry := ignoreIdx.MatchCluster(cl.Members); entry != nil {
+			// Round51：同 Tier1——簇成员全在忽略集合内才静默，出现集合外成员才列出
+			covered, newCnt := entry.Evaluate(cl.Members)
+			if covered {
 				continue
 			}
 			cl.Ignored = true

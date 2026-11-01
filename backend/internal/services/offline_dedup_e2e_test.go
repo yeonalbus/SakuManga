@@ -50,8 +50,24 @@ func TestMaintainDedupClustersE2E(t *testing.T) {
 			t.Fatalf("创建漫画失败: %v", err)
 		}
 	}
-	// 忽略 A 组（title 型：核心名 + 画师）
-	if _, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", ""); err != nil {
+	// ── 基线：未忽略时 A 组聚簇，取其成员作为忽略集合（Round51：按组成员）──
+	base, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("基线维护查重失败: %v", err)
+	}
+	var aGroup []string
+	for _, cl := range base.Clusters {
+		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
+			for _, m := range cl.Members {
+				aGroup = append(aGroup, m.Comic.ID)
+			}
+		}
+	}
+	if len(aGroup) != 3 {
+		t.Fatalf("基线 A 组应有 3 成员，得到 %d", len(aGroup))
+	}
+	// 忽略 A 组（Round51：按组成员）
+	if _, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", aGroup); err != nil {
 		t.Fatalf("创建忽略失败: %v", err)
 	}
 
@@ -99,7 +115,7 @@ func TestMaintainDedupClustersE2E(t *testing.T) {
 	newComic := mkComic("a4", "[サークル] サンプルタイトル (Korean)", []string{"artist:てすと", "language:korean"}, 31)
 	newComic.GID = "g-new"
 	newComic.LocalPath = "/nonexistent/a4"
-	newComic.AddedAt = time.Now() // 忽略之后入库
+	newComic.AddedAt = time.Now().Add(time.Second) // 明确晚于忽略创建时间（毫秒级比较）
 	if err := db.Create(&newComic).Error; err != nil {
 		t.Fatalf("创建新增漫画失败: %v", err)
 	}
@@ -126,12 +142,20 @@ func TestMaintainDedupClustersE2E(t *testing.T) {
 		t.Error("忽略项出现新入库成员时应重新列出该簇")
 	}
 
-	// ── 确认新增（刷新快照）→ 该簇回到静默 ──
+	// ── 确认新增（把当前簇成员并入集合）→ 该簇回到静默 ──
 	var ig models.IgnoredIdentifier
 	if err := db.Where("type = ?", "title").First(&ig).Error; err != nil {
 		t.Fatalf("读取忽略条目失败: %v", err)
 	}
-	if _, err := AckIgnoreSnapshot(db, ig.ID); err != nil {
+	var clusterIDs []string
+	for _, cl := range after.Clusters {
+		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
+			for _, m := range cl.Members {
+				clusterIDs = append(clusterIDs, m.Comic.ID)
+			}
+		}
+	}
+	if _, err := AckIgnoreSnapshot(db, ig.ID, clusterIDs); err != nil {
 		t.Fatalf("确认新增失败: %v", err)
 	}
 	acked, err := MaintainDedupWithProgress(db, nil, nil, false)
@@ -142,55 +166,6 @@ func TestMaintainDedupClustersE2E(t *testing.T) {
 		if cl.TitleKey == "サンプルタイトル" && cl.Artist == "てすと" {
 			t.Errorf("确认新增后该簇应回到静默，不再列出（得到 %d 成员）", len(cl.Members))
 		}
-	}
-}
-
-// TestDetectClustersComicIgnore 成员级忽略（type=comic）：被忽略的漫画不参与聚类，
-// 组内剩余成员 ≥2 时组保留并收缩，<2 时组消失。
-func TestDetectClustersComicIgnore(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("打开内存库失败: %v", err)
-	}
-	if err := db.AutoMigrate(&models.OfflineComic{}, &models.IgnoredIdentifier{}); err != nil {
-		t.Fatalf("迁移失败: %v", err)
-	}
-	comics := []models.OfflineComic{
-		mkComic("m1", "[サークル] ワールド", []string{"artist:abc"}, 30),
-		mkComic("m2", "[サークル] ワールド (English)", []string{"artist:abc"}, 31),
-		mkComic("m3", "[サークル] ワールド 汉化版", []string{"artist:abc"}, 32),
-	}
-	idx := LoadIgnoreIndex(db)
-
-	// 基线：3 成员 1 簇
-	base := detectTitleClusters(comics, idx)
-	if len(base) != 1 || len(base[0].Members) != 3 {
-		t.Fatalf("基线应为 3 成员 1 簇，得到 %d 簇", len(base))
-	}
-
-	// 忽略 m2（成员级）→ 组收缩为 2 成员
-	if _, err := CreateIgnore(db, "comic", "", "", "", "m2", ""); err != nil {
-		t.Fatalf("创建成员级忽略失败: %v", err)
-	}
-	idx2 := LoadIgnoreIndex(db)
-	after := detectTitleClusters(comics, idx2)
-	if len(after) != 1 || len(after[0].Members) != 2 {
-		t.Fatalf("忽略 m2 后应为 2 成员 1 簇，得到 %d 簇", len(after))
-	}
-	for _, m := range after[0].Members {
-		if m.Comic.ID == "m2" {
-			t.Error("被忽略成员 m2 不应出现在簇中")
-		}
-	}
-
-	// 再忽略 m1 → 组内仅剩 1 成员 → 组消失
-	if _, err := CreateIgnore(db, "comic", "", "", "", "m1", ""); err != nil {
-		t.Fatalf("创建成员级忽略失败: %v", err)
-	}
-	idx3 := LoadIgnoreIndex(db)
-	final := detectTitleClusters(comics, idx3)
-	if len(final) != 0 {
-		t.Fatalf("组内剩余 1 成员不应成簇，得到 %d 簇", len(final))
 	}
 }
 
@@ -236,7 +211,7 @@ func TestMaintainDedupParentIgnoreE2E(t *testing.T) {
 	}
 
 	// 忽略父画廊 gid=100
-	if _, err := CreateIgnore(db, "gid", "", "", "100", "", ""); err != nil {
+	if _, err := CreateIgnore(db, "gid", "", "", "100", "", nil); err != nil {
 		t.Fatalf("创建 gid 忽略失败: %v", err)
 	}
 

@@ -67,7 +67,7 @@ type ClusterMember struct {
 	Artist string `json:"artist,omitempty"`
 
 	// addedAtMs 首次入库时间戳(ms)，Round50 E 起改由本字段承载：
-	// 结果不再下发完整 OfflineComic，但「忽略后新增」判定（TitleIgnoreEntry.CountNewMembers）
+	// 结果不再下发完整 OfflineComic，但「忽略后新增」判定（TitleIgnoreEntry.Evaluate）
 	// 仍需要这个时间，故以非导出字段随成员传递。
 	addedAtMs int64 `json:"-"`
 }
@@ -340,10 +340,6 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) [
 	artistKnown := make([]bool, 0, len(comics))
 	for i := range comics {
 		c := &comics[i]
-		// Round26-2：成员级忽略——被忽略的漫画（type=comic）不参与名称聚类
-		if ignoreIdx != nil && ignoreIdx.IsComicIgnored(c.ID) {
-			continue
-		}
 		tags := UnmarshalTagSlice(c.OnlineTags)
 		artist := extractNamespaceTag(tags, "artist")
 
@@ -451,12 +447,11 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) [
 		if cl == nil {
 			continue
 		}
-		if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
-			// Round44：忽略 = "直到有变化为止"。
-			// 簇成员全在忽略当时的快照内 → 静默跳过（增量/全量一致）；
-			// 出现快照外的成员（忽略之后新入库）→ 照常列出并标注新增，供用户确认。
-			newCnt := entry.CountNewMembers(cl.Members)
-			if newCnt == 0 {
+		if entry := ignoreIdx.MatchCluster(cl.Members); entry != nil {
+			// Round51：忽略 = 「这一组」——簇成员全在忽略集合内 → 静默；
+			// 出现集合外成员 → 照常列出，其中「忽略之后新入库」的计入新增，供用户确认。
+			covered, newCnt := entry.Evaluate(cl.Members)
+			if covered {
 				continue
 			}
 			cl.Ignored = true

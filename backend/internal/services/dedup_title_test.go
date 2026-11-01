@@ -112,28 +112,35 @@ func TestCreateIgnoreValidation(t *testing.T) {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	// 非法类型
-	if _, err := CreateIgnore(db, "bogus", "k", "", "", "", ""); err == nil {
+	if _, err := CreateIgnore(db, "bogus", "k", "", "", "", nil); err == nil {
 		t.Error("非法 type 应报错")
 	}
-	// title 型缺核心名
-	if _, err := CreateIgnore(db, "title", "  ", "", "", "", ""); err == nil {
-		t.Error("title 型缺核心名应报错")
+	// title 型缺标题
+	if _, err := CreateIgnore(db, "title", "  ", "", "", "", nil); err == nil {
+		t.Error("title 型缺标题应报错")
+	}
+	// title 型缺成员（Round51：按组成员）
+	if _, err := CreateIgnore(db, "title", "テスト", "abc", "", "", nil); err == nil {
+		t.Error("title 型缺成员应报错")
 	}
 	// gid 型缺 gid
-	if _, err := CreateIgnore(db, "gid", "", "", "", "", ""); err == nil {
+	if _, err := CreateIgnore(db, "gid", "", "", "", "", nil); err == nil {
 		t.Error("gid 型缺 gid 应报错")
 	}
-	// 幂等：同 key 返回同一条
-	a, err := CreateIgnore(db, "title", "テスト", "abc", "", "", "")
+	// 幂等：同 key 返回同一条，成员并集
+	a, err := CreateIgnore(db, "title", "テスト", "abc", "", "", []string{"m1"})
 	if err != nil {
 		t.Fatalf("创建失败: %v", err)
 	}
-	b, err := CreateIgnore(db, "title", "テスト", "abc", "", "", "")
+	b, err := CreateIgnore(db, "title", "テスト", "abc", "", "", []string{"m2"})
 	if err != nil {
 		t.Fatalf("重复创建失败: %v", err)
 	}
 	if a.ID != b.ID {
 		t.Errorf("幂等应返回同一条，得到 %s vs %s", a.ID, b.ID)
+	}
+	if seen := parseSeenComicIDs(b.SeenComicIDs); !seen["m1"] || !seen["m2"] {
+		t.Errorf("重复创建应把成员并入集合，得到 %q", b.SeenComicIDs)
 	}
 	// 恢复：不存在的 id 容错
 	if err := RestoreIgnore(db, "not-exist"); err != ErrIgnoreNotFound {
@@ -260,13 +267,11 @@ func TestDetectClustersIgnore(t *testing.T) {
 	}
 }
 
-// newTestIgnoreIndex 构造带 title 型忽略（含成员快照）的内存索引
+// newTestIgnoreIndex 构造带 title 型忽略（成员集合）的内存索引
 func newTestIgnoreIndex(titleKey, artist string, seen []string) *IgnoreIndex {
 	idx := &IgnoreIndex{
-		titleEntries:     map[string]*TitleIgnoreEntry{},
-		titleEntriesNorm: map[string]*TitleIgnoreEntry{},
-		gids:             map[string]bool{},
-		comicIDs:         map[string]bool{},
+		titleEntries: map[string]*TitleIgnoreEntry{},
+		gids:         map[string]bool{},
 	}
 	e := &TitleIgnoreEntry{
 		ID:        "test-ignore",
@@ -278,8 +283,7 @@ func newTestIgnoreIndex(titleKey, artist string, seen []string) *IgnoreIndex {
 	for _, id := range seen {
 		e.seen[id] = true
 	}
-	idx.titleEntries[titleIgnoreKey(titleKey, artist)] = e
-	idx.titleEntriesNorm[ignoreTitleKeyOf(titleKey, artist)] = e
+	idx.titleEntries[e.ID] = e
 	return idx
 }
 

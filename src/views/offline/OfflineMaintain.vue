@@ -617,7 +617,7 @@ const selectAllVisible = () => {
   selectedIds.value = ids
 }
 
-// 组级：都留（不再提示）＝忽略整组（可逆，可在忽略清单恢复）
+// 组级：都留（不再提示）＝忽略整组（Round51：传该簇全部成员，按组成员记录；可逆）
 const keepWholeGroup = async (cl: DedupClusterDTO) => {
   const name = cl.artist ? `${cl.titleKey}（artist:${cl.artist}）` : cl.titleKey
   const confirmed = await modal.confirm(
@@ -628,7 +628,12 @@ const keepWholeGroup = async (cl: DedupClusterDTO) => {
   try {
     await http('/offline/ignore', {
       method: 'POST',
-      body: JSON.stringify({ type: 'title', titleKey: cl.titleKey, artist: cl.artist || '' }),
+      body: JSON.stringify({
+        type: 'title',
+        titleKey: cl.titleKey,
+        artist: cl.artist || '',
+        members: cl.members.map((m) => m.comic.id),
+      }),
     })
     toast.success('已忽略本组，可在「忽略清单」中恢复')
     processedCount.value++
@@ -638,11 +643,14 @@ const keepWholeGroup = async (cl: DedupClusterDTO) => {
   }
 }
 
-// 忽略项出现"忽略后新增" → 确认新增（刷新成员快照，之后继续静默）
+// 忽略项出现"忽略后新增" → 确认新增（把当前簇成员并入忽略集合，之后继续静默）
 const ackIgnoreNew = async (cl: DedupClusterDTO) => {
   if (!cl.ignoreId) return
   try {
-    await http(`/offline/ignore/${cl.ignoreId}/ack`, { method: 'POST' })
+    await http(`/offline/ignore/${cl.ignoreId}/ack`, {
+      method: 'POST',
+      body: JSON.stringify({ members: cl.members.map((m) => m.comic.id) }),
+    })
     toast.success('已确认新增，该组回到静默（忽略清单里可随时恢复）')
     await loadResult()
   } catch (err) {

@@ -12,7 +12,7 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Round44：忽略清单成员视图（宽松口径 + 同组标注）+ 成员快照 / 新增感知 / 回填
+// Round51：忽略清单成员视图（按组成员）+ 破坏性清理（旧语义条目）
 // ─────────────────────────────────────────────────────────────
 
 func newIgnoreMemberTestDB(t *testing.T) *gorm.DB {
@@ -35,7 +35,8 @@ func newIgnoreMemberTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestListIgnoresWithMembersLooseScope(t *testing.T) {
+// TestListIgnoresWithMembersGroupScope Round51：清单成员 = 忽略集合中的现存成员（按组，不再按名字）
+func TestListIgnoresWithMembersGroupScope(t *testing.T) {
 	db := newIgnoreMemberTestDB(t)
 
 	// 同一核心名 + 同画师，4 本：第01話 两本（同卷 → 构成重复组）、第02/03話 各一本
@@ -53,7 +54,8 @@ func TestListIgnoresWithMembersLooseScope(t *testing.T) {
 		}
 	}
 
-	if _, err := CreateIgnore(db, "title", "テスト作品", "tester", "", "", ""); err != nil {
+	// 忽略「第01話 组」：Round51 按组成员，传该簇成员 {m1, m2}
+	if _, err := CreateIgnore(db, "title", "テスト作品", "tester", "", "", []string{"m1", "m2"}); err != nil {
 		t.Fatalf("创建忽略失败: %v", err)
 	}
 
@@ -65,15 +67,12 @@ func TestListIgnoresWithMembersLooseScope(t *testing.T) {
 		t.Fatalf("应有 1 条忽略，得到 %d", len(list))
 	}
 	it := list[0]
-	// 宽松口径：4 本全部列出（含不成组的散本）
-	if it.MatchedCount != 4 {
-		t.Errorf("宽松口径应覆盖 4 本，得到 %d", it.MatchedCount)
+	// 只展示集合成员（2 本），不再按名字把散本也拉进来
+	if it.MatchedCount != 2 {
+		t.Errorf("应覆盖集合内 2 本，得到 %d", it.MatchedCount)
 	}
 	if it.GroupCount != 1 || it.GroupedCount != 2 {
 		t.Errorf("应识别 1 个重复组 / 2 本同组，得到 groupCount=%d groupedCount=%d", it.GroupCount, it.GroupedCount)
-	}
-	if it.NewCount != 0 {
-		t.Errorf("刚创建忽略时不应有新增，得到 %d", it.NewCount)
 	}
 	grouped := map[string]bool{}
 	for _, m := range it.Members {
@@ -82,76 +81,94 @@ func TestListIgnoresWithMembersLooseScope(t *testing.T) {
 	if !grouped["m1"] || !grouped["m2"] {
 		t.Error("第01話 的两本应标记为同组（会构成重复）")
 	}
-	if grouped["m3"] || grouped["m4"] {
-		t.Error("第02/03話 各一本不应标记为同组")
-	}
 
-	// ── 新增感知：忽略之后新入库同卷本子 → 该成员标记 isNew ──
+	// ── 新增感知：忽略之后新入库同组本子 m5 → 维护缓存里该组显示新增 1 本 ──
 	newComic := mkComic("m5", "[CIRCLE] テスト作品 第01話 (Chinese)", []string{"artist:tester", "language:chinese"}, 20)
 	newComic.Source = models.SourceOffline
 	newComic.LocalPath = "/nonexistent/m5"
-	// 明确晚于忽略创建时间：新增判定用毫秒级比较（isAddedAfter: >），
-	// 直接用 time.Now() 会因 Windows 时钟精度（~15.6ms）与忽略创建落在同一毫秒而漏判。
-	newComic.AddedAt = time.Now().Add(time.Second) // 忽略之后入库
+	newComic.AddedAt = time.Now().Add(time.Second) // 明确晚于忽略创建时间
 	if err := db.Create(&newComic).Error; err != nil {
 		t.Fatalf("创建新增漫画失败: %v", err)
 	}
+	var all []models.OfflineComic
+	if err := db.Where("source = ?", models.SourceOffline).Find(&all).Error; err != nil {
+		t.Fatalf("读取漫画失败: %v", err)
+	}
+	clusters := detectTitleClusters(all, LoadIgnoreIndex(db))
+	StoreMaintainDedupResult(&DedupResult{Clusters: clusters}, false)
 	list, _ = ListIgnoresWithMembers(db)
 	it = list[0]
-	if it.MatchedCount != 5 || it.NewCount != 1 {
-		t.Fatalf("应覆盖 5 本且 1 本为新增，得到 matched=%d new=%d", it.MatchedCount, it.NewCount)
-	}
-	newFlagged := false
-	for _, m := range it.Members {
-		if m.Comic.ID == "m5" && m.IsNew {
-			newFlagged = true
-		}
-	}
-	if !newFlagged {
-		t.Error("新入库的 m5 应带 isNew 标记")
+	if it.NewCount != 1 {
+		t.Fatalf("新入库的 m5 应计入新增 1 本，得到 %d", it.NewCount)
 	}
 
-	// ── 确认新增：快照刷新为当前集合 → 不再有新增 ──
-	if _, err := AckIgnoreSnapshot(db, it.ID); err != nil {
+	// ── 确认新增：把 m5 并入集合 → 该组回到静默 ──
+	if _, err := AckIgnoreSnapshot(db, it.ID, []string{"m5"}); err != nil {
 		t.Fatalf("确认新增失败: %v", err)
 	}
+	clusters = detectTitleClusters(all, LoadIgnoreIndex(db))
+	StoreMaintainDedupResult(&DedupResult{Clusters: clusters}, false)
 	list, _ = ListIgnoresWithMembers(db)
 	if list[0].NewCount != 0 {
 		t.Errorf("确认新增后不应再有新增，得到 %d", list[0].NewCount)
 	}
-
-	// ── 回填：快照被清空（存量数据形态）→ BackfillIgnoreSnapshots 按当前匹配集合补齐 ──
-	if err := db.Model(&models.IgnoredIdentifier{}).Where("id = ?", it.ID).
-		Update("seen_comic_ids", "").Error; err != nil {
-		t.Fatalf("清空快照失败: %v", err)
-	}
-	if n := BackfillIgnoreSnapshots(db); n != 1 {
-		t.Errorf("应回填 1 条，得到 %d", n)
-	}
-	list, _ = ListIgnoresWithMembers(db)
-	if list[0].NewCount != 0 {
-		t.Errorf("回填后不应有新增（快照＝当前集合），得到 %d", list[0].NewCount)
-	}
 }
 
-func TestCreateIgnoreSnapshotWritten(t *testing.T) {
+// TestCreateIgnoreMembersWritten Round51：创建时写入成员集合；无成员 / 非 title 类型校验
+func TestCreateIgnoreMembersWritten(t *testing.T) {
 	db := newIgnoreMemberTestDB(t)
-	c := mkComic("s1", "[CIRCLE] スナップショット作品", []string{"artist:snap"}, 10)
-	c.Source = models.SourceOffline
-	c.LocalPath = "/nonexistent/s1"
-	if err := db.Create(&c).Error; err != nil {
-		t.Fatalf("创建漫画失败: %v", err)
+
+	if _, err := CreateIgnore(db, "title", "作品", "snap", "", "", nil); err == nil {
+		t.Error("title 型未提供成员时应报错")
 	}
-	rec, err := CreateIgnore(db, "title", "スナップショット作品", "snap", "", "", "")
+	if _, err := CreateIgnore(db, "comic", "", "", "s1", "", nil); err == nil {
+		t.Error("comic 型已移除，应报错")
+	}
+
+	rec, err := CreateIgnore(db, "title", "スナップショット作品", "snap", "", "", []string{"s1", "s2", "s1"})
 	if err != nil {
 		t.Fatalf("创建忽略失败: %v", err)
 	}
 	seen := parseSeenComicIDs(rec.SeenComicIDs)
-	if !seen["s1"] {
-		t.Errorf("创建忽略时应写入成员快照，得到 %q", rec.SeenComicIDs)
+	if len(seen) != 2 || !seen["s1"] || !seen["s2"] {
+		t.Errorf("成员集合应去重为 {s1,s2}，得到 %q", rec.SeenComicIDs)
 	}
-	// gid / comic 型不写快照
-	if r2, err := CreateIgnore(db, "gid", "", "", "12345", "", ""); err != nil || r2.SeenComicIDs != "" {
-		t.Errorf("gid 型不应写成员快照（err=%v）", err)
+	if rec.SnapshotVersion != ignoreSnapshotVersion {
+		t.Errorf("新条目快照版本应为 %d，得到 %d", ignoreSnapshotVersion, rec.SnapshotVersion)
+	}
+
+	// gid 型不写成员集合
+	if r2, err := CreateIgnore(db, "gid", "", "", "12345", "", nil); err != nil || r2.SeenComicIDs != "" {
+		t.Errorf("gid 型不应写成员集合（err=%v）", err)
+	}
+}
+
+// TestPurgeLegacyIgnores 破坏性更新：启动时清空旧语义条目（version<2），保留新条目（幂等）
+func TestPurgeLegacyIgnores(t *testing.T) {
+	db := newIgnoreMemberTestDB(t)
+	old := models.IgnoredIdentifier{
+		ID: "ignore-old", Type: "title", TitleKey: "旧作品", Artist: "a",
+		SeenComicIDs: `["x1"]`, CreatedAt: time.Now(), SnapshotVersion: 0,
+	}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatalf("写入旧条目失败: %v", err)
+	}
+	fresh, err := CreateIgnore(db, "title", "新作品", "b", "", "", []string{"y1"})
+	if err != nil {
+		t.Fatalf("创建新条目失败: %v", err)
+	}
+
+	if n := PurgeLegacyIgnores(db); n != 1 {
+		t.Errorf("应清理 1 条旧条目，得到 %d", n)
+	}
+	if err := db.First(&models.IgnoredIdentifier{}, "id = ?", "ignore-old").Error; err == nil {
+		t.Error("旧条目应已被删除")
+	}
+	if err := db.First(&models.IgnoredIdentifier{}, "id = ?", fresh.ID).Error; err != nil {
+		t.Error("新条目不应被清理")
+	}
+	// 幂等：再清一次为 0
+	if n := PurgeLegacyIgnores(db); n != 0 {
+		t.Errorf("重复清理应为 0，得到 %d", n)
 	}
 }

@@ -246,7 +246,7 @@ func TestApplyIgnoreFiltersMatchesSync(t *testing.T) {
 			keepID = c.ID
 		}
 	}
-	if _, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", ""); err != nil {
+	if _, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", []string{"a1", "a2"}); err != nil {
 		t.Fatalf("创建忽略失败: %v", err)
 	}
 	ApplyIgnoreFiltersToMaintainResult(db)
@@ -284,7 +284,7 @@ func TestApplyIgnoreFiltersGIDParentItem(t *testing.T) {
 	resetMaintainResultForTest(t)
 	db := newSyncTestDB(t)
 	seedTwoClusters(t, db)
-	if _, err := CreateIgnore(db, "gid", "", "", "111", "", ""); err != nil {
+	if _, err := CreateIgnore(db, "gid", "", "", "111", "", nil); err != nil {
 		t.Fatalf("创建 gid 忽略失败: %v", err)
 	}
 

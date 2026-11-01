@@ -294,17 +294,15 @@ func InvalidateMaintainDedupResult(removedIDs []string) {
 
 // SyncMaintainDedupClusters 定向同步维护查重结果缓存中的「疑似重复」簇（Round33）。
 //
-// 背景：结果缓存是扫描时的内存快照，忽略 / 恢复忽略 / 删除漫画后不会自动更新，
-// 导致三个问题：①已忽略的簇重进页面又「复活」；②恢复忽略的簇不出现；
-// ③已删除的漫画仍残留在簇成员里。用户只能整份重新扫描（数千本联网核对，数十分钟）。
+// 背景：结果缓存是扫描时的内存快照，删除漫画后不会自动更新，导致已删除的漫画仍残留
+// 在簇成员里。用户只能整份重新扫描（数千本联网核对，数十分钟）。
 //
 // 本函数只重跑纯本地、零联网、零文件 I/O 的名称级聚类（O3 规则 5）+ 忽略表过滤，
-// 毫秒级完成，使缓存与最新忽略表 / 书库保持一致；同时按增量语义移除命中「gid 型忽略」
+// 毫秒级完成，使缓存与最新书库保持一致；同时按增量语义移除命中「gid 型忽略」
 // 的父画廊更新提示（全量核对结果不豁免，与扫描口径一致）。
 //
-// 不保留「未同步」信号：定向同步后结果列表已与最新书库/忽略表一致，
-// 因此一并前移 FinishedAt（使 hasUnsynced=false）并清除 stale 标记，
-// 前端不会再提示「结果已过期，请重新扫描」。用户之后仍可手动全量核对。
+// Round51：忽略 / 恢复忽略不再调用本函数（忽略走 ApplyIgnoreFiltersToMaintainResult 定向过滤，
+// 恢复只删条目、等下次重新扫描），本函数当前无生产入口，保留供未来全量同步/测试使用。
 func SyncMaintainDedupClusters(db *gorm.DB) {
 	if db == nil {
 		return
@@ -394,8 +392,9 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 //   - 仍然一并剔除 items 中命中被删 id 的条目（含被删成对项）、清 stale、前移 FinishedAt、
 //     清空更新检测缓存并落库一次——与「定向同步」的收尾语义一致。
 //
-// 注意：**忽略 / 恢复忽略**仍须调用 SyncMaintainDedupClusters——忽略表变化会改变簇的可见性
-// （被忽略的簇要隐藏、恢复的要浮现），那不是「删除节点」能表达的。
+// 注意：**忽略 / 确认新增**走 ApplyIgnoreFiltersToMaintainResult（定向过滤），**恢复忽略**只删条目
+// （Round51：不重算，等下次重新扫描）——都不再调用 SyncMaintainDedupClusters；
+// 删除节点不可能产生新簇/新边，因此走本函数裁剪即可。
 func PruneMaintainDedupMembers(removedIDs []string) {
 	if len(removedIDs) == 0 {
 		return
@@ -499,13 +498,14 @@ func ApplyIgnoreFiltersToMaintainResult(db *gorm.DB) {
 
 	offlineTaskMu.Lock()
 	if offlineMaintainRes != nil {
-		// 1) title 型忽略：命中且无「忽略后新增」的簇静默隐藏；有新增的照常列出并标注
+		// 1) title 型忽略（Round51：按组成员集合）——簇成员全在集合内静默隐藏；
+		//    出现集合外成员则列出，其中「忽略后新入库」的计入新增
 		kept := offlineMaintainRes.Clusters[:0]
 		for _, cl := range offlineMaintainRes.Clusters {
-			if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
-				newCnt := entry.CountNewMembers(cl.Members)
-				if newCnt == 0 {
-					continue // 命中忽略且无新增 → 隐藏
+			if entry := ignoreIdx.MatchCluster(cl.Members); entry != nil {
+				covered, newCnt := entry.Evaluate(cl.Members)
+				if covered {
+					continue // 簇成员全在忽略集合内 → 隐藏
 				}
 				cl.Ignored = true
 				cl.IgnoredNewCount = newCnt

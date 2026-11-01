@@ -71,7 +71,7 @@ func seedClusterComics(t *testing.T, db *gorm.DB) []models.OfflineComic {
 	return comics
 }
 
-// TestSyncMaintainDedupClustersTitleIgnore 忽略即时生效 + 恢复即时回归
+// TestSyncMaintainDedupClustersTitleIgnore 忽略即时生效（定向过滤）+ 恢复不触发重算（Round51）
 func TestSyncMaintainDedupClustersTitleIgnore(t *testing.T) {
 	resetMaintainResultForTest(t)
 	db := newSyncTestDB(t)
@@ -86,71 +86,43 @@ func TestSyncMaintainDedupClustersTitleIgnore(t *testing.T) {
 		t.Fatalf("基线应有 1 个疑似重复簇，得到 %d", len(GetMaintainDedupResult().Clusters))
 	}
 
-	// 忽略整组（title 型）→ 缓存即时同步，无需重新扫描
-	ig, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", "")
+	// 忽略整组（Round51：按组成员，传该簇全部成员）→ 定向过滤，缓存即时同步
+	cl := GetMaintainDedupResult().Clusters[0]
+	ids := make([]string, 0, len(cl.Members))
+	for _, m := range cl.Members {
+		ids = append(ids, m.Comic.ID)
+	}
+	ig, err := CreateIgnore(db, "title", cl.TitleKey, cl.Artist, "", "", ids)
 	if err != nil {
 		t.Fatalf("创建忽略失败: %v", err)
 	}
 	MarkLibraryChanged() // 模拟书库变更（下载/删除）后结果「未同步」的状态
-	SyncMaintainDedupClusters(db)
+	ApplyIgnoreFiltersToMaintainResult(db)
 	if got := GetMaintainDedupResult(); len(got.Clusters) != 0 {
 		t.Errorf("忽略后缓存应立即无簇，得到 %d 簇", len(got.Clusters))
 	}
 	if got := GetMaintainDedupResult(); got.Stale {
-		t.Error("定向同步后不应残留 stale 标记（否则前端仍提示重新扫描）")
+		t.Error("定向过滤后不应残留 stale 标记（否则前端仍提示重新扫描）")
 	}
 	if HasUnsyncedLibraryChanges() {
-		t.Error("定向同步后不应再存在「未反映变更」信号（否则进页面仍提示结果过期）")
+		t.Error("定向过滤后不应再存在「未反映变更」信号（否则进页面仍提示结果过期）")
 	}
 
-	// 恢复忽略 → 簇立即回归
+	// 恢复忽略（Round51：只删条目、不触发重算）→ 缓存保持现状，等重新扫描才回归
 	if err := RestoreIgnore(db, ig.ID); err != nil {
 		t.Fatalf("恢复忽略失败: %v", err)
 	}
+	if got := GetMaintainDedupResult(); len(got.Clusters) != 0 {
+		t.Errorf("恢复忽略不应触发聚类重算（缓存应保持现状），得到 %d 簇", len(got.Clusters))
+	}
+	// 重新扫描（全量重算）→ 簇回归
 	SyncMaintainDedupClusters(db)
 	got := GetMaintainDedupResult()
 	if len(got.Clusters) != 1 {
-		t.Fatalf("恢复后缓存应立即回到 1 簇，得到 %d", len(got.Clusters))
+		t.Fatalf("重新扫描后缓存应回到 1 簇，得到 %d", len(got.Clusters))
 	}
 	if len(got.Clusters[0].Members) != 3 {
-		t.Errorf("恢复后簇成员应为 3，得到 %d", len(got.Clusters[0].Members))
-	}
-}
-
-// TestSyncMaintainDedupClustersComicIgnore 成员级忽略：簇收缩 → 消失
-func TestSyncMaintainDedupClustersComicIgnore(t *testing.T) {
-	resetMaintainResultForTest(t)
-	db := newSyncTestDB(t)
-	seedClusterComics(t, db)
-
-	res, err := MaintainDedupWithProgress(db, nil, nil, false)
-	if err != nil {
-		t.Fatalf("增量维护查重失败: %v", err)
-	}
-	StoreMaintainDedupResult(res, false)
-
-	// 忽略 1 个成员 → 簇收缩为 2
-	if _, err := CreateIgnore(db, "comic", "", "", "", "a2", ""); err != nil {
-		t.Fatalf("创建成员级忽略失败: %v", err)
-	}
-	SyncMaintainDedupClusters(db)
-	got := GetMaintainDedupResult()
-	if len(got.Clusters) != 1 || len(got.Clusters[0].Members) != 2 {
-		t.Fatalf("忽略 1 个成员后应为 2 成员 1 簇，得到 %d 簇", len(got.Clusters))
-	}
-	for _, m := range got.Clusters[0].Members {
-		if m.Comic.ID == "a2" {
-			t.Error("被忽略成员 a2 不应出现在簇中")
-		}
-	}
-
-	// 再忽略 1 个成员 → 剩余 1 成员 → 簇消失
-	if _, err := CreateIgnore(db, "comic", "", "", "", "a1", ""); err != nil {
-		t.Fatalf("创建成员级忽略失败: %v", err)
-	}
-	SyncMaintainDedupClusters(db)
-	if got := GetMaintainDedupResult(); len(got.Clusters) != 0 {
-		t.Errorf("组内剩余 1 成员不应成簇，得到 %d 簇", len(got.Clusters))
+		t.Errorf("重新扫描后簇成员应为 3，得到 %d", len(got.Clusters[0].Members))
 	}
 }
 
@@ -174,7 +146,7 @@ func TestSyncMaintainDedupClustersGIDIgnore(t *testing.T) {
 	}
 
 	// 忽略父画廊 gid（gid 型）
-	if _, err := CreateIgnore(db, "gid", "", "", "777", "", ""); err != nil {
+	if _, err := CreateIgnore(db, "gid", "", "", "777", "", nil); err != nil {
 		t.Fatalf("创建 gid 型忽略失败: %v", err)
 	}
 

@@ -348,16 +348,17 @@ func (h *OfflineHandler) ClearRemovedStatus(c *gin.Context) {
 
 // ─────────────────────────────────────────────────────────────
 // Round26 O2：忽略标记（疑似重复组 / 父画廊更新提示）
+// Round51：忽略语义改为「按组成员」——title 型传 members（该簇全部成员 id）
 // ─────────────────────────────────────────────────────────────
 
 // createIgnoreReq 创建忽略条目请求体
 type createIgnoreReq struct {
-	Type     string `json:"type"`     // title | gid | comic
-	TitleKey string `json:"titleKey"` // type=title：归一化核心名
-	Artist   string `json:"artist"`   // type=title：画师
-	GID      string `json:"gid"`      // type=gid：父画廊 gid
-	ComicID  string `json:"comicId"`  // type=comic：本地漫画 id（组内成员级忽略）
-	Note     string `json:"note"`     // 备注（可选）
+	Type     string   `json:"type"`     // title | gid
+	TitleKey string   `json:"titleKey"` // type=title：展示用核心名
+	Artist   string   `json:"artist"`   // type=title：展示用画师
+	GID      string   `json:"gid"`      // type=gid：父画廊 gid
+	Members  []string `json:"members"`  // type=title：该簇全部成员 id（Round51）
+	Note     string   `json:"note"`     // 备注（可选）
 }
 
 // CreateIgnore 新增忽略条目 POST /api/v1/offline/ignore
@@ -367,19 +368,14 @@ func (h *OfflineHandler) CreateIgnore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
 		return
 	}
-	rec, err := services.CreateIgnore(h.db, req.Type, req.TitleKey, req.Artist, req.GID, req.ComicID, req.Note)
+	rec, err := services.CreateIgnore(h.db, req.Type, req.TitleKey, req.Artist, req.GID, req.Note, req.Members)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	// Round33：忽略即时生效——避免「忽略后重进页面簇又复活」而被迫整份重新扫描。
-	// Round50 A2：title / gid 型忽略只影响聚类之后的可见性，直接定向应用忽略表（毫秒级）；
-	// 仅 comic 型（成员级）忽略会改变聚类输入，才需要全量重算。
-	if req.Type == "comic" {
-		services.SyncMaintainDedupClusters(h.db)
-	} else {
-		services.ApplyIgnoreFiltersToMaintainResult(h.db)
-	}
+	// Round50 A2：title / gid 型忽略只影响聚类之后的可见性，直接定向应用忽略表（毫秒级）。
+	services.ApplyIgnoreFiltersToMaintainResult(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 
@@ -398,11 +394,14 @@ func (h *OfflineHandler) ListIgnores(c *gin.Context) {
 
 // AckIgnoreNewMembers 确认新增 POST /api/v1/offline/ignore/:id/ack
 //
-// Round44 新增感知：被忽略的作品下出现"忽略之后新入库"的本子时，该簇会重新出现在维护页；
-// 用户在忽略清单页确认已知悉后，把成员快照刷新为当前匹配集合，之后继续静默。
+// Round51：请求体传当前簇的全部成员 id（members），并入忽略集合；之后该簇回到静默。
 func (h *OfflineHandler) AckIgnoreNewMembers(c *gin.Context) {
 	id := c.Param("id")
-	rec, err := services.AckIgnoreSnapshot(h.db, id)
+	var req struct {
+		Members []string `json:"members"`
+	}
+	_ = c.ShouldBindJSON(&req) // 允许空 body：空则保持现状
+	rec, err := services.AckIgnoreSnapshot(h.db, id, req.Members)
 	if err != nil {
 		if errors.Is(err, services.ErrIgnoreNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -411,12 +410,14 @@ func (h *OfflineHandler) AckIgnoreNewMembers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// 快照更新后该簇回到静默态 → Round50 A2：定向应用忽略表（毫秒级），无需重算聚类
+	// 集合更新后该簇回到静默 → 定向应用忽略表（毫秒级），无需重算聚类
 	services.ApplyIgnoreFiltersToMaintainResult(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 
 // RestoreIgnore 恢复（删除）忽略条目 POST /api/v1/offline/ignore/:id/restore
+//
+// Round51：只删条目、不触发聚类重算（毫秒级）；被恢复的组在下次「重新扫描」后回到维护列表。
 func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 	id := c.Param("id")
 	if err := services.RestoreIgnore(h.db, id); err != nil {
@@ -427,7 +428,5 @@ func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Round33：恢复即时生效——定向重算结果缓存的疑似重复簇，恢复的组立即回到列表
-	services.SyncMaintainDedupClusters(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

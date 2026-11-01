@@ -2054,8 +2054,10 @@ onUnmounted(() => {
   padding: 10px;
 }
 .member-cover {
-  width: 54px;
-  height: 72px;
+  /* Round52：封面撑满 5 行内容高度（上下留白相等），宽度随之放大 */
+  width: 106px;
+  min-width: 90px;
+  align-self: stretch;
   border-radius: 6px;
   flex: 0 0 auto;
   overflow: hidden;

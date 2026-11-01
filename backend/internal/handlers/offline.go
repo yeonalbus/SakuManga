@@ -372,9 +372,14 @@ func (h *OfflineHandler) CreateIgnore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Round33：忽略即时生效——定向重算结果缓存的疑似重复簇，
-	// 避免「忽略后重进页面簇又复活」而被迫整份重新扫描
-	services.SyncMaintainDedupClusters(h.db)
+	// Round33：忽略即时生效——避免「忽略后重进页面簇又复活」而被迫整份重新扫描。
+	// Round50 A2：title / gid 型忽略只影响聚类之后的可见性，直接定向应用忽略表（毫秒级）；
+	// 仅 comic 型（成员级）忽略会改变聚类输入，才需要全量重算。
+	if req.Type == "comic" {
+		services.SyncMaintainDedupClusters(h.db)
+	} else {
+		services.ApplyIgnoreFiltersToMaintainResult(h.db)
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 
@@ -406,8 +411,8 @@ func (h *OfflineHandler) AckIgnoreNewMembers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// 快照更新后该簇回到静默态 → 定向同步结果缓存（无需重新扫描）
-	services.SyncMaintainDedupClusters(h.db)
+	// 快照更新后该簇回到静默态 → Round50 A2：定向应用忽略表（毫秒级），无需重算聚类
+	services.ApplyIgnoreFiltersToMaintainResult(h.db)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ignore": rec})
 }
 

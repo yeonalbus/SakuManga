@@ -54,7 +54,7 @@
 
 **风险**：
 - 规则 4 目录签名会对新增纳入的老化本做首次签名预热（I/O）；已有 `sig_dir_mtime` 缓存，二次运行即快。**这是 G 的必然代价**，但删除路径（A 落地后）不再触发它。
-- `removed_status` 是否也纳入本地查重：**本轮不改**（保持现有排除行为），理由是珱垣只明确了老化本；该决策在调研文档 §5 单列待确认。若后续确认，只需在 `filterOfflineLocalCandidates` 里放行。
+- `removed_status`（E 站已下架/版权移除）也一并纳入本地查重：它与老化的排除理由完全相同（"避免重复联网 404"是联网理由，与本地文件是否重复无关）。**本方案已实现**（`filterOfflineLocalCandidates` 只排除「关闭离线维护的额外路径」），联网环节仍跳过。
 
 #### 1.2 A：删除路径改为增量裁剪
 
@@ -69,7 +69,7 @@
    - 清 `Stale`、前移 `FinishedAt`（沿用现有"定向同步即视为已同步"语义）；
    - 落库一次快照（`PersistMaintainSnapshot`）。
 2. `RemoveDedup` 的两个分支（批量 + 单删）改为：`InvalidateMaintainDedupResult(ids)`（剔除 Items）→ `PruneMaintainDedupMembers(ids)`（裁剪簇 + 落库）。**不再调用 `SyncMaintainDedupClusters`**。
-3. `CreateIgnore` / `DeleteIgnore`（忽略、恢复忽略）**保持**调用 `SyncMaintainDedupClusters`：忽略表变化会改变簇的可见性，语义上仍需全量重算（低频操作，耗时 6 s 可接受，本轮不优化）。
+3. **忽略 / 确认新增**（A2，2026-11-01 追加）：`CreateIgnore`（title / gid 型）与 `AckIgnoreNewMembers` 改为 `ApplyIgnoreFiltersToMaintainResult`——只把已算好的簇按忽略表过滤（毫秒级），不重跑聚类；`RestoreIgnore`（恢复忽略）与 comic 型（成员级）忽略仍走 `SyncMaintainDedupClusters` 全量重算，因为前者需要把被隐藏的簇重新算出来、后者会改变聚类输入。
 
 **验收**：单本删除端到端 < 200 ms；同一 3 本组删 1 本后，组仍在原位置、`id` 不变、成员变 2。
 
@@ -176,6 +176,7 @@
 | 删除后簇列表 | 全量重排 + 重编号 | 位置与 `cluster.id` 不变，仅被删成员消失 | A + B |
 | 结果体积（同数据 A/B） | 1425 KB（623 成员 / 287 组） | **871 KB**，**−38.9%**（每成员 2343 B → 1431 B） | E |
 | 本地候选 / 联网候选 | 5033 / 5033（混同） | **7816（含老化 2779）/ 5033（老化 0）** | G 分层 |
+| 忽略本组 / 确认新增 | 全量重算 6～10 s | **毫秒级**（定向过滤忽略表） | A2 |
 
 ### 已知代价（实测）
 
@@ -185,6 +186,7 @@
 
 ### 遗留与后续
 
-- `removed_status` 是否纳入本地查重：本轮**未改**（保持排除），待珱垣确认。
+- ~~`removed_status` 是否纳入本地查重~~ **已纳入**（与老化本同口径，见 §1.1 风险说明）。
+- **忽略 / 确认新增 也改定向**（A2，2026-11-01 追加）：`ApplyIgnoreFiltersToMaintainResult` 只把已有簇按忽略表过滤，不重跑聚类（毫秒级）；恢复忽略与 comic 型（成员级）忽略仍走全量重算——前者需要把被隐藏的簇重新算出来，后者会改变聚类输入。已用 `TestApplyIgnoreFiltersMatchesSync` 锁定"定向过滤结果 == 全量重算结果"。
 - 发版时需在 `CHANGELOG.md` 顶部新版本区块补写本轮条目（含上文指标），并在 `DSPlans/YeonBriefs/` 列出 README 待改点。
 - 部署需按惯例重新构建前端并同步 `backend/webui/dist` + 重编 exe，由珱垣重启线上进程生效。

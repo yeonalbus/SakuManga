@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"SakuManga/internal/models"
+
+	"gorm.io/gorm"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -195,5 +197,129 @@ func TestPruneMaintainDedupMembersNilResult(t *testing.T) {
 	PruneMaintainDedupMembers(nil)
 	if GetMaintainDedupResult() != nil {
 		t.Error("空缓存裁剪后仍应为空")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round50 A2：忽略/确认新增 走定向过滤（不重算聚类）
+// ─────────────────────────────────────────────────────────────
+
+// seedTwoClusters 写入两个互不相干的疑似重复簇
+func seedTwoClusters(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	comics := []models.OfflineComic{
+		// 簇 1
+		mkComic("a1", "[サークル] サンプルタイトル", []string{"artist:てすと", "language:japanese"}, 30),
+		mkComic("a2", "[サークル] サンプルタイトル (English)", []string{"artist:てすと", "language:english"}, 31),
+		// 簇 2
+		mkComic("b1", "[サークル] ベツタイトル", []string{"artist:てすと", "language:japanese"}, 20),
+		mkComic("b2", "[サークル] ベツタイトル 汉化版", []string{"artist:てすと", "language:chinese"}, 21),
+	}
+	for i := range comics {
+		comics[i].Source = models.SourceOffline
+		comics[i].LocalPath = "/nonexistent/" + comics[i].ID // 目录不存在 → 签名规则跳过
+		if err := db.Create(&comics[i]).Error; err != nil {
+			t.Fatalf("创建漫画失败: %v", err)
+		}
+	}
+}
+
+// TestApplyIgnoreFiltersMatchesSync 定向过滤与全量重算的簇集合必须一致
+func TestApplyIgnoreFiltersMatchesSync(t *testing.T) {
+	resetMaintainResultForTest(t)
+	db := newSyncTestDB(t)
+	seedTwoClusters(t, db)
+
+	// A：定向路径（忽略后只过滤缓存）
+	res, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("维护查重失败: %v", err)
+	}
+	StoreMaintainDedupResult(res, false)
+	if len(res.Clusters) != 2 {
+		t.Fatalf("基线应有 2 簇，得到 %d", len(res.Clusters))
+	}
+	// 记录「将被忽略」之外那个簇的 ID，用于验证顺序/ID 不变
+	keepID := ""
+	for _, c := range res.Clusters {
+		if c.TitleKey != "サンプルタイトル" {
+			keepID = c.ID
+		}
+	}
+	if _, err := CreateIgnore(db, "title", "サンプルタイトル", "てすと", "", "", ""); err != nil {
+		t.Fatalf("创建忽略失败: %v", err)
+	}
+	ApplyIgnoreFiltersToMaintainResult(db)
+	got := GetMaintainDedupResult()
+	if got == nil {
+		t.Fatal("定向过滤后缓存不应为空")
+	}
+	if len(got.Clusters) != 1 {
+		t.Fatalf("忽略后应剩 1 簇，得到 %d", len(got.Clusters))
+	}
+	if got.Clusters[0].ID != keepID {
+		t.Errorf("未命中忽略的簇 ID 应保持不变（不重算、不重编号）: before=%s after=%s", keepID, got.Clusters[0].ID)
+	}
+	if got.Stale {
+		t.Error("定向过滤后不应残留 stale")
+	}
+	applySet := got.Clusters[0].TitleKey
+
+	// B：全量重算路径（忽略表已存在 → 扫描时直接静默该簇）
+	resetMaintainResultForTest(t)
+	res2, err := MaintainDedupWithProgress(db, nil, nil, false)
+	if err != nil {
+		t.Fatalf("重新扫描失败: %v", err)
+	}
+	if len(res2.Clusters) != 1 {
+		t.Fatalf("重算后应剩 1 簇，得到 %d", len(res2.Clusters))
+	}
+	if res2.Clusters[0].TitleKey != applySet {
+		t.Errorf("定向过滤与全量重算结果不一致: apply=%q sync=%q", applySet, res2.Clusters[0].TitleKey)
+	}
+}
+
+// TestApplyIgnoreFiltersGIDParentItem gid 型忽略：定向移除父画廊提示项，簇不受影响
+func TestApplyIgnoreFiltersGIDParentItem(t *testing.T) {
+	resetMaintainResultForTest(t)
+	db := newSyncTestDB(t)
+	seedTwoClusters(t, db)
+	if _, err := CreateIgnore(db, "gid", "", "", "111", "", ""); err != nil {
+		t.Fatalf("创建 gid 忽略失败: %v", err)
+	}
+
+	parentComic := mkComic("p1", "旧版", nil, 10)
+	pairComic := mkComic("p2", "新版", nil, 10)
+	offlineTaskMu.Lock()
+	offlineMaintainRes = &DedupResult{
+		Items: []DedupItem{
+			{Comic: toMaintainComicView(parentComic), Reason: "旧版可删除", Keep: false, Rule: "parent", PairComic: toMaintainComicViewPtr(pairComic)},
+			{Comic: toMaintainComicView(mkComic("other", "其他", nil, 10)), Reason: "同 GID", Keep: false, Rule: "gid"},
+		},
+		Clusters: []DedupCluster{
+			{ID: "cluster-keep", TitleKey: "keep", Members: []ClusterMember{
+				{Comic: toMaintainComicView(mkComic("k1", "k1", nil, 1))},
+				{Comic: toMaintainComicView(mkComic("k2", "k2", nil, 1))},
+			}},
+		},
+		FinishedAt: 1,
+		Stale:      true,
+	}
+	// 父画廊项绑定被忽略的 gid
+	offlineMaintainRes.Items[0].Comic.GID = "111"
+	offlineTaskMu.Unlock()
+
+	ApplyIgnoreFiltersToMaintainResult(db)
+
+	got := GetMaintainDedupResult()
+	if len(got.Items) != 1 || got.Items[0].Comic.ID != "other" {
+		ids := make([]string, 0, len(got.Items))
+		for _, it := range got.Items {
+			ids = append(ids, it.Comic.ID)
+		}
+		t.Errorf("命中 gid 忽略的 parent 项应被移除，剩余 %v", ids)
+	}
+	if len(got.Clusters) != 1 || got.Clusters[0].ID != "cluster-keep" {
+		t.Errorf("簇不应受影响，得到 %d 簇", len(got.Clusters))
 	}
 }

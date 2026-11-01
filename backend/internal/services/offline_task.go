@@ -466,6 +466,91 @@ func PruneMaintainDedupMembers(removedIDs []string) {
 		dlLogTag, len(removedIDs), remainingItems, remainingClusters)
 }
 
+// ApplyIgnoreFiltersToMaintainResult 定向应用忽略表到维护结果缓存（Round50 A2）。
+//
+// 「新增忽略」与「确认新增」这两类操作的本质只是**把已经算好的簇按忽略表隐藏**：
+// title 型 / gid 型忽略都发生在聚类之后（detectTitleClusters 产出簇 → 再按忽略表过滤），
+// 不改变聚类输入，因此无需重跑 detectTitleClusters（实测全量重算 6~10 秒）。
+//
+// 不适用（必须全量重算 SyncMaintainDedupClusters）：
+//   - **恢复忽略**：被隐藏的簇已不在缓存里，只能重算找回；
+//   - **comic 型（成员级）忽略**：该本会退出名称聚类候选，改变聚类输入本身。
+//
+// 与 Sync 的一致性：过滤条件与 Sync 内的口径完全相同（title 型按 MatchTitle + 新增感知，
+// gid 型只在增量语义下过滤 parent 提示项），因此结果与全量重算一致；差别仅在于
+// 保持簇的原有顺序与 ID，前端列表不重排。
+func ApplyIgnoreFiltersToMaintainResult(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+
+	offlineTaskMu.Lock()
+	res := offlineMaintainRes
+	if res == nil {
+		offlineTaskMu.Unlock()
+		return // 尚无结果缓存，等首次扫描
+	}
+	full := res.forceFull
+	offlineTaskMu.Unlock()
+
+	ignoreIdx := LoadIgnoreIndex(db)
+
+	remainingClusters, remainingItems := 0, 0
+
+	offlineTaskMu.Lock()
+	if offlineMaintainRes != nil {
+		// 1) title 型忽略：命中且无「忽略后新增」的簇静默隐藏；有新增的照常列出并标注
+		kept := offlineMaintainRes.Clusters[:0]
+		for _, cl := range offlineMaintainRes.Clusters {
+			if entry := ignoreIdx.MatchTitle(cl.TitleKey, cl.Artist); entry != nil {
+				newCnt := entry.CountNewMembers(cl.Members)
+				if newCnt == 0 {
+					continue // 命中忽略且无新增 → 隐藏
+				}
+				cl.Ignored = true
+				cl.IgnoredNewCount = newCnt
+				cl.IgnoreID = entry.ID
+			} else {
+				cl.Ignored = false
+				cl.IgnoredNewCount = 0
+				cl.IgnoreID = ""
+			}
+			kept = append(kept, cl)
+		}
+		for i := len(kept); i < len(offlineMaintainRes.Clusters); i++ {
+			offlineMaintainRes.Clusters[i] = DedupCluster{}
+		}
+		offlineMaintainRes.Clusters = kept
+
+		// 2) gid 型忽略：增量语义下移除「旧版可删除」的父画廊提示（全量核对不豁免，与扫描口径一致）
+		if !full {
+			items := offlineMaintainRes.Items[:0]
+			for _, it := range offlineMaintainRes.Items {
+				if !it.Keep && it.Rule == "parent" && ignoreIdx.IsGIDIgnored(it.Comic.GID) {
+					continue
+				}
+				items = append(items, it)
+			}
+			for i := len(items); i < len(offlineMaintainRes.Items); i++ {
+				offlineMaintainRes.Items[i] = DedupItem{}
+			}
+			offlineMaintainRes.Items = items
+		}
+
+		offlineMaintainRes.Stale = false
+		offlineMaintainRes.FinishedAt = time.Now().UnixMilli()
+		remainingClusters = len(offlineMaintainRes.Clusters)
+		remainingItems = len(offlineMaintainRes.Items)
+	}
+	offlineTaskMu.Unlock()
+
+	PersistMaintainSnapshot(db)
+
+	log.Printf("%s [maintain] 已定向应用忽略表：剩余 %d 项 / %d 组（未重算聚类）",
+		dlLogTag, remainingItems, remainingClusters)
+}
+
+
 // StoreUpdateCheckResult 缓存更新检测结果
 func StoreUpdateCheckResult(res *UpdateCheckResult) {
 	offlineTaskMu.Lock()

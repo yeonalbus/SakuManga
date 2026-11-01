@@ -284,7 +284,7 @@ func approxComparable(a, b *approxCandidate) bool {
 // detectApproxClusters Tier 2 主入口：产出「Tier 1 未覆盖」的近似重复簇。
 //
 // exclude 为已被 Tier 1 聚入簇的漫画 ID（不重复参与，避免同一条目出现在两个簇里）。
-func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool, ignoreIdx *IgnoreIndex, forceFull bool) []DedupCluster {
+func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool, ignoreIdx *IgnoreIndex) []DedupCluster {
 	cands := make([]*approxCandidate, 0, len(comics))
 	for i := range comics {
 		c := &comics[i]

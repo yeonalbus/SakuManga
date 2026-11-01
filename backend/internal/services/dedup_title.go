@@ -326,15 +326,15 @@ func coreVolKeyOf(key string) string {
 // detectTitleClusters 名称级疑似重复检测（O3 规则 5，纯本地）
 //
 // comics 应为「未被确定性规则标记删除」的漫画集合（调用方过滤 removeSet）。
-// forceFull=false 时命中忽略（核心名+画师）的簇直接跳过；
-// forceFull=true 时全部输出，命中忽略的簇带 Ignored=true（前端折叠展示）。
+// 忽略判定不区分增量 / 全量（Round44 起一致）：命中忽略且无快照外新入库成员 → 静默；
+// 出现快照外的新成员 → 输出并标 Ignored / IgnoredNewCount（前端展示「此前已忽略 · 新增 N 本」）。
 //
 // Round42 改造（D9 标定集驱动）：
 //   - **双字段池**：`title_jpn`（E 站规范标题）与 `title` 各自生成指纹，任一字段同键即成组。
 //     此前只用 `title`（metadata 抓取常为罗马音），导致卡片显示的日文标题搜不到 / 聚不了组。
 //   - **并查集合并**：一本可能持有 2 个键（两个字段），用并查集按「相同键」连通，
 //     等价于多键精确匹配，且保持传递性正确（键是精确匹配，非相似度）。
-func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, forceFull bool) []DedupCluster {
+func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) []DedupCluster {
 	cands := make([]*clusterCandidate, 0, len(comics))
 	keySets := make([][]string, 0, len(comics))
 	artistKnown := make([]bool, 0, len(comics))
@@ -475,7 +475,7 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, f
 			clustered[m.Comic.ID] = true
 		}
 	}
-	clusters = append(clusters, detectApproxClusters(comics, clustered, ignoreIdx, forceFull)...)
+	clusters = append(clusters, detectApproxClusters(comics, clustered, ignoreIdx)...)
 
 	// 排序（Round50 B）：多级稳定键，保证同输入同输出、且顺序可预测——
 	//   成员数降序（疑似度更高的组在前）→ 置信度（high 优先）→ 核心名 → 画师。

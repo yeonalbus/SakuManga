@@ -129,7 +129,7 @@ func PublishLocalDedupSnapshot(comics []models.OfflineComic, ignoreIdx *IgnoreIn
 	if onProgress != nil {
 		onProgress(0, 1, "", "本地判重（名称级疑似重复）")
 	}
-	clusters := detectTitleClusters(comics, ignoreIdx, forceFull)
+	clusters := detectTitleClusters(comics, ignoreIdx)
 	res := &DedupResult{Items: []DedupItem{}, Clusters: clusters}
 	StoreMaintainDedupResult(res, forceFull) // 内部同步落库（D6）
 	if onProgress != nil {

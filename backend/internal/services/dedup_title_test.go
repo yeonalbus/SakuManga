@@ -154,7 +154,7 @@ func TestDetectClustersMultiLanguage(t *testing.T) {
 		mkComic("a2", "[サークル] サンプルタイトル (English)", []string{"artist:てすと", "language:english"}, 34),
 		mkComic("a3", "[サークル] サンプルタイトル 汉化版", []string{"artist:てすと", "language:chinese"}, 33),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("多语言版本应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -179,7 +179,7 @@ func TestDetectClustersTranslatedTitleNotClustered(t *testing.T) {
 		mkComic("g1", "[サークル] サンプルタイトル", []string{"artist:てすと"}, 32),
 		mkComic("g2", "[Circle] Sample Title (English)", []string{"artist:てすと"}, 34),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 0 {
 		t.Fatalf("翻译标题不应聚组，得到 %d 簇", len(clusters))
 	}
@@ -192,7 +192,7 @@ func TestDetectClustersVolumeIsolation(t *testing.T) {
 		mkComic("b2", "[TOMO] シリーズ Vol.2", []string{"artist:TOMO"}, 21),
 		mkComic("b3", "[TOMO] シリーズ 第3話", []string{"artist:TOMO"}, 22),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 0 {
 		t.Fatalf("不同卷号不应判为重复，得到 %d 簇", len(clusters))
 	}
@@ -204,7 +204,7 @@ func TestDetectClustersRemaster(t *testing.T) {
 		mkComic("c1", "[MILK] ロリポップ", []string{"artist:MILK"}, 42),
 		mkComic("c2", "[MILK] ロリポップ (新装版)", []string{"artist:MILK"}, 60),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("重绘版应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -219,7 +219,7 @@ func TestDetectClustersNameClash(t *testing.T) {
 		mkComic("d1", "COMIC LO", []string{"artist:aaa"}, 100),
 		mkComic("d2", "COMIC LO", []string{"artist:bbb"}, 100),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 0 {
 		t.Fatalf("撞名不同画师不应聚组，得到 %d 簇", len(clusters))
 	}
@@ -234,10 +234,10 @@ func TestDetectClustersIgnore(t *testing.T) {
 	idx := newTestIgnoreIndex("もう一つの世界", "abc", []string{"e1", "e2"})
 
 	// 成员全在快照内 → 增量与全量都不列出（语义＝"直到有变化为止"）
-	if got := detectTitleClusters(comics, idx, false); len(got) != 0 {
+	if got := detectTitleClusters(comics, idx); len(got) != 0 {
 		t.Fatalf("忽略且无新增时不应列出（增量），得到 %d 簇", len(got))
 	}
-	if got := detectTitleClusters(comics, idx, true); len(got) != 0 {
+	if got := detectTitleClusters(comics, idx); len(got) != 0 {
 		t.Fatalf("忽略且无新增时不应列出（全量，Round44 已撤销「永久列出」），得到 %d 簇", len(got))
 	}
 
@@ -245,7 +245,7 @@ func TestDetectClustersIgnore(t *testing.T) {
 	newComic := mkComic("e3", "[CIRCLE] もう一つの世界 (Chinese)", []string{"artist:abc"}, 30)
 	newComic.AddedAt = time.Now() // 忽略之后入库
 	comics = append(comics, newComic)
-	got := detectTitleClusters(comics, idx, true)
+	got := detectTitleClusters(comics, idx)
 	if len(got) != 1 {
 		t.Fatalf("忽略项出现新入库成员时应列出该簇，得到 %d 簇", len(got))
 	}
@@ -289,7 +289,7 @@ func TestDetectClustersNoArtistTag(t *testing.T) {
 		mkComic("f1", "とあるシリーズ", nil, 20),
 		mkComic("f2", "とあるシリーズ (reupload)", nil, 20),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("无画师 tag 的相同核心名应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -375,7 +375,7 @@ func TestDetectClustersUserReportedCase(t *testing.T) {
 			"[夢ねこ屋 (むーにゃん)] 極東絢爛賭博島ドリームアイランド3 アルトリア&頼光編 (Fate/Grand Order) [中国翻訳]",
 			[]string{"artist:muunyan", "language:chinese", "language:translated"}, 112),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("用户报告样本应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -402,7 +402,7 @@ func TestDetectClustersCrossFieldPool(t *testing.T) {
 			"",
 			[]string{"artist:muunyan"}, 35),
 	}
-	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 1 {
+	if clusters := detectTitleClusters(comics, nil); len(clusters) != 1 {
 		t.Fatalf("跨字段同作品应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
 }
@@ -415,12 +415,12 @@ func TestDetectClustersAuthorVeto(t *testing.T) {
 		mkComicFull("v1", "[thirty8ght] サツキ (ブルーアーカイブ)", "", []string{"artist:38 | thirty8ght"}, 22),
 		mkComicFull("v2", "[りおん] サツキ (ブルーアーカイブ)", "", []string{"artist:rion"}, 22),
 	}
-	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 0 {
+	if clusters := detectTitleClusters(comics, nil); len(clusters) != 0 {
 		t.Fatalf("不同作者的同名作品不应聚组，得到 %d 簇", len(clusters))
 	}
 	// 反向对照：只把 artist 改成相同 → 应聚组（证明否决来自作者，而非标题差异）
 	comics[1].OnlineTags = MarshalTagSlice([]string{"artist:38 | thirty8ght"})
-	if clusters := detectTitleClusters(comics, nil, false); len(clusters) != 1 {
+	if clusters := detectTitleClusters(comics, nil); len(clusters) != 1 {
 		t.Fatalf("同作者同名应聚组，得到 %d 簇", len(clusters))
 	}
 }
@@ -432,7 +432,7 @@ func TestDetectClustersNoArtistDowngrade(t *testing.T) {
 		mkComic("w1", "[CIRCLE] とある本 [中国翻訳]", nil, 30),
 		mkComic("w2", "[CIRCLE] とある本 [無修正] [中国翻訳]", nil, 31),
 	}
-	clusters := detectTitleClusters(comics, nil, false)
+	clusters := detectTitleClusters(comics, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("作者未知时不应否决，应聚成 1 簇，得到 %d 簇", len(clusters))
 	}

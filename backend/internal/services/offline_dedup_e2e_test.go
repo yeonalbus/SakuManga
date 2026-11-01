@@ -163,7 +163,7 @@ func TestDetectClustersComicIgnore(t *testing.T) {
 	idx := LoadIgnoreIndex(db)
 
 	// 基线：3 成员 1 簇
-	base := detectTitleClusters(comics, idx, false)
+	base := detectTitleClusters(comics, idx)
 	if len(base) != 1 || len(base[0].Members) != 3 {
 		t.Fatalf("基线应为 3 成员 1 簇，得到 %d 簇", len(base))
 	}
@@ -173,7 +173,7 @@ func TestDetectClustersComicIgnore(t *testing.T) {
 		t.Fatalf("创建成员级忽略失败: %v", err)
 	}
 	idx2 := LoadIgnoreIndex(db)
-	after := detectTitleClusters(comics, idx2, false)
+	after := detectTitleClusters(comics, idx2)
 	if len(after) != 1 || len(after[0].Members) != 2 {
 		t.Fatalf("忽略 m2 后应为 2 成员 1 簇，得到 %d 簇", len(after))
 	}
@@ -188,7 +188,7 @@ func TestDetectClustersComicIgnore(t *testing.T) {
 		t.Fatalf("创建成员级忽略失败: %v", err)
 	}
 	idx3 := LoadIgnoreIndex(db)
-	final := detectTitleClusters(comics, idx3, false)
+	final := detectTitleClusters(comics, idx3)
 	if len(final) != 0 {
 		t.Fatalf("组内剩余 1 成员不应成簇，得到 %d 簇", len(final))
 	}

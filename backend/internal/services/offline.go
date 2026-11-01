@@ -1262,7 +1262,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			clusterCandidates = append(clusterCandidates, comics[i])
 		}
 	}
-	result.Clusters = detectTitleClusters(clusterCandidates, ignoreIdx, forceFull)
+	result.Clusters = detectTitleClusters(clusterCandidates, ignoreIdx)
 
 	// ── 组装结果 ──
 	// 删除标记优先于保留标记：同一漫画若同时命中“被新版取代(删)”与“是某旧版的新版(留)”，一律判删，

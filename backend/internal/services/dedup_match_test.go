@@ -23,7 +23,7 @@ func TestApproxClustersBracketNoteDifference(t *testing.T) {
 		mkComicFull("ap2", "[lestart] ELSWORD Series C<3#EVE Esencia H> (Elsword) [Chinese] [不咕鸟汉化组]", "",
 			[]string{"artist:lestart", "language:chinese"}, 12),
 	}
-	clusters := detectApproxClusters(comics, nil, nil, false)
+	clusters := detectApproxClusters(comics, nil, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("括注差异（正文相同）应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -41,7 +41,7 @@ func TestApproxClustersContentSequelNotClustered(t *testing.T) {
 		mkComicFull("sq2", "[エロマズン (まー九郎)] 催眠温泉 甘露寺蜜璃 妊娠中 (鬼滅の刃) [中国翻訳] [DL版]", "",
 			[]string{"artist:ma-kurou", "language:chinese"}, 51),
 	}
-	if clusters := detectApproxClusters(comics, nil, nil, false); len(clusters) != 0 {
+	if clusters := detectApproxClusters(comics, nil, nil); len(clusters) != 0 {
 		t.Fatalf("续篇/加笔（正文不同）不应聚组，得到 %d 簇", len(clusters))
 	}
 }
@@ -55,7 +55,7 @@ func TestApproxClustersVolumeNumbersNotClustered(t *testing.T) {
 		mkComicFull("vn2", "[Puu no Puupuupuu (Puuzaki Puuna)] Okasare saimin 4 danshi hitori shika inai", "",
 			[]string{"artist:puu no puupuupuu"}, 67),
 	}
-	if clusters := detectApproxClusters(comics, nil, nil, false); len(clusters) != 0 {
+	if clusters := detectApproxClusters(comics, nil, nil); len(clusters) != 0 {
 		t.Fatalf("不同卷（数字不同）不应聚组，得到 %d 簇", len(clusters))
 	}
 }
@@ -66,7 +66,7 @@ func TestApproxClustersAuthorVeto(t *testing.T) {
 		mkComicFull("av1", "[thirty8ght] サツキ (ブルーアーカイブ)", "", []string{"artist:38 | thirty8ght"}, 22),
 		mkComicFull("av2", "[りおん] サツキ (ブルーアーカイブ)", "", []string{"artist:rion"}, 6),
 	}
-	if clusters := detectApproxClusters(comics, nil, nil, false); len(clusters) != 0 {
+	if clusters := detectApproxClusters(comics, nil, nil); len(clusters) != 0 {
 		t.Fatalf("不同作者不应聚组（Tier 2 亦须遵守 D10），得到 %d 簇", len(clusters))
 	}
 }
@@ -77,7 +77,7 @@ func TestApproxClustersUnknownAuthorDowngrade(t *testing.T) {
 		mkComic("aw1", "[Fanbox] Sample Work", nil, 30),
 		mkComic("aw2", "[Fanbox] Sample Work [Chinese]", nil, 31),
 	}
-	clusters := detectApproxClusters(comics, nil, nil, false)
+	clusters := detectApproxClusters(comics, nil, nil)
 	if len(clusters) != 1 {
 		t.Fatalf("作者未知时不否决，应聚成 1 簇，得到 %d 簇", len(clusters))
 	}
@@ -95,7 +95,7 @@ func TestApproxClustersSkipsExcluded(t *testing.T) {
 		mkComicFull("ex1", "[lestart] ELSWORD Series C<3#EVE Esencia H> [Chinese]", "", []string{"artist:lestart"}, 10),
 		mkComicFull("ex2", "[lestart] ELSWORD Series C<3#EVE Esencia H> (Elsword) [Chinese]", "", []string{"artist:lestart"}, 12),
 	}
-	if clusters := detectApproxClusters(comics, map[string]bool{"ex1": true, "ex2": true}, nil, false); len(clusters) != 0 {
+	if clusters := detectApproxClusters(comics, map[string]bool{"ex1": true, "ex2": true}, nil); len(clusters) != 0 {
 		t.Fatalf("已被 Tier 1 聚入的条目不应再进 Tier 2，得到 %d 簇", len(clusters))
 	}
 }

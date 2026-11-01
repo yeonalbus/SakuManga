@@ -99,11 +99,11 @@ func TestDetectClustersIgnoreCompatLegacyKey(t *testing.T) {
 	lc2 := mkComic("lc2", "[CIRCLE] もう一つの世界 [無修正] [中国翻訳]", []string{"artist:abc"}, 31)
 	comics := []models.OfflineComic{lc1, lc2}
 	// 增量：命中忽略（含兼容匹配）→ 跳过
-	if got := detectTitleClusters(comics, idx, false); len(got) != 0 {
+	if got := detectTitleClusters(comics, idx); len(got) != 0 {
 		t.Errorf("兼容匹配应让增量查重跳过已忽略簇，得到 %d 簇", len(got))
 	}
 	// 全量：无新增成员 → 同样静默（Round44 撤销「永久列出」）
-	if got := detectTitleClusters(comics, idx, true); len(got) != 0 {
+	if got := detectTitleClusters(comics, idx); len(got) != 0 {
 		t.Errorf("无新增成员时全量核对也不应列出，得到 %d 簇", len(got))
 	}
 
@@ -117,7 +117,7 @@ func TestDetectClustersIgnoreCompatLegacyKey(t *testing.T) {
 	for _, e := range idx2.titleEntries {
 		e.seen["lc1"] = true // 只把 lc1 视为"忽略时已知"
 	}
-	got := detectTitleClusters(comics2, idx2, true)
+	got := detectTitleClusters(comics2, idx2)
 	if len(got) != 1 || !got[0].Ignored || got[0].IgnoredNewCount != 1 {
 		t.Errorf("兼容匹配下出现新成员应列出并标记 NewCount=1，得到 %+v", got)
 	}

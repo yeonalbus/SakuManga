@@ -347,7 +347,7 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 	}
 
 	ignoreIdx := LoadIgnoreIndex(db)
-	clusters := detectTitleClusters(candidates, ignoreIdx, full)
+	clusters := detectTitleClusters(candidates, ignoreIdx)
 
 	offlineTaskMu.Lock()
 	if offlineMaintainRes != nil {

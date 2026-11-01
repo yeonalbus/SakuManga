@@ -38,7 +38,7 @@ func TestClusterIDStableAcrossRuns(t *testing.T) {
 	}
 	idx := LoadIgnoreIndex(db)
 
-	first := detectTitleClusters(comics, idx, false)
+	first := detectTitleClusters(comics, idx)
 	if len(first) != 2 {
 		t.Fatalf("预期 2 簇，得到 %d", len(first))
 	}
@@ -51,7 +51,7 @@ func TestClusterIDStableAcrossRuns(t *testing.T) {
 	}
 	want := sig(first)
 	for i := 0; i < 2; i++ {
-		if got := sig(detectTitleClusters(comics, idx, false)); got != want {
+		if got := sig(detectTitleClusters(comics, idx)); got != want {
 			t.Fatalf("第 %d 次重算的顺序/ID 不一致:\n want %s\n  got %s", i+2, want, got)
 		}
 	}
@@ -76,7 +76,7 @@ func TestClusterIDStableAfterMemberRemoved(t *testing.T) {
 	}
 	idx := LoadIgnoreIndex(db)
 
-	before := detectTitleClusters(comics, idx, false)
+	before := detectTitleClusters(comics, idx)
 	if len(before) != 1 {
 		t.Fatalf("预期 1 簇，得到 %d", len(before))
 	}
@@ -84,7 +84,7 @@ func TestClusterIDStableAfterMemberRemoved(t *testing.T) {
 
 	// 去掉 p3 后重算（模拟删除后的全量重算；A 的定向裁剪路径同样保持 ID）
 	remain := []models.OfflineComic{comics[0], comics[1]}
-	after := detectTitleClusters(remain, idx, false)
+	after := detectTitleClusters(remain, idx)
 	if len(after) != 1 {
 		t.Fatalf("预期删成员后仍有 1 簇，得到 %d", len(after))
 	}
@@ -110,7 +110,7 @@ func TestClusterSortStableTieBreak(t *testing.T) {
 		mkClusterComic("a2c", "[サークル] アルファ (English)", "a1", 21, false),
 	}
 	idx := LoadIgnoreIndex(db)
-	cls := detectTitleClusters(comics, idx, false)
+	cls := detectTitleClusters(comics, idx)
 	if len(cls) != 2 {
 		t.Fatalf("预期 2 簇，得到 %d", len(cls))
 	}

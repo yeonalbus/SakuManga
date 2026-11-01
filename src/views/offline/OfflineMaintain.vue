@@ -509,7 +509,7 @@ const submitRemove = async (
       : `确定移除《${title}》的记录吗？\n\n本地文件将保留：${targets[0].localPath || ''}`
   const confirmed = await modal.confirm(
     message,
-    withFile ? '移除记录 + 本地文件' : '移除记录（保留文件）',
+    withFile ? '移除并删除本地文件' : '移除记录',
   )
   if (!confirmed) return false
 
@@ -600,10 +600,11 @@ const onToggleSelect = (cl: DedupClusterDTO, m: ClusterMemberDTO) => {
   }
   toggleSelect(m.comic.id)
 }
-const removeSelected = async (withFile: boolean) => {
+// 批量移除：是否同时删本地文件由页面上方「移除时删除本地文件」勾选决定（与单本「移除这本」一致）
+const removeSelected = async () => {
   const targets = selectedTargets.value
   if (targets.length === 0) return
-  await submitRemove(targets, withFile)
+  await submitRemove(targets, deleteFile.value)
 }
 const selectAllVisible = () => {
   // 每组最多选「成员数 − 1」本（避免整组删空）
@@ -921,36 +922,33 @@ onUnmounted(() => {
           <span class="hint dim">不勾选＝只移除记录，本地文件保留（可随时重新扫描回来）</span>
         </div>
 
-        <!-- Round50：批量操作栏（勾选后出现，一次提交多本） -->
+        <!-- Round50：批量操作栏（勾选后出现，一次提交多本；删文件与否跟随上方勾选） -->
         <div v-if="selectedCount > 0" class="batch-bar">
           <span class="batch-count">
             已选 <b>{{ selectedCount }}</b> 本 · 涉及 <b>{{ selectedGroupCount }}</b> 组
           </span>
           <span class="hint dim">每组至少保留 1 本；整组都想留请用「都留（不再提示）」</span>
           <span class="spacer"></span>
-          <button class="action-btn ghost-gray sm" @click="clearSelection">清空</button>
+          <button class="action-btn ghost-gray sm" @click="clearSelection">清空选择</button>
           <button
             class="action-btn danger-soft sm"
             :disabled="isRemoving"
-            @click="removeSelected(false)"
+            :title="deleteFile ? '将同时删除这些本的本地文件（不可恢复）' : '只移除记录，本地文件保留'"
+            @click="removeSelected"
           >
-            <AppIcon :name="isRemoving ? 'loading' : 'trash'" :size="12" :class="{ spin: isRemoving }" />
-            移除记录（保留文件）
-          </button>
-          <button
-            class="action-btn danger sm"
-            :disabled="isRemoving"
-            @click="removeSelected(true)"
-          >
-            <AppIcon :name="isRemoving ? 'loading' : 'trash'" :size="12" :class="{ spin: isRemoving }" />
-            移除记录 + 本地文件
+            <AppIcon
+              :name="isRemoving ? 'loading' : 'trash'"
+              :size="12"
+              :class="{ spin: isRemoving }"
+            />
+            移除已选 {{ selectedCount }} 本{{ deleteFile ? '（含本地文件）' : '' }}
           </button>
         </div>
         <div v-else-if="clusters.length > 0 || removeItems.length > 0" class="batch-hint">
           <button class="action-btn ghost-teal sm" @click="selectAllVisible">
             <AppIcon name="check" :size="12" /> 选中全部待处理（每组留 1 本）
           </button>
-          <span class="hint dim">勾选成员卡左上角的方框即可批量移除，一次确认、一次提交</span>
+          <span class="hint dim">点成员卡左上角的方框即可批量移除：一次确认、一次提交</span>
         </div>
       </div>
 
@@ -1077,17 +1075,20 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div class="crow-actions">
-                    <label
+                    <button
                       v-for="(m, mi) in cl.members"
                       :key="m.comic.id"
+                      type="button"
                       class="pick"
                       :class="{ on: isSelected(m.comic.id), locked: memberLocked(cl, m) }"
                       :title="memberLocked(cl, m) ? '每组至少保留 1 本（整组都想留请用「都留」）' : `勾选成员 ${String.fromCharCode(65 + mi)} 以便批量移除`"
                       @click.stop="onToggleSelect(cl, m)"
                     >
-                      <input type="checkbox" :checked="isSelected(m.comic.id)" :disabled="memberLocked(cl, m)" />
-                      <span>{{ String.fromCharCode(65 + mi) }}</span>
-                    </label>
+                      <span class="tick" :class="{ on: isSelected(m.comic.id) }">
+                        <AppIcon v-if="isSelected(m.comic.id)" name="check" :size="11" />
+                      </span>
+                      {{ String.fromCharCode(65 + mi) }}
+                    </button>
                     <button
                       v-for="(m, mi) in cl.members"
                       :key="'rm-' + m.comic.id"
@@ -1180,14 +1181,15 @@ onUnmounted(() => {
                     class="member"
                     :class="{ picked: isSelected(m.comic.id) }"
                   >
-                    <label
+                    <button
+                      type="button"
                       class="pick-corner"
                       :class="{ on: isSelected(m.comic.id), locked: memberLocked(cl, m) }"
                       :title="memberLocked(cl, m) ? '每组至少保留 1 本（整组都想留请用「都留」）' : '勾选以便批量移除'"
-                      @click.stop.prevent="onToggleSelect(cl, m)"
+                      @click.stop="onToggleSelect(cl, m)"
                     >
-                      <input type="checkbox" :checked="isSelected(m.comic.id)" :disabled="memberLocked(cl, m)" />
-                    </label>
+                      <AppIcon v-if="isSelected(m.comic.id)" name="check" :size="12" />
+                    </button>
                     <div class="member-cover" @click="openComic(m.comic.id)">
                       <img
                         v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
@@ -1806,11 +1808,16 @@ onUnmounted(() => {
   padding: 2px 7px;
   border-radius: 6px;
   border: 1px solid var(--app-border-2);
+  background: none;
+  font-family: inherit;
   font-size: 0.74rem;
+  line-height: 1.4;
   color: var(--app-text-3);
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
 }
 .pick.on {
   border-color: var(--app-accent);
@@ -1820,11 +1827,21 @@ onUnmounted(() => {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.pick input {
-  accent-color: var(--app-accent);
-  width: 13px;
-  height: 13px;
-  margin: 0;
+/* 自绘勾选框：状态完全由组件驱动，避免原生 checkbox 的中间态与视觉不同步 */
+.tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--app-border-3);
+  color: #fff;
+  flex: none;
+}
+.tick.on {
+  border-color: var(--app-accent);
+  background: var(--app-accent);
 }
 .pick-corner {
   position: absolute;
@@ -1836,24 +1853,23 @@ onUnmounted(() => {
   justify-content: center;
   width: 20px;
   height: 20px;
+  padding: 0;
   border-radius: 6px;
-  border: 1px solid var(--app-border-2);
+  border: 1px solid var(--app-border-3);
   background: var(--app-surface-2);
+  color: #fff;
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 .pick-corner.on {
   border-color: var(--app-accent);
+  background: var(--app-accent);
 }
 .pick-corner.locked {
   opacity: 0.35;
   cursor: not-allowed;
-}
-.pick-corner input {
-  accent-color: var(--app-accent);
-  width: 12px;
-  height: 12px;
-  margin: 0;
 }
 .member.picked {
   border-color: var(--app-accent);

@@ -19,11 +19,12 @@ import AppIcon from '@/components/icons/AppIcon.vue'
 
 const { modal, toast } = useUI()
 
+// Round50 E：字段集与后端 MaintainComicView 对齐（结果已不再下发完整 OfflineComic）。
+// 需要新字段时先确认后端视图已包含，避免「前端读不到」的静默缺失。
 interface OfflineComicDTO {
   id: string
   title: string
   coverUrl: string
-  category?: string
   pageCount?: number
   updatedAt: string
   localPath?: string
@@ -39,6 +40,9 @@ interface DedupItemDTO {
   reason: string // 重复原因
   keep: boolean // true=建议保留，false=建议删除
   rule?: string // gid | hash | parent | signature（仅 parent 可忽略）
+  // Round50：后端一直返回成对对象（Round4 任务一），此前类型定义遗漏；
+  // 批量/单本移除时据此把「被删项 ↔ 保留项」对应的条目一并从本地列表移出
+  pairComic?: OfflineComicDTO
 }
 
 interface ClusterMemberDTO {
@@ -92,8 +96,23 @@ const items = ref<DedupItemDTO[]>([])
 const clusters = ref<DedupClusterDTO[]>([])
 const resultStale = ref(false)
 const isScanning = ref(false)
-const isRemoving = ref(false)
-const removingId = ref('')
+// Round50：per-item 删除状态（原为全局 isRemoving —— 任一删除在飞时锁死整页按钮，
+// 且并发点击会被 doRemoveComic 静默丢弃；现在只禁用正在处理的那一项）
+const removingIds = ref<string[]>([])
+const isRemoving = computed(() => removingIds.value.length > 0)
+const isRemovingId = (id: string) => removingIds.value.includes(id)
+
+// Round50：批量勾选（一次确认、一次请求提交 comicIds）
+const selectedIds = ref<string[]>([])
+const isSelected = (id: string) => selectedIds.value.includes(id)
+const toggleSelect = (id: string) => {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx >= 0) selectedIds.value.splice(idx, 1)
+  else selectedIds.value.push(id)
+}
+const clearSelection = () => {
+  selectedIds.value = []
+}
 const coverFailed = ref<Record<string, boolean>>({})
 const deleteFile = ref(false) // 「含文件」勾选（记忆于后端设置）
 const density = ref<'comfortable' | 'compact'>(readDensity())
@@ -280,6 +299,13 @@ const loadResult = async () => {
     items.value = data?.items || []
     clusters.value = data?.clusters || []
     resultStale.value = !!data?.stale
+    // Round50：结果更新后清理已失效的勾选（成员可能已被删/随组消失）
+    if (selectedIds.value.length > 0) {
+      const alive = new Set<string>()
+      for (const it of items.value) alive.add(it.comic.id)
+      for (const cl of clusters.value) for (const m of cl.members) alive.add(m.comic.id)
+      selectedIds.value = selectedIds.value.filter((id) => alive.has(id))
+    }
   } catch {
     // 结果暂未就绪，交给轮询下一轮
   }
@@ -429,26 +455,84 @@ const clearRemovedAndRematch = async () => {
   }
 }
 
-// ── 移除（主操作）／都留（忽略整组）／确认新增 ──
-const doRemoveComic = async (c: OfflineComicDTO, withFile: boolean): Promise<boolean> => {
-  if (isRemoving.value) return false
-  const title = c.title || '未命名'
+// ── 移除（主操作）／批量移除／都留（忽略整组）／确认新增 ──
+
+// Round50：删除后本地即时裁剪（后端已按同一规则裁剪结果缓存，二者一致）。
+// 不再 loadResult() 全量重拉——900 KB 响应 + 整表重渲染正是"操作结束后序列变化"的来源。
+// 规则与后端 PruneMaintainDedupMembers 对齐：剔除被删成员、成员不足 2 本的组消失、
+// 其余组保持原有顺序与 id。
+const applyLocalRemoval = (ids: string[]) => {
+  if (ids.length === 0) return
+  const set = new Set(ids)
+  let removedGroups = 0
+  items.value = items.value.filter(
+    (i) => !set.has(i.comic.id) && !(i.pairComic && set.has(i.pairComic.id)),
+  )
+  const next: DedupClusterDTO[] = []
+  for (const cl of clusters.value) {
+    if (!cl.members.some((m) => set.has(m.comic.id))) {
+      next.push(cl) // 与本组无关：原样保留（顺序与 id 均不变）
+      continue
+    }
+    const members = cl.members.filter((m) => !set.has(m.comic.id))
+    if (members.length < 2) {
+      removedGroups++ // 组内不足 2 本 → 该组处理完毕
+      if (expanded.value[cl.id]) delete expanded.value[cl.id]
+      continue
+    }
+    next.push({ ...cl, members })
+  }
+  clusters.value = next
+  processedCount.value += removedGroups
+}
+
+// 统一删除入口：单本与批量共用（一次确认、一次请求、per-item 状态、本地裁剪）
+const submitRemove = async (
+  targets: { id: string; title: string; localPath?: string }[],
+  withFile: boolean,
+): Promise<boolean> => {
+  if (targets.length === 0) return false
+  if (targets.some((t) => isRemovingId(t.id))) return false // 同一本不重复提交
+  const batch = targets.length > 1
+  const title = targets[0].title || '未命名'
+  const preview = targets
+    .slice(0, 5)
+    .map((t) => `· ${t.title || '未命名'}`)
+    .join('\n')
+  const more = targets.length > 5 ? `\n… 等 ${targets.length} 本` : ''
+  const message = batch
+    ? withFile
+      ? `确定移除以下 ${targets.length} 本的记录，并同时删除其本地文件吗？\n\n${preview}${more}\n\n此操作不可恢复！`
+      : `确定移除以下 ${targets.length} 本的记录吗（本地文件保留）？\n\n${preview}${more}`
+    : withFile
+      ? `确定移除《${title}》并同时删除其本地文件吗？\n\n${targets[0].localPath || ''}\n\n此操作不可恢复！`
+      : `确定移除《${title}》的记录吗？\n\n本地文件将保留：${targets[0].localPath || ''}`
   const confirmed = await modal.confirm(
-    withFile
-      ? `确定移除《${title}》并同时删除其本地文件吗？\n\n${c.localPath || ''}\n\n此操作不可恢复！`
-      : `确定移除《${title}》的记录吗？\n\n本地文件将保留：${c.localPath || ''}`,
+    message,
     withFile ? '移除记录 + 本地文件' : '移除记录（保留文件）',
   )
   if (!confirmed) return false
 
-  isRemoving.value = true
-  removingId.value = c.id
+  const ids = targets.map((t) => t.id)
+  removingIds.value.push(...ids)
   try {
-    const data = await http<{ ok: boolean; alreadyDeleted?: boolean }>('/offline/maintain/remove', {
-      method: 'POST',
-      body: JSON.stringify({ comicId: c.id, deleteFile: withFile }),
-    })
-    if (data.alreadyDeleted) {
+    const data = await http<{ ok: boolean; deleted?: number; alreadyDeleted?: boolean }>(
+      '/offline/maintain/remove',
+      {
+        method: 'POST',
+        body: JSON.stringify(
+          batch ? { comicIds: ids, deleteFile: withFile } : { comicId: ids[0], deleteFile: withFile },
+        ),
+      },
+    )
+    applyLocalRemoval(ids)
+    if (batch) clearSelection()
+    else selectedIds.value = selectedIds.value.filter((id) => !ids.includes(id))
+    if (batch) {
+      toast.success(
+        `已移除 ${data?.deleted ?? ids.length} 本${withFile ? '（含本地文件）' : '（保留本地文件）'}`,
+      )
+    } else if (data?.alreadyDeleted) {
       toast.info(`《${title}》记录已不存在（可能已在其他设备删除），已同步刷新列表`)
     } else {
       toast.success(withFile ? `《${title}》已移除（含本地文件）` : `《${title}》记录已移除（保留本地文件）`)
@@ -459,17 +543,18 @@ const doRemoveComic = async (c: OfflineComicDTO, withFile: boolean): Promise<boo
     toast.error(msg || '移除失败')
     return false
   } finally {
-    isRemoving.value = false
-    removingId.value = ''
+    removingIds.value = removingIds.value.filter((id) => !ids.includes(id))
   }
 }
+
+const doRemoveComic = async (c: OfflineComicDTO, withFile: boolean): Promise<boolean> =>
+  submitRemove([{ id: c.id, title: c.title, localPath: c.localPath }], withFile)
 
 // 建议删除区（规则 1/2/3/4 强证据）：移除
 const removeSuggested = async (item: DedupItemDTO) => {
   const ok = await doRemoveComic(item.comic, deleteFile.value)
   if (!ok) return
   processedCount.value++
-  await loadResult()
 }
 
 // 成员级：移除这本（2 本组＝保留另一本；3 本组可逐个移除，剩 <2 本该组自动消失）
@@ -477,8 +562,58 @@ const removeMember = async (cl: DedupClusterDTO, m: ClusterMemberDTO) => {
   const ok = await doRemoveComic(m.comic, deleteFile.value)
   if (!ok) return
   expanded.value[cl.id] = false
-  processedCount.value++
-  await loadResult()
+}
+
+// ── 批量勾选（Round50 D）──
+// 已选成员 → 删除目标（从 items 与 clusters 里解析标题/路径）
+const selectedTargets = computed(() => {
+  const out: { id: string; title: string; localPath?: string }[] = []
+  const seen = new Set<string>()
+  const push = (c: { id: string; title: string; localPath?: string }) => {
+    if (!selectedIds.value.includes(c.id) || seen.has(c.id)) return
+    seen.add(c.id)
+    out.push({ id: c.id, title: c.title, localPath: c.localPath })
+  }
+  for (const it of items.value) push(it.comic)
+  for (const cl of clusters.value) for (const m of cl.members) push(m.comic)
+  return out
+})
+const selectedCount = computed(() => selectedTargets.value.length)
+const selectedGroupCount = computed(() => {
+  let n = 0
+  for (const cl of clusters.value) {
+    if (cl.members.some((m) => selectedIds.value.includes(m.comic.id))) n++
+  }
+  return n
+})
+
+// 同组至少保留 1 本：已勾选 = 成员数 − 1 时，禁选剩下的那一本（整组删空没有意义，应走「都留」）
+const memberLocked = (cl: DedupClusterDTO, m: ClusterMemberDTO) => {
+  if (isSelected(m.comic.id)) return false
+  const picked = cl.members.filter((x) => selectedIds.value.includes(x.comic.id)).length
+  return picked >= cl.members.length - 1
+}
+const onToggleSelect = (cl: DedupClusterDTO, m: ClusterMemberDTO) => {
+  if (memberLocked(cl, m)) {
+    toast.warning('每组至少保留 1 本：若要整组保留，请用「都留（不再提示）」')
+    return
+  }
+  toggleSelect(m.comic.id)
+}
+const removeSelected = async (withFile: boolean) => {
+  const targets = selectedTargets.value
+  if (targets.length === 0) return
+  await submitRemove(targets, withFile)
+}
+const selectAllVisible = () => {
+  // 每组最多选「成员数 − 1」本（避免整组删空）
+  const ids: string[] = []
+  for (const cl of clusters.value) {
+    const limit = cl.members.length - 1
+    cl.members.slice(0, Math.max(0, limit)).forEach((m) => ids.push(m.comic.id))
+  }
+  for (const it of items.value) ids.push(it.comic.id)
+  selectedIds.value = ids
 }
 
 // 组级：都留（不再提示）＝忽略整组（可逆，可在忽略清单恢复）
@@ -785,6 +920,38 @@ onUnmounted(() => {
           <span class="spacer"></span>
           <span class="hint dim">不勾选＝只移除记录，本地文件保留（可随时重新扫描回来）</span>
         </div>
+
+        <!-- Round50：批量操作栏（勾选后出现，一次提交多本） -->
+        <div v-if="selectedCount > 0" class="batch-bar">
+          <span class="batch-count">
+            已选 <b>{{ selectedCount }}</b> 本 · 涉及 <b>{{ selectedGroupCount }}</b> 组
+          </span>
+          <span class="hint dim">每组至少保留 1 本；整组都想留请用「都留（不再提示）」</span>
+          <span class="spacer"></span>
+          <button class="action-btn ghost-gray sm" @click="clearSelection">清空</button>
+          <button
+            class="action-btn danger-soft sm"
+            :disabled="isRemoving"
+            @click="removeSelected(false)"
+          >
+            <AppIcon :name="isRemoving ? 'loading' : 'trash'" :size="12" :class="{ spin: isRemoving }" />
+            移除记录（保留文件）
+          </button>
+          <button
+            class="action-btn danger sm"
+            :disabled="isRemoving"
+            @click="removeSelected(true)"
+          >
+            <AppIcon :name="isRemoving ? 'loading' : 'trash'" :size="12" :class="{ spin: isRemoving }" />
+            移除记录 + 本地文件
+          </button>
+        </div>
+        <div v-else-if="clusters.length > 0 || removeItems.length > 0" class="batch-hint">
+          <button class="action-btn ghost-teal sm" @click="selectAllVisible">
+            <AppIcon name="check" :size="12" /> 选中全部待处理（每组留 1 本）
+          </button>
+          <span class="hint dim">勾选成员卡左上角的方框即可批量移除，一次确认、一次提交</span>
+        </div>
       </div>
 
       <!-- 空态 -->
@@ -848,7 +1015,7 @@ onUnmounted(() => {
                 <button
                   v-if="item.rule === 'parent'"
                   class="action-btn ghost-gray"
-                  :disabled="isRemoving"
+                  :disabled="isRemovingId(item.comic.id)"
                   title="忽略此更新提示（父画廊 gid），后续不再提示「旧版可删除」"
                   @click="ignoreParent(item)"
                 >
@@ -856,15 +1023,15 @@ onUnmounted(() => {
                 </button>
                 <button
                   class="action-btn danger-soft"
-                  :disabled="isRemoving"
+                  :disabled="isRemovingId(item.comic.id)"
                   @click="removeSuggested(item)"
                 >
                   <AppIcon
-                    :name="isRemoving && removingId === item.comic.id ? 'loading' : 'trash'"
+                    :name="isRemovingId(item.comic.id) ? 'loading' : 'trash'"
                     :size="13"
-                    :class="{ spin: isRemoving && removingId === item.comic.id }"
+                    :class="{ spin: isRemovingId(item.comic.id) }"
                   />
-                  {{ isRemoving && removingId === item.comic.id ? '处理中...' : '移除这本' }}
+                  {{ isRemovingId(item.comic.id) ? '处理中...' : '移除这本' }}
                 </button>
               </div>
             </div>
@@ -910,18 +1077,29 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div class="crow-actions">
-                    <button
+                    <label
                       v-for="(m, mi) in cl.members"
                       :key="m.comic.id"
+                      class="pick"
+                      :class="{ on: isSelected(m.comic.id), locked: memberLocked(cl, m) }"
+                      :title="memberLocked(cl, m) ? '每组至少保留 1 本（整组都想留请用「都留」）' : `勾选成员 ${String.fromCharCode(65 + mi)} 以便批量移除`"
+                      @click.stop="onToggleSelect(cl, m)"
+                    >
+                      <input type="checkbox" :checked="isSelected(m.comic.id)" :disabled="memberLocked(cl, m)" />
+                      <span>{{ String.fromCharCode(65 + mi) }}</span>
+                    </label>
+                    <button
+                      v-for="(m, mi) in cl.members"
+                      :key="'rm-' + m.comic.id"
                       class="action-btn danger-soft sm"
-                      :disabled="isRemoving"
+                      :disabled="isRemovingId(m.comic.id)"
                       :title="`移除《${m.comic.title}》（其余本子保留）`"
                       @click.stop="removeMember(cl, m)"
                     >
                       <AppIcon
-                        :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                        :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
                         :size="12"
-                        :class="{ spin: isRemoving && removingId === m.comic.id }"
+                        :class="{ spin: isRemovingId(m.comic.id) }"
                       />
                       {{ String.fromCharCode(65 + mi) }}
                     </button>
@@ -980,13 +1158,13 @@ onUnmounted(() => {
                           <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
                         </div>
                       </div>
-                      <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
+                      <button class="action-btn danger-soft" :disabled="isRemovingId(m.comic.id)" @click="removeMember(cl, m)">
                         <AppIcon
-                          :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                          :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
                           :size="13"
-                          :class="{ spin: isRemoving && removingId === m.comic.id }"
+                          :class="{ spin: isRemovingId(m.comic.id) }"
                         />
-                        {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
+                        {{ isRemovingId(m.comic.id) ? '处理中...' : '移除这本' }}
                       </button>
                     </div>
                   </div>
@@ -996,7 +1174,20 @@ onUnmounted(() => {
               <!-- 舒适视图：成员卡并排 -->
               <template v-else>
                 <div class="members">
-                  <div v-for="m in cl.members" :key="m.comic.id" class="member">
+                  <div
+                    v-for="m in cl.members"
+                    :key="m.comic.id"
+                    class="member"
+                    :class="{ picked: isSelected(m.comic.id) }"
+                  >
+                    <label
+                      class="pick-corner"
+                      :class="{ on: isSelected(m.comic.id), locked: memberLocked(cl, m) }"
+                      :title="memberLocked(cl, m) ? '每组至少保留 1 本（整组都想留请用「都留」）' : '勾选以便批量移除'"
+                      @click.stop.prevent="onToggleSelect(cl, m)"
+                    >
+                      <input type="checkbox" :checked="isSelected(m.comic.id)" :disabled="memberLocked(cl, m)" />
+                    </label>
                     <div class="member-cover" @click="openComic(m.comic.id)">
                       <img
                         v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
@@ -1032,16 +1223,16 @@ onUnmounted(() => {
                       <div class="member-actions">
                         <button
                           class="action-btn danger-soft sm"
-                          :disabled="isRemoving"
+                          :disabled="isRemovingId(m.comic.id)"
                           :title="`仅移除这一本，组内其余本子照常保留`"
                           @click="removeMember(cl, m)"
                         >
                           <AppIcon
-                            :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                            :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
                             :size="12"
-                            :class="{ spin: isRemoving && removingId === m.comic.id }"
+                            :class="{ spin: isRemovingId(m.comic.id) }"
                           />
-                          {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
+                          {{ isRemovingId(m.comic.id) ? '处理中...' : '移除这本' }}
                         </button>
                       </div>
                     </div>
@@ -1115,13 +1306,13 @@ onUnmounted(() => {
                           <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
                         </div>
                       </div>
-                      <button class="action-btn danger-soft" :disabled="isRemoving" @click="removeMember(cl, m)">
+                      <button class="action-btn danger-soft" :disabled="isRemovingId(m.comic.id)" @click="removeMember(cl, m)">
                         <AppIcon
-                          :name="isRemoving && removingId === m.comic.id ? 'loading' : 'trash'"
+                          :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
                           :size="13"
-                          :class="{ spin: isRemoving && removingId === m.comic.id }"
+                          :class="{ spin: isRemovingId(m.comic.id) }"
                         />
-                        {{ isRemoving && removingId === m.comic.id ? '处理中...' : '移除这本' }}
+                        {{ isRemovingId(m.comic.id) ? '处理中...' : '移除这本' }}
                       </button>
                     </div>
                   </div>
@@ -1582,6 +1773,92 @@ onUnmounted(() => {
   color: var(--app-text-muted);
 }
 
+/* ── Round50：批量勾选与批量操作栏 ── */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-2);
+  background: var(--app-surface-2);
+}
+.batch-count {
+  font-size: 0.8rem;
+  color: var(--app-text-2);
+}
+.batch-count b {
+  color: var(--app-text-strong);
+}
+.batch-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-2);
+  font-size: 0.74rem;
+  color: var(--app-text-3);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s;
+}
+.pick.on {
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
+}
+.pick.locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pick input {
+  accent-color: var(--app-accent);
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+.pick-corner {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-2);
+  background: var(--app-surface-2);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pick-corner.on {
+  border-color: var(--app-accent);
+}
+.pick-corner.locked {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.pick-corner input {
+  accent-color: var(--app-accent);
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+.member.picked {
+  border-color: var(--app-accent);
+}
+
 /* 分组 */
 .group {
   background: var(--app-surface);
@@ -1750,6 +2027,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 .member {
+  position: relative;
   flex: 1 1 280px;
   min-width: 0;
   display: flex;

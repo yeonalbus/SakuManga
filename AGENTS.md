@@ -6,7 +6,15 @@
 
 - SakuManga：前端 Vue 3 + Vite，后端 Go，详见 `README.md` 与 `PROJECT_TREE.md`
 - 远程仓库：`https://github.com/yeonalbus/SakuManga.git`（默认分支 `main`）
-- 工作目录：`G:\SakuProjects\SakuManga`
+- 工作目录（源码仓库）：`G:\SakuProjects\SakuManga`
+
+## 运行环境拓扑（重要，开工前先认清）
+
+- **源码仓库（本机）**：`G:\SakuProjects\SakuManga`——git 工作区，AI 在此改代码、提交、推送。**本机改代码不会立即影响线上**，必须构建 + 部署才生效。
+- **运行实例（远程服务器）**：SakuManga **不运行在本机**，生产实例部署在远程服务器上；其运行目录通过网络盘映射为 `Y:\SakuManga`（含 exe、`manga.db`、`cover_cache/`、`data/`、`logs/`、`config.json`）。
+- **访问通道**：AI 只能经 `Y:\SakuManga` 接触线上；服务器本身仅有远程桌面（RDP），**未配置 SSH**——AI 无法执行远程命令、无法读取实时 stdout、**无法重启线上进程**。重启服务与 RDP 操作一律由珱垣手动执行。
+- **读写口径**：`Y:\SakuManga` 是线上真实数据。默认只读（查 `manga.db`、看 `logs/`、诊断）；写操作仅限部署动作（覆盖 exe、同步 `backend/webui/dist`、改 `config.json`）且需珱垣确认；**禁止删除或篡改 `manga.db`、`cover_cache/`、`data/`**，验证前需要动库就让珱垣先备份。
+- **部署链路**：前端 `npm run build-only` → 同步 `backend/webui/dist`；后端重新编译打包 exe → 覆盖运行目录下的 exe / 静态资源 → 由珱垣重启线上进程生效。
 
 ## Git 工作流（每次任务收尾必做）
 

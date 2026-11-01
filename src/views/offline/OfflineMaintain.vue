@@ -189,23 +189,18 @@ const hasDecensored = (c: OfflineComicDTO) => {
 // ── 决策标签（Round45）：一眼看出「该删谁」的质量标记 ──
 // key 为 other 命名空间的裸 key（判定见上方 tagKeySet），tag 为 E 站完整写法（悬浮提示用）。
 // tone 语义：bad=倾向删除（渣翻/外部广告）、warn=有损但看情况（马赛克修正）、good=倾向保留（无修正）。
+// Round52：顺序固定为 马赛克修正 → 无修正 → 渣翻 → 外部广告；只渲染实际命中的，不占空位
 const DECISION_TAGS = [
-  { key: 'rough translation', tag: 'other:rough translation', name: '渣翻', tone: 'bad' },
-  { key: 'extraneous ads', tag: 'other:extraneous ads', name: '外部广告', tone: 'bad' },
   { key: 'mosaic censorship', tag: 'other:mosaic censorship', name: '马赛克修正', tone: 'warn' },
   { key: 'uncensored', tag: 'other:uncensored', name: '无修正', tone: 'good' },
+  { key: 'rough translation', tag: 'other:rough translation', name: '渣翻', tone: 'bad' },
+  { key: 'extraneous ads', tag: 'other:extraneous ads', name: '外部广告', tone: 'bad' },
 ] as const
 
 const decisionTags = (c: OfflineComicDTO) => {
   const keys = tagKeySet(c)
   if (keys.size === 0) return []
   return DECISION_TAGS.filter((d) => keys.has(d.key))
-}
-
-// Round52：固定 4 槽（缺失的留空占位，保证同组两张卡第三行位置对齐）
-const decisionSlots = (c: OfflineComicDTO) => {
-  const keys = tagKeySet(c)
-  return DECISION_TAGS.map((d) => ({ ...d, on: keys.has(d.key) }))
 }
 
 const sizeRatio = (a?: number, b?: number) => {
@@ -1239,11 +1234,11 @@ onUnmounted(() => {
                           }}</span>
                         </span>
                         <span
-                          v-for="d in decisionSlots(m.comic)"
+                          v-for="d in decisionTags(m.comic)"
                           :key="d.key"
                           class="decision-chip"
-                          :class="[d.tone, { slot: !d.on }]"
-                          :title="d.on ? d.tag : ''"
+                          :class="d.tone"
+                          :title="d.tag"
                           >{{ d.name }}</span
                         >
                       </div>
@@ -2054,10 +2049,10 @@ onUnmounted(() => {
   padding: 10px;
 }
 .member-cover {
-  /* Round52：封面撑满 5 行内容高度（上下留白相等），宽度随之放大 */
-  width: 106px;
-  min-width: 90px;
-  align-self: stretch;
+  /* Round52：固定 3:4（与书签卡同比例），不随内容拉伸 */
+  width: 120px;
+  height: 160px;
+  align-self: flex-start;
   border-radius: 6px;
   flex: 0 0 auto;
   overflow: hidden;
@@ -2104,6 +2099,8 @@ onUnmounted(() => {
   font-size: 0.82rem;
   color: var(--app-text-strong);
   line-height: 1.35;
+  /* Round52：固定占 2 行——单行标题也留出第二行高度，保证同组卡片行位对齐 */
+  min-height: 2.7em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -2139,7 +2136,6 @@ onUnmounted(() => {
   line-height: 1.5;
   color: #e8c069;
   font-variant-numeric: tabular-nums;
-  margin-right: 2px;
 }
 .score-bar.empty {
   color: var(--app-text-muted);
@@ -2167,10 +2163,6 @@ onUnmounted(() => {
   background: #12281f;
   border-color: #1d5148;
   color: #7fe0c4;
-}
-/* Round52：固定 4 槽——缺失标签保留位置但不可见（保证同组卡片第三行对齐） */
-.decision-chip.slot {
-  visibility: hidden;
 }
 .lang-chip {
   border: 1px dashed var(--app-border-3);

@@ -9,20 +9,23 @@
 DSPlans/
 ├── plans/        # 施工方案：功能开发 plan、路线图、早期规划（Round 系列方案全部在此）
 ├── Problems/     # 问题记录：用户/群友反馈的问题诊断、修复说明、答疑话术
-├── VerNotes/     # 发布文案：RELEASE_NOTES、推广文案、发布流程、用户 FAQ
+├── VerNotes/     # 发布文档：RELEASE_NOTES（详实版）、发布流程、用户 FAQ
+├── YeonBriefs/   # 版本简报：给珱垣写 README / Release 正文的精炼素材（BRIEF_vX.Y.Z.md）
 └── readme.md     # 本规则文件
 ```
 
 | 子目录 | 收纳内容 | 典型文件 |
 |--------|----------|----------|
-| `plans/` | 开工前的施工方案与规划 | `round47-downloads-bulk-actions-plan.md`、`初版目录树.md` |
+| `plans/` | 开工前的施工方案与规划 | `round49-bookmark-wall-probe-plan.md`、`初版目录树.md` |
 | `Problems/` | 问题反馈的处理过程与结论 | `Q1-handling.md` |
-| `VerNotes/` | 面向发布的说明与文案 | `RELEASE_NOTES_vX.Y.Z.md`、`wiki.md`、`RELEASE_PROCESS.md` |
+| `VerNotes/` | 面向发布的详实说明与流程 | `RELEASE_NOTES_vX.Y.Z.md`、`wiki.md`、`RELEASE_PROCESS.md` |
+| `YeonBriefs/` | 给珱垣的精炼版本简报（按 Round 增量累积） | `BRIEF_v2.3.0.md` |
 
 ## 二、与 YeonPlans 的分工
 
 - `YeonPlans/`：用户（珱垣）本人落笔的决策、思路与学习笔记，**AI 禁止改动其内容**。
 - `DSPlans/` ：AI 产出的方案、诊断、发布文案，**用户不直接改动**。
+- 写给珱垣看的「可读结论 / 写作素材」统一放 `YeonBriefs/`，不往 `YeonPlans/` 里搬。
 
 新增文档时按上表归入对应子目录；暂无法归类的临时内容可先放本目录根，稳定后再归位。
 

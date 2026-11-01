@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, onUnmounted } from 'vue'
 import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
@@ -690,9 +690,50 @@ const toggleGroup = (key: string) => {
 }
 const toggleExpand = (id: string) => {
   expanded.value[id] = !expanded.value[id]
+  ensureCompareSel(id)
 }
 const isExpanded = (id: string) => !!expanded.value[id]
 const aliveCount = (cl: DedupClusterDTO) => cl.members.length
+
+// ── Round52：展开对比的左右成员选择（固定两栏，切换条最多显示 5 个）──
+const compareSides = ['left', 'right'] as const
+const compareSel = ref<Record<string, { left: number; right: number }>>({})
+const ensureCompareSel = (id: string) => {
+  const cl = clusters.value.find((c) => c.id === id)
+  if (!cl) return
+  if (!compareSel.value[id]) {
+    compareSel.value[id] = { left: 0, right: Math.min(1, Math.max(0, cl.members.length - 1)) }
+  }
+}
+const memberLetter = (i: number) => String.fromCharCode(65 + i)
+const selIndexOf = (cl: DedupClusterDTO, side: 'left' | 'right') => {
+  const sel = compareSel.value[cl.id]
+  const max = Math.max(0, cl.members.length - 1)
+  const raw = sel ? sel[side] : side === 'left' ? 0 : 1
+  return Math.min(Math.max(0, raw), max)
+}
+const memberOf = (cl: DedupClusterDTO, side: 'left' | 'right') =>
+  cl.members[selIndexOf(cl, side)] ?? cl.members[0]
+const setCompareSel = (cl: DedupClusterDTO, side: 'left' | 'right', idx: number) => {
+  const max = Math.max(0, cl.members.length - 1)
+  const target = Math.min(Math.max(0, idx), max)
+  const cur = compareSel.value[cl.id] ?? { left: 0, right: Math.min(1, max) }
+  const next = { ...cur }
+  const other = side === 'left' ? 'right' : 'left'
+  // 左右不允许选中同一本：冲突时把另一侧换到本侧原来的成员
+  if (target === cur[other]) next[other] = cur[side]
+  next[side] = target
+  compareSel.value[cl.id] = next
+  nextTick(() => {
+    const el = document.querySelector<HTMLElement>(
+      `[data-compare="${cl.id}"][data-side="${side}"] .sw-chip.on`,
+    )
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
+}
+const moveCompareSel = (cl: DedupClusterDTO, side: 'left' | 'right', delta: number) => {
+  setCompareSel(cl, side, selIndexOf(cl, side) + delta)
+}
 
 // 统计（进度条 / 汇总 chips）
 const totalMemberCount = computed(() => clusters.value.reduce((s, c) => s + c.members.length, 0))
@@ -1289,24 +1330,66 @@ onUnmounted(() => {
                 <div v-if="isExpanded(cl.id)" class="inline-compare">
                   <div class="diffline">这两本差在哪：<b>{{ diffChips(cl).join(' · ') }}</b></div>
                   <div class="compare">
-                    <div v-for="(m, mi) in cl.members" :key="m.comic.id" class="panel">
+                    <div
+                      v-for="side in compareSides"
+                      :key="side"
+                      class="panel"
+                      :data-compare="cl.id"
+                      :data-side="side"
+                    >
                       <div class="panel-head">
-                        <span class="panel-badge info">成员 {{ String.fromCharCode(65 + mi) }}</span>
-                        <span class="panel-diff">{{ memberDiff(cl, mi) }}</span>
+                        <span class="panel-badge info">成员 {{ memberLetter(selIndexOf(cl, side)) }}</span>
+                        <div class="member-switch">
+                          <button
+                            type="button"
+                            class="sw-arrow"
+                            :disabled="selIndexOf(cl, side) <= 0"
+                            title="上一个成员"
+                            @click="moveCompareSel(cl, side, -1)"
+                          >
+                            ‹
+                          </button>
+                          <div class="sw-track">
+                            <button
+                              v-for="(m, i) in cl.members"
+                              :key="m.comic.id"
+                              type="button"
+                              class="sw-chip"
+                              :class="{ on: i === selIndexOf(cl, side) }"
+                              :title="`切换到成员 ${memberLetter(i)}`"
+                              @click="setCompareSel(cl, side, i)"
+                            >
+                              {{ memberLetter(i) }}
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            class="sw-arrow"
+                            :disabled="selIndexOf(cl, side) >= cl.members.length - 1"
+                            title="下一个成员"
+                            @click="moveCompareSel(cl, side, 1)"
+                          >
+                            ›
+                          </button>
+                        </div>
                       </div>
                       <PageThumbWall
-                        :comic-id="m.comic.id"
-                        :page-count="m.pageCount || 0"
-                        :label="String.fromCharCode(65 + mi)"
-                        :title="m.comic.title || ''"
+                        :comic-id="memberOf(cl, side).comic.id"
+                        :page-count="memberOf(cl, side).pageCount || 0"
+                        :label="memberLetter(selIndexOf(cl, side))"
+                        :title="memberOf(cl, side).comic.title || ''"
                       />
-                      <button class="action-btn danger-soft" :disabled="isRemovingId(m.comic.id)" @click="removeMember(cl, m)">
+                      <button
+                        class="action-btn danger-soft"
+                        :disabled="isRemovingId(memberOf(cl, side).comic.id)"
+                        @click="removeMember(cl, memberOf(cl, side))"
+                      >
                         <AppIcon
-                          :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
+                          :name="isRemovingId(memberOf(cl, side).comic.id) ? 'loading' : 'trash'"
                           :size="13"
-                          :class="{ spin: isRemovingId(m.comic.id) }"
+                          :class="{ spin: isRemovingId(memberOf(cl, side).comic.id) }"
                         />
-                        {{ isRemovingId(m.comic.id) ? '处理中...' : '移除这本' }}
+                        {{ isRemovingId(memberOf(cl, side).comic.id) ? '处理中...' : '移除这本' }}
                       </button>
                     </div>
                   </div>
@@ -2031,15 +2114,14 @@ onUnmounted(() => {
   color: #9fd8a6;
 }
 
-/* 成员卡（舒适视图） */
+/* 成员卡（舒适视图）：Round52 固定 2 列 n 行，3 本时 A B / C（空位不拉伸） */
 .members {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  flex-wrap: wrap;
 }
 .member {
   position: relative;
-  flex: 1 1 280px;
   min-width: 0;
   display: flex;
   gap: 10px;
@@ -2047,6 +2129,11 @@ onUnmounted(() => {
   border: 1px solid var(--app-border-3);
   border-radius: 6px;
   padding: 10px;
+}
+@media (max-width: 900px) {
+  .members {
+    grid-template-columns: 1fr;
+  }
 }
 .member-cover {
   /* Round52：固定 3:4（与书签卡同比例），不随内容拉伸 */
@@ -2264,6 +2351,67 @@ onUnmounted(() => {
 .panel-diff {
   font-size: 0.74rem;
   color: var(--app-text-3);
+}
+/* Round52：展开区成员切换条（‹ [A] B C D E ›）——宽约 5 个，超出可横向拖动 */
+.member-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  min-width: 0;
+}
+.sw-arrow {
+  width: 18px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.sw-arrow:hover:not(:disabled) {
+  background: var(--app-surface-3-hover);
+}
+.sw-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.sw-track {
+  display: flex;
+  gap: 4px;
+  max-width: 168px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 1px 0;
+}
+.sw-track::-webkit-scrollbar {
+  display: none;
+}
+.sw-chip {
+  width: 24px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-3);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.sw-chip:hover {
+  color: var(--app-text-2);
+}
+.sw-chip.on {
+  border-color: #2b4a63;
+  background: #14283a;
+  color: #7ec8ff;
 }
 .panel-top {
   display: flex;

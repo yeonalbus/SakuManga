@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { API_BASE } from '@/config/api'
 import { usePagePreview } from './usePagePreview'
 
@@ -91,6 +91,20 @@ onBeforeUnmount(() => {
   if (timer !== null) window.clearTimeout(timer)
   timer = null
 })
+
+// 切换对比成员时复用同一组件实例 → 必须重置加载进度（否则沿用上一本的已载页数）
+watch(
+  () => props.comicId,
+  () => {
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      timer = null
+    }
+    busy.value = false
+    loaded.value = Math.min(INIT, total.value)
+    requestAnimationFrame(fillIfNeeded)
+  },
+)
 </script>
 
 <template>

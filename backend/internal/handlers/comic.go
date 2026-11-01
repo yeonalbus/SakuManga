@@ -387,7 +387,7 @@ func GetComicPageThumbImage(c *gin.Context) {
 	}
 
 	c.Header("Cache-Control", "public, max-age=86400")
-	c.Data(http.StatusOK, "image/jpeg", data)
+	c.Data(http.StatusOK, http.DetectContentType(data), data)
 }
 
 // GetComicRawPageImage 按物理页索引直读图片（Round23 管理模式预览用，不应用隐藏页映射）。

@@ -21,6 +21,8 @@ export interface BaseComic {
   tags: string[] // 标签列表
   category?: string // 分类 (提至基类：Doujinshi, Manga 等)
   rating?: number // 评分/星级
+  /** Round52：E 站社区评分（离线漫画；0/缺失=未知）。个人评分缺失时作为兜底展示 */
+  communityRating?: number
   pageCount?: number // 总页数 (统一命名为 pageCount)
   readCount?: number // 统一：阅读/点击总次数 (替代混淆的 clickCount)
   updatedAt: string // 更新/扫描时间

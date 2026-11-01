@@ -4,6 +4,8 @@ import { useUI } from '@/composables/useUI'
 import { http } from '@/utils/request'
 import { openComicDetailInNewTab } from '@/utils/detailNav'
 import AppIcon from '@/components/icons/AppIcon.vue'
+import PageThumbWall from './PageThumbWall.vue'
+import PageLightbox from './PageLightbox.vue'
 
 // ─────────────────────────────────────────────────────────────
 // Round44：本地书库维护 v3
@@ -33,6 +35,8 @@ interface OfflineComicDTO {
   sourceMode?: string
   onlineTags?: string
   tags?: string
+  // Round52：社区评分（E 站全站评分，0/缺失=未知）
+  communityRating?: number
 }
 
 interface DedupItemDTO {
@@ -196,6 +200,12 @@ const decisionTags = (c: OfflineComicDTO) => {
   const keys = tagKeySet(c)
   if (keys.size === 0) return []
   return DECISION_TAGS.filter((d) => keys.has(d.key))
+}
+
+// Round52：固定 4 槽（缺失的留空占位，保证同组两张卡第三行位置对齐）
+const decisionSlots = (c: OfflineComicDTO) => {
+  const keys = tagKeySet(c)
+  return DECISION_TAGS.map((d) => ({ ...d, on: keys.has(d.key) }))
 }
 
 const sizeRatio = (a?: number, b?: number) => {
@@ -1219,13 +1229,21 @@ onUnmounted(() => {
                           ><AppIcon name="local" :size="12" /> {{ formatBytes(m.comic.fileSize) }}</span
                         >
                       </div>
-                      <div v-if="decisionTags(m.comic).length" class="decision-row">
+                      <div class="decision-row">
+                        <span class="score-bar" :class="{ empty: !(m.comic.communityRating && m.comic.communityRating > 0) }">
+                          <span class="star">★</span>
+                          <span class="val">{{
+                            m.comic.communityRating && m.comic.communityRating > 0
+                              ? m.comic.communityRating.toFixed(2)
+                              : '—'
+                          }}</span>
+                        </span>
                         <span
-                          v-for="d in decisionTags(m.comic)"
+                          v-for="d in decisionSlots(m.comic)"
                           :key="d.key"
                           class="decision-chip"
-                          :class="d.tone"
-                          :title="d.tag"
+                          :class="[d.tone, { slot: !d.on }]"
+                          :title="d.on ? d.tag : ''"
                           >{{ d.name }}</span
                         >
                       </div>
@@ -1273,7 +1291,7 @@ onUnmounted(() => {
                     <AppIcon name="eyeClosed" :size="13" /> 都留（不再提示）
                   </button>
                 </div>
-                <div v-show="isExpanded(cl.id)" class="inline-compare">
+                <div v-if="isExpanded(cl.id)" class="inline-compare">
                   <div class="diffline">这两本差在哪：<b>{{ diffChips(cl).join(' · ') }}</b></div>
                   <div class="compare">
                     <div v-for="(m, mi) in cl.members" :key="m.comic.id" class="panel">
@@ -1281,41 +1299,12 @@ onUnmounted(() => {
                         <span class="panel-badge info">成员 {{ String.fromCharCode(65 + mi) }}</span>
                         <span class="panel-diff">{{ memberDiff(cl, mi) }}</span>
                       </div>
-                      <div class="panel-top">
-                        <div class="cover lg" @click="openComic(m.comic.id)">
-                          <img
-                            v-if="m.comic.coverUrl && !coverFailed[m.comic.id]"
-                            :src="m.comic.coverUrl"
-                            :alt="m.comic.title"
-                            loading="lazy"
-                            @error="onCoverError(m.comic.id)"
-                          />
-                          <span v-else class="cover-fallback">{{ (cl.titleKey || '?').slice(0, 1) }}</span>
-                        </div>
-                        <div class="member-main">
-                          <div class="panel-title" @click="openComic(m.comic.id)">{{ m.comic.title }}</div>
-                          <div class="member-meta">
-                            <span class="lang-chip" :class="{ 'is-null': !m.lang }">{{ m.lang || 'null' }}</span>
-                            <span><AppIcon name="file" :size="12" /> {{ m.pageCount }} 页</span>
-                            <span
-                              ><AppIcon name="local" :size="12" />
-                              {{ formatBytes(m.comic.fileSize) }}</span
-                            >
-                            <span>artist: {{ m.artist || 'null' }}</span>
-                          </div>
-                          <div v-if="decisionTags(m.comic).length" class="decision-row">
-                            <span
-                              v-for="d in decisionTags(m.comic)"
-                              :key="d.key"
-                              class="decision-chip"
-                              :class="d.tone"
-                              :title="d.tag"
-                              >{{ d.name }}</span
-                            >
-                          </div>
-                          <div class="member-path"><AppIcon name="folder" :size="12" /> {{ m.comic.localPath || '—' }}</div>
-                        </div>
-                      </div>
+                      <PageThumbWall
+                        :comic-id="m.comic.id"
+                        :page-count="m.pageCount || 0"
+                        :label="String.fromCharCode(65 + mi)"
+                        :title="m.comic.title || ''"
+                      />
                       <button class="action-btn danger-soft" :disabled="isRemovingId(m.comic.id)" @click="removeMember(cl, m)">
                         <AppIcon
                           :name="isRemovingId(m.comic.id) ? 'loading' : 'trash'"
@@ -1326,7 +1315,7 @@ onUnmounted(() => {
                       </button>
                     </div>
                   </div>
-                  <p class="hint dim">移除前会二次确认；是否连本地文件一起删由上方勾选决定</p>
+                  <p class="hint dim">点击缩略图可放大原图对比；移除前会二次确认，是否连本地文件一起删由上方勾选决定</p>
                 </div>
               </template>
             </div>
@@ -1354,6 +1343,9 @@ onUnmounted(() => {
       </template>
     </template>
   </div>
+
+  <!-- Round52：原图灯箱（点击展开对比里的缩略图打开） -->
+  <PageLightbox />
 </template>
 
 <style scoped>
@@ -2136,6 +2128,20 @@ onUnmounted(() => {
   flex-wrap: wrap;
   margin-top: 2px;
 }
+/* Round52：社区评分（纯文字，无背景框；缺失显示 ★ —） */
+.score-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #e8c069;
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+.score-bar.empty {
+  color: var(--app-text-muted);
+}
 .decision-chip {
   font-size: 0.7rem;
   line-height: 1.5;
@@ -2159,6 +2165,10 @@ onUnmounted(() => {
   background: #12281f;
   border-color: #1d5148;
   color: #7fe0c4;
+}
+/* Round52：固定 4 槽——缺失标签保留位置但不可见（保证同组卡片第三行对齐） */
+.decision-chip.slot {
+  visibility: hidden;
 }
 .lang-chip {
   border: 1px dashed var(--app-border-3);

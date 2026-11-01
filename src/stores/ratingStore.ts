@@ -24,16 +24,20 @@ export const getMyRating = (comicId: string): number => myRatings.value[comicId]
 
 /**
  * 生效评分（Round10-Bug2/3）：卡片展示与离线星级筛选统一使用的评分口径。
- * - 离线漫画：优先个人评分（详情页 1-5 星，myRatings），未评分回退社区评分 comic.rating；
+ * - 离线漫画：优先个人评分（详情页 1-5 星，myRatings），未评分回退社区评分
+ *   （Round52：优先 comic.communityRating，兼容旧字段 comic.rating）；
  * - 在线漫画：保持社区评分 comic.rating。
  * 修复「详情页打分后卡片仍显示 —」「星级筛选按社区评分永远筛不出个人评分」两个问题。
  */
 export const getEffectiveRating = (
-  comic: Pick<ComicItem, 'id' | 'source' | 'rating'>,
+  comic: Pick<ComicItem, 'id' | 'source' | 'rating'> & { communityRating?: number },
 ): number => {
   if (comic.source === 'offline') {
     const mine = myRatings.value[comic.id]
     if (mine && mine > 0) return mine
+    // Round52：社区评分（E 站全站评分）优先于旧 rating 字段
+    const community = Number(comic.communityRating)
+    if (Number.isFinite(community) && community > 0) return community
   }
   const r = Number(comic.rating)
   return Number.isFinite(r) && r > 0 ? r : 0

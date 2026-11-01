@@ -430,3 +430,22 @@ func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
+
+// RestoreIgnores 批量恢复 POST /api/v1/offline/ignores/restore
+//
+// Round51：忽略清单页「多选 → 批量恢复」。只删条目、不触发聚类重算。
+func (h *OfflineHandler) RestoreIgnores(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+		return
+	}
+	n, err := services.RestoreIgnores(h.db, req.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": n})
+}

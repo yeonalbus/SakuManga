@@ -349,6 +349,23 @@ func RestoreIgnore(db *gorm.DB, id string) error {
 	return nil
 }
 
+// RestoreIgnores 批量恢复（删除）忽略条目（Round51 批量恢复）。
+// 恢复只删条目、不触发聚类重算（被恢复的组在下次重新扫描后回到维护列表）；返回删除条数。
+func RestoreIgnores(db *gorm.DB, ids []string) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("非法参数：db 不能为空")
+	}
+	ids = dedupeComicIDs(ids)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := db.Delete(&models.IgnoredIdentifier{}, "id IN ?", ids)
+	if res.Error != nil {
+		return 0, fmt.Errorf("批量恢复忽略条目失败: %v", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
 // ── 成员集合工具 ──
 
 func dedupeComicIDs(ids []string) []string {

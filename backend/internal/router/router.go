@@ -362,6 +362,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.POST("/offline/ignore", offlineHandler.CreateIgnore)
 			admin.GET("/offline/ignore/list", offlineHandler.ListIgnores)
 			admin.POST("/offline/ignore/:id/restore", offlineHandler.RestoreIgnore)
+			// Round51：忽略清单页「多选 → 批量恢复」（只删条目、不触发聚类重算）
+			admin.POST("/offline/ignores/restore", offlineHandler.RestoreIgnores)
 			// Round44：确认新增（刷新 title 型忽略的成员快照 → 该簇回到静默态）
 			admin.POST("/offline/ignore/:id/ack", offlineHandler.AckIgnoreNewMembers)
 

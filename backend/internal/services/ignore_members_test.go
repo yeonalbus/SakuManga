@@ -172,3 +172,29 @@ func TestPurgeLegacyIgnores(t *testing.T) {
 		t.Errorf("重复清理应为 0，得到 %d", n)
 	}
 }
+
+// TestRestoreIgnoresBatch 批量恢复：一次删除多条并返回删除数；空列表不报错
+func TestRestoreIgnoresBatch(t *testing.T) {
+	db := newIgnoreMemberTestDB(t)
+	var ids []string
+	for _, key := range []string{"A", "B", "C"} {
+		rec, err := CreateIgnore(db, "title", key, "x", "", "", []string{key + "1"})
+		if err != nil {
+			t.Fatalf("创建忽略失败: %v", err)
+		}
+		ids = append(ids, rec.ID)
+	}
+	n, err := RestoreIgnores(db, ids)
+	if err != nil {
+		t.Fatalf("批量恢复失败: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("应删除 3 条，得到 %d", n)
+	}
+	if left, _ := ListIgnores(db); len(left) != 0 {
+		t.Errorf("批量恢复后应为空，得到 %d 条", len(left))
+	}
+	if n2, err := RestoreIgnores(db, nil); err != nil || n2 != 0 {
+		t.Errorf("空列表批量恢复应返回 0 且不报错，得到 %d / %v", n2, err)
+	}
+}

@@ -73,6 +73,7 @@ const load = async () => {
   try {
     const data = await http<{ items: IgnoreItemDTO[] }>('/offline/ignore/list')
     items.value = data?.items || []
+    selectedIds.value = []
     // 默认展开有新增的条目，便于直接确认
     const open: Record<string, boolean> = {}
     for (const it of items.value) {
@@ -83,6 +84,47 @@ const load = async () => {
     toast.error(err instanceof Error ? err.message : '读取忽略清单失败')
   } finally {
     loading.value = false
+  }
+}
+
+// ── 多选 + 批量恢复（Round51.1）──
+const selectedIds = ref<string[]>([])
+const allSelected = computed(
+  () => items.value.length > 0 && selectedIds.value.length === items.value.length,
+)
+const isSelected = (id: string) => selectedIds.value.includes(id)
+const toggleSelect = (id: string) => {
+  selectedIds.value = isSelected(id)
+    ? selectedIds.value.filter((x) => x !== id)
+    : [...selectedIds.value, id]
+}
+const toggleSelectAll = () => {
+  selectedIds.value = allSelected.value ? [] : items.value.map((i) => i.id)
+}
+const batchRestore = async () => {
+  if (selectedIds.value.length === 0) return
+  const confirmed = await modal.confirm(
+    `确定恢复选中的 ${selectedIds.value.length} 条忽略吗？\n\n恢复后这些组会重新参与疑似重复判定，将在下次「重新扫描」后出现在维护列表。`,
+    '批量恢复忽略',
+  )
+  if (!confirmed) return
+  busyId.value = 'batch'
+  try {
+    const ids = [...selectedIds.value]
+    const data = await http<{ ok: boolean; deleted?: number }>('/offline/ignores/restore', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    })
+    const set = new Set(ids)
+    items.value = items.value.filter((i) => !set.has(i.id))
+    selectedIds.value = []
+    toast.success(
+      `已恢复 ${data?.deleted ?? ids.length} 条忽略，将在下次重新扫描后出现在维护列表`,
+    )
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '批量恢复失败')
+  } finally {
+    busyId.value = ''
   }
 }
 
@@ -161,6 +203,15 @@ onMounted(load)
         </p>
       </div>
       <div class="header-actions">
+        <button
+          class="scan-btn"
+          :disabled="selectedIds.length === 0 || busyId === 'batch'"
+          :title="selectedIds.length === 0 ? '先勾选要恢复的忽略项' : '恢复选中的忽略项'"
+          @click="batchRestore"
+        >
+          <AppIcon name="arrowLeft" :size="14" />
+          批量恢复{{ selectedIds.length ? `（${selectedIds.length}）` : '' }}
+        </button>
         <button class="scan-btn ghost" :disabled="loading" @click="load">
           <AppIcon name="refresh" :size="15" /> 刷新
         </button>
@@ -190,6 +241,17 @@ onMounted(load)
 
     <!-- 统计 -->
     <div class="stat-bar">
+      <button
+        type="button"
+        class="pick all"
+        :class="{ on: allSelected }"
+        :title="allSelected ? '取消全选' : '全选'"
+        @click="toggleSelectAll"
+      >
+        <span class="tick" :class="{ on: allSelected }">
+          <AppIcon v-if="allSelected" name="check" :size="10" />
+        </span>
+      </button>
       <span class="stat-item">{{ items.length }} 条忽略</span>
       <span v-if="staleItems.length > 0" class="stat-item warn"
         >{{ staleItems.length }} 条已不构成重复（可清理）</span
@@ -218,9 +280,21 @@ onMounted(load)
         :class="{
           stale: item.matchedCount <= 1,
           hasnew: item.newCount > 0,
+          selected: isSelected(item.id),
         }"
       >
         <div class="ignore-head" @click="toggle(item.id)">
+          <button
+            type="button"
+            class="pick"
+            :class="{ on: isSelected(item.id) }"
+            :title="isSelected(item.id) ? '取消勾选' : '勾选以便批量恢复'"
+            @click.stop="toggleSelect(item.id)"
+          >
+            <span class="tick" :class="{ on: isSelected(item.id) }">
+              <AppIcon v-if="isSelected(item.id)" name="check" :size="10" />
+            </span>
+          </button>
           <span class="type-chip">{{ typeLabel(item.type) }}</span>
           <span class="ignore-key" :title="item.titleKey || `gid ${item.gid}`">
             {{ item.titleKey || `gid ${item.gid}` }}
@@ -441,6 +515,52 @@ onMounted(load)
 }
 .ignore-row.stale {
   border-left-color: var(--app-text-muted);
+}
+.ignore-row.selected {
+  border-left-color: var(--app-accent);
+}
+
+/* 勾选按钮（与维护页同款自绘勾选框） */
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-2);
+  background: none;
+  font-family: inherit;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--app-text-3);
+  cursor: pointer;
+  user-select: none;
+  flex: 0 0 auto;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+.pick.on {
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
+}
+.pick.all {
+  padding: 2px 5px;
+}
+.tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--app-border-3);
+  color: #fff;
+  flex: none;
+}
+.tick.on {
+  border-color: var(--app-accent);
+  background: var(--app-accent);
 }
 .ignore-head {
   display: flex;

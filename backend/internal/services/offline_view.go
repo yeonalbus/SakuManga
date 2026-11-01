@@ -33,6 +33,8 @@ type MaintainComicView struct {
 	UpdatedAt  time.Time `json:"updatedAt"`
 	Tags       string    `json:"tags"`                 // 决策标签判定（与 onlineTags 取并集）
 	OnlineTags string    `json:"onlineTags,omitempty"` // E 站官方 tag JSON（决策标签主来源）
+	// Round52：社区评分（维护卡第三行展示；0=未知，前端显示 ★ —）
+	CommunityRating float64 `json:"communityRating"`
 }
 
 // toMaintainComicView 由完整模型投影视图（唯一投影入口，避免字段口径漂移）
@@ -49,6 +51,7 @@ func toMaintainComicView(c models.OfflineComic) MaintainComicView {
 		UpdatedAt:  c.UpdatedAt,
 		Tags:       c.Tags,
 		OnlineTags: c.OnlineTags,
+		CommunityRating: c.CommunityRating,
 	}
 }
 

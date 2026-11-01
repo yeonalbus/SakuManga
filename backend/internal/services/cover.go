@@ -176,29 +176,37 @@ func readCoverSource(comic models.OfflineComic) ([]byte, time.Time, error) {
 // decodeAndResize 解码图片并等比缩放到宽 CoverThumbWidth，输出 JPEG。
 // 无法解码（如 AVIF）或无需缩放（原图更小）时返回 false，由调用方回退原图直传。
 func decodeAndResize(data []byte) ([]byte, bool) {
+	return decodeAndResizeTo(data, CoverThumbWidth)
+}
+
+// decodeAndResizeTo 通用版：解码图片并等比缩放到指定宽度，输出 JPEG（Round52：页缩略图复用）。
+func decodeAndResizeTo(data []byte, width int) ([]byte, bool) {
+	if width <= 0 {
+		return nil, false
+	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, false
 	}
 	bounds := img.Bounds()
 	w := bounds.Dx()
-	if w <= 0 || w <= CoverThumbWidth {
+	if w <= 0 || w <= width {
 		return nil, false
 	}
-	h := bounds.Dy() * CoverThumbWidth / w
+	h := bounds.Dy() * width / w
 	if h <= 0 {
 		return nil, false
 	}
-	resized := image.NewRGBA(image.Rect(0, 0, CoverThumbWidth, h))
+	resized := image.NewRGBA(image.Rect(0, 0, width, h))
 	// 盒式平均降采样（无需 x/image 依赖；列表缩略图画质足够）
-	box := (w + CoverThumbWidth - 1) / CoverThumbWidth
+	box := (w + width - 1) / width
 	if box < 1 {
 		box = 1
 	}
 	for y := 0; y < h; y++ {
 		srcY := y * bounds.Dy() / h
-		for x := 0; x < CoverThumbWidth; x++ {
-			srcX := x * w / CoverThumbWidth
+		for x := 0; x < width; x++ {
+			srcX := x * w / width
 			var r, g, b, a, n uint32
 			for dy := 0; dy < box; dy++ {
 				for dx := 0; dx < box; dx++ {

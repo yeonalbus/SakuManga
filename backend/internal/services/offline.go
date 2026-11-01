@@ -120,6 +120,8 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 			}
 		} else if detail != nil {
 			fetchedOnline[c.ID] = true
+			// Round52：顺带回写社区评分（本次已拉详情，零额外请求）
+			writeCommunityRating(db, c, detail.Rating)
 			// A1. 详情页罗列更新版本（#gnd "newer versions" / #dms）→ 本画廊已被取代，A→C 更新到最新版。
 			//     若最新版已在本地（gidMap 命中），无需下载更新：清除旧的更新标记，交由维护查重界面删除旧版。
 			if detail.NewVersionGID != "" && detail.NewVersionGID != c.GID {
@@ -492,7 +494,22 @@ func BuildUpdateDownloadParams(db *gorm.DB, manager *DownloadManager, comic *mod
 	}, nil
 }
 
-// markOfflineUpdate 标记漫画需要更新到新版
+// writeCommunityRating 回写社区评分（Round52）。
+// rating<=0 视为未知（不写，避免把已值覆盖成 0）；与库中相同则跳过写。
+func writeCommunityRating(db *gorm.DB, c *models.OfflineComic, rating float64) {
+	if db == nil || c == nil || rating <= 0 {
+		return
+	}
+	if rating == c.CommunityRating {
+		return
+	}
+	c.CommunityRating = rating
+	if err := db.Model(c).Update("community_rating", rating).Error; err != nil {
+		log.Printf("%s [offline] 漫画 %q 回写社区评分失败: %v", dlWarnTag, c.Title, err)
+	}
+}
+
+// markOfflineUpdate 标记离线漫画存在新版本（A→C 更新到最新版）。 标记漫画需要更新到新版
 func markOfflineUpdate(c *models.OfflineComic, newGID, newToken, note string) {
 	c.NeedsUpdate = true
 	c.NewGID = newGID
@@ -959,7 +976,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				// Round26 O2：规则 3 gid 型忽略——增量扫描时被忽略的父画廊不联网、不提示（用户故意保留旧版）。
 				// Round50（G）：老化/失效本不参与联网核对（它们已进入本地查重候选集，此处显式跳过）
 				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
-					c.AgedStatus || c.RemovedStatus ||
+					(c.AgedStatus && !forceFull) || c.RemovedStatus ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -974,7 +991,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				c := &comics[i]
 				// Round50（G）：老化/失效本不参与联网核对（它们已进入本地查重候选集，此处显式跳过）
 				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
-					c.AgedStatus || c.RemovedStatus ||
+					(c.AgedStatus && !forceFull) || c.RemovedStatus ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -1022,6 +1039,8 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 							dlLogTag, c.Title, c.GID, detail.ParentGID)
 					}
 				}
+				// Round52：顺带回写社区评分（本次已拉详情，零额外请求）
+				writeCommunityRating(db, c, detail.Rating)
 				// 3a-新：父链上溯（隔代祖孙发现）——本地可能只保存更新链的两端
 				// （中间版本缺失，如 A→B→C→D 仅本地有 A 与 D），直接父检查（3b）与
 				// children 检查都因中间节点缺失而失联。沿本画廊的父画廊链向上逐层抓取

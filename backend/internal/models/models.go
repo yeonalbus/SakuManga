@@ -32,6 +32,10 @@ type OfflineComic struct {
 	Source       ComicSource `gorm:"default:'offline'" json:"source"` // 标识来源
 	Tags         string      `gorm:"type:text" json:"tags"`           // 标签列表 (在数据库中存 JSON 字符串，例如 ["TagA","TagB"])
 	Rating       float64     `gorm:"default:0" json:"rating"`         // 评分
+	// Round52：社区评分（E 站全站评分，0=未知）。
+	// 与用户个人评分（ComicRating 表）严格分离：本地卡片缺个人评分时用它兜底；
+	// 不参与 XP 词云权重，也不得用于任何自动删除。
+	CommunityRating float64 `gorm:"default:0" json:"communityRating"`
 	PageCount    int         `json:"pageCount"`                       // 总页数
 	UpdatedAt    time.Time   `json:"updatedAt"`                       // 扫描/更新时间
 	IsDownloaded bool        `gorm:"default:true" json:"isDownloaded"`

@@ -346,10 +346,53 @@ func GetComicPageImage(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, data)
 }
 
+// GetComicPageThumbImage 返回某有效页的缩略图（Round52：维护页展开对比用）。
+// 首次生成 240px JPEG 缓存到 page_cache/（复用封面的单飞 + 限流思路），
+// 命中直接回缓存文件并带 ETag，浏览器二次零请求。
+func GetComicPageThumbImage(c *gin.Context) {
+	id := c.Param("id")
+	pageIdxStr := c.Param("index")
+
+	var pageIdx int
+	if _, err := fmt.Sscanf(pageIdxStr, "%d", &pageIdx); err != nil || pageIdx < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的页码"})
+		return
+	}
+
+	var comic models.OfflineComic
+	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
+		return
+	}
+
+	data, cachePath, cached, err := services.GetPageThumb(comic, pageIdx)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	if cached {
+		fi, _ := os.Stat(cachePath)
+		if fi != nil {
+			etag := fmt.Sprintf(`"%d-%d"`, fi.ModTime().Unix(), fi.Size())
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Header("ETag", etag)
+			if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		c.File(cachePath)
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, "image/jpeg", data)
+}
+
 // GetComicRawPageImage 按物理页索引直读图片（Round23 管理模式预览用，不应用隐藏页映射）。
 // 与 GetComicPageImage（有效索引，自动跳过隐藏页）区分：管理模式需展示含隐藏页的全量页面。
-func GetComicRawPageImage(c *gin.Context) {
-	id := c.Param("id")
+func GetComicRawPageImage(c *gin.Context) {	id := c.Param("id")
 	pageIdxStr := c.Param("index")
 
 	var pageIdx int

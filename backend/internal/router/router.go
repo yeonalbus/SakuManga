@@ -83,6 +83,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		public.GET("/comics/:id/cover", handlers.GetComicCover)
 		public.GET("/comics/:id/pages", handlers.GetComicPages)
 		public.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
+		// Round52：页缩略图（维护页展开对比，240px 缓存到 page_cache/）
+		public.GET("/comics/:id/page-thumb/:index", handlers.GetComicPageThumbImage)
 		// Round23：物理页索引直读（管理模式预览展示含隐藏页的全量页面）
 		public.GET("/comics/:id/raw-page/:index", handlers.GetComicRawPageImage)
 

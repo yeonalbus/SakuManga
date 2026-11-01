@@ -415,6 +415,13 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	// 发布时间：metadata publishTime / ComicInfo 日期（问题1 排序）
 	publishedAt := parsePublishTime(meta.PublishTime)
 
+	// Round52：社区评分——本地 metadata/ComicInfo 有值时写入；
+	// 库中已有值（联网核对写入的更权威）则不覆盖，避免重新扫描把新值退化成旧值。
+	communityRating := existingFull.CommunityRating
+	if communityRating <= 0 {
+		communityRating = meta.Rating
+	}
+
 	comic := models.OfflineComic{
 		ID:                comicID,
 		Title:             title,
@@ -426,6 +433,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		Source:            models.SourceOffline,
 		Category:          category,             // 写入解析出的分类
 		Tags:              string(tagsJSON),     // 写入解析出的多元标签数组 JSON
+		CommunityRating:   communityRating,      // Round52：社区评分（本地解析 / 保留库中已有）
 		PageCount:         effectivePageCount,   // Round23：有效页数（物理 − 隐藏）
 		HiddenPages:       MarshalHiddenPages(hiddenPages),
 		OriginalPageCount: originalPageCount,

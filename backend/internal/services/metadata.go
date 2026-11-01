@@ -218,7 +218,8 @@ type ParsedMetadata struct {
 	ParentGID   string
 	FileCount   int
 	FileSize    int64
-	PublishTime string // 发布时间字符串（问题1）
+	PublishTime string  // 发布时间字符串（问题1）
+	Rating      float64 // Round52：社区评分（metadata rating / ComicInfo CommunityRating，0=未知）
 }
 
 // applyJSONMeta 将 EH/JH metadata JSON 合并进解析结果
@@ -255,6 +256,18 @@ func (r *ParsedMetadata) applyJSONMeta(jsonMeta EHMetadataJSON) {
 	}
 	if r.PublishTime == "" {
 		r.PublishTime = jsonMeta.PublishTimeAlt
+	}
+	if r.Rating == 0 {
+		switch v := jsonMeta.Rating.(type) {
+		case float64:
+			r.Rating = v
+		case int:
+			r.Rating = float64(v)
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				r.Rating = f
+			}
+		}
 	}
 }
 
@@ -323,6 +336,23 @@ func parseEHJSONMetadata(data []byte) EHMetadataJSON {
 		}
 		return 0
 	}
+	// 浮点字段：兼容数字与字符串形式的评分（Round52）
+	getFloat := func(keys ...string) float64 {
+		for _, k := range keys {
+			raw, ok := src[k]
+			if !ok {
+				continue
+			}
+			var f float64
+			if err := json.Unmarshal(raw, &f); err == nil {
+				return f
+			}
+			if v, err := strconv.ParseFloat(strings.TrimSpace(getStr(k)), 64); err == nil {
+				return v
+			}
+		}
+		return 0
+	}
 	// 标签字段：兼容 JSON 数组与逗号分隔字符串两种形态
 	getTags := func() []string {
 		raw, ok := src["tags"]
@@ -357,6 +387,7 @@ func parseEHJSONMetadata(data []byte) EHMetadataJSON {
 	meta.Tags = getTags()
 	meta.FileCount = getInt("pageCount", "filecount")
 	meta.Filesize = int64(getInt("filesize", "size"))
+	meta.Rating = getFloat("rating")
 	meta.PublishTime = getStr("publish_time")
 	meta.PublishTimeAlt = getStr("publishTime")
 	// 画廊下载：父画廊关系编码在 oldVersionGalleryUrl 中（https://.../g/<parent_gid>/<token>/）
@@ -426,6 +457,12 @@ func (r *ParsedMetadata) applyXMLMeta(xmlMeta ComicInfoXML) {
 	}
 	if r.FileCount == 0 && xmlMeta.PageCount > 0 {
 		r.FileCount = xmlMeta.PageCount
+	}
+	// Round52：ComicInfo 的 CommunityRating 作为评分兜底（第三方下载器 / EHViewer 常写此字段）
+	if r.Rating == 0 && xmlMeta.CommunityRating != "" {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(xmlMeta.CommunityRating), 64); err == nil {
+			r.Rating = v
+		}
 	}
 }
 

@@ -317,6 +317,7 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 
 		// ── 顺带补齐发布时间（问题2）：外部导入的画廊本地 metadata 无 publishTime，
 		//    用本次拉取的 E 站详情 Posted 字段解析并回写 published_at，无需额外请求 ──
+		writeCommunityRating(s.db, c, detail.Rating)
 		if c.PublishedAt == nil && detail.UpdatedAt != "" {
 			if pt := parsePublishTime(detail.UpdatedAt); pt != nil {
 				if err := s.db.Model(c).Update("published_at", *pt).Error; err != nil {

@@ -692,10 +692,10 @@ func ReconcileOfflineAfterDownload(db *gorm.DB, task *models.DownloadTask) (*Rec
 			continue
 		}
 		result.DedupItems = append(result.DedupItems, DedupItem{
-			Comic:     comics[i],
+			Comic:     toMaintainComicView(comics[i]),
 			Reason:    fmt.Sprintf("同 GID(%s) 重复：建议保留文件夹形态，删除该重复项", task.GID),
 			Keep:      false,
-			PairComic: &comics[keepIdx],
+			PairComic: toMaintainComicViewPtr(comics[keepIdx]),
 		})
 	}
 
@@ -750,11 +750,11 @@ func buildUpdateNote(latestGID string, children []GalleryRelation) string {
 //
 //	仅 parent（父子画廊）可忽略（gid 粒度）；gid/hash/signature（同 GID/hash/内容签名）不可忽略。
 type DedupItem struct {
-	Comic     models.OfflineComic  `json:"comic"`
-	Reason    string               `json:"reason"`              // 重复原因
-	Keep      bool                 `json:"keep"`                // 是否建议保留（true=保留，false=建议删除）
-	Rule      string               `json:"rule"`                // gid | hash | parent | signature（Round26 O2）
-	PairComic *models.OfflineComic `json:"pairComic,omitempty"` // 成对对象（Round4 任务一）
+	Comic     MaintainComicView  `json:"comic"`
+	Reason    string             `json:"reason"`              // 重复原因
+	Keep      bool               `json:"keep"`                // 是否建议保留（true=保留，false=建议删除）
+	Rule      string             `json:"rule"`                // gid | hash | parent | signature（Round26 O2）
+	PairComic *MaintainComicView `json:"pairComic,omitempty"` // 成对对象（Round4 任务一）
 }
 
 // DedupResult 查重结果
@@ -803,7 +803,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}
 	// 问题4：按「离线维护」开关过滤——已关闭的额外路径下的漫画不参与查重
-	comics = filterOfflineUpdateEnabled(db, comics)
+	// Round50（G）：改用「本地查重候选」（只排除禁用路径），老化/失效本一并纳入本地规则；
+	// 需要联网的环节（在线回填 GID、在线父子关系发现）在各自循环内显式跳过老化/失效本。
+	comics = filterOfflineLocalCandidates(db, comics)
 
 	result := &DedupResult{Items: []DedupItem{}}
 	keepSet := map[string]bool{}   // 建议保留的 comic id
@@ -955,7 +957,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 				// 需求1 兜底：已核对过父画廊关系的漫画（parent_checked_at>0）默认增量跳过；
 				// forceFull=true 时忽略该标记，强制全量联网重抓。
 				// Round26 O2：规则 3 gid 型忽略——增量扫描时被忽略的父画廊不联网、不提示（用户故意保留旧版）。
+				// Round50（G）：老化/失效本不参与联网核对（它们已进入本地查重候选集，此处显式跳过）
 				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
+					c.AgedStatus || c.RemovedStatus ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -968,7 +972,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 					return nil, err
 				}
 				c := &comics[i]
+				// Round50（G）：老化/失效本不参与联网核对（它们已进入本地查重候选集，此处显式跳过）
 				if c.GID == "" || c.Token == "" || removeSet[c.ID] ||
+					c.AgedStatus || c.RemovedStatus ||
 					(!forceFull && (c.ParentCheckedAt != 0 || ignoreIdx.IsGIDIgnored(c.GID))) {
 					continue
 				}
@@ -1263,16 +1269,18 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	// 确保多版本链（如 4019697→4051934→4086937）只保留最新版一份。
 	for i := range comics {
 		c := comics[i]
-		var pair *models.OfflineComic
+		var pair *MaintainComicView
 		if pid := pairID[c.ID]; pid != "" {
-			pair = findComicByID(comics, pid)
+			if pc := findComicByID(comics, pid); pc != nil {
+				pair = toMaintainComicViewPtr(*pc)
+			}
 		}
 		if removeSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: reasonMap[c.ID], Keep: false, Rule: ruleMap[c.ID], PairComic: pair})
+			result.Items = append(result.Items, DedupItem{Comic: toMaintainComicView(c), Reason: reasonMap[c.ID], Keep: false, Rule: ruleMap[c.ID], PairComic: pair})
 			continue
 		}
 		if keepSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: c, Reason: "建议保留", Keep: true, PairComic: pair})
+			result.Items = append(result.Items, DedupItem{Comic: toMaintainComicView(c), Reason: "建议保留", Keep: true, PairComic: pair})
 		}
 	}
 
@@ -1359,6 +1367,10 @@ func backfillGIDOnline(db *gorm.DB, ehService *EHService, comics []models.Offlin
 	for i := range comics {
 		c := &comics[i]
 		if c.GID != "" || c.Token != "" || c.ParentCheckedAt != 0 {
+			continue
+		}
+		// Round50（G）：本地查重候选已不再排除老化/失效本，联网回填前在此显式跳过
+		if c.AgedStatus || c.RemovedStatus {
 			continue
 		}
 		targets = append(targets, i)
@@ -1513,6 +1525,10 @@ func findComicByID(comics []models.OfflineComic, id string) *models.OfflineComic
 //   - 额外路径的漫画仅当其路径 EnableOfflineUpdate == true 时参与；
 //   - 已老化漫画（AgedStatus=true）不参与更新检测（Round4 任务四，只扫描一次）；
 //   - 读取路径配置失败时保守处理：按全量参与（不静默丢数据）。
+//
+// Round50（G）语义收窄：本函数现在只用于**联网维度**（更新检测、老化判定、在线回填 GID、
+// 在线父子关系发现）。纯本地查重请用 filterOfflineLocalCandidates——本地是否存了重复文件
+// 与 E 站发布年限无关，老化本必须参与本地查重。
 func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []models.OfflineComic {
 	var paths []models.ExtraScanPath
 	if err := db.Select("id", "enable_offline_update").Find(&paths).Error; err != nil {
@@ -1540,6 +1556,37 @@ func filterOfflineUpdateEnabled(db *gorm.DB, comics []models.OfflineComic) []mod
 	}
 	return filtered
 }
+
+// filterOfflineLocalCandidates 本地查重候选集（Round50 G）：
+// 只用「离线维护」开关过滤额外路径，**不排除老化本 / 失效本**。
+//
+// 背景：本地查重规则（同 GID / 归档 hash / 目录内容签名 / 名称级疑似重复）判定的是
+// 「本地是否存了重复文件」，与 E 站的发布年限、画廊是否下架毫无关系。此前维护查重复用
+// filterOfflineUpdateEnabled 的候选集，把「不联网」顺手扩大成了「不查本地」——
+// 实测线上库 7817 本中 2780 本被老化标记排除，疑似重复组数从 288 组掉到 41 组
+// （247 组重复被永久隐藏），属功能性漏检。
+func filterOfflineLocalCandidates(db *gorm.DB, comics []models.OfflineComic) []models.OfflineComic {
+	var paths []models.ExtraScanPath
+	if err := db.Select("id", "enable_offline_update").Find(&paths).Error; err != nil {
+		log.Printf("%s [offline] 读取额外路径配置失败，按全量参与处理: %v", dlWarnTag, err)
+		return comics
+	}
+	disabled := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		if !p.EnableOfflineUpdate {
+			disabled[p.ID] = true
+		}
+	}
+	filtered := comics[:0]
+	for _, c := range comics {
+		if c.ScanPathID != "" && disabled[c.ScanPathID] {
+			continue // 额外路径已关闭离线维护：不参与任何查重
+		}
+		filtered = append(filtered, c)
+	}
+	return filtered
+}
+
 
 // DeleteOfflineComic 删除本地画廊：
 //   - 可选物理删除本地文件

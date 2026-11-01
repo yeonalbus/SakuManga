@@ -35,7 +35,7 @@ func TestMaintainSnapshotRoundTrip(t *testing.T) {
 	db := newSnapshotTestDB(t)
 	res := &DedupResult{
 		Items: []DedupItem{
-			{Comic: models.OfflineComic{ID: "c1", Title: "样本"}, Reason: "同 GID", Keep: true, Rule: "gid"},
+			{Comic: toMaintainComicView(models.OfflineComic{ID: "c1", Title: "样本"}), Reason: "同 GID", Keep: true, Rule: "gid"},
 		},
 		Clusters: []DedupCluster{
 			{ID: "cluster-0", TitleKey: "key", Artist: "abc", Confidence: "high", Reason: "r"},

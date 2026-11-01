@@ -1,6 +1,8 @@
 package services
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sort"
@@ -49,15 +51,25 @@ type DedupCluster struct {
 	// 前端据此标注「此前已忽略 · 新增 N 本」并提供「确认新增（更新快照）」。
 	IgnoredNewCount int    `json:"ignoredNewCount,omitempty"`
 	IgnoreID        string `json:"ignoreId,omitempty"`
+
+	// keyPart 稳定标识素材（不导出、不落 JSON）：Tier1 = 核心名+卷号+画师；
+	// Tier2 = 首成员核心名+卷号+画师。Round50 B：ID 由此派生，与「排序位置、成员数」无关，
+	// 因此删除成员或重排后 ID 不变（前端 :key、展开态、勾选态都不会错位）。
+	keyPart string
 }
 
 // ClusterMember 疑似重复组单个成员
 type ClusterMember struct {
-	Comic     models.OfflineComic `json:"comic"`
-	PageCount int                 `json:"pageCount"` // 物理页数（OriginalPageCount 优先，隐藏页不影响比对）
-	Lang      string              `json:"lang,omitempty"`
+	Comic     MaintainComicView `json:"comic"`
+	PageCount int               `json:"pageCount"` // 物理页数（OriginalPageCount 优先，隐藏页不影响比对）
+	Lang      string            `json:"lang,omitempty"`
 	// Round43：成员各自的 artist tag（不同于组级 Artist——组内可能存在「作者未知」成员，前端逐卡展示）
 	Artist string `json:"artist,omitempty"`
+
+	// addedAtMs 首次入库时间戳(ms)，Round50 E 起改由本字段承载：
+	// 结果不再下发完整 OfflineComic，但「忽略后新增」判定（TitleIgnoreEntry.CountNewMembers）
+	// 仍需要这个时间，故以非导出字段随成员传递。
+	addedAtMs int64 `json:"-"`
 }
 
 // TitleFingerprint 标题指纹（清洗层输出）
@@ -465,14 +477,51 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex, f
 	}
 	clusters = append(clusters, detectApproxClusters(comics, clustered, ignoreIdx, forceFull)...)
 
-	// 排序：成员多者优先（疑似度更高的组排前面）
-	sort.Slice(clusters, func(i, j int) bool {
-		return len(clusters[i].Members) > len(clusters[j].Members)
+	// 排序（Round50 B）：多级稳定键，保证同输入同输出、且顺序可预测——
+	//   成员数降序（疑似度更高的组在前）→ 置信度（high 优先）→ 核心名 → 画师。
+	// 用 SliceStable：比较键完全相同的组保持输入顺序（原为不稳定的 sort.Slice）。
+	sort.SliceStable(clusters, func(i, j int) bool {
+		a, b := clusters[i], clusters[j]
+		if len(a.Members) != len(b.Members) {
+			return len(a.Members) > len(b.Members)
+		}
+		if a.Confidence != b.Confidence {
+			return a.Confidence == "high"
+		}
+		if a.TitleKey != b.TitleKey {
+			return a.TitleKey < b.TitleKey
+		}
+		return a.Artist < b.Artist
 	})
+	// ID（Round50 B）：由 keyPart 派生（与位置无关），删成员/重排后保持不变；
+	// 撞车（keyPart 相同的不同簇，理论上可能出现在 Tier1/Tier2 交叠）时追加序号兜底。
+	seen := make(map[string]int, len(clusters))
 	for i := range clusters {
-		clusters[i].ID = fmt.Sprintf("cluster-%d", i)
+		key := clusters[i].keyPart
+		if key == "" {
+			// 兜底：极端情况下 keyPart 未填充，用标题+画师+首成员保证可用性
+			key = clusters[i].TitleKey + "\x00\x00" + clusters[i].Artist
+			if len(clusters[i].Members) > 0 {
+				key += "\x00" + clusters[i].Members[0].Comic.ID
+			}
+		}
+		base := "cluster-" + shortHash(clusterIDHash(key))
+		id := base
+		if n, ok := seen[base]; ok {
+			seen[base] = n + 1
+			id = fmt.Sprintf("%s-%d", base, n+1)
+		} else {
+			seen[base] = 1
+		}
+		clusters[i].ID = id
 	}
 	return clusters
+}
+
+// clusterIDHash 计算簇稳定标识的短哈希（md5 前 8 位小写十六进制）
+func clusterIDHash(key string) string {
+	sum := md5.Sum([]byte(key))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 // buildCluster 组内判定 → 簇（nil 表示不构成疑似重复）
@@ -488,10 +537,11 @@ func buildCluster(g []*clusterCandidate) *DedupCluster {
 			pc = cand.comic.PageCount
 		}
 		members = append(members, ClusterMember{
-			Comic:     *cand.comic,
+			Comic:     toMaintainComicView(*cand.comic),
 			PageCount: pc,
 			Lang:      lang,
 			Artist:    extractNamespaceTag(tags, "artist"),
+			addedAtMs: cand.comic.AddedAt.UnixMilli(),
 		})
 	}
 	for i := 0; i < len(members); i++ {
@@ -532,6 +582,7 @@ func buildCluster(g []*clusterCandidate) *DedupCluster {
 	}
 
 	return &DedupCluster{
+		keyPart:    clusterKey(fp),
 		TitleKey:   fp.Core,
 		Artist:     fp.Artist,
 		Confidence: confidence,

@@ -327,12 +327,13 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 	offlineTaskMu.Unlock()
 
 	// 候选集与扫描时同口径：离线来源 + 「离线维护」开关过滤 + 排除确定性建议删除项
+	// Round50（G）：改用「本地查重候选」（不排除老化/失效本），与扫描主流程保持一致
 	var comics []models.OfflineComic
 	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
 		log.Printf("%s [dedup-sync] 读取离线漫画失败，跳过疑似重复簇同步: %v", dlWarnTag, err)
 		return
 	}
-	comics = filterOfflineUpdateEnabled(db, comics)
+	comics = filterOfflineLocalCandidates(db, comics)
 
 	removeSet := make(map[string]struct{}, len(removedIDs))
 	for _, id := range removedIDs {
@@ -376,6 +377,93 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 
 	log.Printf("%s [dedup-sync] 疑似重复簇已定向同步：候选 %d 本，簇 %d 组（全量语义=%v）",
 		dlLogTag, len(candidates), len(clusters), full)
+}
+
+// PruneMaintainDedupMembers 删除后定向裁剪维护结果缓存（Round50 A）。
+//
+// 为什么可以不走全量重算：Tier1（精确归一键的连通分量）与 Tier2（相似度达阈值的边连通）
+// 都以「节点 + 边」构成，删掉节点只会让连通分量缩小或消失，**不可能产生新分量/新边**。
+// 因此删除后不需要重跑 detectTitleClusters（实测 4~6 秒，正是「删除要等很久」的根因），
+// 只需把被删成员从缓存的簇里摘掉、丢弃成员不足 2 本的簇。
+// （该性质已用真实库副本验证：增量裁剪与全量重算的簇集合完全一致，见
+//  DSPlans/Research/_measure/zzresearch_inc_test.go）
+//
+// 与 SyncMaintainDedupClusters 的差别：
+//   - 保持簇的**原有顺序与 ID 不变** → 前端列表不重排、`:key` 不变、展开态不错位；
+//   - 不做忽略表过滤（删除不改变忽略表）；
+//   - 仍然一并剔除 items 中命中被删 id 的条目（含被删成对项）、清 stale、前移 FinishedAt、
+//     清空更新检测缓存并落库一次——与「定向同步」的收尾语义一致。
+//
+// 注意：**忽略 / 恢复忽略**仍须调用 SyncMaintainDedupClusters——忽略表变化会改变簇的可见性
+// （被忽略的簇要隐藏、恢复的要浮现），那不是「删除节点」能表达的。
+func PruneMaintainDedupMembers(removedIDs []string) {
+	if len(removedIDs) == 0 {
+		return
+	}
+	removed := make(map[string]struct{}, len(removedIDs))
+	for _, id := range removedIDs {
+		removed[id] = struct{}{}
+	}
+
+	remainingClusters, remainingItems := 0, 0
+
+	offlineTaskMu.Lock()
+	if offlineMaintainRes != nil {
+		// 1) items：剔除被删项；成对对象已被删的组视为处理完毕，不再保留孤儿项
+		keptItems := offlineMaintainRes.Items[:0]
+		for _, item := range offlineMaintainRes.Items {
+			if _, hit := removed[item.Comic.ID]; hit {
+				continue
+			}
+			if item.PairComic != nil {
+				if _, hit := removed[item.PairComic.ID]; hit {
+					continue
+				}
+			}
+			keptItems = append(keptItems, item)
+		}
+		for i := len(keptItems); i < len(offlineMaintainRes.Items); i++ {
+			offlineMaintainRes.Items[i] = DedupItem{}
+		}
+		offlineMaintainRes.Items = keptItems
+
+		// 2) clusters：原地裁剪成员（保持簇顺序与 ID），不足 2 本的簇整簇移除
+		keptClusters := offlineMaintainRes.Clusters[:0]
+		for _, cl := range offlineMaintainRes.Clusters {
+			members := cl.Members[:0]
+			for _, m := range cl.Members {
+				if _, hit := removed[m.Comic.ID]; hit {
+					continue
+				}
+				members = append(members, m)
+			}
+			for i := len(members); i < len(cl.Members); i++ {
+				cl.Members[i] = ClusterMember{} // 清引用，避免已删成员被底层数组持有
+			}
+			cl.Members = members
+			if len(cl.Members) < 2 {
+				continue
+			}
+			keptClusters = append(keptClusters, cl)
+		}
+		for i := len(keptClusters); i < len(offlineMaintainRes.Clusters); i++ {
+			offlineMaintainRes.Clusters[i] = DedupCluster{}
+		}
+		offlineMaintainRes.Clusters = keptClusters
+
+		offlineMaintainRes.Stale = false
+		offlineMaintainRes.FinishedAt = time.Now().UnixMilli()
+		remainingClusters = len(offlineMaintainRes.Clusters)
+		remainingItems = len(offlineMaintainRes.Items)
+	}
+	offlineUpdateRes = nil // 被删漫画可能仍残留在更新检测结果中
+	offlineTaskMu.Unlock()
+
+	// 锁外落库（IO 不持锁）；全局 DB 不可用（如单测）时静默跳过
+	PersistMaintainSnapshot(database.DB)
+
+	log.Printf("%s [maintain] 删除后已定向裁剪结果：移除 %d 本，剩余 %d 项 / %d 组（未重算聚类）",
+		dlLogTag, len(removedIDs), remainingItems, remainingClusters)
 }
 
 // StoreUpdateCheckResult 缓存更新检测结果

@@ -168,8 +168,8 @@ func TestSyncMaintainDedupClustersGIDIgnore(t *testing.T) {
 
 	build := func() *DedupResult {
 		return &DedupResult{Items: []DedupItem{
-			{Comic: old, Reason: "旧版被新版取代，建议删除", Keep: false, Rule: "parent", PairComic: &newer},
-			{Comic: newer, Reason: "建议保留", Keep: true, PairComic: &old},
+			{Comic: toMaintainComicView(old), Reason: "旧版被新版取代，建议删除", Keep: false, Rule: "parent", PairComic: toMaintainComicViewPtr(newer)},
+			{Comic: toMaintainComicView(newer), Reason: "建议保留", Keep: true, PairComic: toMaintainComicViewPtr(old)},
 		}}
 	}
 
@@ -210,9 +210,9 @@ func TestInvalidateMaintainDedupResultPrunesPair(t *testing.T) {
 	other.Source = models.SourceOffline
 
 	StoreMaintainDedupResult(&DedupResult{Items: []DedupItem{
-		{Comic: dup, Reason: "同 GID 重复", Keep: false, Rule: "gid", PairComic: &keep},
-		{Comic: keep, Reason: "建议保留", Keep: true, PairComic: &dup},
-		{Comic: other, Reason: "同 GID 重复", Keep: false, Rule: "gid"},
+		{Comic: toMaintainComicView(dup), Reason: "同 GID 重复", Keep: false, Rule: "gid", PairComic: toMaintainComicViewPtr(keep)},
+		{Comic: toMaintainComicView(keep), Reason: "建议保留", Keep: true, PairComic: toMaintainComicViewPtr(dup)},
+		{Comic: toMaintainComicView(other), Reason: "同 GID 重复", Keep: false, Rule: "gid"},
 	}}, false)
 
 	InvalidateMaintainDedupResult([]string{"d1"})

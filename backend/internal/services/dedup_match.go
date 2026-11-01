@@ -424,10 +424,11 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 			c := cands[idx]
 			tags := UnmarshalTagSlice(c.comic.OnlineTags)
 			membersOut = append(membersOut, ClusterMember{
-				Comic:     *c.comic,
+				Comic:     toMaintainComicView(*c.comic),
 				PageCount: c.pages,
 				Lang:      extractNamespaceTag(tags, "language"),
 				Artist:    extractNamespaceTag(tags, "artist"), // Round43：成员各自的画师
+				addedAtMs: c.comic.AddedAt.UnixMilli(),
 			})
 		}
 		for i := 0; i < len(membersOut); i++ {
@@ -451,7 +452,10 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		if titleKey == "" {
 			titleKey = first.coreTt
 		}
+		// Round50 B：稳定标识素材 = 核心名 + 卷号 + 画师（与 Tier1 的 clusterKey 同构）
+		keyPart := titleKey + "\x00" + first.vol + "\x00" + first.artist
 		cl := DedupCluster{
+			keyPart:    keyPart,
 			TitleKey:   titleKey,
 			Artist:     first.artist,
 			Confidence: confidence,

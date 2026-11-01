@@ -298,10 +298,11 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 	// 批量删除：comicIds 非空则优先批量
 	if len(req.ComicIDs) > 0 {
 		deleted, err := services.RemoveDedupComics(h.db, req.ComicIDs, req.DeleteFile)
-		// 幽灵文件修复：无论成败都使维护/更新结果缓存失效，避免残留过期数据
-		services.InvalidateMaintainDedupResult(req.ComicIDs)
-		// Round33：定向重算疑似重复簇（已删项不再残留在簇成员中），缓存即时可信
-		services.SyncMaintainDedupClusters(h.db)
+		// Round50 A：删除只会让簇缩小/消失（不可能产生新簇），因此定向裁剪即可——
+		// 剔除被删成员、丢弃不足 2 本的簇，保持其余簇的顺序与 ID 不变，并清 stale / 落库。
+		// 不再调用 SyncMaintainDedupClusters（那会全量重跑聚类，实测 5.9~6.0 秒）。
+		// 无论成败都执行裁剪，避免残留过期数据（幽灵文件容错）。
+		services.PruneMaintainDedupMembers(req.ComicIDs)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "deleted": deleted})
 			return
@@ -317,16 +318,15 @@ func (h *OfflineHandler) RemoveDedup(c *gin.Context) {
 		// 幽灵文件容错：记录已不存在（可能已被其他设备删除）→ 视为删除成功，
 		// 返回 alreadyDeleted=true，前端据此移除本地列表项而非报错。
 		if errors.Is(err, services.ErrComicNotFound) {
-			services.InvalidateMaintainDedupResult([]string{req.ComicID})
-			services.SyncMaintainDedupClusters(h.db)
+			services.PruneMaintainDedupMembers([]string{req.ComicID})
 			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1, "alreadyDeleted": true})
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	services.InvalidateMaintainDedupResult([]string{req.ComicID})
-	services.SyncMaintainDedupClusters(h.db)
+	// Round50 A：定向裁剪（见上方批量分支注释），不再全量重算疑似重复簇
+	services.PruneMaintainDedupMembers([]string{req.ComicID})
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": 1})
 }
 

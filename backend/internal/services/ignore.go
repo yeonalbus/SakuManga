@@ -275,7 +275,10 @@ func RestoreIgnore(db *gorm.DB, id string) error {
 
 // ── 指纹匹配（忽略键 ↔ 本地漫画） ──
 
-// loadDedupCandidates 查重候选集：离线来源 + 「离线维护」开关过滤（与维护查重同口径）
+// loadDedupCandidates 查重候选集：离线来源 + 「离线维护」开关过滤（与维护查重**本地口径**一致）
+//
+// Round50（G）：与维护查重同步改为 filterOfflineLocalCandidates（不排除老化/失效本）——
+// 否则忽略成员快照 / 「忽略后新增」判定会与聚类输入不一致，把老化成员误判为「新增」。
 func loadDedupCandidates(db *gorm.DB) ([]models.OfflineComic, error) {
 	if db == nil {
 		return nil, fmt.Errorf("非法参数：db 不能为空")
@@ -288,7 +291,7 @@ func loadDedupCandidates(db *gorm.DB) ([]models.OfflineComic, error) {
 	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}
-	return filterOfflineUpdateEnabled(db, comics), nil
+	return filterOfflineLocalCandidates(db, comics), nil
 }
 
 // comicIgnoreKeys 单本漫画在忽略表口径下的匹配键（title_jpn 优先、title 兜底；artist 必须一致）
@@ -497,7 +500,8 @@ func (e *TitleIgnoreEntry) CountNewMembers(members []ClusterMember) int {
 	n := 0
 	for i := range members {
 		m := members[i]
-		if !m.Comic.AddedAt.IsZero() && m.Comic.AddedAt.UnixMilli() <= e.CreatedAt {
+		// Round50 E：结果已不再下发完整 OfflineComic，入库时间改由成员的非导出字段承载
+		if m.addedAtMs > 0 && m.addedAtMs <= e.CreatedAt {
 			continue // 忽略之前就在库里的本子 → 不算新增
 		}
 		if e.seen[m.Comic.ID] {

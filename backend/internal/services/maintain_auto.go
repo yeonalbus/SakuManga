@@ -74,11 +74,11 @@ func MarkMaintainDedupReplacement(db *gorm.DB, old *models.OfflineComic, newGID 
 	}
 
 	// 新版漫画（已下载入库，gid 匹配）作为成对对象，对比视图双列展示 新版↔旧版
-	var pair *models.OfflineComic
+	var pairView *MaintainComicView
 	if newGID != "" {
 		var nc models.OfflineComic
 		if err := db.Where("g_id = ?", newGID).Order("updated_at DESC").First(&nc).Error; err == nil {
-			pair = &nc
+			pairView = toMaintainComicViewPtr(nc)
 		}
 	}
 
@@ -99,10 +99,10 @@ func MarkMaintainDedupReplacement(db *gorm.DB, old *models.OfflineComic, newGID 
 		kept = append(kept, it)
 	}
 	res.Items = append(kept, DedupItem{
-		Comic:      *old,
-		Reason:     "旧版被新版取代，建议删除",
-		Keep:       false,
-		PairComic:  pair,
+		Comic:     toMaintainComicView(*old),
+		Reason:    "旧版被新版取代，建议删除",
+		Keep:      false,
+		PairComic: pairView,
 	})
 	res.Stale = false // 定向写入后结果即时可信，前端无需提示重新扫描
 

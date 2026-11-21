@@ -103,6 +103,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 		// 路径管理（读写分离：扫描路径增删改/触发扫描为系统级写操作，仅管理员，见下方 admin 分组）
 		api.GET("/scan-paths", handlers.GetScanPaths)
+		api.GET("/scan-paths/:id/impact", handlers.GetScanPathImpact) // 删除前统计将连带清理的本数
 		api.GET("/scan-paths/:id/scan/progress", handlers.GetScanPathProgress)
 		api.GET("/scan-paths/scan-progress", handlers.GetAllScanProgress)
 

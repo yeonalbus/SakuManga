@@ -59,21 +59,61 @@ func containsString(list []string, s string) bool {
 // CleanupComicReferences 漫画记录删除/替换后的引用清理与迁移。
 // oldID 必填；newID 为空 = 删除引用，非空 = 迁移到新 id。
 func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
-	if db == nil || oldID == "" {
+	if oldID == "" {
 		return
 	}
-
-	// 1. 离线历史：迁移（保留进度与阅读时间）或删除（孤儿行）
+	var migrate map[string]string
 	if newID != "" {
-		if err := db.Model(&models.HistoryRecord{}).
-			Where("source = ? AND comic_id = ?", models.SourceOffline, oldID).
-			Update("comic_id", newID).Error; err != nil {
-			logWarn("CleanupComicReferences: 迁移历史失败 old=%s new=%s: %v", oldID, newID, err)
+		migrate = map[string]string{oldID: newID}
+	}
+	CleanupComicReferencesBatch(db, []string{oldID}, migrate)
+}
+
+// CleanupComicReferencesBatch 批量版引用清理/迁移（语义与 CleanupComicReferences 一致）。
+//
+// 存在的理由：删除「额外的画廊扫描路径」会一次删掉成百上千本离线记录，
+// 逐本调用单本版会对书架与阅读清单各做一次全表扫描（O(N 本 × 全表)），
+// 本函数把两处全表扫描各合并为一次。历史表则按 id 分为「迁移」与「批量删除」两批。
+//
+// migrate：oldID → 替换记录 id；未命中的 id 直接从引用中剔除。
+func CleanupComicReferencesBatch(db *gorm.DB, oldIDs []string, migrate map[string]string) {
+	if db == nil || len(oldIDs) == 0 {
+		return
+	}
+	oldSet := make(map[string]bool, len(oldIDs))
+	for _, id := range oldIDs {
+		if id != "" {
+			oldSet[id] = true
 		}
-	} else {
-		if err := db.Where("source = ? AND comic_id = ?", models.SourceOffline, oldID).
+	}
+	if len(oldSet) == 0 {
+		return
+	}
+	replacementOf := func(id string) string {
+		if migrate == nil {
+			return ""
+		}
+		return migrate[id]
+	}
+
+	// 1. 离线历史：有替换记录 → 迁移（保留进度与阅读时间）；否则计入批量删除（孤儿行）
+	toDelete := make([]string, 0, len(oldSet))
+	for id := range oldSet {
+		newID := replacementOf(id)
+		if newID == "" {
+			toDelete = append(toDelete, id)
+			continue
+		}
+		if err := db.Model(&models.HistoryRecord{}).
+			Where("source = ? AND comic_id = ?", models.SourceOffline, id).
+			Update("comic_id", newID).Error; err != nil {
+			logWarn("CleanupComicReferencesBatch: 迁移历史失败 old=%s new=%s: %v", id, newID, err)
+		}
+	}
+	if len(toDelete) > 0 {
+		if err := db.Where("source = ? AND comic_id IN ?", models.SourceOffline, toDelete).
 			Delete(&models.HistoryRecord{}).Error; err != nil {
-			logWarn("CleanupComicReferences: 删除孤儿历史失败 old=%s: %v", oldID, err)
+			logWarn("CleanupComicReferencesBatch: 删除孤儿历史失败 count=%d: %v", len(toDelete), err)
 		}
 	}
 
@@ -86,9 +126,9 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 			changed := false
 			out := make([]string, 0, len(ids))
 			for _, id := range ids {
-				if id == oldID {
+				if oldSet[id] {
 					changed = true
-					if newID != "" && !containsString(out, newID) {
+					if newID := replacementOf(id); newID != "" && !containsString(out, newID) {
 						out = append(out, newID)
 					}
 					continue
@@ -100,8 +140,8 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 				shelves[i].Count = len(out)
 			}
 			// 封面引用同步（Round38）
-			if shelves[i].CoverComicID != "" && shelves[i].CoverComicID == oldID {
-				if newID != "" {
+			if cid := shelves[i].CoverComicID; cid != "" && oldSet[cid] {
+				if newID := replacementOf(cid); newID != "" {
 					shelves[i].CoverComicID = newID
 				} else {
 					shelves[i].CoverComicID = "" // 本子已删除 → 回退自动封面
@@ -110,7 +150,7 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 			}
 			if changed {
 				if err := db.Save(&shelves[i]).Error; err != nil {
-					logWarn("CleanupComicReferences: 更新书架失败 shelf=%s: %v", shelves[i].ID, err)
+					logWarn("CleanupComicReferencesBatch: 更新书架失败 shelf=%s: %v", shelves[i].ID, err)
 				}
 			}
 		}
@@ -128,9 +168,9 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 			out := make([]map[string]interface{}, 0, len(items))
 			for _, it := range items {
 				id, _ := it["id"].(string)
-				if id == oldID {
+				if oldSet[id] {
 					changed = true
-					if newID != "" {
+					if newID := replacementOf(id); newID != "" {
 						it["id"] = newID
 						out = append(out, it)
 					}
@@ -142,7 +182,7 @@ func CleanupComicReferences(db *gorm.DB, oldID, newID string) {
 				b, _ := json.Marshal(out)
 				lists[i].Items = string(b)
 				if err := db.Save(&lists[i]).Error; err != nil {
-					logWarn("CleanupComicReferences: 更新阅读清单失败 user=%d: %v", lists[i].UserID, err)
+					logWarn("CleanupComicReferencesBatch: 更新阅读清单失败 user=%d: %v", lists[i].UserID, err)
 				}
 			}
 		}

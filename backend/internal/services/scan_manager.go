@@ -72,6 +72,16 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 	return progress, nil
 }
 
+// IsScanning 指定路径当前是否正在扫描（未完成）。
+// 删除扫描路径前用它拒绝并发删除：否则扫描 goroutine 会继续把漫画
+// 以即将被删除的路径 ID 落库，留下新的孤儿记录。
+func (m *ScanManager) IsScanning(pathID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.running[pathID]
+	return ok && !p.IsDone()
+}
+
 // GetProgress 获取指定路径的扫描进度快照；若该路径从未启动过扫描返回 nil
 func (m *ScanManager) GetProgress(pathID string) *ScanProgress {
 	m.mu.Lock()

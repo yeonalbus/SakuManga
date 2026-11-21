@@ -1606,7 +1606,6 @@ func filterOfflineLocalCandidates(db *gorm.DB, comics []models.OfflineComic) []m
 	return filtered
 }
 
-
 // DeleteOfflineComic 删除本地画廊：
 //   - 可选物理删除本地文件
 //   - 删除数据库记录
@@ -1645,6 +1644,134 @@ func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	XpRecomposeComic(comicID)
 	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
 	return nil
+}
+
+// DeleteOfflineComicsByScanPath 删除某条「额外的画廊扫描路径」下已入库的全部漫画记录，
+// **保留磁盘文件**（路径只是从扫描来源中撤出，不等于销毁文件）。
+//
+// 背景（Round53 修复）：此前 DeleteScanPath 只删 extra_scan_paths 一行，
+// 这些漫画仍留在 offline_comics 中 → 离线库照常展示、来源标签因查不到路径名而
+// 退化成「下载」、且因不再命中「关闭离线维护」集合而被重新纳入联网更新检测。
+//
+// 与逐本 DeleteOfflineComic 的差异（成百上千本时必须的批量优化）：
+//   - 一条 SQL 批量删除记录；
+//   - 引用清理走 CleanupComicReferencesBatch（书架/阅读清单各只全表扫一次）；
+//   - XP 统计走一次异步全量重建，而非逐本全用户差分。
+//
+// 返回实际删除的记录数。
+func DeleteOfflineComicsByScanPath(db *gorm.DB, scanPathID string) (int, error) {
+	if db == nil || strings.TrimSpace(scanPathID) == "" {
+		return 0, nil
+	}
+
+	var comics []models.OfflineComic
+	if err := db.Select("id", "g_id").
+		Where("scan_path_id = ?", scanPathID).
+		Find(&comics).Error; err != nil {
+		return 0, fmt.Errorf("读取该路径下的漫画失败: %v", err)
+	}
+	if len(comics) == 0 {
+		return 0, nil
+	}
+
+	ids := make([]string, 0, len(comics))
+	gids := make([]string, 0, len(comics))
+	for _, c := range comics {
+		ids = append(ids, c.ID)
+		if c.GID != "" {
+			gids = append(gids, c.GID)
+		}
+	}
+
+	// 同 gid 的其他记录（其他扫描路径 / 下载导入）→ 作为引用迁移目标，
+	// 避免「同 gid 的下载版还在」时把用户历史/书架引用一并清掉。
+	newIDByOld := map[string]string{}
+	if len(gids) > 0 {
+		var others []models.OfflineComic
+		if err := db.Select("id", "g_id").
+			Where("g_id IN ?", gids).
+			Where("(scan_path_id IS NULL OR scan_path_id <> ?)", scanPathID).
+			Find(&others).Error; err == nil {
+			byGID := make(map[string]string, len(others))
+			for _, o := range others {
+				if o.GID == "" {
+					continue
+				}
+				if _, ok := byGID[o.GID]; !ok {
+					byGID[o.GID] = o.ID
+				}
+			}
+			for _, c := range comics {
+				if c.GID == "" {
+					continue
+				}
+				if rep, ok := byGID[c.GID]; ok {
+					newIDByOld[c.ID] = rep
+				}
+			}
+		}
+	}
+
+	deleted := 0
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("scan_path_id = ?", scanPathID).Delete(&models.OfflineComic{})
+		if res.Error != nil {
+			return fmt.Errorf("删除该路径下的漫画记录失败: %v", res.Error)
+		}
+		deleted = int(res.RowsAffected)
+		CleanupComicReferencesBatch(tx, ids, newIDByOld)
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	// 书库变更时间戳（维护查重判断是否需要重扫）与 XP 统计全量重建：
+	// 均放在事务外/异步执行，避免提交前读数导致重建结果含已删记录。
+	MarkLibraryChanged()
+	XpRebuildAsync("删除额外扫描路径")
+	log.Printf("%s [scan] 已删除额外扫描路径 %s 下的 %d 本漫画记录（磁盘文件保留）", dlLogTag, scanPathID, deleted)
+	return deleted, nil
+}
+
+// ErrScanPathInProgress 该扫描路径正在扫描中，不允许删除。
+var ErrScanPathInProgress = errors.New("该路径正在扫描，请等待扫描完成后再删除")
+
+// DeleteScanPathWithComics 删除一条额外的画廊扫描路径，并连带清理其名下已入库的漫画记录。
+//
+// 完整流程（供 handler 直接调用，HTTP 层只做状态码映射）：
+//  1. 路径记录不存在 → 视为已删除（幂等），返回 (0, nil)，且**不按任意 id 清理漫画**
+//     （否则传入伪造 id 即成为「按 scanPathID 批量删库」的后门）；
+//  2. 该路径正在扫描 → ErrScanPathInProgress（扫描 goroutine 不受删除影响，
+//     放行会以即将删除的路径 ID 继续落库，产生新的残留记录）；
+//  3. 先清理漫画（失败则整体失败、路径保留可重试），再删路径记录。
+//
+// 磁盘文件一律保留。返回清理的漫画数量。
+func DeleteScanPathWithComics(db *gorm.DB, scanPathID string) (int, error) {
+	if db == nil || strings.TrimSpace(scanPathID) == "" {
+		return 0, nil
+	}
+
+	var path models.ExtraScanPath
+	if err := db.First(&path, "id = ?", scanPathID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("查询扫描路径失败: %v", err)
+	}
+
+	if GetScanManager().IsScanning(scanPathID) {
+		return 0, ErrScanPathInProgress
+	}
+
+	removed, err := DeleteOfflineComicsByScanPath(db, scanPathID)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := db.Where("id = ?", scanPathID).Delete(&models.ExtraScanPath{}).Error; err != nil {
+		return removed, fmt.Errorf("删除扫描路径记录失败（已完成 %d 本漫画清理，可重试）: %v", removed, err)
+	}
+	return removed, nil
 }
 
 // RemoveDedupComic 删除重复漫画（查重维护入口）：委托 DeleteOfflineComic 统一处理历史记录与文件

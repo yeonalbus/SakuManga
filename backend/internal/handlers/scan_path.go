@@ -4,6 +4,7 @@ import (
 	"SakuManga/internal/database"
 	"SakuManga/internal/models"
 	"SakuManga/internal/services"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -22,8 +23,8 @@ func GetScanPaths(c *gin.Context) {
 func AddScanPath(c *gin.Context) {
 	var req struct {
 		Path                string `json:"path"`
-		Name                string `json:"name,omitempty"`            // 可配置显示名（问题3 来源标签）
-		EnableOfflineUpdate *bool  `json:"enableOfflineUpdate"`        // 是否参与离线更新/维护查重（问题4）
+		Name                string `json:"name,omitempty"`      // 可配置显示名（问题3 来源标签）
+		EnableOfflineUpdate *bool  `json:"enableOfflineUpdate"` // 是否参与离线更新/维护查重（问题4）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的路径"})
@@ -94,10 +95,39 @@ func UpdateScanPath(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 }
 
+// GetScanPathImpact 查询删除该路径会连带清理的漫画数量（前端二次确认文案用）。
+func GetScanPathImpact(c *gin.Context) {
+	id := c.Param("id")
+	var count int64
+	if err := database.DB.Model(&models.OfflineComic{}).
+		Where("scan_path_id = ?", id).
+		Count(&count).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"comicCount": count})
+}
+
+// DeleteScanPath 删除一条额外的画廊扫描路径，**并连带清理该路径下已入库的漫画记录**。
+//
+// 历史缺陷（Round53 修复）：本接口原先只删 extra_scan_paths 一行，
+// offline_comics 里 ScanPathID 指向该路径的记录全部残留——离线库照常展示、
+// 来源标签退化成「下载」、且不再命中「关闭离线维护」集合而被重新纳入联网更新检测。
+// 完整流程（幂等 / 扫描中拒绝 / 先清漫画再删路径）见 services.DeleteScanPathWithComics。
 func DeleteScanPath(c *gin.Context) {
 	id := c.Param("id")
-	database.DB.Where("id = ?", id).Delete(&models.ExtraScanPath{})
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+
+	removed, err := services.DeleteScanPathWithComics(database.DB, id)
+	if err != nil {
+		if errors.Is(err, services.ErrScanPathInProgress) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "removedComics": removed})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功", "removedComics": removed})
 }
 
 // TriggerScanPath 异步启动一次扫描（全量 / 增量）。

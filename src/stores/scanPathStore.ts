@@ -207,15 +207,19 @@ export const updateEnableOfflineUpdate = async (id: string, enabled: boolean) =>
   }
 }
 
-/** 移除指定路径 */
-export const removeScanPath = async (id: string) => {
+/** 查询删除该路径会连带清理的漫画数量（二次确认文案用） */
+export const getScanPathImpact = async (id: string): Promise<number> => {
+  const res = await http<{ comicCount: number }>(`/scan-paths/${id}/impact`)
+  return res?.comicCount ?? 0
+}
+
+/** 移除指定路径（后端会连带清理该路径下已入库的漫画记录，磁盘文件保留）。
+ *  成功返回被清理的漫画数量；失败抛出错误（保持本地列表与后端一致）。 */
+export const removeScanPath = async (id: string): Promise<number> => {
+  const res = await http<{ removedComics?: number }>(`/scan-paths/${id}`, {
+    method: 'DELETE',
+  })
   scanPaths.value = scanPaths.value.filter((p) => p.id !== id)
   clearScanProgress(id)
-  try {
-    await http(`/scan-paths/${id}`, {
-      method: 'DELETE',
-    })
-  } catch (err) {
-    console.error('删除路径失败:', err)
-  }
+  return res?.removedComics ?? 0
 }

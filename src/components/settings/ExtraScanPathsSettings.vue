@@ -148,8 +148,13 @@
               <span class="spinning"><AppIcon name="refresh" :size="15" /></span>
             </span>
 
-            <!-- 删除按钮 -->
-            <button @click="handleRemove(item.id)" class="btn btn-icon danger" title="移除路径">
+            <!-- 删除按钮（二次确认；移除路径会连带清理该路径下已入库的漫画记录） -->
+            <button
+              @click="handleRemove(item)"
+              class="btn btn-icon danger"
+              :disabled="removingId === item.id"
+              title="移除路径"
+            >
               <AppIcon name="close" :size="15" />
             </button>
           </div>
@@ -230,6 +235,7 @@ import {
   updateScanPathName,
   updateEnableOfflineUpdate,
   removeScanPath,
+  getScanPathImpact,
   startScanPath,
   refreshScanProgress,
   ensurePolling,
@@ -240,9 +246,10 @@ import {
   type ScanProgress,
   type ScanMode,
 } from '@/stores/scanPathStore'
+import { fetchOfflineComics } from '@/stores/comicStore'
 import { useUI } from '@/composables/useUI'
 
-const { toast } = useUI()
+const { toast, modal } = useUI()
 
 defineEmits<{
   (e: 'back'): void
@@ -335,9 +342,45 @@ const handleToggleOfflineUpdate = (item: ExtraScanPath, value: boolean) => {
   toast.success(value ? '该路径已开启离线维护' : '该路径已关闭离线维护')
 }
 
-// 3. 移除路径
-const handleRemove = (id: string) => {
-  removeScanPath(id)
+// 3. 移除路径：二次确认（显示将连带清理的本数）→ 后端级联清理该路径下已入库的漫画记录。
+//    磁盘文件保留：撤出来源 ≠ 销毁文件；需要物理删除请到离线库中单独操作。
+const removingId = ref('')
+
+const handleRemove = async (item: ExtraScanPath) => {
+  if (removingId.value) return
+  removingId.value = item.id
+  try {
+    // 计数失败不阻断删除，退化为不显示本数
+    let impact = 0
+    try {
+      impact = await getScanPathImpact(item.id)
+    } catch (err) {
+      console.error('统计路径影响数量失败:', err)
+    }
+
+    const confirmed = await modal.confirm(
+      impact > 0
+        ? `移除扫描路径「${item.path}」吗？\n该路径下已入库的 ${impact} 本漫画将一并从离线库移除。`
+        : `移除扫描路径「${item.path}」吗？该路径下暂无已入库漫画。`,
+      '移除扫描路径',
+      {
+        tone: 'danger',
+        confirmText: '移除',
+        details: '路径下的磁盘文件不会被删除；如需物理删除，请到离线库中单独操作。',
+      },
+    )
+    if (!confirmed) return
+
+    const removed = await removeScanPath(item.id)
+    toast.success(removed > 0 ? `已移除路径，并清理 ${removed} 本离线记录` : '路径已移除')
+    // 同步刷新离线库内存列表，避免已清理的条目在页面间残留
+    void fetchOfflineComics()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '移除路径失败'
+    toast.error(msg)
+  } finally {
+    removingId.value = ''
+  }
 }
 
 // 4. 单路径扫描（异步启动，进度由轮询实时更新）

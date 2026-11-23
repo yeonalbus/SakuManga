@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"SakuManga/internal/database"
+	"SakuManga/internal/models"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -257,5 +260,54 @@ func TestCountImagesRecursiveMatchesPageList(t *testing.T) {
 		if filepath.Separator == '\\' && filepath.ToSlash(p) != p {
 			t.Errorf("页表路径应统一为 / 分隔: %q", p)
 		}
+	}
+}
+
+// TestScanEndToEndPageCountRecursive 端到端：真实扫描入库后，DB 页数 = 递归页表长度。
+func TestScanEndToEndPageCountRecursive(t *testing.T) {
+	withoutXpCloud(t)
+	db := newRefsTestDB(t)
+	oldDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = oldDB })
+
+	root := t.TempDir()
+	aaa := filepath.Join(root, "AAA")
+	mustWriteFile(t, filepath.Join(aaa, "1.jpg"), "x")
+	mustWriteFile(t, filepath.Join(aaa, "BBB", "2.jpg"), "x")
+	// 根下直接归档：内部 2 图
+	mustWriteZip(t, filepath.Join(root, "c.zip"), "1.jpg", "2.jpg")
+
+	found, err := ScanAndSaveDirectory(root, true)
+	if err != nil {
+		t.Fatalf("扫描失败: %v", err)
+	}
+	if found != 2 {
+		t.Fatalf("应入库 2 本（AAA + c.zip），实际 %d", found)
+	}
+
+	var dirComic models.OfflineComic
+	if err := db.First(&dirComic, "local_path = ?", aaa).Error; err != nil {
+		t.Fatalf("读取 AAA 记录失败: %v", err)
+	}
+	if dirComic.PageCount != 2 || dirComic.OriginalPageCount != 2 {
+		t.Fatalf("AAA 页数应为递归 2 页，实际 %d/%d", dirComic.PageCount, dirComic.OriginalPageCount)
+	}
+
+	var zipComic models.OfflineComic
+	if err := db.First(&zipComic, "local_path = ?", filepath.Join(root, "c.zip")).Error; err != nil {
+		t.Fatalf("读取归档记录失败: %v", err)
+	}
+	if zipComic.PageCount != 2 || zipComic.OriginalPageCount != 2 {
+		t.Fatalf("归档页数应为 2 页，实际 %d/%d", zipComic.PageCount, zipComic.OriginalPageCount)
+	}
+
+	// DB 页数必须与阅读器页表一致
+	pages, err := listImagesRecursive(aaa)
+	if err != nil {
+		t.Fatalf("页表失败: %v", err)
+	}
+	if len(pages) != dirComic.PageCount {
+		t.Fatalf("页表 %d 页与 DB PageCount %d 不一致", len(pages), dirComic.PageCount)
 	}
 }

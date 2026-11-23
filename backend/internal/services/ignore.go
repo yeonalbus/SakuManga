@@ -334,7 +334,9 @@ func PurgeLegacyIgnores(db *gorm.DB) int {
 	return int(res.RowsAffected)
 }
 
-// RestoreIgnore 恢复（删除）忽略条目；id 不存在时返回 ErrIgnoreNotFound（容错）
+// RestoreIgnore 恢复（删除）忽略条目；id 不存在时返回 ErrIgnoreNotFound（容错）。
+// D20：服务层只删条目；「恢复后立即本地重算」由 handler 层在维护任务空闲时调用
+// RecalculateDedupLocal 完成（避免服务层与任务锁耦合）。
 func RestoreIgnore(db *gorm.DB, id string) error {
 	if db == nil {
 		return fmt.Errorf("非法参数：db 不能为空")
@@ -350,7 +352,7 @@ func RestoreIgnore(db *gorm.DB, id string) error {
 }
 
 // RestoreIgnores 批量恢复（删除）忽略条目（Round51 批量恢复）。
-// 恢复只删条目、不触发聚类重算（被恢复的组在下次重新扫描后回到维护列表）；返回删除条数。
+// D20：恢复后由 handler 调用 RecalculateDedupLocal 立即本地重算；返回删除条数。
 func RestoreIgnores(db *gorm.DB, ids []string) (int, error) {
 	if db == nil {
 		return 0, fmt.Errorf("非法参数：db 不能为空")

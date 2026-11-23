@@ -37,7 +37,7 @@ func TestHashRuleEmitsKeep(t *testing.T) {
 		}
 	}
 
-	res, err := maintainDedupWithProgress(db, nil, nil, true)
+	res, err := maintainDedupWithProgress(db, nil, nil, true, false)
 	if err != nil {
 		t.Fatalf("维护查重失败: %v", err)
 	}

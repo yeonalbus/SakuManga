@@ -417,7 +417,8 @@ func (h *OfflineHandler) AckIgnoreNewMembers(c *gin.Context) {
 
 // RestoreIgnore 恢复（删除）忽略条目 POST /api/v1/offline/ignore/:id/restore
 //
-// Round51：只删条目、不触发聚类重算（毫秒级）；被恢复的组在下次「重新扫描」后回到维护列表。
+// D20：删除条目后立即做一次本地重算（不联网），使被隐藏的簇即时回到维护列表；
+// 若维护/查重任务正在运行则跳过重算（避免并发写查重快照），仅日志提示。
 func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 	id := c.Param("id")
 	if err := services.RestoreIgnore(h.db, id); err != nil {
@@ -428,12 +429,25 @@ func (h *OfflineHandler) RestoreIgnore(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.recalcAfterIgnoreRestore()
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// recalcAfterIgnoreRestore 恢复忽略后的本地重算（D20），带并发保护。
+func (h *OfflineHandler) recalcAfterIgnoreRestore() {
+	st := services.GetOfflineTaskProgress()
+	if st.Status == services.OfflineTaskRunning || st.Status == services.OfflineTaskPaused {
+		log.Printf("%s [ignore] 维护任务运行中（%s），跳过恢复后的本地重算", dlWarnTag, st.Status)
+		return
+	}
+	if _, err := services.RecalculateDedupLocal(h.db); err != nil {
+		log.Printf("%s [ignore] 恢复后本地重算失败: %v", dlWarnTag, err)
+	}
 }
 
 // RestoreIgnores 批量恢复 POST /api/v1/offline/ignores/restore
 //
-// Round51：忽略清单页「多选 → 批量恢复」。只删条目、不触发聚类重算。
+// Round51：忽略清单页「多选 → 批量恢复」。D20：恢复后立即本地重算（不联网），运行中任务则跳过。
 func (h *OfflineHandler) RestoreIgnores(c *gin.Context) {
 	var req struct {
 		IDs []string `json:"ids"`
@@ -447,5 +461,6 @@ func (h *OfflineHandler) RestoreIgnores(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.recalcAfterIgnoreRestore()
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": n})
 }

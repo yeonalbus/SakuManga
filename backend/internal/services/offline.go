@@ -834,17 +834,24 @@ var ErrComicNotFound = errors.New("未找到漫画记录")
 //   - 文件夹内容签名相同（无 gid/hash/parent 元数据的复制型重复）→ 删除复制项（问题3修复）
 //     （Round45：签名缓存以「目录 mtime」为基准，目录未变则跳过递归遍历）
 func MaintainDedup(db *gorm.DB, ehService *EHService) (*DedupResult, error) {
-	return maintainDedupWithProgress(db, ehService, nil, true)
+	return maintainDedupWithProgress(db, ehService, nil, true, false)
 }
 
 // MaintainDedupWithProgress 带进度回调的维护查重（问题3：长任务进度可感知，供 handler 异步任务使用）
 // forceFull=true 时忽略 parent_checked_at 增量标记，强制对全部符合条件的漫画做在线父子关系发现（需求1 兜底）。
 func MaintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn, forceFull bool) (*DedupResult, error) {
-	return maintainDedupWithProgress(db, ehService, onProgress, forceFull)
+	return maintainDedupWithProgress(db, ehService, onProgress, forceFull, false)
+}
+
+// RecalculateDedupLocal 仅本地重算（不联网），供「恢复忽略」即时生效（D20）。
+// 跳过：在线回填 GID、规则 3a 在线父子关系发现、Tier2 联网复核。
+func RecalculateDedupLocal(db *gorm.DB) (*DedupResult, error) {
+	return maintainDedupWithProgress(db, nil, nil, false, true)
 }
 
 // maintainDedupWithProgress 带进度回调的本地维护查重（问题3：长任务进度可感知）
-func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn, forceFull bool) (*DedupResult, error) {
+// skipOnline=true 时只跑本地规则（D20 恢复忽略后的即时重算）。
+func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineProgressFn, forceFull bool, skipOnline bool) (*DedupResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("非法参数：db 不能为空")
 	}
@@ -882,8 +889,11 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	// 在本次运行中即可完成跨路径查重。需绑定 IPB 账号，回填失败/多结果写
 	// parent_checked_at 增量跳过（配合 S5 限流），避免每次维护重复搜索。
 	// Round29：支持中途暂停/取消（检查点在逐本搜索前）。
-	if err := backfillGIDOnline(db, ehService, comics, forceFull, onProgress); err != nil {
-		return nil, err
+	// D20：skipOnline 时跳过（恢复忽略后的本地重算不联网）。
+	if !skipOnline {
+		if err := backfillGIDOnline(db, ehService, comics, forceFull, onProgress); err != nil {
+			return nil, err
+		}
 	}
 
 	// ── 1. 同 GID 分组查重 ──
@@ -1001,7 +1011,8 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	//      沿父画廊链向上逐层抓取，命中本地版本即旧版被新版取代。
 	//    仅对未被标记删除的漫画抓取，避免重复请求；
 	//    账号未绑定时跳过在线发现（本地规则1/2/4 仍可用）。
-	if ehService != nil {
+	// D20：skipOnline 时整段跳过（本地重算不联网，3b 本地父画廊检查仍执行）。
+	if !skipOnline && ehService != nil {
 		account := LoadAdminAccount(db)
 		if account.IPBMemberID != "" {
 			ehSetting := loadEHSetting(db, LoadAdminUserID(db))
@@ -1357,7 +1368,8 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	// ── Round42 D2：联网复核（可选，默认关闭）──
 	// 对近似层（Tier 2）产出的非高置信簇做一次 E 站反查校验（逐簇限流 + 单次上限），
 	// 通过则升为高置信，未通过则标注「未确认」供人工优先看。设置项默认关闭。
-	if GetDedupSetting(db).OnlineVerify {
+	// D20：本地重算跳过联网复核。
+	if !skipOnline && GetDedupSetting(db).OnlineVerify {
 		VerifyApproxClustersOnline(db, ehService, result.Clusters, onProgress)
 	}
 

@@ -471,12 +471,12 @@ func PruneMaintainDedupMembers(removedIDs []string) {
 // title 型 / gid 型忽略都发生在聚类之后（detectTitleClusters 产出簇 → 再按忽略表过滤），
 // 不改变聚类输入，因此无需重跑 detectTitleClusters（实测全量重算 6~10 秒）。
 //
-// 不适用（必须全量重算 SyncMaintainDedupClusters）：
-//   - **恢复忽略**：被隐藏的簇已不在缓存里，只能重算找回；
+// 不适用（必须重算）：
+//   - **恢复忽略**：被隐藏的簇已不在缓存里，只能重算找回（handler 调用 RecalculateDedupLocal）；
 //   - **comic 型（成员级）忽略**：该本会退出名称聚类候选，改变聚类输入本身。
 //
-// 与 Sync 的一致性：过滤条件与 Sync 内的口径完全相同（title 型按 MatchTitle + 新增感知，
-// gid 型只在增量语义下过滤 parent 提示项），因此结果与全量重算一致；差别仅在于
+// 与重算的一致性：过滤条件与离线任务内的口径完全相同（title 型按簇键 + 成员集合 + 新增感知，
+// gid 型只在增量语义下过滤 parent 提示项），因此结果与重算一致；差别仅在于
 // 保持簇的原有顺序与 ID，前端列表不重排。
 func ApplyIgnoreFiltersToMaintainResult(db *gorm.DB) {
 	if db == nil {

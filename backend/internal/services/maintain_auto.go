@@ -110,36 +110,6 @@ func MarkMaintainDedupReplacement(db *gorm.DB, old *models.OfflineComic, newGID 
 		dlLogTag, old.ID, newGID)
 }
 
-// AutoRunMaintainDedup 后台自动触发一次增量维护查重（需求4，队列空闲>1min 的触发点）。
-//
-// 返回 true 表示已启动扫描（实际扫描在 goroutine 中异步执行）；false 表示跳过：
-//   - 书库无未反映变更（变更时间戳去重，避免空转）；
-//   - 已有离线任务（维护/更新）在运行（单槽位互斥）；
-//   - ehService 为空时退化为纯本地查重（由 MaintainDedupWithProgress 内部处理）。
-func AutoRunMaintainDedup(db *gorm.DB, ehService *EHService) bool {
-	if !HasUnsyncedLibraryChanges() {
-		log.Printf("%s [auto-maintain] 书库无未反映变更（lastLibraryChange=%d），跳过自动增量查重",
-			dlLogTag, GetLastLibraryChange())
-		return false
-	}
-	if !StartOfflineTask(OfflineTaskMaintain) {
-		log.Printf("%s [auto-maintain] 已有离线维护任务在运行，跳过自动增量查重", dlWarnTag)
-		return false
-	}
-
-	log.Printf("%s [auto-maintain] 下载队列空闲>1min 且书库存在未反映变更，自动启动增量维护查重", dlLogTag)
-	go func() {
-		result, err := MaintainDedupWithProgress(db, ehService, OfflineMaintainProgressSink, false)
-		if err != nil {
-			FinishOfflineTask(err)
-			return
-		}
-		StoreMaintainDedupResult(result, false)
-		FinishOfflineTask(nil)
-	}()
-	return true
-}
-
 // MaintainUnsyncedStatus 书库变更与查重结果的同步状态（需求4，前端进入维护界面时判断是否自动增量查重）
 type MaintainUnsyncedStatus struct {
 	LastLibraryChange int64 `json:"lastLibraryChange"` // 书库最近一次变更时间戳(ms)，0 表示进程内尚无变更记录

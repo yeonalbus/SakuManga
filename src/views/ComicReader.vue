@@ -1598,7 +1598,6 @@ watch(
       :open="sidebarOpen"
       :pages="sidebarPages"
       :current-physical="currentPhysicalIndex0"
-      :physical-total="totalPages"
       :chapters="readerChapters"
       :bookmarks="readerBookmarks"
       @close="sidebarOpen = false"

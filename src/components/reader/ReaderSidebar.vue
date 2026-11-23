@@ -29,7 +29,6 @@ const props = defineProps<{
   activeTab: Tab
   pages: SidebarPage[] // 可见页序列（物理索引 + raw-page URL）
   currentPhysical: number
-  physicalTotal: number
   chapters: SidebarChapter[]
   bookmarks: number[]
 }>()

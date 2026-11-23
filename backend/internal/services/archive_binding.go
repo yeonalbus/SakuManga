@@ -66,31 +66,3 @@ func FindActiveBinding(db *gorm.DB, gid string, userID uint) (*models.ArchiveBin
 	return &b, nil
 }
 
-// ConsumeBinding 标记某个画廊的绑定已消费（下载成功，无需再切回）。
-func ConsumeBinding(db *gorm.DB, gid string, userID uint) {
-	if db == nil || gid == "" {
-		return
-	}
-	if err := db.Model(&models.ArchiveBinding{}).
-		Where("g_id = ? AND user_id = ?", gid, userID).
-		Update("consumed", true).Error; err != nil {
-		log.Printf("%s 标记绑定已消费失败（gid=%s）：%v", clashLogTag, gid, err)
-	}
-}
-
-// GCBindings 清理过期或已消费超过 1 小时的绑定，返回删除条数。
-// 惰性调用（挂在归档调度 tick 上），不引入独立定时器。
-func GCBindings(db *gorm.DB) int64 {
-	if db == nil {
-		return 0
-	}
-	now := time.Now()
-	res := db.Where("expires_at < ? OR (consumed = ? AND created_at < ?)",
-		now, true, now.Add(-time.Hour)).
-		Delete(&models.ArchiveBinding{})
-	if res.Error != nil {
-		log.Printf("%s 清理绑定失败：%v", clashLogTag, res.Error)
-		return 0
-	}
-	return res.RowsAffected
-}

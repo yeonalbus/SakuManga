@@ -138,36 +138,10 @@ func TestArchiveBindingLifecycle(t *testing.T) {
 		t.Fatalf("应覆盖为最新节点，实际 %q", found.Node)
 	}
 
-	// 消费后不再命中
-	ConsumeBinding(db, "123", 7)
+	// 已消费的绑定不再命中（consumed=true 由下载成功流程写入）
+	db.Model(&models.ArchiveBinding{}).Where("g_id = ? AND user_id = ?", "123", 7).Update("consumed", true)
 	if b2, _ := FindActiveBinding(db, "123", 7); b2 != nil {
 		t.Fatal("已消费的绑定不应命中")
-	}
-}
-
-func TestArchiveBindingGC(t *testing.T) {
-	db := newTestDB(t)
-
-	// 过期记录
-	oldB := &models.ArchiveBinding{
-		GID: "old", UserID: 1, Node: "X",
-		ExpiresAt: time.Now().Add(-time.Hour),
-	}
-	db.Create(oldB)
-
-	// 未过期记录
-	liveB := &models.ArchiveBinding{
-		GID: "live", UserID: 1, Node: "Y",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-	db.Create(liveB)
-
-	removed := GCBindings(db)
-	if removed != 1 {
-		t.Fatalf("应清理 1 条过期记录，实际 %d", removed)
-	}
-	if b, _ := FindActiveBinding(db, "live", 1); b == nil {
-		t.Fatal("未过期记录不应被清理")
 	}
 }
 

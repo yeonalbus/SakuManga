@@ -205,7 +205,7 @@ func scorePair(a, b *approxCandidate) (score, bodySim float64) {
 }
 
 // newApproxCandidate 由离线漫画构造 Tier 2 候选（核心名为空者返回 nil）
-func newApproxCandidate(c *models.OfflineComic, ignoreIdx *IgnoreIndex) *approxCandidate {
+func newApproxCandidate(c *models.OfflineComic) *approxCandidate {
 	tags := UnmarshalTagSlice(c.OnlineTags)
 	artist := extractNamespaceTag(tags, "artist")
 
@@ -288,8 +288,8 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		if exclude[c.ID] {
 			continue
 		}
-		// 忽略标记（title 型）在簇生成后统一过滤，这里只做成员级排除
-		if ac := newApproxCandidate(c, ignoreIdx); ac != nil {
+		// 忽略标记（title 型）在簇生成后统一过滤
+		if ac := newApproxCandidate(c); ac != nil {
 			cands = append(cands, ac)
 		}
 	}

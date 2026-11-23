@@ -215,18 +215,9 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 	}
 
 	// ── 保存变更 ──
-	if len(changed) > 0 {
-		for i := range comics {
-			c := &comics[i]
-			if !changed[c.ID] {
-				continue
-			}
-			c.UpdatedAt = time.Now()
-			if err := db.Save(c).Error; err != nil {
-				log.Printf("%s [update] 保存漫画 %s 更新标记失败: %v", dlErrTag, c.ID, err)
-			}
-		}
-	}
+	// D7：更新检测只写自身标记列，不改 updated_at（updated_at 语义为「内容/入库时间」，
+	// 被检测动作刷新会把所有被检查过的本顶到列表最前，破坏默认排序）。
+	saveUpdateMarks(db, comics, changed)
 
 	// 收集需要更新的漫画（已标记）
 	for i := range comics {
@@ -241,6 +232,24 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 }
 
 // ─────────────────────────────────────────────────────────────
+// saveUpdateMarks 持久化更新检测产生的标记变更（D7：不改 updated_at）。
+// 用原生 SQL 而非 db.Save/Updates：GORM 对模型字段 UpdatedAt 有自动时间戳回调，
+// 即使 map Updates 也会补 updated_at；检测流程必须保持该列语义不变。
+func saveUpdateMarks(db *gorm.DB, comics []models.OfflineComic, changed map[string]bool) {
+	for i := range comics {
+		c := &comics[i]
+		if !changed[c.ID] {
+			continue
+		}
+		if err := db.Exec(
+			`UPDATE offline_comics SET needs_update = ?, new_g_id = ?, new_token = ?, update_note = ?, parent_g_id = ? WHERE id = ?`,
+			c.NeedsUpdate, c.NewGID, c.NewToken, c.UpdateNote, c.ParentGID, c.ID,
+		).Error; err != nil {
+			log.Printf("%s [update] 保存漫画 %s 更新标记失败: %v", dlErrTag, c.ID, err)
+		}
+	}
+}
+
 // Aged Status 老化判定（Round4 任务四：365 天老化规则）
 //
 // E 站规则：发布超 365 天的画廊无法再通过 Gallery Manager Update 生成子画廊，

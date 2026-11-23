@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func generateID(path string) string {
@@ -515,12 +517,98 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		DownloadScheme:    existingFull.DownloadScheme, // 画质升级：下载任务回填的方案，扫描不覆盖（存量零值保留）
 	}
 
-	// 问题3修复：捕获入库错误，避免「扫描发现 N 本」与实际落库数量不一致的静默失败
-	if err := database.DB.Save(&comic).Error; err != nil {
+	// 问题3修复：捕获入库错误，避免「扫描发现 N 本」与实际落库数量不一致的静默失败。
+	// D7：禁止整行 Save —— 只写白名单允许的列（状态位/用户数据/阅读信号一律保留）。
+	if err := applyScanFields(database.DB, &existingFull, &comic); err != nil {
 		log.Printf("%s [scan] 入库失败 %q: %v", dlErrTag, localPath, err)
 		return false
 	}
 	return true
+}
+
+// applyScanFields 按 D7 三类白名单落库：
+//   - 新记录（existing.ID 为空）：Create，扫描值即初始值；
+//   - 已存在记录：只写 Scan-Owned 与满足条件的 Merge 列（禁止整行 Save）。
+//
+// updated_at 仅在存在实际变更列时才刷新，避免「扫一次全亮」污染列表默认排序。
+func applyScanFields(db *gorm.DB, existing *models.OfflineComic, incoming *models.OfflineComic) error {
+	if existing == nil || existing.ID == "" {
+		return db.Create(incoming).Error
+	}
+	updates := scanFieldUpdates(existing, incoming)
+	if len(updates) == 0 {
+		return nil
+	}
+	updates["updated_at"] = time.Now()
+	return db.Model(&models.OfflineComic{}).Where("id = ?", incoming.ID).Updates(updates).Error
+}
+
+// scanFieldUpdates 计算已存在记录的扫描落库列（D7 字段白名单）。
+func scanFieldUpdates(existing *models.OfflineComic, incoming *models.OfflineComic) map[string]interface{} {
+	u := map[string]interface{}{}
+
+	// ── Scan-Owned：扫描可完全决定 ──
+	u["page_count"] = incoming.PageCount
+	u["original_page_count"] = incoming.OriginalPageCount
+	u["file_size"] = incoming.FileSize
+	u["file_modified_at"] = incoming.FileModifiedAt
+	u["source_mode"] = incoming.SourceMode
+	u["category"] = incoming.Category
+
+	// ── Merge：标题（未手改才写，写入时同步基线，避免下次扫描误判为手改而永久锁定）──
+	titleEdited := existing.OriginalTitle != "" && existing.Title != existing.OriginalTitle
+	if !titleEdited && incoming.Title != "" {
+		u["title"] = incoming.Title
+		u["original_title"] = incoming.Title
+	}
+	jpnEdited := existing.OriginalTitleJpn != "" && existing.TitleJpn != existing.OriginalTitleJpn
+	if !jpnEdited && incoming.TitleJpn != "" {
+		u["title_jpn"] = incoming.TitleJpn
+		u["original_title_jpn"] = incoming.TitleJpn
+	}
+
+	// ── Merge：空值填充（保护在线回填值与用户数据）──
+	if existing.GID == "" && incoming.GID != "" {
+		u["g_id"] = incoming.GID
+	}
+	if existing.Token == "" && incoming.Token != "" {
+		u["token"] = incoming.Token
+	}
+	if existing.ParentGID == "" && incoming.ParentGID != "" {
+		u["parent_g_id"] = incoming.ParentGID
+	}
+	if existing.PublishedAt == nil && incoming.PublishedAt != nil {
+		u["published_at"] = incoming.PublishedAt
+	}
+	if existing.CommunityRating <= 0 && incoming.CommunityRating > 0 {
+		u["community_rating"] = incoming.CommunityRating
+	}
+
+	// ── Merge：OnlineTags 仅空时填充（用侧车解析结果兜底），Tags 由三态合成 ──
+	onlineTags := existing.OnlineTags
+	if onlineTags == "" {
+		if sideTags := strings.TrimSpace(incoming.Tags); sideTags != "" && sideTags != "[]" {
+			u["online_tags"] = sideTags
+			onlineTags = sideTags
+		}
+	}
+	if merged := mergeTagJSON(onlineTags, existing.OfflineAddTags, existing.OfflineRemoveTags, incoming.Tags); merged != "" && merged != existing.Tags {
+		u["tags"] = merged
+	}
+	return u
+}
+
+// mergeTagJSON 由三态源合成展示用 tags；三态为空时回退侧车解析出的标签。
+func mergeTagJSON(onlineRaw, addRaw, removeRaw, fallback string) string {
+	merged := MergeTags(UnmarshalTagSlice(onlineRaw), UnmarshalTagSlice(addRaw), UnmarshalTagSlice(removeRaw))
+	if len(merged) == 0 {
+		return fallback
+	}
+	b, err := json.Marshal(merged)
+	if err != nil {
+		return fallback
+	}
+	return string(b)
 }
 
 // parsePublishTime 尽量解析发布时间字符串（问题1）。支持多种格式：

@@ -39,32 +39,50 @@ func IsArchive(filename string) bool {
 	}
 }
 
-// GetCoverFromDir 递归查找文件夹（或深层子文件夹）中的第一张图片
-func GetCoverFromDir(dirPath string) (string, error) {
-	var firstImg string
+// IsSupportedArchive 可入库且可读的归档（D4：zip/cbz）
+func IsSupportedArchive(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".zip" || ext == ".cbz"
+}
 
-	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !d.IsDir() && IsImage(d.Name()) {
-			firstImg = path
-			return filepath.SkipAll // 找到第一张图立即终止递归
-		}
-		return nil
-	})
+// IsUnsupportedArchive 识别但不可读的归档（D4：rar/7z）
+func IsUnsupportedArchive(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".rar" || ext == ".7z"
+}
 
-	if firstImg != "" {
-		return firstImg, nil
-	}
+// GetCoverFromDir 取本子页表第一张未隐藏图的绝对路径（D11：封面 = 阅读器第 1 页）。
+func GetCoverFromDir(dirPath string, hidden HiddenSet) (string, error) {
+	pages, err := listImagesRecursive(dirPath)
 	if err != nil {
 		return "", err
+	}
+	for _, rel := range pages {
+		if hidden.Paths[rel] {
+			continue
+		}
+		return filepath.Join(dirPath, filepath.FromSlash(rel)), nil
 	}
 	return "", errors.New("未找到图片")
 }
 
-// GetCoverFromZip 从 ZIP/CBZ 压缩包中流式读取第一张图片数据
-func GetCoverFromZip(zipPath string) ([]byte, string, error) {
+// GetCoverFromZip 读取 zip/cbz 页表第一张未隐藏图的图片数据（D11）。
+func GetCoverFromZip(zipPath string, hidden HiddenSet) ([]byte, string, error) {
+	pages, err := listImagesInZip(zipPath)
+	if err != nil {
+		return nil, "", err
+	}
+	var target string
+	for _, name := range pages {
+		if !hidden.Paths[name] {
+			target = name
+			break
+		}
+	}
+	if target == "" {
+		return nil, "", errors.New("压缩包内未找到图片")
+	}
+
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return nil, "", err
@@ -72,32 +90,34 @@ func GetCoverFromZip(zipPath string) ([]byte, string, error) {
 	defer r.Close()
 
 	for _, f := range r.File {
-		if !f.FileInfo().IsDir() && IsImage(f.Name) {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, "", err
-			}
-			defer rc.Close()
-
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, "", err
-			}
-
-			ext := strings.ToLower(filepath.Ext(f.Name))
-			contentType := "image/jpeg"
-			switch ext {
-			case ".png":
-				contentType = "image/png"
-			case ".webp":
-				contentType = "image/webp"
-			case ".gif":
-				contentType = "image/gif"
-			}
-			return data, contentType, nil
+		if f.FileInfo().IsDir() || filepath.ToSlash(f.Name) != target {
+			continue
 		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, "", err
+		}
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, getContentType(target), nil
 	}
 	return nil, "", errors.New("压缩包内未找到图片")
+}
+
+// InvalidateCoverCache 删除某漫画的封面缓存文件（D11：隐藏页变化后必须立即失效；
+// D14：删除记录时一并清理）。返回错误仅代表文件存在但删除失败。
+func InvalidateCoverCache(comicID string) error {
+	if comicID == "" {
+		return nil
+	}
+	err := os.Remove(coverCachePath(comicID))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -143,13 +163,13 @@ func EnsureCoverCacheDir() error {
 }
 
 // readCoverSource 读取封面源图（ZIP 或目录），返回字节 + 源修改时间（缓存失效依据）
-func readCoverSource(comic models.OfflineComic) ([]byte, time.Time, error) {
+func readCoverSource(comic models.OfflineComic, hidden HiddenSet) ([]byte, time.Time, error) {
 	fi, err := os.Stat(comic.LocalPath)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
 	if fi.IsDir() {
-		imgPath, err := GetCoverFromDir(comic.LocalPath)
+		imgPath, err := GetCoverFromDir(comic.LocalPath, hidden)
 		if err != nil {
 			return nil, time.Time{}, err
 		}
@@ -163,8 +183,11 @@ func readCoverSource(comic models.OfflineComic) ([]byte, time.Time, error) {
 		}
 		return data, fi.ModTime(), nil
 	}
-	if IsArchive(comic.LocalPath) {
-		data, _, err := GetCoverFromZip(comic.LocalPath)
+	if IsUnsupportedArchive(comic.LocalPath) {
+		return nil, time.Time{}, ErrUnsupportedArchive
+	}
+	if IsSupportedArchive(comic.LocalPath) {
+		data, _, err := GetCoverFromZip(comic.LocalPath, hidden)
 		if err != nil {
 			return nil, time.Time{}, err
 		}
@@ -284,14 +307,14 @@ func endCoverGen(comicID string) {
 }
 
 // coverSourceModTime 仅获取封面源图修改时间（不读取图片内容）：
-// 文件夹 → WalkDir 找到首图即停再 stat（比读整图便宜得多）；归档 → os.Stat 包文件。
-func coverSourceModTime(comic models.OfflineComic) (time.Time, error) {
+// 文件夹 → 页表首张未隐藏图 stat；归档 → os.Stat 包文件。
+func coverSourceModTime(comic models.OfflineComic, hidden HiddenSet) (time.Time, error) {
 	fi, err := os.Stat(comic.LocalPath)
 	if err != nil {
 		return time.Time{}, err
 	}
 	if fi.IsDir() {
-		imgPath, err := GetCoverFromDir(comic.LocalPath)
+		imgPath, err := GetCoverFromDir(comic.LocalPath, hidden)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -310,7 +333,9 @@ func coverSourceModTime(comic models.OfflineComic) (time.Time, error) {
 //   - 无需缩放/解码失败 → 返回 (srcData, "", false)，调用方原图直传。
 func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, cached bool, err error) {
 	cachePath = coverCachePath(comic.ID)
-	srcMod, err := coverSourceModTime(comic)
+	pages, _ := GetPageList(comic.LocalPath)
+	hidden := ParseHiddenSet(comic.HiddenPages, pages)
+	srcMod, err := coverSourceModTime(comic, hidden)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -339,7 +364,7 @@ func GetCoverThumb(comic models.OfflineComic) (data []byte, cachePath string, ca
 	coverGenSem <- struct{}{}
 	defer func() { <-coverGenSem }()
 
-	srcData, _, err := readCoverSource(comic)
+	srcData, _, err := readCoverSource(comic, hidden)
 	if err != nil {
 		return nil, "", false, err
 	}

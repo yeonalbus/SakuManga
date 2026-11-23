@@ -52,16 +52,18 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 	m.mu.Unlock()
 
 	go func() {
-		count, err := scanDirectory(path, includeSubfolders, mode, progress, pathID)
+		stats, err := scanDirectory(path, includeSubfolders, mode, progress, pathID)
 		progress.finish(err)
 		if err == nil {
 			// 扫描成功 → 回写路径记录的统计（供列表直接展示）
 			now := time.Now().UnixMilli()
 			database.DB.Model(&models.ExtraScanPath{}).Where("id = ?", pathID).Updates(map[string]interface{}{
 				"last_scanned": now,
-				"comic_count":  count,
+				"comic_count":  stats.Found,
 			})
-			log.Printf("%s [scan] 路径 %q 扫描完成：发现 %d 本漫画（mode=%s）", dlLogTag, path, count, mode)
+			log.Printf("%s [scan] 路径 %q 扫描完成：入库 %d 本（跳过：已存在 %d / 同gid %d / 空目录 %d / 不支持归档 %d，mode=%s）",
+				dlLogTag, path, stats.Found, stats.SkippedExisting, stats.SkippedGid,
+				stats.SkippedEmpty, stats.SkippedUnsupported, mode)
 			// Round32：扫描会成批新增/更新/删除本地漫画 → 异步全量重建 XP 统计表
 			XpRebuildAsync("扫描")
 		} else {

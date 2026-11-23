@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,7 +28,7 @@ type OfflineComicResponse struct {
 	OnlineTagsList        []string            `json:"onlineTagsList"`        // 原始三态（前端区分官方/本地展示）
 	OfflineAddTagsList    []string            `json:"offlineAddTagsList"`    // 本地新增 tag
 	OfflineRemoveTagsList []string            `json:"offlineRemoveTagsList"` // 本地删除的 online tag
-	HiddenPagesList       []int               `json:"hiddenPagesList"`       // 隐藏的物理页索引（Round23 自定义删除页面）
+	HiddenPagesList       []string            `json:"hiddenPagesList"`       // 隐藏页相对路径（D10）
 	OriginalPageCount     int                 `json:"originalPageCount"`     // 原始物理页数（隐藏页后 pageCount 为有效页数）
 }
 
@@ -36,11 +38,10 @@ type OfflineComicResponse struct {
 //   列表接口从未赋值（恒为 null），详情页经 /comics/:id 独立接口获取有效值，零功能影响。
 type OfflineComicListResponse struct {
 	models.OfflineComic
-	SourceLabel       string                 `json:"sourceLabel,omitempty"`
+	SourceLabel       string                  `json:"sourceLabel,omitempty"`
 	Tags              []services.TagItemBrief `json:"tags"`
-	TagRaws           []string               `json:"tagRaws"`
-	HiddenPagesList   []int                  `json:"hiddenPagesList"`
-	OriginalPageCount int                    `json:"originalPageCount"`
+	TagRaws           []string                `json:"tagRaws"`
+	OriginalPageCount int                     `json:"originalPageCount"`
 }
 
 func parseRawTags(tagsStr string) []string {
@@ -130,7 +131,6 @@ func GetOfflineComics(c *gin.Context) {
 			SourceLabel:       label,
 			Tags:              translatedTags,
 			TagRaws:           merged,
-			HiddenPagesList:   services.ParseHiddenPages(comic.HiddenPages),
 			OriginalPageCount: comic.OriginalPageCount,
 		})
 	}
@@ -178,6 +178,10 @@ func GetOfflineComicDetail(c *gin.Context) {
 
 	translatedTags := services.GlobalTagEngine.TranslateTags(merged)
 
+	// D10：隐藏页以相对路径返回（解析旧数字索引需要页表，且 rar/7z 页表不可用 → 返回空）。
+	pages, _ := services.GetPageList(comic.LocalPath)
+	hidden := services.ParseHiddenSet(comic.HiddenPages, pages)
+
 	c.JSON(http.StatusOK, OfflineComicResponse{
 		OfflineComic:          comic,
 		Tags:                  translatedTags,
@@ -186,7 +190,7 @@ func GetOfflineComicDetail(c *gin.Context) {
 		OnlineTagsList:        onlineTags,
 		OfflineAddTagsList:    offlineAddTags,
 		OfflineRemoveTagsList: offlineRemoveTags,
-		HiddenPagesList:       services.ParseHiddenPages(comic.HiddenPages),
+		HiddenPagesList:       hidden.PathsList(),
 		OriginalPageCount:     comic.OriginalPageCount,
 	})
 }
@@ -288,9 +292,13 @@ func UpdateOfflineComic(c *gin.Context) {
 	}})
 }
 
-// GetComicPages 获取指定漫画的有效页列表（Round23：剔除用户自定义隐藏页）。
-// 返回 total=有效页数、pages=有效页文件名列表、originalTotal=物理页数、hiddenPages=隐藏索引，
-// 供阅读器/预览按有效序号读取；管理模式用 hiddenPages 还原隐藏态。
+// GetComicPages 获取指定漫画的页表（D9/D10）：
+//   - pages         物理页表（全部相对路径，自然排序；物理索引 = 该数组下标）
+//   - total         有效页数（物理 − 隐藏）
+//   - originalTotal 物理页数
+//   - hiddenPages   隐藏页相对路径
+//
+// 前端用 pages 过滤 hiddenPages 得到可见序列；图片一律走 /raw-page/:物理索引。
 func GetComicPages(c *gin.Context) {
 	id := c.Param("id")
 	var comic models.OfflineComic
@@ -305,48 +313,17 @@ func GetComicPages(c *gin.Context) {
 		return
 	}
 
-	hidden := services.ParseHiddenPages(comic.HiddenPages)
-	visible := services.FilterHiddenPages(pages, hidden)
+	hidden := services.NormalizeHiddenSet(services.ParseHiddenSet(comic.HiddenPages, pages), pages)
 
 	c.JSON(http.StatusOK, gin.H{
-		"total":          len(visible),
-		"pages":          visible,
-		"originalTotal":  len(pages),
-		"hiddenPages":    hidden,
-		"originalCount":  comic.OriginalPageCount,
+		"pages":         pages,
+		"total":         services.EffectivePageCount(pages, hidden),
+		"originalTotal": len(pages),
+		"hiddenPages":   hidden.PathsList(),
 	})
 }
 
-// GetComicPageImage 响应单页图片数据（pageIndex 为剔除隐藏页后的有效序号，Round23 自动映射物理页）
-func GetComicPageImage(c *gin.Context) {
-	id := c.Param("id")
-	pageIdxStr := c.Param("index")
-
-	var pageIdx int
-	if _, err := fmt.Sscanf(pageIdxStr, "%d", &pageIdx); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的页码"})
-		return
-	}
-
-	var comic models.OfflineComic
-	if err := database.DB.First(&comic, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "找不到该漫画"})
-		return
-	}
-
-	hidden := services.ParseHiddenPages(comic.HiddenPages)
-	data, contentType, err := services.GetVisiblePageData(comic.LocalPath, pageIdx, hidden)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 🎯 开启强缓存：浏览器命中本地缓存后零延迟加载
-	c.Header("Cache-Control", "public, max-age=86400")
-	c.Data(http.StatusOK, contentType, data)
-}
-
-// GetComicPageThumbImage 返回某有效页的缩略图（Round52：维护页展开对比用）。
+// GetComicPageThumbImage 返回某物理页的缩略图（D9：索引 = 物理页序号）。
 // 首次生成 240px JPEG 缓存到 page_cache/（复用封面的单飞 + 限流思路），
 // 命中直接回缓存文件并带 ETag，浏览器二次零请求。
 func GetComicPageThumbImage(c *gin.Context) {
@@ -390,9 +367,10 @@ func GetComicPageThumbImage(c *gin.Context) {
 	c.Data(http.StatusOK, http.DetectContentType(data), data)
 }
 
-// GetComicRawPageImage 按物理页索引直读图片（Round23 管理模式预览用，不应用隐藏页映射）。
-// 与 GetComicPageImage（有效索引，自动跳过隐藏页）区分：管理模式需展示含隐藏页的全量页面。
-func GetComicRawPageImage(c *gin.Context) {	id := c.Param("id")
+// GetComicRawPageImage 按物理页索引直读图片（D9：页索引统一为物理索引，不应用隐藏页映射）。
+// 管理模式预览需展示含隐藏页的全量页面；阅读器/详情预览同样走本路由。
+func GetComicRawPageImage(c *gin.Context) {
+	id := c.Param("id")
 	pageIdxStr := c.Param("index")
 
 	var pageIdx int
@@ -419,9 +397,10 @@ func GetComicRawPageImage(c *gin.Context) {	id := c.Param("id")
 }
 
 // UpdateComicHiddenPages 自定义删除页面：更新隐藏页列表 PUT /api/v1/comics/:id/hidden-pages
-// body: { hiddenPages: [物理页索引(0-based)...] }（传空数组 = 全部恢复）。
-// 软删除（不物理删文件）：同步重算 pageCount（有效页数）并记录 originalPageCount（原物理页数，
-// 供更新检测/维护查重比对，避免隐藏页后误判「画廊被扩充」）。
+// body: { hiddenPages: ["相对路径", ...] }（D10；传空数组 = 全部恢复）。
+// 只接受当前页表中存在的相对路径（旧数字索引由前端换算后提交）。
+// 软删除（不物理删文件）：同步重算 pageCount（有效页数）并记录 originalPageCount（原物理页数），
+// 供更新检测/维护查重比对；保存成功后立即失效封面缓存（D11：封面可能来自被隐藏的首图）。
 func UpdateComicHiddenPages(c *gin.Context) {
 	id := c.Param("id")
 	var comic models.OfflineComic
@@ -431,30 +410,52 @@ func UpdateComicHiddenPages(c *gin.Context) {
 	}
 
 	var req struct {
-		HiddenPages []int `json:"hiddenPages"`
+		HiddenPages []string `json:"hiddenPages"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数解析失败"})
 		return
 	}
 
-	physicalCount, err := services.CountPages(comic.LocalPath)
+	pages, err := services.GetPageList(comic.LocalPath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取画廊失败: " + err.Error()})
 		return
 	}
 
-	// 裁剪越界索引（物理页可能因文件增删而变化）并排序去重
-	hidden := services.NormalizeHiddenPages(req.HiddenPages, physicalCount)
+	// 只接受页表中存在的相对路径（归一化 "/" 分隔）
+	raw := services.HiddenSet{Paths: map[string]bool{}}
+	for _, p := range req.HiddenPages {
+		p = strings.TrimSpace(filepath.ToSlash(p))
+		if p != "" {
+			raw.Paths[p] = true
+		}
+	}
+	hidden := services.NormalizeHiddenSet(raw, pages)
+
+	// 联动清理书签/章节：需物理索引（书签/章节按物理页存储）
+	indexOf := make(map[string]int, len(pages))
+	for i, p := range pages {
+		indexOf[p] = i
+	}
+	physical := make([]int, 0, len(hidden.Paths))
+	for p := range hidden.Paths {
+		if i, ok := indexOf[p]; ok {
+			physical = append(physical, i)
+		}
+	}
+	sort.Ints(physical)
+
 	// 原页数：首次设置时记录物理页数；此后物理页数变大时同步抬升（保持「原页数 ≥ 有效页数」）
+	physicalCount := len(pages)
 	orig := comic.OriginalPageCount
 	if orig <= 0 || physicalCount > orig {
 		orig = physicalCount
 	}
 
-	comic.HiddenPages = services.MarshalHiddenPages(hidden)
+	comic.HiddenPages = hidden.Marshal()
 	comic.OriginalPageCount = orig
-	comic.PageCount = services.EffectivePageCount(physicalCount, hidden)
+	comic.PageCount = services.EffectivePageCount(pages, hidden)
 	comic.UpdatedAt = time.Now()
 	if err := database.DB.Save(&comic).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败: " + err.Error()})
@@ -462,13 +463,18 @@ func UpdateComicHiddenPages(c *gin.Context) {
 	}
 
 	// Round24：隐藏页联动清理（被隐藏物理页 → 其书签/章节标记清除；失败不阻断隐藏保存）
-	removedBookmarks, removedChapters, _ := services.PurgeHiddenMarks(database.DB, id, hidden)
+	removedBookmarks, removedChapters, _ := services.PurgeHiddenMarks(database.DB, id, physical)
+
+	// D11：隐藏/恢复首图后封面必须立即刷新
+	if err := services.InvalidateCoverCache(comic.ID); err != nil {
+		fmt.Printf("[cover] 清理封面缓存失败 comic=%s: %v\n", comic.ID, err)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":           "已更新隐藏页",
 		"pageCount":         comic.PageCount,
 		"originalPageCount": comic.OriginalPageCount,
-		"hiddenPages":       hidden,
+		"hiddenPages":       hidden.PathsList(),
 		"removedBookmarks":  removedBookmarks,
 		"removedChapters":   removedChapters,
 	})

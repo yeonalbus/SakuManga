@@ -17,10 +17,9 @@ import (
 // 背景：维护页展开对比要一次显示一本前若干页的缩略图（点开看原图），
 // 直接用 /raw-page 原图会重演 Round14 封面卡顿问题（每张几 MB + zip 解压解码）。
 //
-// 方案：首次请求按有效页索引取页图 → 等比缩放到宽 PageThumbWidth → JPEG 写
+// 方案：首次请求按物理页索引取页图（D9）→ 等比缩放到宽 PageThumbWidth → JPEG 写
 // <dataDir>/page_cache/<comicId>/<index>.jpg；命中直接回缓存文件（带 ETag/强缓存）。
 // 复用封面的思路：per(comic,page) 单飞去重 + 全局解码信号量限流 + 源 mtime 变更检测。
-// 页索引与 /comics/:id/page/:index 一致（自动跳过用户隐藏页）。
 // ─────────────────────────────────────────────────────────────
 
 // PageThumbWidth 页缩略图目标宽度（维护页缩略图墙 64px 展示，240px 足够清晰且体积小）
@@ -68,15 +67,15 @@ func endPageGen(key string) {
 	pageGenMu.Unlock()
 }
 
-// GetPageThumb 获取某离线漫画某个有效页的缩略图。
+// GetPageThumb 获取某离线漫画某物理页的缩略图（D9：索引 = 物理页序号，不再应用隐藏页映射）。
 //   - 缓存命中且源未变更 → 返回 (nil, cachePath, true)，零 IO（除 stat）；
 //   - 未命中 → 读页图 → 缩放到 240px → 写缓存；
 //   - 无法解码/无需缩放（页图本身很窄）→ 返回原图字节（调用方直传）。
-func GetPageThumb(comic models.OfflineComic, index int) (data []byte, cachePath string, cached bool, err error) {
-	if index < 0 {
-		return nil, "", false, fmt.Errorf("无效页码: %d", index)
+func GetPageThumb(comic models.OfflineComic, physicalIndex int) (data []byte, cachePath string, cached bool, err error) {
+	if physicalIndex < 0 {
+		return nil, "", false, fmt.Errorf("无效页码: %d", physicalIndex)
 	}
-	cachePath = pageCachePath(comic.ID, index)
+	cachePath = pageCachePath(comic.ID, physicalIndex)
 
 	srcMod, err := pageSourceModTime(comic)
 	if err != nil {
@@ -89,7 +88,7 @@ func GetPageThumb(comic models.OfflineComic, index int) (data []byte, cachePath 
 		}
 	}
 
-	key := fmt.Sprintf("%s/%d", comic.ID, index)
+	key := fmt.Sprintf("%s/%d", comic.ID, physicalIndex)
 	waitCh, waiting := beginPageGen(key)
 	if waiting {
 		<-waitCh
@@ -103,8 +102,7 @@ func GetPageThumb(comic models.OfflineComic, index int) (data []byte, cachePath 
 	pageGenSem <- struct{}{}
 	defer func() { <-pageGenSem }()
 
-	hidden := ParseHiddenPages(comic.HiddenPages)
-	srcData, _, err := GetVisiblePageData(comic.LocalPath, index, hidden)
+	srcData, _, err := GetPageData(comic.LocalPath, physicalIndex)
 	if err != nil {
 		return nil, "", false, err
 	}

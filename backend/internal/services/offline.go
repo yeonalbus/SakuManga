@@ -664,16 +664,31 @@ func ReconcileOfflineAfterDownload(db *gorm.DB, task *models.DownloadTask) (*Rec
 			changed = true
 		}
 		// 3. PageCount 校正：metadata filecount 更完整时采用。
-		// Round23：隐藏页后 PageCount 为有效页数，校正须以 OriginalPageCount（原始物理页数）为基准，
-		// 避免「90P 隐藏 5P → 有效 85P」被 metadata filecount=90 覆盖回 90。
-		hidden := ParseHiddenPages(c.HiddenPages)
+		// Round53/D10：隐藏页以相对路径存储；旧数字索引在本步顺便迁移为相对路径。
+		pages, pageErr := GetPageList(c.LocalPath)
+		hidden := HiddenSet{Paths: map[string]bool{}}
+		if pageErr == nil {
+			hidden = NormalizeHiddenSet(ParseHiddenSet(c.HiddenPages, pages), pages)
+			if len(hidden.Paths) > 0 && c.HiddenPages != hidden.Marshal() {
+				c.HiddenPages = hidden.Marshal() // 旧数字索引 → 相对路径（就地迁移）
+				changed = true
+			}
+		}
 		orig := c.OriginalPageCount
 		if orig <= 0 {
 			orig = c.PageCount // 旧数据无原页数记录，以当前页数兜底
 		}
 		if meta.FileCount > orig {
 			c.OriginalPageCount = meta.FileCount
-			c.PageCount = EffectivePageCount(meta.FileCount, hidden)
+			// 页表不可读（落地目录尚无可读图片）时以 metadata 为准，避免把权威页数校正成 0。
+			if pageErr != nil || (len(pages) == 0 && meta.FileCount > 0) {
+				c.PageCount = meta.FileCount - len(hidden.Paths)
+				if c.PageCount < 0 {
+					c.PageCount = 0
+				}
+			} else {
+				c.PageCount = EffectivePageCount(pages, hidden)
+			}
 			result.PageCountCorrected++
 			changed = true
 		}

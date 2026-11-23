@@ -127,43 +127,88 @@ func GetPageList(localPath string) ([]string, error) {
 	return pages, nil
 }
 
-// scanPageList 原 GetPageList 扫描逻辑（不缓存）
-func scanPageList(localPath string, isDir bool) ([]string, error) {
-	var images []string
+// ErrUnsupportedArchive 识别但不可读的归档格式（D4：当前仅支持 zip/cbz）
+var ErrUnsupportedArchive = errors.New("不支持的归档格式（当前仅支持 zip/cbz）")
 
-	// 1. 散图文件夹
-	if isDir {
-		err := filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !d.IsDir() && IsImage(d.Name()) {
-				// 记录相对路径
-				rel, _ := filepath.Rel(localPath, path)
-				images = append(images, rel)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	} else if IsArchive(localPath) {
-		// 2. ZIP / CBZ 压缩包
-		r, err := zip.OpenReader(localPath)
-		if err != nil {
-			return nil, err
-		}
-		defer r.Close()
-
-		for _, f := range r.File {
-			if !f.FileInfo().IsDir() && IsImage(f.Name) {
-				images = append(images, f.Name)
-			}
+// hasHiddenSegment 路径中任一段以 "." 开头（D1 全局忽略规则；兼容 / 与 \ 分隔）
+func hasHiddenSegment(name string) bool {
+	for _, seg := range strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if isHiddenEntry(seg) {
+			return true
 		}
 	}
+	return false
+}
 
+// listImagesRecursive 返回目录内全部图片的相对路径：
+// 递归任意深度子目录、跳过 "." 开头的隐藏目录/文件、统一为 "/" 分隔、自然排序。
+// 该函数是「页表」的唯一实现（D3），扫描入库的页数与阅读器页表共用它。
+func listImagesRecursive(dir string) ([]string, error) {
+	var images []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path == dir {
+			return nil
+		}
+		if isHiddenEntry(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() && IsImage(d.Name()) {
+			rel, rerr := filepath.Rel(dir, path)
+			if rerr != nil {
+				rel = path
+			}
+			images = append(images, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	sortFilenames(images)
 	return images, nil
+}
+
+// listImagesInZip 返回 zip/cbz 内全部图片条目名（跳过隐藏段、自然排序）。
+func listImagesInZip(zipPath string) ([]string, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	images := make([]string, 0, len(r.File))
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() || hasHiddenSegment(f.Name) {
+			continue
+		}
+		if IsImage(f.Name) {
+			images = append(images, filepath.ToSlash(f.Name))
+		}
+	}
+	sortFilenames(images)
+	return images, nil
+}
+
+// scanPageList 原 GetPageList 扫描逻辑（不缓存）
+func scanPageList(localPath string, isDir bool) ([]string, error) {
+	if isDir {
+		// 1. 散图文件夹：递归页表（D3）
+		return listImagesRecursive(localPath)
+	}
+	// 2. 归档：仅 zip/cbz 可读（D4）
+	if IsUnsupportedArchive(localPath) {
+		return nil, ErrUnsupportedArchive
+	}
+	if !IsSupportedArchive(localPath) {
+		return nil, errors.New("不支持的格式")
+	}
+	return listImagesInZip(localPath)
 }
 
 // GetPageData 获取特定页码的图片二进制流（物理页索引）
@@ -175,27 +220,13 @@ func GetPageData(localPath string, pageIndex int) ([]byte, string, error) {
 	return getPageDataByName(localPath, pages[pageIndex])
 }
 
-// GetVisiblePageData 获取「有效页索引」对应的图片二进制流（自动跳过隐藏页，Round23）。
-// pageIndex 为剔除隐藏页后的有效序号（0-based）：第 N 张可见图 = 物理页列表中第 N 个未隐藏项。
-func GetVisiblePageData(localPath string, pageIndex int, hidden []int) ([]byte, string, error) {
-	pages, err := GetPageList(localPath)
-	if err != nil {
-		return nil, "", err
-	}
-	visible := FilterHiddenPages(pages, hidden)
-	if pageIndex < 0 || pageIndex >= len(visible) {
-		return nil, "", errors.New("页码超出范围")
-	}
-	return getPageDataByName(localPath, visible[pageIndex])
-}
-
 // getPageDataByName 按物理文件名读取图片二进制流（文件夹直读 / ZIP 定位读取）
 func getPageDataByName(localPath string, targetFile string) ([]byte, string, error) {
 	fi, _ := os.Stat(localPath)
 
 	// 1. 散图文件夹直接读取文件
 	if fi.IsDir() {
-		fullPath := filepath.Join(localPath, targetFile)
+		fullPath := filepath.Join(localPath, filepath.FromSlash(targetFile))
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			return nil, "", err
@@ -203,8 +234,11 @@ func getPageDataByName(localPath string, targetFile string) ([]byte, string, err
 		return data, getContentType(targetFile), nil
 	}
 
-	// 2. ZIP 压缩包定位读取
-	if IsArchive(localPath) {
+	// 2. 归档：仅 zip/cbz 可读（D4）
+	if IsUnsupportedArchive(localPath) {
+		return nil, "", ErrUnsupportedArchive
+	}
+	if IsSupportedArchive(localPath) {
 		r, err := zip.OpenReader(localPath)
 		if err != nil {
 			return nil, "", err

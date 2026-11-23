@@ -48,6 +48,10 @@ type ScanProgress struct {
 	StartedAt    int64     `json:"startedAt"`
 	FinishedAt   int64     `json:"finishedAt,omitempty"`
 	ComicCount   int       `json:"comicCount,omitempty"` // 完成后的入库数量（同 Found）
+	// D2/D4：跳过项统计（Warnings 为前若干条摘要，供前端告警展示）
+	SkippedEmpty       int      `json:"skippedEmpty,omitempty"`       // 直接子目录递归图片数为 0
+	SkippedUnsupported int      `json:"skippedUnsupported,omitempty"` // 不可读归档（rar/7z 等）
+	Warnings           []string `json:"warnings,omitempty"`
 }
 
 func newScanProgress(pathID, mode string) *ScanProgress {
@@ -82,6 +86,8 @@ func (p *ScanProgress) Snapshot() *ScanProgress {
 		StartedAt:    p.StartedAt,
 		FinishedAt:   p.FinishedAt,
 		ComicCount:   p.ComicCount,
+		SkippedEmpty: p.SkippedEmpty, SkippedUnsupported: p.SkippedUnsupported,
+		Warnings: append([]string(nil), p.Warnings...),
 	}
 }
 
@@ -105,6 +111,15 @@ func (p *ScanProgress) setTotal(total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Total = total
+}
+
+// setSkips 写入跳过项统计与告警摘要（D2/D4；Warnings 已由调用方截断）
+func (p *ScanProgress) setSkips(empty, unsupported int, warnings []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.SkippedEmpty = empty
+	p.SkippedUnsupported = unsupported
+	p.Warnings = append([]string(nil), warnings...)
 }
 
 func (p *ScanProgress) setCurrentTitle(title string) {
@@ -144,92 +159,124 @@ func (p *ScanProgress) finish(err error) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 候选收集
+// 扫描口径（D1/D2/D4）
 // ─────────────────────────────────────────────────────────────
 
-// scanCandidate 待扫描条目
-type scanCandidate struct {
-	path  string
-	isDir bool
+// ScanSkipReason 扫描跳过原因
+type ScanSkipReason string
+
+const (
+	SkipReasonEmpty       ScanSkipReason = "empty"               // 直接子目录递归图片数为 0（D2）
+	SkipReasonUnsupported ScanSkipReason = "unsupported_archive" // 不可读归档（rar/7z，D4）
+)
+
+// ScanSkip 被跳过的条目（供告警展示）
+type ScanSkip struct {
+	Path   string
+	Reason ScanSkipReason
 }
 
-// collectCandidates 收集扫描路径下的所有候选条目（含图片的文件夹 + 归档压缩包）
-func collectCandidates(rootPath string, includeSubfolders bool) ([]scanCandidate, error) {
-	var candidates []scanCandidate
+// ScanCandidate 待扫描条目（一个本子）
+type ScanCandidate struct {
+	Path  string
+	IsDir bool
+}
 
-	if includeSubfolders {
-		err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
+// isHiddenEntry 名称以 "." 开头的隐藏项（D1 全局忽略：.saku_trash / .git 等）
+func isHiddenEntry(name string) bool {
+	return strings.HasPrefix(name, ".")
+}
+
+// CollectScanCandidates 按 D1/D2/D4 口径收集扫描候选。
+//
+// includeSubfolders=true：扫描路径根自身直接含图 → 根即一本（不再切子目录）；
+// 否则根的直接子目录各一本（递归图片数为 0 → 跳过），根下直接归档各一本。
+// includeSubfolders=false：仅扫描路径根自身视为单本（递归图片数为 0 → 跳过）。
+//
+// 遍历一律跳过名称以 "." 开头的隐藏目录/文件；rar/7z 记为 unsupported_archive。
+func CollectScanCandidates(rootPath string, includeSubfolders bool) ([]ScanCandidate, []ScanSkip, error) {
+	if _, err := os.Stat(rootPath); err != nil {
+		return nil, nil, err
+	}
+	var cands []ScanCandidate
+	var skips []ScanSkip
+	addSkip := func(path string, reason ScanSkipReason) {
+		skips = append(skips, ScanSkip{Path: path, Reason: reason})
+	}
+
+	// 根自身是否直接含图（隐藏项不参与）
+	rootHasImage := false
+	if entries, err := os.ReadDir(rootPath); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || isHiddenEntry(e.Name()) {
+				continue
 			}
-
-			if d.IsDir() {
-				entries, readErr := os.ReadDir(path)
-				if readErr != nil {
-					return nil
-				}
-
-				hasImage := false
-				for _, entry := range entries {
-					if !entry.IsDir() && IsImage(entry.Name()) {
-						hasImage = true
-						break
-					}
-				}
-
-				if hasImage {
-					candidates = append(candidates, scanCandidate{path: path, isDir: true})
-					if path != rootPath {
-						return filepath.SkipDir
-					}
-				}
-				return nil
+			if IsImage(e.Name()) {
+				rootHasImage = true
+				break
 			}
+		}
+	}
 
-			if !d.IsDir() && IsArchive(d.Name()) {
-				candidates = append(candidates, scanCandidate{path: path, isDir: false})
-			}
+	if !includeSubfolders {
+		n, err := countImagesRecursive(rootPath)
+		if err != nil || n == 0 {
+			addSkip(rootPath, SkipReasonEmpty)
+			return nil, skips, nil
+		}
+		return []ScanCandidate{{Path: rootPath, IsDir: true}}, skips, nil
+	}
 
-			return nil
-		})
-		return candidates, err
+	if rootHasImage {
+		// D1：根自身含图 → 根一本，子目录不再单独切本
+		return []ScanCandidate{{Path: rootPath, IsDir: true}}, skips, nil
 	}
 
 	entries, err := os.ReadDir(rootPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	// 根目录自身直接平铺图片（归档解压落地后 extractDir 直接含图片，非子目录形态）
-	rootHasImage := false
 	for _, entry := range entries {
-		if !entry.IsDir() && IsImage(entry.Name()) {
-			rootHasImage = true
-			break
+		name := entry.Name()
+		if isHiddenEntry(name) {
+			continue
 		}
-	}
-	if rootHasImage {
-		return []scanCandidate{{path: rootPath, isDir: true}}, nil
-	}
-
-	for _, entry := range entries {
-		fullPath := filepath.Join(rootPath, entry.Name())
+		full := filepath.Join(rootPath, name)
 		if entry.IsDir() {
-			subEntries, subErr := os.ReadDir(fullPath)
-			if subErr != nil {
+			n, err := countImagesRecursive(full)
+			if err != nil || n == 0 {
+				addSkip(full, SkipReasonEmpty)
 				continue
 			}
-			for _, sub := range subEntries {
-				if !sub.IsDir() && IsImage(sub.Name()) {
-					candidates = append(candidates, scanCandidate{path: fullPath, isDir: true})
-					break
-				}
-			}
-		} else if IsArchive(entry.Name()) {
-			candidates = append(candidates, scanCandidate{path: fullPath, isDir: false})
+			cands = append(cands, ScanCandidate{Path: full, IsDir: true})
+			continue
+		}
+		switch {
+		case IsSupportedArchive(name):
+			cands = append(cands, ScanCandidate{Path: full, IsDir: false})
+		case IsUnsupportedArchive(name):
+			addSkip(full, SkipReasonUnsupported)
 		}
 	}
-	return candidates, nil
+	return cands, skips, nil
+}
+
+// countImagesRecursive 目录内图片数量（= 递归页表长度，与阅读器同一口径）
+func countImagesRecursive(dir string) (int, error) {
+	images, err := listImagesRecursive(dir)
+	if err != nil {
+		return 0, err
+	}
+	return len(images), nil
+}
+
+// countImagesInZip 归档内图片数量（= 归档页表长度）
+func countImagesInZip(zipPath string) (int, error) {
+	images, err := listImagesInZip(zipPath)
+	if err != nil {
+		return 0, err
+	}
+	return len(images), nil
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -270,23 +317,25 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	}
 	tagsJSON, _ := json.Marshal(tags)
 
+	// D3：页数 = 递归页表长度（与阅读器一致）
 	pageCount := 0
 	var fileSize int64
 	fileModifiedAt := time.Time{}
 	if isDir {
 		entries, _ := os.ReadDir(localPath)
 		for _, entry := range entries {
-			if !entry.IsDir() && IsImage(entry.Name()) {
-				pageCount++
+			if entry.IsDir() || isHiddenEntry(entry.Name()) {
+				continue
 			}
-			if !entry.IsDir() {
-				if fi, err := entry.Info(); err == nil {
-					fileSize += fi.Size()
-					if fi.ModTime().After(fileModifiedAt) {
-						fileModifiedAt = fi.ModTime()
-					}
+			if fi, err := entry.Info(); err == nil {
+				fileSize += fi.Size()
+				if fi.ModTime().After(fileModifiedAt) {
+					fileModifiedAt = fi.ModTime()
 				}
 			}
+		}
+		if n, err := countImagesRecursive(localPath); err == nil {
+			pageCount = n
 		}
 		// 目录自身修改时间兜底（问题1）
 		if fileModifiedAt.IsZero() {
@@ -295,6 +344,9 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 			}
 		}
 	} else {
+		if n, err := countImagesInZip(localPath); err == nil {
+			pageCount = n
+		}
 		if fi, err := os.Stat(localPath); err == nil {
 			fileSize = fi.Size()
 			fileModifiedAt = fi.ModTime()
@@ -400,8 +452,19 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		}
 	}
 
-	// 隐藏页与原始页数：首次入库为空；已存在记录保留用户隐藏配置
-	hiddenPages := ParseHiddenPages(existingFull.HiddenPages)
+	// 隐藏页与原始页数：首次入库为空；已存在记录保留用户隐藏配置。
+	// D10：以相对路径存储；旧的纯数字索引按当前页表映射后再归一。
+	var pagePaths []string
+	if isDir {
+		if ps, err := listImagesRecursive(localPath); err == nil {
+			pagePaths = ps
+		}
+	} else {
+		if ps, err := listImagesInZip(localPath); err == nil {
+			pagePaths = ps
+		}
+	}
+	hidden := ParseHiddenSet(existingFull.HiddenPages, pagePaths)
 	originalPageCount := existingFull.OriginalPageCount
 	if originalPageCount <= 0 {
 		originalPageCount = pageCount
@@ -409,8 +472,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	if pageCount > originalPageCount {
 		originalPageCount = pageCount // 物理页变多时同步抬升原页数
 	}
-	hiddenPages = NormalizeHiddenPages(hiddenPages, pageCount) // 物理页变少时裁剪越界索引
-	effectivePageCount := EffectivePageCount(pageCount, hiddenPages)
+	hidden = NormalizeHiddenSet(hidden, pagePaths) // 页表中已不存在的路径自动丢弃
+	effectivePageCount := EffectivePageCount(pagePaths, hidden)
 
 	// 发布时间：metadata publishTime / ComicInfo 日期（问题1 排序）
 	publishedAt := parsePublishTime(meta.PublishTime)
@@ -435,7 +498,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 		Tags:              string(tagsJSON),     // 写入解析出的多元标签数组 JSON
 		CommunityRating:   communityRating,      // Round52：社区评分（本地解析 / 保留库中已有）
 		PageCount:         effectivePageCount,   // Round23：有效页数（物理 − 隐藏）
-		HiddenPages:       MarshalHiddenPages(hiddenPages),
+		HiddenPages:       hidden.Marshal(),     // D10：相对路径数组
 		OriginalPageCount: originalPageCount,
 		UpdatedAt:         time.Now(),
 		AddedAt:           addedAt,
@@ -489,35 +552,58 @@ func parsePublishTime(s string) *time.Time {
 // 主扫描流程
 // ─────────────────────────────────────────────────────────────
 
-// scanDirectory 扫描指定路径并入库，返回入库数量。
+// ScanStats 单次扫描的统计结果（D17：found 为写入成功；跳过项分原因计数）
+type ScanStats struct {
+	Found              int
+	SkippedExisting    int // 增量模式已存在
+	SkippedGid         int // 同 gid 冲突跳过
+	SkippedEmpty       int // 递归图片数为 0（D2）
+	SkippedUnsupported int // 不可读归档 rar/7z（D4）
+	Failed             int // 写库失败
+}
+
+// scanDirectory 扫描指定路径并入库，返回统计结果。
 // mode: "full" 全量 | "incremental" 增量；progress 可为 nil（不汇报进度）；
 // pathID 为来源额外扫描路径 ID（空 = 下载导入）。
-func scanDirectory(rootPath string, includeSubfolders bool, mode string, progress *ScanProgress, pathID string) (int, error) {
+func scanDirectory(rootPath string, includeSubfolders bool, mode string, progress *ScanProgress, pathID string) (ScanStats, error) {
 	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
-		return 0, err
+		return ScanStats{}, err
 	}
 
 	if progress != nil {
 		progress.setPhase(ScanPhaseCounting)
 	}
-	candidates, err := collectCandidates(rootPath, includeSubfolders)
+	candidates, skips, err := CollectScanCandidates(rootPath, includeSubfolders)
 	if err != nil {
-		return 0, err
+		return ScanStats{}, err
+	}
+	stats := ScanStats{}
+	warnings := make([]string, 0, 16)
+	for _, s := range skips {
+		switch s.Reason {
+		case SkipReasonEmpty:
+			stats.SkippedEmpty++
+		case SkipReasonUnsupported:
+			stats.SkippedUnsupported++
+		}
+		if len(warnings) < maxScanWarnings {
+			warnings = append(warnings, string(s.Reason)+": "+s.Path)
+		}
 	}
 	if progress != nil {
+		progress.setSkips(stats.SkippedEmpty, stats.SkippedUnsupported, warnings)
 		progress.setTotal(len(candidates))
 		progress.setPhase(ScanPhaseScanning)
 	}
 
 	incremental := mode == "incremental"
-	comicCount := 0
 
 	for _, cand := range candidates {
 		if progress != nil {
-			progress.setCurrentTitle(filepath.Base(cand.path))
+			progress.setCurrentTitle(filepath.Base(cand.Path))
 		}
-		if saveComic(cand.path, cand.isDir, incremental, pathID) {
-			comicCount++
+		if saveComic(cand.Path, cand.IsDir, incremental, pathID) {
+			stats.Found++
 			if progress != nil {
 				progress.incFound()
 			}
@@ -529,15 +615,18 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 		}
 	}
 
-	return comicCount, nil
+	return stats, nil
 }
+
+// maxScanWarnings 告警摘要保留条数上限（避免大库内存膨胀；统计计数仍为全量）
+const maxScanWarnings = 50
 
 // ScanAndSaveDirectory 兼容旧调用：全量扫描，不汇报进度；pathID 为空（下载导入，问题3）
 func ScanAndSaveDirectory(rootPath string, includeSubfolders bool) (int, error) {
-	count, err := scanDirectory(rootPath, includeSubfolders, "full", nil, "")
+	stats, err := scanDirectory(rootPath, includeSubfolders, "full", nil, "")
 	// Round32：下载入库（画廊/压缩包任务完成）会新增本地漫画 → 异步重建 XP 统计表
-	if err == nil && count > 0 {
+	if err == nil && stats.Found > 0 {
 		XpRebuildAsync("下载入库")
 	}
-	return count, err
+	return stats.Found, err
 }

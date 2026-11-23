@@ -82,8 +82,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// 故作公开路由（离线画廊数据本身为全局共享，无用户隔离）。
 		public.GET("/comics/:id/cover", handlers.GetComicCover)
 		public.GET("/comics/:id/pages", handlers.GetComicPages)
-		public.GET("/comics/:id/page/:index", handlers.GetComicPageImage)
-		// Round52：页缩略图（维护页展开对比，240px 缓存到 page_cache/）
+		// D9：页索引统一物理索引；旧 /page/:index（有效索引）路由已删除。
+		// Round52：页缩略图（维护页展开对比，240px 缓存到 page_cache/；索引 = 物理页序号）
 		public.GET("/comics/:id/page-thumb/:index", handlers.GetComicPageThumbImage)
 		// Round23：物理页索引直读（管理模式预览展示含隐藏页的全量页面）
 		public.GET("/comics/:id/raw-page/:index", handlers.GetComicRawPageImage)

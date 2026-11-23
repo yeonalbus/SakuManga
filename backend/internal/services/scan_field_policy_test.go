@@ -313,3 +313,78 @@ func TestSaveUpdateMarksDoesNotTouchUpdatedAt(t *testing.T) {
 		t.Errorf("updated_at 不应被检测刷新：期望 %v，实际 %v", oldTime, got.UpdatedAt)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// D8 来源不可变：仅首次入库写 ScanPathID；已存在记录一律不改写
+// （避免「下载目录被设为扫描路径」把来源从「下载」翻成「额外路径」）
+// ─────────────────────────────────────────────────────────────
+
+func TestScanFillsSourceForNewRecords(t *testing.T) {
+	db := setupScanPolicyDB(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "1.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("写图片失败: %v", err)
+	}
+	if !saveComic(dir, true, false, "path-a") {
+		t.Fatalf("saveComic 应成功")
+	}
+	var got models.OfflineComic
+	if err := db.First(&got, "local_path = ?", dir).Error; err != nil {
+		t.Fatalf("读取记录失败: %v", err)
+	}
+	if got.ScanPathID != "path-a" {
+		t.Errorf("首次入库应写来源 path-a，实际 %q", got.ScanPathID)
+	}
+}
+
+func TestScanKeepsDownloadOrigin(t *testing.T) {
+	db := setupScanPolicyDB(t)
+	seed, dir := seedComicDir(t, db, func(c *models.OfflineComic) {
+		c.ScanPathID = ""
+	})
+	if !saveComic(dir, true, false, "path-a") {
+		t.Fatalf("saveComic 应成功")
+	}
+	var got models.OfflineComic
+	if err := db.First(&got, "id = ?", seed.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ScanPathID != "" {
+		t.Errorf("下载导入记录被扫描命中时不应改写来源，实际 %q", got.ScanPathID)
+	}
+}
+
+func TestScanKeepsExistingSourceOnPathChange(t *testing.T) {
+	db := setupScanPolicyDB(t)
+	seed, dir := seedComicDir(t, db, func(c *models.OfflineComic) {
+		c.ScanPathID = "path-a"
+	})
+	if !saveComic(dir, true, false, "path-b") {
+		t.Fatalf("saveComic 应成功")
+	}
+	var got models.OfflineComic
+	if err := db.First(&got, "id = ?", seed.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ScanPathID != "path-a" {
+		t.Errorf("路径A→路径B 不应改写来源，实际 %q", got.ScanPathID)
+	}
+}
+
+func TestIncrementalKeepsDownloadOrigin(t *testing.T) {
+	db := setupScanPolicyDB(t)
+	seed, dir := seedComicDir(t, db, func(c *models.OfflineComic) {
+		c.ScanPathID = ""
+	})
+	// 增量模式：已存在 → 跳过（返回 false），且不得改写来源
+	if saveComic(dir, true, true, "path-a") {
+		t.Errorf("增量模式遇已存在记录应返回 false")
+	}
+	var got models.OfflineComic
+	if err := db.First(&got, "id = ?", seed.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ScanPathID != "" {
+		t.Errorf("增量模式不应改写来源，实际 %q", got.ScanPathID)
+	}
+}

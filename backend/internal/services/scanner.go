@@ -377,6 +377,8 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 					log.Printf("%s [scan] 增量补提元数据 gid=%s: %q", dlLogTag, meta.GID, localPath)
 				}
 			}
+			// D8：来源不可变——已存在记录不改写 scan_path_id（含增量模式），
+			// 避免「下载目录被设为扫描路径」时把来源从「下载」翻成「额外路径」。
 			log.Printf("%s [scan] 增量模式跳过已存在路径: %q", dlLogTag, localPath)
 			return false
 		}
@@ -595,6 +597,8 @@ func scanFieldUpdates(existing *models.OfflineComic, incoming *models.OfflineCom
 	if merged := mergeTagJSON(onlineTags, existing.OfflineAddTags, existing.OfflineRemoveTags, incoming.Tags); merged != "" && merged != existing.Tags {
 		u["tags"] = merged
 	}
+
+	// ── D8 来源不可变：已存在记录一律不改写 scan_path_id（仅首次入库在 Create 时写入）──
 	return u
 }
 

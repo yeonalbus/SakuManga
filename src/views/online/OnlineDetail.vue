@@ -252,25 +252,29 @@ const fetchDetail = async () => {
   }
 }
 
-// S1 本地优先：加载本地页图列表并重建预览切片（0-based index 对应 /comics/:id/page/:index）
+// S1 本地优先：加载本地页图列表并重建预览切片（D9：统一物理页索引 /raw-page/:index）
 const LOCAL_PREVIEW_BATCH = 40
 const loadLocalPreviewPages = async (): Promise<boolean> => {
   const lv = localVersion.value
   if (!lv) return false
   try {
-    const res = await http<{ total: number; pages?: string[] }>(`/comics/${lv.comicId}/pages`)
-    const total = res.total || lv.pageCount || 0
-    if (total <= 0) return false
-    comic.value.pageCount = total
-    const count = Math.min(total, LOCAL_PREVIEW_BATCH)
+    const res = await http<{ total: number; pages?: string[]; originalTotal?: number }>(
+      `/comics/${lv.comicId}/pages`,
+    )
+    const allPages = Array.isArray(res.pages) ? res.pages : []
+    const physicalTotal = allPages.length || res.originalTotal || 0
+    const effectiveTotal = res.total || lv.pageCount || 0
+    if (physicalTotal <= 0 && effectiveTotal <= 0) return false
+    comic.value.pageCount = effectiveTotal || physicalTotal
+    const count = Math.min(physicalTotal || effectiveTotal, LOCAL_PREVIEW_BATCH)
     comic.value.previewPages = Array.from({ length: count }, (_, i) => ({
       pageIndex: i + 1,
-      url: `${API_BASE}/comics/${lv.comicId}/page/${i}`,
+      url: `${API_BASE}/comics/${lv.comicId}/raw-page/${i}`,
       isSprite: false,
       width: 100,
       height: 130,
     }))
-    maxPreviewPage.value = Math.ceil(total / LOCAL_PREVIEW_BATCH)
+    maxPreviewPage.value = Math.ceil((physicalTotal || effectiveTotal) / LOCAL_PREVIEW_BATCH)
     currentPreviewPage.value = 1
     return true
   } catch (err: unknown) {

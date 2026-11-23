@@ -64,7 +64,7 @@ export interface OfflineComic extends BaseComic {
   gid?: string
 
   // ─── Round23：自定义删除页面（隐藏页软删除）───
-  hiddenPagesList?: number[] // 隐藏的物理页索引（0-based 原文件索引）
+  hiddenPagesList?: string[] // 隐藏页的相对路径（D10；物理索引由 /pages 的 pages 数组下标换算）
   originalPageCount?: number // 原始物理页数（隐藏页后 pageCount 为有效页数）
 }
 

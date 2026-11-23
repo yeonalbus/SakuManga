@@ -41,6 +41,12 @@ export interface ScanProgress {
   startedAt: number
   finishedAt?: number
   comicCount?: number
+  /** D2：递归图片数为 0 被跳过的目录数 */
+  skippedEmpty?: number
+  /** D4：不可读归档（rar/7z）被跳过的条数 */
+  skippedUnsupported?: number
+  /** 跳过项摘要（前若干条，供告警展示） */
+  warnings?: string[]
 }
 
 /** 扫描路径列表 */

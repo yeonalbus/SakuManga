@@ -189,27 +189,23 @@ const loadComicPages = async () => {
       onlineId = realId
       onlineToken = tok
     } else {
-      // 📚 离线模式：物理索引锚点（Round24）
-      // /pages 返回 originalTotal(物理页数) + hiddenPages(隐藏物理索引)；
-      // 前端构建「可见物理序列」，图片按物理索引直读 /raw-page（URL 稳定可缓存，
-      // 修复隐藏页后「有效序号」URL 强缓存错位的问题）。
+      // 📚 离线模式（D9/D10）：/pages 返回 pages（物理页表相对路径）+ hiddenPages（隐藏页相对路径）。
+      // 可见序列 = 页表下标过滤隐藏；图片按物理索引直读 /raw-page（URL 稳定可缓存）。
       const data = await http<{
         total?: number
-        pages?: unknown[]
+        pages?: string[]
         originalTotal?: number
-        hiddenPages?: number[]
+        hiddenPages?: string[]
       }>(`/comics/${realId}/pages`)
-      const physicalTotal = typeof data.originalTotal === 'number' ? data.originalTotal : 0
-      const hidden = new Set(data.hiddenPages || [])
+      const allPages = Array.isArray(data.pages) ? data.pages : []
+      const hidden = new Set<string>(Array.isArray(data.hiddenPages) ? data.hiddenPages : [])
       const visible: number[] = []
-      if (physicalTotal > 0) {
-        for (let p = 0; p < physicalTotal; p++) {
-          if (!hidden.has(p)) visible.push(p)
-        }
-      } else if (typeof data.total === 'number') {
-        for (let i = 0; i < data.total; i++) visible.push(i)
-      } else if (Array.isArray(data.pages)) {
-        for (let i = 0; i < data.pages.length; i++) visible.push(i)
+      allPages.forEach((p, i) => {
+        if (!hidden.has(p)) visible.push(i)
+      })
+      // 兜底：老后端不返回页表时退回物理总数
+      if (visible.length === 0 && typeof data.originalTotal === 'number' && data.originalTotal > 0) {
+        for (let p = 0; p < data.originalTotal; p++) visible.push(p)
       }
       if (visible.length === 0) {
         toast.error('该画廊没有任何页面')

@@ -208,7 +208,10 @@
           <span v-else>
             <AppIcon name="success" weight="fill" :size="13" /> 扫描完成，共
             {{ progressOf(item)!.comicCount ?? progressOf(item)!.found }} 本
-            <template v-if="progressOf(item)!.skipped"
+            <template v-if="skippedDetail(progressOf(item)!)">
+              （跳过 {{ skippedDetail(progressOf(item)!) }}）
+            </template>
+            <template v-else-if="progressOf(item)!.skipped"
               >（跳过 {{ progressOf(item)!.skipped }}）</template
             >
           </span>
@@ -394,6 +397,14 @@ const handleSingleScan = async (item: ExtraScanPath, mode: ScanMode) => {
 
 // 5. 进度辅助函数
 const progressOf = (item: ExtraScanPath): ScanProgress | undefined => getScanProgress(item.id)
+
+// D2/D4：跳过项摘要（空目录 / 不可读归档）
+const skippedDetail = (p: ScanProgress): string => {
+  const parts: string[] = []
+  if (p.skippedEmpty) parts.push(`空目录 ${p.skippedEmpty}`)
+  if (p.skippedUnsupported) parts.push(`不可读归档 ${p.skippedUnsupported}`)
+  return parts.join(' / ')
+}
 
 const isScanning = (item: ExtraScanPath): boolean => {
   const p = progressOf(item)

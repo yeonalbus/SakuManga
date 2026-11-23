@@ -53,7 +53,7 @@ interface OfflineDetailDTO {
   gid?: string
   token?: string
   // Round23：自定义删除页面（隐藏页软删除）
-  hiddenPagesList?: number[]
+  hiddenPagesList?: string[]
   originalPageCount?: number
 }
 
@@ -94,7 +94,7 @@ const onlineTagsList = ref<string[]>([])
 const offlineAddTagsList = ref<string[]>([])
 const offlineRemoveTagsList = ref<string[]>([])
 // Round23：隐藏页（自定义删除页面）
-const hiddenPagesList = ref<number[]>([])
+const hiddenPagesList = ref<string[]>([])
 // Round24：后端新旧探测 + 旧后端降级（线上旧版后端不返回三态字段，删除后本地移除显示）
 const backendHasTriState = ref(false)
 const legacyRemovedRaws = ref<Set<string>>(new Set()) // 旧后端下本会话已删除的 raw（显示过滤）
@@ -449,7 +449,8 @@ const previewPages = ref<number[]>([]) // 普通模式：已加载的可见物�
 const visiblePhysicalList = ref<number[]>([]) // 可见物理索引序列（Round24，物理索引锚点）
 const visibleTotal = ref(0) // 有效总页数（物理 − 隐藏）
 const physicalTotal = ref(0) // 物理总页数（含隐藏）
-const hiddenPageSet = ref<Set<number>>(new Set()) // 隐藏的物理页索引集合
+const allPages = ref<string[]>([]) // 物理页表（相对路径；下标即物理索引）
+const hiddenPageSet = ref<Set<string>>(new Set()) // 隐藏页的相对路径集合（D10）
 const loadingPreview = ref(false)
 
 // 管理模式（Round23 自定义删除页面）
@@ -466,14 +467,16 @@ const previewCount = computed(() => visibleTotal.value) // 预览 tab 标题显�
 // 折叠后默认不渲染该段缩略图，用户按需展开（展开后仍可多选恢复操作）。
 const MANAGE_FOLD_MIN_MIDDLE = 20 // 中间隐藏段达到该页数才折叠（零星隐藏不打扰）
 
-/** 隐藏连续段（run-length）：按物理序扫描 hiddenPageSet */
+/** 隐藏连续段（run-length）：按物理序扫描「该物理索引对应路径是否在隐藏集合中」 */
 const hiddenSegments = computed(() => {
   const hidden = hiddenPageSet.value
   if (hidden.size === 0 || physicalTotal.value <= 0) return []
   const segs: { start: number; end: number }[] = []
   let start = -1
   for (let i = 0; i < physicalTotal.value; i++) {
-    if (hidden.has(i)) {
+    const path = allPages.value[i]
+    const isHidden = path !== undefined && hidden.has(path)
+    if (isHidden) {
       if (start < 0) start = i
     } else if (start >= 0) {
       segs.push({ start, end: i - 1 })
@@ -524,25 +527,22 @@ const fetchPreview = async () => {
   if (!comic.value.id || loadingPreview.value) return
   loadingPreview.value = true
   try {
-    const data = await http<{ total?: number; pages?: unknown[]; originalTotal?: number; hiddenPages?: number[] }>(
-      '/comics/' + comic.value.id + '/pages',
-    )
-    visibleTotal.value = typeof data.total === 'number' ? data.total : 0
-    physicalTotal.value =
-      typeof data.originalTotal === 'number'
-        ? data.originalTotal
-        : visibleTotal.value || comic.value.pageCount || 0
-    if (Array.isArray(data.hiddenPages)) {
-      hiddenPageSet.value = new Set(data.hiddenPages)
-    }
-    // Round24：可见物理索引序列（物理索引锚点，普通预览与阅读器/管理模式统一）
+    const data = await http<{
+      pages?: string[]
+      total?: number
+      originalTotal?: number
+      hiddenPages?: string[]
+    }>('/comics/' + comic.value.id + '/pages')
+    // D10：pages = 物理页表（相对路径，下标即物理索引）；hiddenPages = 隐藏页相对路径
+    const pages = Array.isArray(data.pages) ? data.pages : []
+    allPages.value = pages
+    physicalTotal.value = pages.length || (typeof data.originalTotal === 'number' ? data.originalTotal : 0)
+    visibleTotal.value = typeof data.total === 'number' ? data.total : pages.length
+    hiddenPageSet.value = new Set(Array.isArray(data.hiddenPages) ? data.hiddenPages : [])
+    // 可见物理索引序列（物理索引锚点，普通预览与阅读器/管理模式统一）
     const list: number[] = []
-    if (physicalTotal.value > 0) {
-      for (let i = 0; i < physicalTotal.value; i++) {
-        if (!hiddenPageSet.value.has(i)) list.push(i)
-      }
-    } else if (typeof data.total === 'number') {
-      for (let i = 0; i < data.total; i++) list.push(i)
+    for (let i = 0; i < pages.length; i++) {
+      if (!hiddenPageSet.value.has(pages[i])) list.push(i)
     }
     visiblePhysicalList.value = list
     // 初始加载第一批（普通模式）
@@ -581,7 +581,19 @@ const exitManageMode = () => {
   previewPages.value = visiblePhysicalList.value.slice(0, PREVIEW_BATCH)
 }
 
-const isHiddenPage = (physicalIdx: number) => hiddenPageSet.value.has(physicalIdx)
+/** 隐藏页的物理索引集合（由相对路径集合映射；D10） */
+const hiddenPhysicalIndices = computed(() => {
+  const out: number[] = []
+  for (let i = 0; i < allPages.value.length; i++) {
+    if (hiddenPageSet.value.has(allPages.value[i])) out.push(i)
+  }
+  return out
+})
+
+const isHiddenPage = (physicalIdx: number) => {
+  const p = allPages.value[physicalIdx]
+  return p !== undefined && hiddenPageSet.value.has(p)
+}
 const isSelectedPage = (physicalIdx: number) => selectedPages.value.has(physicalIdx)
 
 const toggleSelectPage = (physicalIdx: number) => {
@@ -594,16 +606,19 @@ const toggleSelectPage = (physicalIdx: number) => {
   selectedPages.value = s
 }
 
-// 保存隐藏页列表（软删除）：同步重算有效页数并记录原页数
-const saveHiddenPages = async (hidden: number[]) => {
+// 保存隐藏页列表（软删除）：入参为物理索引数组，提交时映射为相对路径（D10）。
+const saveHiddenPages = async (hiddenPhysical: number[]) => {
   if (!comic.value.id || savingHidden.value) return
   savingHidden.value = true
   try {
-    const res = await http<{ pageCount: number; originalPageCount: number; hiddenPages: number[] }>(
+    const paths = hiddenPhysical
+      .map((i) => allPages.value[i])
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    const res = await http<{ pageCount: number; originalPageCount: number; hiddenPages: string[] }>(
       `/comics/${comic.value.id}/hidden-pages`,
       {
         method: 'PUT',
-        body: JSON.stringify({ hiddenPages: hidden }),
+        body: JSON.stringify({ hiddenPages: paths }),
       },
     )
     // 手动同步详情字段（不触发 fetchComicDetail，避免预览被重置、管理模式被打断）
@@ -614,10 +629,11 @@ const saveHiddenPages = async (hidden: number[]) => {
     visibleTotal.value = res.pageCount
     physicalTotal.value = Math.max(physicalTotal.value, res.originalPageCount || physicalTotal.value)
     selectedPages.value = new Set()
-    // Round24：重算可见物理序列，普通预览从物理序列重建（隐藏变化导致后续序列错位）
+    // 重算可见物理序列，普通预览从物理序列重建
     const list: number[] = []
     for (let i = 0; i < physicalTotal.value; i++) {
-      if (!hiddenPageSet.value.has(i)) list.push(i)
+      const p = allPages.value[i]
+      if (p === undefined || !hiddenPageSet.value.has(p)) list.push(i)
     }
     visiblePhysicalList.value = list
     previewPages.value = list.slice(0, PREVIEW_BATCH)
@@ -631,23 +647,23 @@ const saveHiddenPages = async (hidden: number[]) => {
 }
 
 const hideSelectedPages = async () => {
-  const toHide = [...selectedPages.value].filter((i) => !hiddenPageSet.value.has(i))
+  const toHide = [...selectedPages.value].filter((i) => !isHiddenPage(i))
   if (toHide.length === 0) {
     toast.info('请先选择未隐藏的页面')
     return
   }
-  const next = [...hiddenPageSet.value, ...toHide]
+  const next = [...new Set([...hiddenPhysicalIndices.value, ...toHide])]
   const ok = await saveHiddenPages(next)
   if (ok) toast.success(`已隐藏 ${toHide.length} 页（有效页数 ${comic.value.pageCount} 页）`)
 }
 
 const restoreSelectedPages = async () => {
-  const toRestore = [...selectedPages.value].filter((i) => hiddenPageSet.value.has(i))
+  const toRestore = [...selectedPages.value].filter((i) => isHiddenPage(i))
   if (toRestore.length === 0) {
     toast.info('请先选择已隐藏的页面')
     return
   }
-  const next = [...hiddenPageSet.value].filter((i) => !toRestore.includes(i))
+  const next = hiddenPhysicalIndices.value.filter((i) => !toRestore.includes(i))
   const ok = await saveHiddenPages(next)
   if (ok) toast.success(`已恢复 ${toRestore.length} 页（有效页数 ${comic.value.pageCount} 页）`)
 }
@@ -661,7 +677,7 @@ const hideRange = async () => {
   const toHide: number[] = []
   for (let p = a; p <= b; p++) {
     const idx = p - 1 // 转 0-based 物理索引
-    if (idx >= 0 && idx < physicalTotal.value && !hiddenPageSet.value.has(idx)) {
+    if (idx >= 0 && idx < physicalTotal.value && !isHiddenPage(idx)) {
       toHide.push(idx)
     }
   }
@@ -669,7 +685,7 @@ const hideRange = async () => {
     toast.info('区间内没有未隐藏的页面')
     return
   }
-  const next = [...hiddenPageSet.value, ...toHide]
+  const next = [...new Set([...hiddenPhysicalIndices.value, ...toHide])]
   const ok = await saveHiddenPages(next)
   if (ok) toast.success(`已隐藏区间 P${a}-P${b}（${toHide.length} 页）`)
 }
@@ -679,13 +695,13 @@ const restoreRange = async () => {
   const toRestore: number[] = []
   for (let p = a; p <= b; p++) {
     const idx = p - 1
-    if (hiddenPageSet.value.has(idx)) toRestore.push(idx)
+    if (isHiddenPage(idx)) toRestore.push(idx)
   }
   if (toRestore.length === 0) {
     toast.info('区间内没有已隐藏的页面')
     return
   }
-  const next = [...hiddenPageSet.value].filter((i) => !toRestore.includes(i))
+  const next = hiddenPhysicalIndices.value.filter((i) => !toRestore.includes(i))
   const ok = await saveHiddenPages(next)
   if (ok) toast.success(`已恢复区间 P${a}-P${b}（${toRestore.length} 页）`)
 }

@@ -200,7 +200,7 @@ const importFromShelf = async (shelf: { id: string; name: string; comicIds?: str
 
           <div class="info-box">
             <h4 class="title" :title="comic.title">{{ comic.title }}</h4>
-            <span class="meta-pages">{{ comic.pageCount || 32 }} Pages</span>
+            <span class="meta-pages">{{ comic.pageCount || 0 }} Pages</span>
           </div>
 
           <div class="card-actions">

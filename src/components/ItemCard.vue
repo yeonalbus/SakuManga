@@ -263,17 +263,36 @@ const handleThumbClick = () => {
   toggleTags()
 }
 
-// 统一解析 Tags，确保永远返回 string[] 数组
+// 统一解析 Tags，确保永远返回 string[] 数组（D22：tags 已统一为 TagItem[]，展示取 name || key）
 const normalizedTags = computed<string[]>(() => {
-  if (Array.isArray(props.comic.tags)) {
-    return props.comic.tags
+  const raw = props.comic.tags as unknown
+  if (Array.isArray(raw)) {
+    return raw
+      .map((t) => {
+        if (typeof t === 'string') return t
+        if (t && typeof t === 'object') {
+          const o = t as { name?: string; key?: string }
+          return (o.name || o.key || '').trim()
+        }
+        return ''
+      })
+      .filter(Boolean)
   }
-  if (typeof props.comic.tags === 'string') {
+  if (typeof raw === 'string') {
     try {
-      const parsed = JSON.parse(props.comic.tags)
-      if (Array.isArray(parsed)) return parsed
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.map((t: unknown) => {
+          if (typeof t === 'string') return t
+          if (t && typeof t === 'object') {
+            const o = t as { name?: string; key?: string }
+            return (o.name || o.key || '').trim()
+          }
+          return ''
+        }).filter(Boolean)
+      }
     } catch {
-      return [props.comic.tags]
+      return [raw]
     }
   }
   return []

@@ -40,6 +40,8 @@ export const useSubStore = defineStore('subStore', () => {
     return dtoList.map((item) => ({
       ...item,
       source: 'online',
+      // D22：在线 DTO 的 tags 为字符串数组 → 统一归一为 TagItem[]
+      tags: Array.isArray(item.tags) ? item.tags.map((t) => ({ key: t, name: t })) : [],
       // 兼容映射：后端 Go 字段为 clickCount，前端契约统一使用 readCount[cite: 1, 4]
       readCount: item.readCount ?? item.clickCount ?? 0,
     }))

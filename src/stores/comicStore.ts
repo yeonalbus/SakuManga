@@ -3,7 +3,7 @@
  * 由原 appStore 拆分而来，负责漫画相关数据源与派生计算
  */
 import { ref, computed } from 'vue'
-import type { OnlineComic, OfflineComic } from '@/types/comic'
+import type { OnlineComic, OfflineComic, TagItem } from '@/types/comic'
 import { http } from '@/utils/request'
 import { offlineReadingList } from '@/stores/readingStore'
 // Round20-Bug4：fetchOfflineComics 失败可见（列表停留旧数据会导致点击 404）
@@ -75,20 +75,23 @@ export const fetchOfflineComics = async () => {
         : []
       return {
         ...item,
-        // 需求2：tags 归一化为「翻译名」字符串数组，供卡片展示与 tag 搜索
+        // D22：tags 统一为 TagItem[]（后端列表发 TagItemBrief，字段是其子集）；
+        // 展示层取 name || key，搜索/语言过滤仍用 tagRaws。
         // bug1：name 可能含 markdown 图标语法（如 ![](url)Fate/Grand Order），
         // 必须先剥离图标再入组，避免 TagChip 把整段 URL 当原文显示。
         tags:
           tagItems.length > 0
             ? tagItems
-                .map((t) => {
-                  if (!t) return ''
-                  const name = cleanTagName(t.name || '')
-                  return name || cleanTagName(t.key || '') || (t.key || '').trim()
+                .map((t): TagItem | null => {
+                  if (!t) return null
+                  const key = ((t.key as string) || '').trim()
+                  const name = cleanTagName(t.name || '') || cleanTagName(key) || key
+                  if (!name && !key) return null
+                  return { key: key || name, name, namespace: t.namespace }
                 })
-                .filter(Boolean)
+                .filter((t): t is TagItem => !!t)
             : typeof item.tags === 'string'
-              ? safeParseTags(item.tags as string)
+              ? safeParseTags(item.tags as string).map((n) => ({ key: n, name: n }))
               : [],
         // 需求2：原始 tag 串（namespace:key，_ 归一为空格并小写），供 tag 搜索/语言过滤精确匹配
         tagRaws:
@@ -167,6 +170,13 @@ export const purgeOrphanOfflineRefs = (id: string) => {
     if (Array.isArray(shelf.comicIds) && shelf.comicIds.length) {
       shelf.comicIds = shelf.comicIds.filter((cid) => cid !== id)
     }
+    // D22：同步清理权重表与手动封面引用（后端 CleanupComicReferences 同口径）
+    if (shelf.sortKeys && shelf.sortKeys[id] !== undefined) {
+      delete shelf.sortKeys[id]
+    }
+    if (shelf.coverComicId === id) {
+      shelf.coverComicId = ''
+    }
   }
 }
 
@@ -205,6 +215,15 @@ export const deleteOfflineComics = async (ids: string[], deleteFile = false): Pr
     for (const shelf of bookshelfStore.bookshelves.value) {
       if (Array.isArray(shelf.comicIds) && shelf.comicIds.length) {
         shelf.comicIds = shelf.comicIds.filter((cid) => !removedIds.has(cid))
+      }
+      // D22：权重表与手动封面引用同步清理
+      if (shelf.sortKeys) {
+        for (const cid of Object.keys(shelf.sortKeys)) {
+          if (removedIds.has(cid)) delete shelf.sortKeys[cid]
+        }
+      }
+      if (shelf.coverComicId && removedIds.has(shelf.coverComicId)) {
+        shelf.coverComicId = ''
       }
     }
     // 4. 本地离线历史（localStorage 存储）

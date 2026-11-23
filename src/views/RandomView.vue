@@ -245,7 +245,8 @@ const toComicItem = (item: RandomComicItem): DrawnComic => {
       title: item.title,
       coverUrl: item.coverUrl,
       source: 'online',
-      tags: item.tags ?? [],
+      // D22：随机接口 DTO 的 tags 为字符串数组 → 统一归一为 TagItem[]
+      tags: (item.tags ?? []).map((t) => ({ key: t, name: t })),
       category: item.category,
       rating: item.rating,
       pageCount: item.pageCount,
@@ -262,7 +263,7 @@ const toComicItem = (item: RandomComicItem): DrawnComic => {
     title: item.title,
     coverUrl: item.coverUrl,
     source: 'offline',
-    tags: item.tags ?? [],
+    tags: (item.tags ?? []).map((t) => ({ key: t, name: t })),
     category: item.category,
     rating: item.rating,
     pageCount: item.pageCount,
@@ -271,7 +272,6 @@ const toComicItem = (item: RandomComicItem): DrawnComic => {
     isDownloaded: item.isDownloaded,
     localPath: item.localPath ?? '',
     fileSize: item.fileSize,
-    hasError: item.hasError,
     // Round32：推荐命中理由（仅离线推荐结果带）
     matchedTags: item.matchedTags,
   } as DrawnComic

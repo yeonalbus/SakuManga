@@ -12,13 +12,22 @@ export type CardViewMode = 'card' | 'compact' // 卡片模式 / 名片模式
 // 2. 核心数据契约 (基础接口 + 在线/离线扩展)
 // ==========================================
 
+/** Tag 对象（D22：后端列表返回 TagItemBrief、详情返回 TagItem，前端统一按 TagItem 处理） */
+export interface TagItem {
+  key: string // 原始 key（namespace 内）
+  name?: string // 翻译名（缺失时回退 key）
+  namespace?: string // 命名空间（female/parody/artist 等）
+  intro?: string // 简介（仅详情）
+  count?: number // 热度（可选）
+}
+
 /** 所有漫画（在线/离线）通用的基础属性，专门供 ItemCard 和 GridContainer 使用 */
 export interface BaseComic {
   id: string // 唯一标识 (本地 UUID 或在线 GID)
   title: string // 标题
   coverUrl: string // 封面图 (本地路径或远程 URL)
   source: ComicSource // 标识来源
-  tags: string[] // 标签列表
+  tags: TagItem[] // 标签列表（D22：统一对象数组，展示取 name || key）
   category?: string // 分类 (提至基类：Doujinshi, Manga 等)
   rating?: number // 评分/星级
   /** Round52：E 站社区评分（离线漫画；0/缺失=未知）。个人评分缺失时作为兜底展示 */
@@ -46,8 +55,6 @@ export interface OfflineComic extends BaseComic {
   source: 'offline'
   localPath: string // 本地存储绝对/相对路径
   fileSize?: number // 文件大小 (bytes)
-  hasError?: boolean // 修正语义：标记是否有损坏或缺失页面 (原 needsUpdate)
-  bookshelfId?: string // 关联的离线书架 ID
 
   // ─── 问题1/2/3：标题、时间与来源字段 ───
   titleJpn?: string // 日文原名（优先显示，问题2）

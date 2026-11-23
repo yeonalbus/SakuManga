@@ -128,7 +128,10 @@ if (typeof kwFromUrl === 'string' && kwFromUrl.trim()) {
 // 需求2：本地 tag 搜索——同时匹配翻译名(tags)与原始 tag 串(tagRaws)，二者在 store 中均已归一为 string[]
 const comicTagStrings = (comic: ComicItem): string[] => {
   const out: string[] = []
-  if (Array.isArray(comic.tags)) out.push(...(comic.tags as string[]))
+  // D22：tags 为 TagItem[]，展示/匹配取 name || key
+  if (Array.isArray(comic.tags)) {
+    out.push(...comic.tags.map((t) => (typeof t === 'string' ? t : t.name || t.key)))
+  }
   const raws = (comic as OfflineComic).tagRaws
   if (Array.isArray(raws)) out.push(...raws)
   return out.map((t) => t.toLowerCase()).filter(Boolean)

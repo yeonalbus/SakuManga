@@ -6,7 +6,7 @@ import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/boo
 import { offlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { getMyRating, setMyRating } from '@/stores/ratingStore'
 import { fetchOfflineComics, deleteOfflineComics, offlineComics, purgeOrphanOfflineRefs } from '@/stores/comicStore'
-import type { OfflineComic } from '@/types/comic'
+import type { OfflineComic, TagItem } from '@/types/comic'
 // 🎯 核心引入：直接复用 TagChip 组件以支持全局字典翻译与配色
 import TagChip from '@/components/TagChip.vue'
 import { http } from '@/utils/request'
@@ -21,7 +21,7 @@ import { resolveResumePage, isResumeFromLastPageEnabled } from '@/utils/readingP
 import AppIcon from '@/components/icons/AppIcon.vue'
 
 // 后端 GetOfflineComicDetail 返回的离线漫画 DTO
-// tags 字段可能是 JSON 字符串，也可能是字符串数组，需在运行时归一化
+// D22：tags 统一为 TagItem[]（旧后端/旧数据可能是 JSON 字符串或字符串数组，运行时归一化）
 interface OfflineDetailDTO {
   id: string
   title: string
@@ -33,7 +33,7 @@ interface OfflineDetailDTO {
   addedAt?: string
   publishedAt?: string | null
   fileModifiedAt?: string
-  tags?: string[] | string
+  tags?: Array<Partial<TagItem>> | string
   tagRaws?: string[]
   tagSources?: ('online' | 'local')[]
   onlineTagsList?: string[]
@@ -106,6 +106,18 @@ const rawTagOf = (t: string | { namespace?: string; key?: string }): string => {
   return ns && ns !== 'other' ? `${ns}:${t.key}` : t.key || ''
 }
 
+// D22：任意 tag 形态归一为 TagItem（对象 / 字符串 / JSON 数组元素）
+const normalizeTagItem = (t: unknown): TagItem => {
+  if (t && typeof t === 'object') {
+    const o = t as { key?: string; name?: string; namespace?: string }
+    const key = (o.key || '').trim()
+    const name = (o.name || key).trim()
+    return { key: key || name, name, namespace: o.namespace }
+  }
+  const s = String(t ?? '').trim()
+  return { key: s, name: s }
+}
+
 // 该 tag 属于官方(online) 还是 本地新增(local)
 const tagSource = (idx: number): 'online' | 'local' => tagSources.value[idx] || 'online'
 
@@ -127,9 +139,9 @@ const displayTags = computed<DisplayTag[]>(() => {
   // 旧后端下删除的 tag 由 legacyRemovedRaws 本地过滤（后端无法回传删除状态）。
   if (!backendHasTriState.value || !hasTriStateData) {
     if (Array.isArray(comic.value.tags) && comic.value.tags.length > 0) {
-      return (comic.value.tags as unknown[])
+      return comic.value.tags
         .map((t, idx) => ({
-          raw: tagRaws.value[idx] || rawTagOf(t as never),
+          raw: tagRaws.value[idx] || rawTagOf(t),
           source: tagSource(idx),
           removed: false,
         }))
@@ -158,16 +170,17 @@ const fetchComicDetail = async () => {
     // 🟢 1. 使用 http 请求，省去 /api/v1 前缀和 res.json()
     const data = await http<OfflineDetailDTO>(`/comics/${comicId}`)
 
-    // 🟢 2. 解析 tags 数组逻辑保持不变
-    let parsedTags: string[] = []
+    // 🟢 2. tags 归一为 TagItem[]（D22：兼容旧后端 JSON 字符串/字符串数组）
+    let parsedTags: TagItem[] = []
     if (typeof data.tags === 'string') {
       try {
-        parsedTags = JSON.parse(data.tags)
+        const arr = JSON.parse(data.tags)
+        if (Array.isArray(arr)) parsedTags = arr.map(normalizeTagItem)
       } catch {
         parsedTags = []
       }
     } else if (Array.isArray(data.tags)) {
-      parsedTags = data.tags
+      parsedTags = data.tags.map(normalizeTagItem)
     }
 
     comic.value = {

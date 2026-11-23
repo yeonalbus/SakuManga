@@ -222,7 +222,8 @@ const fetchDetail = async () => {
       source: 'online',
       isFavorite: !!data.isFavorite,
       favIndex: data.favIndex ?? 0,
-      tags: data.tags || [],
+      // D22：在线 DTO 的 tags 为字符串数组 → 统一归一为 TagItem[]
+      tags: (data.tags || []).map((t) => ({ key: t, name: t })),
       previewPages: formattedInitialPreviews, // 👈 使用映射后的预览图列表
       comments: data.comments || [],
     }
@@ -363,14 +364,16 @@ const handleLoadMorePreviews = async () => {
 const groupedTags = computed(() => {
   const groups: Record<string, string[]> = {}
   for (const tag of comic.value.tags || []) {
+    // D22：tags 为 TagItem[]，按 namespace/key 还原 "ns:key" 形式参与分组
+    const raw = typeof tag === 'string' ? tag : tag.key || tag.name || ''
     let ns = 'misc'
-    if (tag.includes(':')) {
-      ns = tag.split(':')[0].toLowerCase()
+    if (raw.includes(':')) {
+      ns = raw.split(':')[0].toLowerCase()
     }
     if (!groups[ns]) {
       groups[ns] = []
     }
-    groups[ns].push(tag)
+    groups[ns].push(raw)
   }
   return groups
 })

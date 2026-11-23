@@ -85,12 +85,7 @@ const shelfComics = computed<OfflineComic[]>(() => {
     }
   }
   // bookshelfId 匹配但不在 comicIds 中的（旧数据/引用残留）排在末尾
-  for (const c of offlineComics.value) {
-    if (!seen.has(c.id) && c.bookshelfId === currentShelfId.value) {
-      ordered.push(c)
-      seen.add(c.id)
-    }
-  }
+  // D22：bookshelfId 字段后端从未下发，相关兜底分支已删除。
   return ordered
 })
 

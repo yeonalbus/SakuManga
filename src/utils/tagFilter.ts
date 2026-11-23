@@ -76,7 +76,7 @@ const collectRawTags = (comic: ComicItem): string[] => {
   push((comic as OfflineComic).tagRaws)
   if (Array.isArray(comic.tags)) {
     for (const t of comic.tags) {
-      const s = normalizeTag(t)
+      const s = normalizeTag(typeof t === 'string' ? t : t.name || t.key)
       // 含冒号的视为原始 tag；不含冒号的是离线翻译名，仅作关键词匹配目标
       if (s.includes(':')) out.push(s)
     }
@@ -97,7 +97,9 @@ const collectSearchTexts = (comic: ComicItem): string[] => {
   push(comic.title)
   if (comic.source === 'offline') push((comic as OfflineComic).titleJpn)
   if (Array.isArray(comic.tags)) {
-    for (const t of comic.tags) push(t)
+    for (const t of comic.tags) {
+      push(typeof t === 'string' ? t : t.name || t.key)
+    }
   }
   if (comic.source === 'online') push((comic as OnlineComic).uploader)
   return texts

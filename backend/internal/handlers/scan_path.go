@@ -59,7 +59,16 @@ func AddScanPath(c *gin.Context) {
 		EnableOfflineUpdate: enableOfflineUpdate,
 	}
 
-	if err := database.DB.Create(&newPath).Error; err != nil {
+	// GORM 对「bool 零值 + gorm default:true 标签」的 Create 会落默认值（true），
+	// 导致显式关闭离线维护被存成开启——用 map 创建保留显式 false。
+	if err := database.DB.Model(&models.ExtraScanPath{}).Create(map[string]interface{}{
+		"id":                   newPath.ID,
+		"path":                 newPath.Path,
+		"name":                 newPath.Name,
+		"include_subfolders":   newPath.IncludeSubfolders,
+		"enable_offline_update": newPath.EnableOfflineUpdate,
+		"created_at":           time.Now(),
+	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加路径失败"})
 		return
 	}

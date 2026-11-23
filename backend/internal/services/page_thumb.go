@@ -26,7 +26,9 @@ import (
 const PageThumbWidth = 240
 
 // pageCacheDir 页缩略图缓存目录（与 manga.db / cover_cache 同级）
-const pageCacheDir = "page_cache"
+// D9：缓存 key 由「有效序号」改为「物理页序号」，语义不兼容 → 换目录名隔离旧缓存
+// （旧 page_cache 不再被读写，随启动期/手动清理删除）。
+const pageCacheDir = "page_cache_v2"
 
 var pageCacheMu sync.Mutex
 

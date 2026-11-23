@@ -163,12 +163,9 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 				}
 			}
 			// A4. 在线页数 > 本地页数 → 原画廊被扩充（同一 gid 增量）。
-			// Round23：自定义隐藏页后 PageCount 为有效页数，须用 OriginalPageCount（原始物理页数）比对，
+			// Round23/D18：自定义隐藏页后 PageCount 为有效页数，须用 OriginalPageCount（原始物理页数）比对，
 			// 否则「90P 隐藏 5P 广告 → 有效 85P」会被在线 90P 误判为画廊扩充。
-			compareBase := c.PageCount
-			if c.OriginalPageCount > 0 {
-				compareBase = c.OriginalPageCount
-			}
+			compareBase := pageCountBaseline(c)
 			if detail.PageCount > 0 && compareBase > 0 && detail.PageCount > compareBase {
 				markOfflineUpdate(c, detail.ID, detail.Token,
 					fmt.Sprintf("原画廊新增了 %d 页（在线 %d 页 > 本地 %d 页）", detail.PageCount-compareBase, detail.PageCount, compareBase))
@@ -232,6 +229,19 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 }
 
 // ─────────────────────────────────────────────────────────────
+// pageCountBaseline 更新检测的本地页数基准（D18）：
+// OriginalPageCount > 0 时以它（物理页数）为准，否则退回 PageCount。
+// 返回 0 表示无可用基准（该记录不参与「画廊被扩充」判定）。
+func pageCountBaseline(c *models.OfflineComic) int {
+	if c == nil {
+		return 0
+	}
+	if c.OriginalPageCount > 0 {
+		return c.OriginalPageCount
+	}
+	return c.PageCount
+}
+
 // saveUpdateMarks 持久化更新检测产生的标记变更（D7：不改 updated_at）。
 // 用原生 SQL 而非 db.Save/Updates：GORM 对模型字段 UpdatedAt 有自动时间戳回调，
 // 即使 map Updates 也会补 updated_at；检测流程必须保持该列语义不变。
@@ -849,8 +859,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	comics = filterOfflineLocalCandidates(db, comics)
 
 	result := &DedupResult{Items: []DedupItem{}}
-	keepSet := map[string]bool{}   // 建议保留的 comic id
-	removeSet := map[string]bool{} // 建议删除的 comic id
+	keepSet := map[string]bool{}      // 建议保留的 comic id
+	keepRule := map[string]string{}   // D19：保留项命中的规则（gid/hash/parent/signature），供列表输出
+	removeSet := map[string]bool{}    // 建议删除的 comic id
 	reasonMap := map[string]string{}
 	ruleMap := map[string]string{}       // Round26 O2：comic id → 命中规则（gid/hash/parent/signature），前端区分可忽略项
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
@@ -901,6 +912,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		for i := range group {
 			if i == keepIdx {
 				keepSet[group[i].ID] = true
+				keepRule[group[i].ID] = "gid"
 				continue
 			}
 			removeSet[group[i].ID] = true
@@ -953,7 +965,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		if len(group) < 2 {
 			continue
 		}
-		// 保留第一个，其余建议删除
+		// 保留第一个，其余建议删除；保留项写入 keepSet（D19：与规则 4 对称，输出「建议保留」）
+		keepSet[group[0].ID] = true
+		keepRule[group[0].ID] = "hash"
 		for i := 1; i < len(group); i++ {
 			c := group[i]
 			// 若已被同 GID 规则标记保留，跳过
@@ -1094,6 +1108,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 						// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
 						if !removeSet[c.ID] {
 							keepSet[c.ID] = true
+							keepRule[c.ID] = "parent"
 						}
 						// Round4 任务一：旧版 anc ↔ 新版 c 互为成对对象（对比视图双列展示）
 						pairID[anc.ID] = c.ID
@@ -1129,6 +1144,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 					totalBytes[c.ID] = c.FileSize
 					if !removeSet[successor.ID] {
 						keepSet[successor.ID] = true
+						keepRule[successor.ID] = "parent"
 					}
 					// Round4 任务一：旧版 ↔ 新版 互为成对对象（对比视图双列展示）
 					pairID[c.ID] = successor.ID
@@ -1176,6 +1192,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			// 新版建议保留（但若 c 自身也是被删除项，不得覆盖删除标记）
 			if !removeSet[c.ID] {
 				keepSet[c.ID] = true
+				keepRule[c.ID] = "parent"
 			}
 			// Round4 任务一：旧版 p ↔ 新版 c 互为成对对象（对比视图双列展示）
 			pairID[p.ID] = c.ID
@@ -1279,6 +1296,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 		for i := range group {
 			if i == keepIdx {
 				keepSet[group[i].ID] = true
+				keepRule[group[i].ID] = "signature"
 				continue
 			}
 			if removeSet[group[i].ID] {
@@ -1323,7 +1341,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 			continue
 		}
 		if keepSet[c.ID] {
-			result.Items = append(result.Items, DedupItem{Comic: toMaintainComicView(c), Reason: "建议保留", Keep: true, PairComic: pair})
+			result.Items = append(result.Items, DedupItem{Comic: toMaintainComicView(c), Reason: "建议保留", Keep: true, Rule: keepRule[c.ID], PairComic: pair})
 		}
 	}
 

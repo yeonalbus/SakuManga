@@ -70,3 +70,22 @@ func TestScanStatsCountsReasons(t *testing.T) {
 			stats.Failed, stats.SkippedExisting, stats.SkippedGid)
 	}
 }
+
+// TestPageCountBaseline D18：更新检测页数基准 = OriginalPageCount 优先，否则 PageCount。
+func TestPageCountBaseline(t *testing.T) {
+	cases := []struct {
+		name string
+		c    *models.OfflineComic
+		want int
+	}{
+		{"nil", nil, 0},
+		{"物理页优先", &models.OfflineComic{PageCount: 5, OriginalPageCount: 10}, 10},
+		{"无物理页退回有效页", &models.OfflineComic{PageCount: 5}, 5},
+		{"均为零", &models.OfflineComic{}, 0},
+	}
+	for _, c := range cases {
+		if got := pageCountBaseline(c.c); got != c.want {
+			t.Errorf("%s: pageCountBaseline = %d，期望 %d", c.name, got, c.want)
+		}
+	}
+}

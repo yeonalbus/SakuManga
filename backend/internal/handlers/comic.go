@@ -95,24 +95,12 @@ func GetOfflineComics(c *gin.Context) {
 	var comics []models.OfflineComic
 	q.Find(&comics)
 
-	// 额外路径 ID→Name 映射（问题3：来源标签）
-	pathNames := map[string]string{}
-	var paths []models.ExtraScanPath
-	database.DB.Select("id", "name").Find(&paths)
-	for _, p := range paths {
-		if p.Name != "" {
-			pathNames[p.ID] = p.Name
-		}
-	}
+	// 额外路径 ID→Name 映射（问题3/D15：来源标签）
+	pathNames := loadScanPathNames(database.DB)
 
 	resp := make([]OfflineComicListResponse, 0, len(comics))
 	for _, comic := range comics {
-		label := "下载"
-		if comic.ScanPathID != "" {
-			if name, ok := pathNames[comic.ScanPathID]; ok {
-				label = name
-			}
-		}
+		label := resolveSourceLabel(comic.ScanPathID, pathNames)
 
 		// 需求2：为列表填充翻译后的 TagItem(Tags) 与原始 tag 串(TagRaws)，前端据此做本地 tag 搜索/语言过滤。
 		// 性能优化：列表用精简翻译（无 intro），OfflineComicListResponse.Tags 遮蔽内嵌的
@@ -135,6 +123,33 @@ func GetOfflineComics(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// loadScanPathNames 加载扫描路径 ID → 显示名（仅收集非空 name）。
+func loadScanPathNames(db *gorm.DB) map[string]string {
+	pathNames := map[string]string{}
+	var paths []models.ExtraScanPath
+	db.Select("id", "name").Find(&paths)
+	for _, p := range paths {
+		if p.Name != "" {
+			pathNames[p.ID] = p.Name
+		}
+	}
+	return pathNames
+}
+
+// resolveSourceLabel 来源标签（D15）：
+//   - ScanPathID 空 → 「下载」
+//   - 路径存在且 Name 非空 → Name
+//   - 路径已删 / Name 为空 → 「已移除来源」（不再伪装成「下载」）
+func resolveSourceLabel(scanPathID string, names map[string]string) string {
+	if scanPathID == "" {
+		return "下载"
+	}
+	if name, ok := names[scanPathID]; ok && name != "" {
+		return name
+	}
+	return "已移除来源"
 }
 
 // GetOfflineComicDetail 获取单个离线画廊详情
@@ -184,6 +199,7 @@ func GetOfflineComicDetail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, OfflineComicResponse{
 		OfflineComic:          comic,
+		SourceLabel:           resolveSourceLabel(comic.ScanPathID, loadScanPathNames(database.DB)),
 		Tags:                  translatedTags,
 		TagRaws:               merged,
 		TagSources:            sources,

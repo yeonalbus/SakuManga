@@ -1630,12 +1630,11 @@ func filterOfflineLocalCandidates(db *gorm.DB, comics []models.OfflineComic) []m
 	return filtered
 }
 
-// DeleteOfflineComic 删除本地画廊：
-//   - 可选物理删除本地文件
-//   - 删除数据库记录
-//
-// 说明：书架与历史记录均为前端 localStorage 功能（后端数据库无对应表），
-// 由前端删除方法在本地同步清理引用，后端无需（也无法）处理。
+// DeleteOfflineComic 删除本地画廊（D14 两阶段原子删除）：
+//  1. deleteFile 时先把目标 Rename 到同盘回收目录（Windows 占用/权限问题在此拦截，DB 未动）；
+//  2. 事务内删记录 + 引用迁移/清理 + 关联表（评分/书签/章节）清理；
+//  3. Commit 成功后清理回收目录与封面/页缓存；Commit 失败则把文件 Rename 回原路径，
+//     回滚再失败写 pending 清单交由启动期恢复。
 func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 	var comic models.OfflineComic
 	if err := db.First(&comic, "id = ?", comicID).Error; err != nil {
@@ -1646,27 +1645,48 @@ func DeleteOfflineComic(db *gorm.DB, comicID string, deleteFile bool) error {
 		return fmt.Errorf("未找到漫画记录: %v", err)
 	}
 
-	// 1. 可选：物理删除本地文件
+	replacement := FindReplacementByGID(db, comic.GID, comicID)
+
+	// 第一阶段：文件 → 同盘回收目录（目标不存在时视为成功，死记录可直接删库）
+	trashPath := ""
 	if deleteFile && comic.LocalPath != "" {
-		if err := os.RemoveAll(comic.LocalPath); err != nil {
+		p, err := stageToTrash(comic.LocalPath, comic.ID)
+		if err != nil {
 			return fmt.Errorf("删除本地文件失败 %q: %v", comic.LocalPath, err)
 		}
-		log.Printf("%s [maintain] 已删除本地文件 %q（comic %s）", dlLogTag, comic.LocalPath, comicID)
+		trashPath = p
 	}
 
-	// 2. 删除数据库记录
-	if err := db.Delete(&comic).Error; err != nil {
-		return fmt.Errorf("删除漫画记录失败: %v", err)
+	// 第二阶段：事务内删除记录与关联数据
+	txErr := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&comic).Error; err != nil {
+			return err
+		}
+		CleanupComicReferences(tx, comicID, replacement)
+		CleanupComicAuxiliaryBatch(tx, []string{comicID}, map[string]string{comicID: replacement})
+		return nil
+	})
+	if txErr != nil {
+		// 回滚文件：失败则落盘 pending，交由启动期恢复
+		if trashPath != "" {
+			if rerr := restoreFromTrash(trashPath, comic.LocalPath); rerr != nil {
+				log.Printf("%s [maintain] 删除失败后回滚文件失败 %q → %q: %v",
+					dlErrTag, trashPath, comic.LocalPath, rerr)
+				recordPendingTrash([]pendingTrashEntry{{TrashPath: trashPath, LocalPath: comic.LocalPath}})
+			}
+		}
+		return fmt.Errorf("删除漫画记录失败: %v", txErr)
 	}
-	// Round20-Bug1/Bug4：删除后清理各用户引用（历史/书架/离线阅读清单）。
-	// 若存在同 gid 的其他记录（查重删除场景），引用迁移到该记录；否则直接清除孤儿引用。
-	replacement := FindReplacementByGID(db, comic.GID, comicID)
-	CleanupComicReferences(db, comicID, replacement)
-	// 需求4：删除记录视为书库变更，记录时间戳供「队列空闲>1min」自动增量维护查重判断。
+
+	// 收尾（允许失败：只留垃圾，不影响一致性）
+	cleanupTrash(trashPath)
+	if err := InvalidateCoverCache(comic.ID); err != nil {
+		log.Printf("%s [maintain] 清理封面缓存失败 comic=%s: %v", dlWarnTag, comic.ID, err)
+	}
+	_ = os.RemoveAll(filepath.Join(pageCacheDir, comic.ID))
 	MarkLibraryChanged()
-	// Round32：清掉该本在 XP 统计表中的贡献（删除路径统一走此处，含维护页批量删除）
 	XpRecomposeComic(comicID)
-	log.Printf("%s [maintain] 已删除漫画 %q（id=%s）", dlLogTag, comic.Title, comicID)
+	log.Printf("%s [maintain] 已删除漫画 %q（id=%s，文件=%v）", dlLogTag, comic.Title, comicID, deleteFile)
 	return nil
 }
 
@@ -1689,7 +1709,9 @@ func DeleteOfflineComicsByScanPath(db *gorm.DB, scanPathID string) (int, error) 
 	}
 
 	var comics []models.OfflineComic
-	if err := db.Select("id", "g_id").
+	// D14：必须带出 local_path —— 文件阶段依赖它 Rename 到回收目录（此前只 Select id/g_id，
+	// 导致 LocalPath 为空、文件阶段被静默跳过）。
+	if err := db.Select("id", "g_id", "local_path", "title").
 		Where("scan_path_id = ?", scanPathID).
 		Find(&comics).Error; err != nil {
 		return 0, fmt.Errorf("读取该路径下的漫画失败: %v", err)
@@ -1736,17 +1758,52 @@ func DeleteOfflineComicsByScanPath(db *gorm.DB, scanPathID string) (int, error) 
 		}
 	}
 
+	// 第一阶段：全部文件移入同盘回收目录（任一失败 → 回滚已移动文件，DB 未动）
+	trashPaths := make([]string, 0, len(comics))
+	rollbackStaged := func(staged int) {
+		for j := 0; j < staged; j++ {
+			if rerr := restoreFromTrash(trashPaths[j], comics[j].LocalPath); rerr != nil {
+				log.Printf("%s [trash] 批量删除回滚文件失败 %q → %q: %v",
+					dlErrTag, trashPaths[j], comics[j].LocalPath, rerr)
+				recordPendingTrash([]pendingTrashEntry{{TrashPath: trashPaths[j], LocalPath: comics[j].LocalPath}})
+			}
+		}
+	}
+	for i := range comics {
+		p, err := stageToTrash(comics[i].LocalPath, comics[i].ID)
+		if err != nil {
+			rollbackStaged(len(trashPaths))
+			return 0, fmt.Errorf("删除文件 %q 失败: %v", comics[i].LocalPath, err)
+		}
+		trashPaths = append(trashPaths, p)
+	}
+
+	// 第二阶段：事务内批量删记录 + 引用/关联清理
 	deleted := 0
-	if err := db.Transaction(func(tx *gorm.DB) error {
+	txErr := db.Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("scan_path_id = ?", scanPathID).Delete(&models.OfflineComic{})
 		if res.Error != nil {
 			return fmt.Errorf("删除该路径下的漫画记录失败: %v", res.Error)
 		}
 		deleted = int(res.RowsAffected)
 		CleanupComicReferencesBatch(tx, ids, newIDByOld)
+		CleanupComicAuxiliaryBatch(tx, ids, newIDByOld)
 		return nil
-	}); err != nil {
-		return 0, err
+	})
+	if txErr != nil {
+		rollbackStaged(len(trashPaths))
+		return 0, txErr
+	}
+
+	// 收尾（允许失败）：清回收目录与封面/页缓存
+	for _, tp := range trashPaths {
+		cleanupTrash(tp)
+	}
+	for _, c := range comics {
+		if err := InvalidateCoverCache(c.ID); err != nil {
+			log.Printf("%s [scan] 清理封面缓存失败 comic=%s: %v", dlWarnTag, c.ID, err)
+		}
+		_ = os.RemoveAll(filepath.Join(pageCacheDir, c.ID))
 	}
 
 	// 书库变更时间戳（维护查重判断是否需要重扫）与 XP 统计全量重建：

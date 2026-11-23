@@ -298,25 +298,20 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 	// 画质升级任务（ForceDeleteOriginal）：用户已确认「升级=替换」，无论
 	// autoUpdateDeleteOriginal 设置如何都删除旧版（新版已落地独立目录，安全）。
 	if (setting.AutoUpdateDeleteOriginal || task.ForceDeleteOriginal) && old.LocalPath != "" {
-		if err := os.RemoveAll(old.LocalPath); err != nil {
-			log.Printf("%s [update] 任务 %s 删除旧版文件夹失败 %q: %v", dlErrTag, task.ID, old.LocalPath, err)
-		} else {
-			reason := "autoUpdateDeleteOriginal=true"
-			if task.ForceDeleteOriginal {
-				reason = "画质升级（forceDeleteOriginal）"
-			}
-			log.Printf("%s [update] 任务 %s 已删除旧版文件夹 %q（%s）", dlLogTag, task.ID, old.LocalPath, reason)
+		reason := "autoUpdateDeleteOriginal=true"
+		if task.ForceDeleteOriginal {
+			reason = "画质升级（forceDeleteOriginal）"
 		}
-		if err := m.db.Delete(&old).Error; err != nil {
-			log.Printf("%s [update] 任务 %s 删除旧版记录失败: %v", dlErrTag, task.ID, err)
-		} else {
-			// Round20-Bug1/Bug4：旧版记录删除后清理引用（历史/书架/离线阅读清单）。
-			// 新版本记录由后续扫描生成（此时尚不存在），无法迁移 → 直接清除旧 id 的孤儿引用。
-			CleanupComicReferences(m.db, old.ID, "")
-			// 需求4：旧版已删除 → 记录书库变更 + 使维护查重结果过期（被删项移除）
-			MarkLibraryChanged()
-			InvalidateMaintainDedupResult([]string{old.ID})
+		// D14：复用统一删除链（两阶段原子删除 + 同 gid 引用/评分迁移到新版）。
+		// 新版记录此时已入库，历史/书架/评分会迁移过去，而非一律清空。
+		if err := DeleteOfflineComic(m.db, old.ID, true); err != nil && !errors.Is(err, ErrComicNotFound) {
+			log.Printf("%s [update] 任务 %s 删除旧版失败 %q: %v", dlErrTag, task.ID, old.LocalPath, err)
+			return
 		}
+		log.Printf("%s [update] 任务 %s 已删除旧版 %q（%s，引用已迁移到新版）", dlLogTag, task.ID, old.LocalPath, reason)
+		// 需求4：旧版已删除 → 记录书库变更 + 使维护查重结果过期（被删项移除）
+		MarkLibraryChanged()
+		InvalidateMaintainDedupResult([]string{old.ID})
 		return
 	}
 

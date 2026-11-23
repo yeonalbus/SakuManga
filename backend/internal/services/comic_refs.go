@@ -148,6 +148,32 @@ func CleanupComicReferencesBatch(db *gorm.DB, oldIDs []string, migrate map[strin
 				}
 				changed = true
 			}
+			// D14：同步清理书架权重表 sortKeys（被删 id 删除；有替代记录则迁移原权重）
+			if keysRaw := shelves[i].SortKeys; keysRaw != "" {
+				var keys map[string]float64
+				if err := json.Unmarshal([]byte(keysRaw), &keys); err == nil {
+					changedKeys := false
+					for id := range oldSet {
+						w, ok := keys[id]
+						if !ok {
+							continue
+						}
+						delete(keys, id)
+						if newID := replacementOf(id); newID != "" {
+							if _, exists := keys[newID]; !exists {
+								keys[newID] = w
+							}
+						}
+						changedKeys = true
+					}
+					if changedKeys {
+						if b, err := json.Marshal(keys); err == nil {
+							shelves[i].SortKeys = string(b)
+							changed = true
+						}
+					}
+				}
+			}
 			if changed {
 				if err := db.Save(&shelves[i]).Error; err != nil {
 					logWarn("CleanupComicReferencesBatch: 更新书架失败 shelf=%s: %v", shelves[i].ID, err)

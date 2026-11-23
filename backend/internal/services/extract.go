@@ -26,10 +26,45 @@ import (
 //       - 按设置删除压缩包
 // ─────────────────────────────────────────────────────────────
 
+// stripSingleTopDir 判断归档内所有非空文件条目是否同处一个顶层目录（D21）：
+//   - 所有条目名统一分隔符后必须都包含 "/"（若根目录直接有文件 → 不剥离，返回 ""）；
+//   - 首段目录名必须完全相同；
+//   - 满足则返回该顶层目录名（调用方解压时去掉该层前缀），否则返回 ""。
+//
+// 目的：E 站 zip 常带一个顶层文件夹（如 "Title/"），若不剥离，解压目录里只有子目录，
+// 扫描器按 includeSubfolders=false 会认不出本子形态；剥离后落地即「图片直接平铺」。
+func stripSingleTopDir(names []string) string {
+	top := ""
+	for _, name := range names {
+		n := strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+		if n == "" || strings.HasSuffix(n, "/") {
+			continue // 目录条目 / 空名不参与判定
+		}
+		idx := strings.Index(n, "/")
+		if idx <= 0 {
+			return "" // 根目录直接有文件（或非法名）→ 不剥离
+		}
+		seg := n[:idx]
+		if top == "" {
+			top = seg
+			continue
+		}
+		if seg != top {
+			return "" // 顶层目录名不一致 → 不剥离
+		}
+	}
+	return top
+}
+
 // extractArchive 解压 zip/cbz 到 extractDir，返回解压出的文件个数。
 // ehService/account/ehSetting 为预留参数（供后续「解压后校验/补拉元数据」扩展）。
 func extractArchive(task *models.DownloadTask, zipPath, extractDir string, deleteZip bool,
 	db *gorm.DB, ehService *EHService, account *models.AccountSetting, ehSetting *models.EHSetting) (int, error) {
+
+	taskID := "<nil>"
+	if task != nil {
+		taskID = task.ID
+	}
 
 	if fi, err := os.Stat(zipPath); err != nil || fi.Size() == 0 {
 		return 0, fmt.Errorf("压缩包不存在或为空: %s", zipPath)
@@ -40,6 +75,19 @@ func extractArchive(task *models.DownloadTask, zipPath, extractDir string, delet
 		return 0, fmt.Errorf("打开压缩包失败: %v", err)
 	}
 	defer zr.Close()
+
+	// D21：若归档内所有文件同处一个顶层目录，解压时剥离该层（落地即本子形态）
+	var fileEntries []string
+	for _, f := range zr.File {
+		if !f.FileInfo().IsDir() {
+			fileEntries = append(fileEntries, f.Name)
+		}
+	}
+	stripPrefix := stripSingleTopDir(fileEntries)
+	if stripPrefix != "" {
+		stripPrefix += "/"
+		log.Printf("%s [extract] 归档存在单一顶层目录 %q，解压时剥离该层", dlLogTag, strings.TrimSuffix(stripPrefix, "/"))
+	}
 
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return 0, fmt.Errorf("创建解压目录失败: %v", err)
@@ -52,8 +100,13 @@ func extractArchive(task *models.DownloadTask, zipPath, extractDir string, delet
 			continue
 		}
 
-		// 安全解压：阻止 zip-slip 路径逃逸
-		name := filepath.Clean(filepath.FromSlash(f.Name))
+		archiveName := strings.ReplaceAll(f.Name, "\\", "/")
+		if stripPrefix != "" && strings.HasPrefix(archiveName, stripPrefix) {
+			archiveName = strings.TrimPrefix(archiveName, stripPrefix)
+		}
+
+		// 安全解压：阻止 zip-slip 路径逃逸（剥离顶层目录后再校验）
+		name := filepath.Clean(filepath.FromSlash(archiveName))
 		if name == "." || name == ".." || strings.HasPrefix(name, ".."+string(os.PathSeparator)) {
 			log.Printf("%s [extract] 跳过危险路径（zip-slip）: %q", dlWarnTag, f.Name)
 			continue
@@ -115,14 +168,14 @@ func extractArchive(task *models.DownloadTask, zipPath, extractDir string, delet
 	// 按设置删除压缩包
 	if deleteZip {
 		if err := os.Remove(zipPath); err != nil {
-			log.Printf("%s [extract] 任务 %s 删除压缩包失败: %v", dlWarnTag, task.ID, err)
+			log.Printf("%s [extract] 任务 %s 删除压缩包失败: %v", dlWarnTag, taskID, err)
 		} else {
-			log.Printf("%s [extract] 任务 %s 已删除压缩包 %q（deleteZipAfterArchiveDownload=true）", dlLogTag, task.ID, zipPath)
+			log.Printf("%s [extract] 任务 %s 已删除压缩包 %q（deleteZipAfterArchiveDownload=true）", dlLogTag, taskID, zipPath)
 		}
 	}
 
 	log.Printf("%s [extract] 任务 %s 解压完成：%d 个文件，%.2f MiB -> %q",
-		dlLogTag, task.ID, fileCount, float64(totalBytes)/1024/1024, extractDir)
+		dlLogTag, taskID, fileCount, float64(totalBytes)/1024/1024, extractDir)
 	return fileCount, nil
 }
 

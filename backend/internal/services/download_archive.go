@@ -325,12 +325,13 @@ func (g *archiveDownloader) extractAndFinish() {
 	}
 	log.Printf("%s [archive-engine] 任务 %s 解压完成，共 %d 个文件 -> %q", dlLogTag, g.task.ID, n, g.extractDir)
 
-	// 扫描入库：让解压后的文件夹出现在离线书架
-	if count, err := ScanAndSaveDirectory(g.extractDir, false); err == nil {
-		log.Printf("%s [archive-engine] 任务 %s 解压目录已扫描入库 %d 个", dlLogTag, g.task.ID, count)
-	} else {
-		log.Printf("%s [archive-engine] 任务 %s 解压目录扫描入库失败: %v", dlWarnTag, g.task.ID, err)
+	// 扫描入库（D21）：入库失败或 0 本 → 任务置 error（可重试），不得标 completed
+	if _, err := ingestDownloadDir(g.extractDir); err != nil {
+		log.Printf("%s [archive-engine] 任务 %s %v", dlErrTag, g.task.ID, err)
+		g.fail("入库失败: " + err.Error())
+		return
 	}
+	log.Printf("%s [archive-engine] 任务 %s 解压目录已扫描入库", dlLogTag, g.task.ID)
 	// 画质升级：回填下载方案（归档按任务归档类型记 archiveResample / archiveOriginal）
 	scheme := string(models.DefaultSchemeArchiveOriginal)
 	if g.task.ArchiveType == models.ArchiveTypeResample {

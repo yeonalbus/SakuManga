@@ -224,12 +224,13 @@ func (g *galleryDownloader) downloadAll(urls []string, detail *GalleryDetailResu
 		log.Printf("%s [gallery-engine] 任务 %s 写入 metadata/ComicInfo.xml 失败（不影响已下载图片）: %v", dlWarnTag, g.task.ID, err)
 	}
 
-	// 扫描入库：让下载完成后的文件夹出现在离线书架
-	if count, err := ScanAndSaveDirectory(g.destDir, false); err == nil {
-		log.Printf("%s [gallery-engine] 任务 %s 下载目录已扫描入库 %d 个", dlLogTag, g.task.ID, count)
-	} else {
-		log.Printf("%s [gallery-engine] 任务 %s 下载目录扫描入库失败: %v", dlWarnTag, g.task.ID, err)
+	// 扫描入库（D21）：入库失败或 0 本 → 任务置 error（可重试），不得标 completed
+	if _, err := ingestDownloadDir(g.destDir); err != nil {
+		log.Printf("%s [gallery-engine] 任务 %s %v", dlErrTag, g.task.ID, err)
+		g.fail("入库失败: " + err.Error())
+		return
 	}
+	log.Printf("%s [gallery-engine] 任务 %s 下载目录已扫描入库", dlLogTag, g.task.ID)
 	// 画质升级：回填下载方案（画廊逐图统一记 gallery；galleryOriginal 为等价方案名，落库无差异）
 	markDownloadScheme(g.m.db, g.destDir, string(models.DefaultSchemeGallery))
 

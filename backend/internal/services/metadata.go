@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -220,17 +221,20 @@ type ParsedMetadata struct {
 	FileSize    int64
 	PublishTime string  // 发布时间字符串（问题1）
 	Rating      float64 // Round52：社区评分（metadata rating / ComicInfo CommunityRating，0=未知）
+	// Source 实际生效的侧车文件名（D13：最高优先级且解析成功者；空 = 无侧车）
+	Source string
 }
 
-// applyJSONMeta 将 EH/JH metadata JSON 合并进解析结果
+// applyJSONMeta 将 EH/JH metadata JSON 合并进解析结果。
+// D13：字段一律「仅空填充」——多个侧车并存时由最高优先级文件先应用、低优先级只补空。
 func (r *ParsedMetadata) applyJSONMeta(jsonMeta EHMetadataJSON) {
-	if jsonMeta.Title != "" {
+	if r.Title == "" && jsonMeta.Title != "" {
 		r.Title = jsonMeta.Title
 	}
-	if jsonMeta.TitleJpn != "" {
+	if r.TitleJpn == "" && jsonMeta.TitleJpn != "" {
 		r.TitleJpn = jsonMeta.TitleJpn
 	}
-	if jsonMeta.Category != "" {
+	if r.Category == "" && jsonMeta.Category != "" {
 		r.Category = jsonMeta.Category
 	}
 	if len(jsonMeta.Tags) > 0 {
@@ -245,10 +249,10 @@ func (r *ParsedMetadata) applyJSONMeta(jsonMeta EHMetadataJSON) {
 	if r.ParentGID == "" {
 		r.ParentGID = jsonMeta.ParentGID
 	}
-	if jsonMeta.FileCount > 0 {
+	if r.FileCount == 0 && jsonMeta.FileCount > 0 {
 		r.FileCount = jsonMeta.FileCount
 	}
-	if jsonMeta.Filesize > 0 {
+	if r.FileSize == 0 && jsonMeta.Filesize > 0 {
 		r.FileSize = jsonMeta.Filesize
 	}
 	if r.PublishTime == "" {
@@ -466,7 +470,42 @@ func (r *ParsedMetadata) applyXMLMeta(xmlMeta ComicInfoXML) {
 	}
 }
 
-// 从散图文件夹中读取元数据
+// metadataSidecarPriority D13：侧车文件名优先级（下标越小优先级越高，最后应用以覆盖低优先级）。
+// 未命中固定名的其他 *.json 优先级最低。
+var metadataSidecarPriority = []string{"comicinfo.xml", "metadata", "ametadata", "info.json", ".ehdata"}
+
+// isMetadataSidecar 判断文件名（小写）是否为可解析的侧车文件
+func isMetadataSidecar(lowerName string) bool {
+	for _, n := range metadataSidecarPriority {
+		if lowerName == n {
+			return true
+		}
+	}
+	return strings.HasSuffix(lowerName, ".json")
+}
+
+// sidecarRank 优先级序号：0 = 最高；未命中固定名 → len(priority)（最低）
+func sidecarRank(lowerName string) int {
+	for i, n := range metadataSidecarPriority {
+		if lowerName == n {
+			return i
+		}
+	}
+	return len(metadataSidecarPriority)
+}
+
+// sortSidecarFiles 按「高优先级在前」排序：首个应用者决定字段值，低优先级只补空（D13）。
+func sortSidecarFiles(names []string) {
+	sort.SliceStable(names, func(i, j int) bool {
+		ri, rj := sidecarRank(strings.ToLower(names[i])), sidecarRank(strings.ToLower(names[j]))
+		if ri != rj {
+			return ri < rj
+		}
+		return names[i] < names[j] // 同级按文件名稳定排序
+	})
+}
+
+// 从散图文件夹中读取元数据（D13：只看本子根目录直接子项，按固定优先级应用）
 func ParseDirMetadata(dirPath string) *ParsedMetadata {
 	result := &ParsedMetadata{
 		Tags: []string{},
@@ -477,29 +516,39 @@ func ParseDirMetadata(dirPath string) *ParsedMetadata {
 		return result
 	}
 
+	// 收集命中的侧车文件 → 按优先级排序（高优先级最后应用）
+	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		name := strings.ToLower(entry.Name())
-		fullPath := filepath.Join(dirPath, entry.Name())
-
-		// A. 匹配 JSON 元数据 (metadata / ametadata / info.json / .ehdata 等)
-		if name == "metadata" || name == "ametadata" || name == "info.json" || name == ".ehdata" || strings.HasSuffix(name, ".json") {
-			if data, err := os.ReadFile(fullPath); err == nil {
-				// 稳健解析：兼容 JHentai 画廊(gallery 包裹层)/归档(平铺)格式与 tags 字符串/数组混用
-				result.applyJSONMeta(parseEHJSONMetadata(data))
-			}
+		if isMetadataSidecar(strings.ToLower(entry.Name())) {
+			names = append(names, entry.Name())
 		}
+	}
+	sortSidecarFiles(names)
 
-		// B. 匹配 ComicInfo.xml
-		if name == "comicinfo.xml" {
-			if data, err := os.ReadFile(fullPath); err == nil {
-				var xmlMeta ComicInfoXML
-				if err := xml.Unmarshal(data, &xmlMeta); err == nil {
-					result.applyXMLMeta(xmlMeta)
+	for _, fileName := range names {
+		lower := strings.ToLower(fileName)
+		fullPath := filepath.Join(dirPath, fileName)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		if lower == "comicinfo.xml" {
+			var xmlMeta ComicInfoXML
+			if err := xml.Unmarshal(data, &xmlMeta); err == nil {
+				result.applyXMLMeta(xmlMeta)
+				if result.Source == "" {
+					result.Source = fileName
 				}
 			}
+			continue
+		}
+		// 稳健解析：兼容 JHentai 画廊(gallery 包裹层)/归档(平铺)格式与 tags 字符串/数组混用
+		result.applyJSONMeta(parseEHJSONMetadata(data))
+		if result.Source == "" {
+			result.Source = fileName
 		}
 	}
 
@@ -507,7 +556,7 @@ func ParseDirMetadata(dirPath string) *ParsedMetadata {
 	return result
 }
 
-// 从 ZIP / CBZ 压缩包内读取元数据
+// 从 ZIP / CBZ 压缩包内读取元数据（D13：任意深度，按固定优先级应用）
 func ParseZipMetadata(zipPath string) *ParsedMetadata {
 	result := &ParsedMetadata{
 		Tags: []string{},
@@ -519,33 +568,53 @@ func ParseZipMetadata(zipPath string) *ParsedMetadata {
 	}
 	defer r.Close()
 
+	// 收集命中的侧车条目（任意深度，按 basename 匹配）→ 按优先级排序
+	type zipSidecar struct {
+		file *zip.File
+		base string
+	}
+	var sidecars []zipSidecar
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		name := strings.ToLower(filepath.Base(f.Name))
+		base := strings.ToLower(filepath.Base(f.Name))
+		if !isMetadataSidecar(base) {
+			continue
+		}
+		sidecars = append(sidecars, zipSidecar{file: f, base: base})
+	}
+	sort.SliceStable(sidecars, func(i, j int) bool {
+		ri, rj := sidecarRank(sidecars[i].base), sidecarRank(sidecars[j].base)
+		if ri != rj {
+			return ri < rj // 高优先级在前
+		}
+		return sidecars[i].file.Name < sidecars[j].file.Name
+	})
 
-		if name == "metadata" || name == "ametadata" || name == "info.json" || name == ".ehdata" || name == "comicinfo.xml" {
-			rc, err := f.Open()
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(rc)
-			rc.Close()
-			if err != nil {
-				continue
-			}
-
-			// JSON 解析
-			if name != "comicinfo.xml" {
-				result.applyJSONMeta(parseEHJSONMetadata(data))
-			} else {
-				// XML 解析
-				var xmlMeta ComicInfoXML
-				if err := xml.Unmarshal(data, &xmlMeta); err == nil {
-					result.applyXMLMeta(xmlMeta)
+	for _, sc := range sidecars {
+		rc, err := sc.file.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		if sc.base == "comicinfo.xml" {
+			var xmlMeta ComicInfoXML
+			if err := xml.Unmarshal(data, &xmlMeta); err == nil {
+				result.applyXMLMeta(xmlMeta)
+				if result.Source == "" {
+					result.Source = filepath.Base(sc.file.Name)
 				}
 			}
+			continue
+		}
+		result.applyJSONMeta(parseEHJSONMetadata(data))
+		if result.Source == "" {
+			result.Source = filepath.Base(sc.file.Name)
 		}
 	}
 

@@ -61,8 +61,9 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 				"last_scanned": now,
 				"comic_count":  stats.Found,
 			})
-			log.Printf("%s [scan] 路径 %q 扫描完成：入库 %d 本（跳过：空目录 %d / 不支持归档 %d，mode=%s）",
-				dlLogTag, path, stats.Found, stats.SkippedEmpty, stats.SkippedUnsupported, mode)
+			log.Printf("%s [scan] 路径 %q 扫描完成：入库 %d 本（跳过：已存在 %d / 同gid %d / 空目录 %d / 不支持归档 %d；失败 %d，mode=%s）",
+				dlLogTag, path, stats.Found, stats.SkippedExisting, stats.SkippedGid,
+				stats.SkippedEmpty, stats.SkippedUnsupported, stats.Failed, mode)
 			// Round32：扫描会成批新增/更新/删除本地漫画 → 异步全量重建 XP 统计表
 			XpRebuildAsync("扫描")
 		} else {

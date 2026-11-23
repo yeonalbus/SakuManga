@@ -45,6 +45,12 @@ export interface ScanProgress {
   skippedEmpty?: number
   /** D4：不可读归档（rar/7z）被跳过的条数 */
   skippedUnsupported?: number
+  /** D17：增量模式已存在跳过数 */
+  skippedExisting?: number
+  /** D17：同 gid 冲突跳过数 */
+  skippedGid?: number
+  /** D17：写库失败数 */
+  failed?: number
   /** 跳过项摘要（前若干条，供告警展示） */
   warnings?: string[]
 }

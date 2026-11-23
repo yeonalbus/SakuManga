@@ -50,9 +50,12 @@ type ScanProgress struct {
 	StartedAt    int64     `json:"startedAt"`
 	FinishedAt   int64     `json:"finishedAt,omitempty"`
 	ComicCount   int       `json:"comicCount,omitempty"` // 完成后的入库数量（同 Found）
-	// D2/D4：跳过项统计（Warnings 为前若干条摘要，供前端告警展示）
+	// D17：跳过项统计（Warnings 为前若干条摘要，供前端告警展示）
 	SkippedEmpty       int      `json:"skippedEmpty,omitempty"`       // 直接子目录递归图片数为 0
 	SkippedUnsupported int      `json:"skippedUnsupported,omitempty"` // 不可读归档（rar/7z 等）
+	SkippedExisting    int      `json:"skippedExisting,omitempty"`    // 增量模式已存在
+	SkippedGid         int      `json:"skippedGid,omitempty"`         // 同 gid 冲突
+	Failed             int      `json:"failed,omitempty"`             // 写库失败
 	Warnings           []string `json:"warnings,omitempty"`
 }
 
@@ -89,6 +92,7 @@ func (p *ScanProgress) Snapshot() *ScanProgress {
 		FinishedAt:   p.FinishedAt,
 		ComicCount:   p.ComicCount,
 		SkippedEmpty: p.SkippedEmpty, SkippedUnsupported: p.SkippedUnsupported,
+		SkippedExisting: p.SkippedExisting, SkippedGid: p.SkippedGid, Failed: p.Failed,
 		Warnings: append([]string(nil), p.Warnings...),
 	}
 }
@@ -115,12 +119,15 @@ func (p *ScanProgress) setTotal(total int) {
 	p.Total = total
 }
 
-// setSkips 写入跳过项统计与告警摘要（D2/D4；Warnings 已由调用方截断）
-func (p *ScanProgress) setSkips(empty, unsupported int, warnings []string) {
+// setSkipBreakdown 写入跳过项分原因统计与告警摘要（D17；Warnings 已由调用方截断）
+func (p *ScanProgress) setSkipBreakdown(stats ScanStats, warnings []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.SkippedEmpty = empty
-	p.SkippedUnsupported = unsupported
+	p.SkippedEmpty = stats.SkippedEmpty
+	p.SkippedUnsupported = stats.SkippedUnsupported
+	p.SkippedExisting = stats.SkippedExisting
+	p.SkippedGid = stats.SkippedGid
+	p.Failed = stats.Failed
 	p.Warnings = append([]string(nil), warnings...)
 }
 
@@ -285,10 +292,28 @@ func countImagesInZip(zipPath string) (int, error) {
 // 单个条目入库
 // ─────────────────────────────────────────────────────────────
 
-// saveComic 处理单个候选条目：解析元数据并入库。
-// scanPathID 为来源额外扫描路径 ID；空字符串 = 下载导入（问题3 来源识别）。
-// 返回是否真正写入（增量模式下已存在的路径 / 同 gid 冲突跳过的会返回 false）。
+// SaveComicResult 单条入库结果（D17：扫描统计按原因细分）
+type SaveComicResult int
+
+const (
+	// SaveComicCreated 已写入（新增或按白名单更新）
+	SaveComicCreated SaveComicResult = iota
+	// SaveComicSkippedExisting 增量模式：路径已存在，跳过
+	SaveComicSkippedExisting
+	// SaveComicSkippedGid 同 gid 冲突（已存在文件夹形态时跳过压缩包）
+	SaveComicSkippedGid
+	// SaveComicFailed 写库失败
+	SaveComicFailed
+)
+
+// saveComic 兼容包装：只有 Created 视为成功。
 func saveComic(localPath string, isDir bool, incremental bool, scanPathID string) bool {
+	return saveComicWithResult(localPath, isDir, incremental, scanPathID) == SaveComicCreated
+}
+
+// saveComicWithResult 处理单个候选条目：解析元数据并入库，返回细分结果（D17）。
+// scanPathID 为来源额外扫描路径 ID；空字符串 = 下载导入（问题3 来源识别）。
+func saveComicWithResult(localPath string, isDir bool, incremental bool, scanPathID string) SaveComicResult {
 	title := filepath.Base(localPath)
 	if !isDir {
 		title = strings.TrimSuffix(title, filepath.Ext(title))
@@ -380,7 +405,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 			// D8：来源不可变——已存在记录不改写 scan_path_id（含增量模式），
 			// 避免「下载目录被设为扫描路径」时把来源从「下载」翻成「额外路径」。
 			log.Printf("%s [scan] 增量模式跳过已存在路径: %q", dlLogTag, localPath)
-			return false
+			return SaveComicSkippedExisting
 		}
 	}
 
@@ -395,7 +420,7 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 				// 已存在文件夹形态（画廊下载），跳过压缩包形态（归档）
 				log.Printf("%s [scan] 跳过同 gid=%s 的压缩包（已存在文件夹形态 %q）: %q",
 					dlLogTag, meta.GID, existing.LocalPath, localPath)
-				return false
+				return SaveComicSkippedGid
 			}
 			if !existingIsDir && isDir {
 				// 新的是文件夹形态，删除旧的压缩包记录，保留文件夹
@@ -523,9 +548,9 @@ func saveComic(localPath string, isDir bool, incremental bool, scanPathID string
 	// D7：禁止整行 Save —— 只写白名单允许的列（状态位/用户数据/阅读信号一律保留）。
 	if err := applyScanFields(database.DB, &existingFull, &comic); err != nil {
 		log.Printf("%s [scan] 入库失败 %q: %v", dlErrTag, localPath, err)
-		return false
+		return SaveComicFailed
 	}
-	return true
+	return SaveComicCreated
 }
 
 // applyScanFields 按 D7 三类白名单落库：
@@ -683,7 +708,7 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 		}
 	}
 	if progress != nil {
-		progress.setSkips(stats.SkippedEmpty, stats.SkippedUnsupported, warnings)
+		progress.setSkipBreakdown(stats, warnings)
 		progress.setTotal(len(candidates))
 		progress.setPhase(ScanPhaseScanning)
 	}
@@ -694,16 +719,31 @@ func scanDirectory(rootPath string, includeSubfolders bool, mode string, progres
 		if progress != nil {
 			progress.setCurrentTitle(filepath.Base(cand.Path))
 		}
-		if saveComic(cand.Path, cand.IsDir, incremental, pathID) {
+		switch saveComicWithResult(cand.Path, cand.IsDir, incremental, pathID) {
+		case SaveComicCreated:
 			stats.Found++
 			if progress != nil {
 				progress.incFound()
 			}
-		} else if progress != nil {
-			progress.incSkipped()
+		case SaveComicSkippedExisting:
+			stats.SkippedExisting++
+			if progress != nil {
+				progress.incSkipped()
+			}
+		case SaveComicSkippedGid:
+			stats.SkippedGid++
+			if progress != nil {
+				progress.incSkipped()
+			}
+		case SaveComicFailed:
+			stats.Failed++
+			if progress != nil {
+				progress.incSkipped()
+			}
 		}
 		if progress != nil {
 			progress.incProcessed()
+			progress.setSkipBreakdown(stats, warnings)
 		}
 	}
 

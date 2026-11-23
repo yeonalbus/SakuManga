@@ -398,11 +398,14 @@ const handleSingleScan = async (item: ExtraScanPath, mode: ScanMode) => {
 // 5. 进度辅助函数
 const progressOf = (item: ExtraScanPath): ScanProgress | undefined => getScanProgress(item.id)
 
-// D2/D4：跳过项摘要（空目录 / 不可读归档）
+// D2/D4/D17：跳过项摘要（空目录 / 不可读归档 / 已存在 / 同 gid / 写库失败）
 const skippedDetail = (p: ScanProgress): string => {
   const parts: string[] = []
   if (p.skippedEmpty) parts.push(`空目录 ${p.skippedEmpty}`)
   if (p.skippedUnsupported) parts.push(`不可读归档 ${p.skippedUnsupported}`)
+  if (p.skippedExisting) parts.push(`已存在 ${p.skippedExisting}`)
+  if (p.skippedGid) parts.push(`同 gid ${p.skippedGid}`)
+  if (p.failed) parts.push(`失败 ${p.failed}`)
   return parts.join(' / ')
 }
 

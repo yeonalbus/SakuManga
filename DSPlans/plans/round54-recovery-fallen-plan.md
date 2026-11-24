@@ -197,6 +197,7 @@
 ### 9.2 failTask（download.go 现有函数）
 - `task.Group == "recovery"` 且 `UpdateForComicID != ""`：
   - 错误分类（新增 `classifyRecoveryFailure`，基于现有 archive 锁定分类 + 404/removed 判定）：
+    - **404 判定**：`archiver.php 返回状态码 404` / `HTTP 404` / `not found` 均视为「画廊已删除或被替换」的确定性失败 → 阵亡 `removed`（旧 gid/token 因画廊被替换而 404 时同样无法自动找回新 gid）
     - 确定性 → 写 fallen（removed / unlock-failed），任务置 `cancelled`。
     - 可重试 → 保持 error / error_lock。
 

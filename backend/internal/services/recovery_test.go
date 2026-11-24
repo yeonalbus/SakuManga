@@ -489,6 +489,9 @@ func TestClassifyRecoveryFailure(t *testing.T) {
 		{"获取画廊页面列表失败: 画廊已被删除或不可用（This gallery has been removed or is unavailable）", models.FallenReasonRemoved, true},
 		{"Gallery has been removed", models.FallenReasonRemoved, true},
 		{"copyright violation", models.FallenReasonRemoved, true},
+		// archiver.php 对已删除/被替换画廊返回 404：确定性失败（E 站实装错误文本）
+		{"archiver.php 返回状态码 404", models.FallenReasonRemoved, true},
+		{"HTTP 404 Not Found", models.FallenReasonRemoved, true},
 		{"解压失败: zip: not a valid zip file", models.FallenReasonUnlockFail, true},
 		{"下载连接超时: EOF", "", false},
 		{"有 3 张图片下载失败（已完成 10 张已断点保存，可重试跳过）", "", false},

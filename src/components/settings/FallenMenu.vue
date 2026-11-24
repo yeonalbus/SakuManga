@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'dismiss', id: number, dismissed: boolean): void
+  (e: 'reclassify'): void
   (e: 'close'): void
 }>()
 
@@ -40,7 +41,17 @@ const groups = computed(() => {
       <div class="panel">
         <div class="panel-head">
           <span class="panel-title">阵亡名单（{{ items.length }}）</span>
-          <button class="close-btn" title="关闭" @click="emit('close')">×</button>
+          <div class="head-actions">
+            <!-- 存量异常任务（旧逻辑失败/用户取消）一键转入阵亡 -->
+            <button
+              class="reclassify-btn"
+              title="把已取消/出错的恢复任务中「404/下架/解压失败」的条目直接转入阵亡（不会重新下载）"
+              @click="emit('reclassify')"
+            >
+              异常任务转入阵亡
+            </button>
+            <button class="close-btn" title="关闭" @click="emit('close')">×</button>
+          </div>
         </div>
 
         <div class="panel-body">
@@ -112,6 +123,27 @@ const groups = computed(() => {
   font-size: 14px;
   font-weight: 600;
   color: var(--app-text-strong);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reclassify-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-input-bg);
+  color: var(--app-text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reclassify-btn:hover {
+  border-color: #f0b429;
+  color: #f0b429;
 }
 
 .close-btn {

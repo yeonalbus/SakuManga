@@ -634,6 +634,51 @@ func (m *DownloadManager) cleanupRecoveryArtifacts(gid string) {
 	}
 }
 
+// RecoveryReclassifyResult 异常任务重分类结果
+type RecoveryReclassifyResult struct {
+	Fallen int      `json:"fallen"` // 确定性失败 → 已转入阵亡
+	Left   int      `json:"left"`   // 非确定性失败（可重试），保留
+	Errors []string `json:"errors"`
+}
+
+// ReclassifyRecoveryTasks 把「已取消 / 出错 / 锁定」的恢复任务按失败文本重新归类：
+//   - 确定性失败（404 / removed / 解压失败等）→ 写阵亡名单 + 删候选 + 任务置 cancelled
+//   - 其余（网络/配额等可重试）→ 保留不动
+//
+// 用途：修复前以旧逻辑失败的存量任务（如 archiver.php 404）无需重新下载即可直接转入阵亡。
+func (m *DownloadManager) ReclassifyRecoveryTasks() (*RecoveryReclassifyResult, error) {
+	var tasks []models.DownloadTask
+	if err := m.db.Where("\"group\" = ? AND status IN ?", RecoveryGroup, []string{
+		string(models.DownloadCancelled), string(models.DownloadError), string(models.DownloadErrorLock),
+	}).Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	res := &RecoveryReclassifyResult{Errors: []string{}}
+	for i := range tasks {
+		t := &tasks[i]
+		reason, deterministic := classifyRecoveryFailure(t.Error)
+		if !deterministic {
+			res.Left++
+			continue
+		}
+		if err := m.recordRecoveryFallen(t, reason); err != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("gid=%s: %v", t.GID, err))
+			continue
+		}
+		t.Status = models.DownloadCancelled
+		t.UpdatedAt = time.Now()
+		if err := m.db.Save(t).Error; err != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("gid=%s 状态保存失败: %v", t.GID, err))
+			continue
+		}
+		res.Fallen++
+	}
+	log.Printf("%s [recovery] 异常任务重分类：共 %d，转阵亡 %d，保留 %d，失败 %d",
+		dlLogTag, len(tasks), res.Fallen, res.Left, len(res.Errors))
+	return res, nil
+}
+
 // recoveredRecordAlive 恢复任务完成的防御校验：按 g_id 确认新记录已入库且文件有效。
 // 只有确认新记录存在，才允许删除旧记录（防悬空，设计 9.1）。
 func (m *DownloadManager) recoveredRecordAlive(gid string) bool {

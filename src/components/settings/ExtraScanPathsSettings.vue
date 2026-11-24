@@ -272,6 +272,7 @@
       :items="fallenItems"
       :loading="fallenLoading"
       @dismiss="handleDismissFallen"
+      @reclassify="handleReclassifyFallen"
       @close="fallenOpen = false"
     />
   </div>
@@ -306,6 +307,7 @@ import {
   startRecovery,
   cancelRecovery,
   dismissFallen,
+  reclassifyRecovery,
   type ExtraScanPath,
   type ScanProgress,
   type ScanMode,
@@ -421,6 +423,25 @@ const openFallen = async () => {
 const handleDismissFallen = async (id: number, dismissed: boolean) => {
   try {
     await dismissFallen(id, dismissed)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '操作失败')
+  }
+}
+
+// 存量异常任务一键转入阵亡：已取消/出错的恢复任务中 404 等确定性失败直接进阵亡名单（不重新下载）
+const handleReclassifyFallen = async () => {
+  const confirmed = await modal.confirm(
+    '把已取消/出错的恢复任务中「404/下架/解压失败」的条目直接转入阵亡名单？\n这些任务不会重新下载，会直接标记为阵亡；网络类错误（可重试）保持原样。',
+    '异常任务转入阵亡',
+    { tone: 'warn', confirmText: '确认转入' },
+  )
+  if (!confirmed) return
+  try {
+    const res = await reclassifyRecovery()
+    toast.success(
+      `已转入阵亡 ${res.fallen} 条${res.left ? `，保留 ${res.left} 条可重试任务` : ''}`,
+    )
+    await Promise.all([fetchFallen(), fetchRecoveryStatus()])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '操作失败')
   }

@@ -562,6 +562,79 @@ func TestFailTaskRecoveryRetryable(t *testing.T) {
 	}
 }
 
+// TestReclassifyRecoveryTasks 存量异常任务重分类：404 → 阵亡 + cancelled；网络错误保留
+func TestReclassifyRecoveryTasks(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+	db.Create(&models.RecoveryCandidate{GID: "100", Token: "t", Title: "a", ComicID: "c1"})
+	db.Create(&models.RecoveryCandidate{GID: "200", Token: "t", Title: "b", ComicID: "c2"})
+
+	// 旧逻辑失败的 404 error 任务
+	db.Create(&models.DownloadTask{
+		ID: "r1", GID: "100", Token: "t", Title: "a",
+		Mode: models.DownloadModeArchive, Status: models.DownloadError, Group: RecoveryGroup,
+		Error: "archiver.php 返回状态码 404",
+	})
+	// 网络类错误任务（可重试）→ 保留
+	db.Create(&models.DownloadTask{
+		ID: "r2", GID: "200", Token: "t", Title: "b",
+		Mode: models.DownloadModeArchive, Status: models.DownloadError, Group: RecoveryGroup,
+		Error: "连接超时: EOF",
+	})
+	// 用户取消的 404 任务（无候选快照，走任务信息兜底）
+	db.Create(&models.DownloadTask{
+		ID: "r3", GID: "300", Token: "t", Title: "c",
+		Mode: models.DownloadModeArchive, Status: models.DownloadCancelled, Group: RecoveryGroup,
+		Error: "archiver.php 返回状态码 404",
+	})
+
+	res, err := mgr.ReclassifyRecoveryTasks()
+	if err != nil {
+		t.Fatalf("重分类失败: %v", err)
+	}
+	if res.Fallen != 2 || res.Left != 1 {
+		t.Fatalf("应转阵亡 2、保留 1，得到 %+v", res)
+	}
+
+	// 阵亡：gid 100 / 300；gid 200 不应有
+	// 注意：GORM 复用结构体查询时会把旧主键拼进条件，必须用新变量
+	var f100 models.FallenComic
+	if err := db.First(&f100, "dedupe_key = ?", "gid:100").Error; err != nil {
+		t.Fatalf("gid=100 应转阵亡: %v", err)
+	}
+	if f100.Reason != models.FallenReasonRemoved {
+		t.Fatalf("阵亡原因应为 removed，得到 %q", f100.Reason)
+	}
+	var f300 models.FallenComic
+	if err := db.First(&f300, "dedupe_key = ?", "gid:300").Error; err != nil {
+		t.Fatalf("用户取消的 gid=300 也应转阵亡: %v", err)
+	}
+	var cnt int64
+	db.Model(&models.FallenComic{}).Where("dedupe_key = ?", "gid:200").Count(&cnt)
+	if cnt != 0 {
+		t.Fatalf("网络错误任务不应进阵亡")
+	}
+
+	// 任务状态：r1/r3 → cancelled；r2 保持 error
+	var t1, t2, t3 models.DownloadTask
+	db.First(&t1, "id = ?", "r1")
+	db.First(&t2, "id = ?", "r2")
+	db.First(&t3, "id = ?", "r3")
+	if t1.Status != models.DownloadCancelled || t3.Status != models.DownloadCancelled {
+		t.Fatalf("404 任务应置 cancelled（r1=%s r3=%s）", t1.Status, t3.Status)
+	}
+	if t2.Status != models.DownloadError {
+		t.Fatalf("网络错误任务应保持 error，得到 %s", t2.Status)
+	}
+
+	// 候选：100 已清理，200 保留
+	var candCount int64
+	db.Model(&models.RecoveryCandidate{}).Count(&candCount)
+	if candCount != 1 {
+		t.Fatalf("候选应只剩 gid=200，实际 %d", candCount)
+	}
+}
+
 // TestFinalizeUpdateRecovery 恢复任务完成钩子：防御校验 + 删旧记录 + 清候选/阵亡
 func TestFinalizeUpdateRecovery(t *testing.T) {
 	db := newRecoveryTestDB(t)

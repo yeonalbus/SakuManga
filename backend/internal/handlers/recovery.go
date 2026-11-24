@@ -113,6 +113,21 @@ func (h *RecoveryHandler) CancelRecovery(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ReclassifyRecovery 异常任务重分类 POST /api/v1/offline/recovery/reclassify
+// 把已取消/出错的恢复任务按失败文本重新归类（404 等确定性失败直接转入阵亡名单），
+// 用于修复前旧逻辑失败的存量任务，无需重新下载。
+func (h *RecoveryHandler) ReclassifyRecovery(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	res, err := h.manager.ReclassifyRecoveryTasks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // GetFallen 阵亡名单 GET /api/v1/offline/fallen?page=&size=
 // 排序：未 dismissed 在前（创建时间升序），dismissed 划线置底（dismissed_at 升序）。
 func (h *RecoveryHandler) GetFallen(c *gin.Context) {

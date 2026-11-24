@@ -384,6 +384,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/offline/recovery/candidates", recoveryHandler.ListCandidates)
 			admin.POST("/offline/recovery/start", recoveryHandler.StartRecovery)
 			admin.POST("/offline/recovery/cancel", recoveryHandler.CancelRecovery)
+			admin.POST("/offline/recovery/reclassify", recoveryHandler.ReclassifyRecovery)
 			admin.GET("/offline/fallen", recoveryHandler.GetFallen)
 			admin.POST("/offline/fallen/dismiss", recoveryHandler.DismissFallen)
 		}

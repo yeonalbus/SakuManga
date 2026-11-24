@@ -338,6 +338,18 @@ export const fetchFallen = async (page = 1, size = 200) => {
   }
 }
 
+/** 异常任务重分类：把已取消/出错的恢复任务中 404 等确定性失败直接转入阵亡名单 */
+export const reclassifyRecovery = async (): Promise<{
+  fallen: number
+  left: number
+  errors?: string[]
+}> => {
+  return await http<{ fallen: number; left: number; errors?: string[] }>(
+    '/offline/recovery/reclassify',
+    { method: 'POST' },
+  )
+}
+
 /** 阵亡条目 x toggle（划线与撤销划线） */
 export const dismissFallen = async (id: number, dismissed: boolean) => {
   await http('/offline/fallen/dismiss', {

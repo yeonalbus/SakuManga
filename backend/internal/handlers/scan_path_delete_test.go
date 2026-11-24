@@ -39,6 +39,10 @@ func newScanPathTestDB(t *testing.T) *gorm.DB {
 		&models.HistoryRecord{},
 		&models.Bookshelf{},
 		&models.ReadingList{},
+		// Round54：DeleteScanPath 会查询恢复候选与下载任务表
+		&models.RecoveryCandidate{},
+		&models.FallenComic{},
+		&models.DownloadTask{},
 	); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}

@@ -62,12 +62,12 @@ func AddScanPath(c *gin.Context) {
 	// GORM 对「bool 零值 + gorm default:true 标签」的 Create 会落默认值（true），
 	// 导致显式关闭离线维护被存成开启——用 map 创建保留显式 false。
 	if err := database.DB.Model(&models.ExtraScanPath{}).Create(map[string]interface{}{
-		"id":                   newPath.ID,
-		"path":                 newPath.Path,
-		"name":                 newPath.Name,
-		"include_subfolders":   newPath.IncludeSubfolders,
+		"id":                    newPath.ID,
+		"path":                  newPath.Path,
+		"name":                  newPath.Name,
+		"include_subfolders":    newPath.IncludeSubfolders,
 		"enable_offline_update": newPath.EnableOfflineUpdate,
-		"created_at":           time.Now(),
+		"created_at":            time.Now(),
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加路径失败"})
 		return
@@ -105,6 +105,7 @@ func UpdateScanPath(c *gin.Context) {
 }
 
 // GetScanPathImpact 查询删除该路径会连带清理的漫画数量（前端二次确认文案用）。
+// Round54：额外返回恢复候选数（>0 时前端需提示「确认后候选转阵亡」）。
 func GetScanPathImpact(c *gin.Context) {
 	id := c.Param("id")
 	var count int64
@@ -114,7 +115,14 @@ func GetScanPathImpact(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"comicCount": count})
+	var candidateCount int64
+	if err := database.DB.Model(&models.RecoveryCandidate{}).
+		Where("scan_path_id = ?", id).
+		Count(&candidateCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计恢复候选失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"comicCount": count, "recoveryCandidateCount": candidateCount})
 }
 
 // DeleteScanPath 删除一条额外的画廊扫描路径，**并连带清理该路径下已入库的漫画记录**。
@@ -125,11 +133,19 @@ func GetScanPathImpact(c *gin.Context) {
 // 完整流程（幂等 / 扫描中拒绝 / 先清漫画再删路径）见 services.DeleteScanPathWithComics。
 func DeleteScanPath(c *gin.Context) {
 	id := c.Param("id")
+	// Round54：?confirmRecovery=1 表示用户已确认「有候选会转阵亡」，放行移除
+	confirmRecovery := c.Query("confirmRecovery") == "1" || c.Query("confirmRecovery") == "true"
 
-	removed, err := services.DeleteScanPathWithComics(database.DB, id)
+	removed, err := services.DeleteScanPathWithComics(database.DB, id, confirmRecovery)
 	if err != nil {
-		if errors.Is(err, services.ErrScanPathInProgress) {
+		switch {
+		case errors.Is(err, services.ErrScanPathInProgress),
+			errors.Is(err, services.ErrScanPathRecoveryInProgress):
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		case errors.Is(err, services.ErrScanPathHasCandidates):
+			// 前端据 needConfirmRecovery 弹二次确认，确认后带 confirmRecovery=1 重试
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "needConfirmRecovery": true})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "removedComics": removed})
@@ -141,11 +157,18 @@ func DeleteScanPath(c *gin.Context) {
 
 // TriggerScanPath 异步启动一次扫描（全量 / 增量）。
 // 启动成功立即返回进度对象；若该路径已在扫描中则返回 409。
+// Round54：该路径有恢复任务进行中时禁止扫描（锁粒度按路径，其他路径不受影响）。
 func TriggerScanPath(c *gin.Context) {
 	id := c.Param("id")
 	var targetPath models.ExtraScanPath
 	if err := database.DB.First(&targetPath, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该路径记录"})
+		return
+	}
+
+	// Round54 恢复锁：仅锁定「恢复队列本子原属路径」，其余路径正常扫描
+	if locked, err := services.IsRecoveryLockedPath(database.DB, id); err == nil && locked {
+		c.JSON(http.StatusConflict, gin.H{"error": "恢复任务进行中，该路径暂不可扫描"})
 		return
 	}
 

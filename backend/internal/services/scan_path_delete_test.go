@@ -180,7 +180,7 @@ func TestDeleteScanPathWithComicsRejectsWhileScanning(t *testing.T) {
 		mgr.mu.Unlock()
 	})
 
-	if _, err := DeleteScanPathWithComics(db, id); !errors.Is(err, ErrScanPathInProgress) {
+	if _, err := DeleteScanPathWithComics(db, id, false); !errors.Is(err, ErrScanPathInProgress) {
 		t.Fatalf("扫描中应返回 ErrScanPathInProgress，得到 %v", err)
 	}
 	// 拒绝时不得有任何删除
@@ -199,7 +199,7 @@ func TestDeleteScanPathWithComicsRejectsWhileScanning(t *testing.T) {
 	mgr.running[id].finish(nil)
 	mgr.mu.Unlock()
 
-	removed, err := DeleteScanPathWithComics(db, id)
+	removed, err := DeleteScanPathWithComics(db, id, false)
 	if err != nil {
 		t.Fatalf("扫描结束后删除失败: %v", err)
 	}

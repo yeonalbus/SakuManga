@@ -30,6 +30,10 @@ func newRefsTestDB(t *testing.T) *gorm.DB {
 		&models.Bookshelf{},
 		&models.ReadingList{},
 		&models.OfflineComic{},
+		// Round54：DeleteScanPathWithComics 会查询恢复候选与下载任务表
+		&models.RecoveryCandidate{},
+		&models.FallenComic{},
+		&models.DownloadTask{},
 	); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}

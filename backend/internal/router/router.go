@@ -41,6 +41,8 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 	offlineHandler := handlers.NewOfflineHandler(db, ehService, downloadManager)
 	// 画质升级：检测候选 + 升级下载（复用 DownloadManager 创建归档原图任务）
 	upgradeHandler := handlers.NewUpgradeHandler(db, downloadManager)
+	// Round54：恢复与阵亡（全量扫描失效对账产物 → 恢复下载 / 阵亡名单）
+	recoveryHandler := handlers.NewRecoveryHandler(db, downloadManager)
 
 	toplistService := services.NewToplistService(ehService)
 	favService := services.NewFavoritesService(ehService)
@@ -376,6 +378,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 
 			// Round32：XP 词云全量重算（公式调整 / 增量链路漏接后的兜底）
 			admin.POST("/offline/xp-cloud/rebuild", xpCloudHandler.RebuildXpCloud)
+
+			// Round54：恢复与阵亡（恢复涉及下载消耗与数据删除，仅管理员）
+			admin.GET("/offline/recovery/status", recoveryHandler.GetStatus)
+			admin.GET("/offline/recovery/candidates", recoveryHandler.ListCandidates)
+			admin.POST("/offline/recovery/start", recoveryHandler.StartRecovery)
+			admin.POST("/offline/recovery/cancel", recoveryHandler.CancelRecovery)
 		}
 	}
 }

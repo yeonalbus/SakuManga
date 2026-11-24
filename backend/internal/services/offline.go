@@ -866,9 +866,9 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	comics = filterOfflineLocalCandidates(db, comics)
 
 	result := &DedupResult{Items: []DedupItem{}}
-	keepSet := map[string]bool{}      // 建议保留的 comic id
-	keepRule := map[string]string{}   // D19：保留项命中的规则（gid/hash/parent/signature），供列表输出
-	removeSet := map[string]bool{}    // 建议删除的 comic id
+	keepSet := map[string]bool{}    // 建议保留的 comic id
+	keepRule := map[string]string{} // D19：保留项命中的规则（gid/hash/parent/signature），供列表输出
+	removeSet := map[string]bool{}  // 建议删除的 comic id
 	reasonMap := map[string]string{}
 	ruleMap := map[string]string{}       // Round26 O2：comic id → 命中规则（gid/hash/parent/signature），前端区分可忽略项
 	totalBytes := make(map[string]int64) // 计算建议删除释放的空间用
@@ -1847,6 +1847,12 @@ func DeleteOfflineComicsByScanPath(db *gorm.DB, scanPathID string) (int, error) 
 // ErrScanPathInProgress 该扫描路径正在扫描中，不允许删除。
 var ErrScanPathInProgress = errors.New("该路径正在扫描，请等待扫描完成后再删除")
 
+// ErrScanPathRecoveryInProgress 该扫描路径有恢复任务进行中，不允许删除（Round54）。
+var ErrScanPathRecoveryInProgress = errors.New("该路径正在恢复下载，请等待完成或取消恢复后再移除")
+
+// ErrScanPathHasCandidates 该扫描路径还有未恢复的候选，需显式确认转入阵亡后才能移除（Round54）。
+var ErrScanPathHasCandidates = errors.New("该路径还有可恢复的本子，请先恢复或确认转入阵亡名单")
+
 // DeleteScanPathWithComics 删除一条额外的画廊扫描路径，并连带清理其名下已入库的漫画记录。
 //
 // 完整流程（供 handler 直接调用，HTTP 层只做状态码映射）：
@@ -1854,10 +1860,13 @@ var ErrScanPathInProgress = errors.New("该路径正在扫描，请等待扫描�
 //     （否则传入伪造 id 即成为「按 scanPathID 批量删库」的后门）；
 //  2. 该路径正在扫描 → ErrScanPathInProgress（扫描 goroutine 不受删除影响，
 //     放行会以即将删除的路径 ID 继续落库，产生新的残留记录）；
-//  3. 先清理漫画（失败则整体失败、路径保留可重试），再删路径记录。
+//  3. Round54：该路径有恢复任务进行中 → ErrScanPathRecoveryInProgress；
+//  4. Round54：该路径有未恢复候选且 confirmRecovery=false → ErrScanPathHasCandidates；
+//     confirmRecovery=true 时先把候选转为阵亡条目（reason=path-removed）再继续；
+//  5. 先清理漫画（失败则整体失败、路径保留可重试），再删路径记录。
 //
 // 磁盘文件一律保留。返回清理的漫画数量。
-func DeleteScanPathWithComics(db *gorm.DB, scanPathID string) (int, error) {
+func DeleteScanPathWithComics(db *gorm.DB, scanPathID string, confirmRecovery bool) (int, error) {
 	if db == nil || strings.TrimSpace(scanPathID) == "" {
 		return 0, nil
 	}
@@ -1872,6 +1881,32 @@ func DeleteScanPathWithComics(db *gorm.DB, scanPathID string) (int, error) {
 
 	if GetScanManager().IsScanning(scanPathID) {
 		return 0, ErrScanPathInProgress
+	}
+
+	// Round54：恢复任务进行中禁止移除路径（删除记录会破坏 update_for_comic_id 关联）
+	locked, err := IsRecoveryLockedPath(db, scanPathID)
+	if err != nil {
+		return 0, fmt.Errorf("恢复状态查询失败: %v", err)
+	}
+	if locked {
+		return 0, ErrScanPathRecoveryInProgress
+	}
+
+	// Round54：有未恢复候选 → 需显式确认；确认后候选转阵亡（path-removed，数据不悬空）
+	var candCount int64
+	if err := db.Model(&models.RecoveryCandidate{}).
+		Where("scan_path_id = ?", scanPathID).Count(&candCount).Error; err != nil {
+		return 0, fmt.Errorf("恢复候选统计失败: %v", err)
+	}
+	if candCount > 0 {
+		if !confirmRecovery {
+			return 0, ErrScanPathHasCandidates
+		}
+		converted, err := convertCandidatesToFallen(db, scanPathID, path.Path)
+		if err != nil {
+			return 0, fmt.Errorf("恢复候选转阵亡失败: %v", err)
+		}
+		log.Printf("%s [scan] 移除路径 %q 前已将 %d 个恢复候选转为阵亡条目（path-removed）", dlLogTag, path.Path, converted)
 	}
 
 	removed, err := DeleteOfflineComicsByScanPath(db, scanPathID)

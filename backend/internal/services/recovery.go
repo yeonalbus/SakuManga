@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -240,4 +241,299 @@ func healRecoveredRecord(db *gorm.DB, c *models.OfflineComic) (int, error) {
 	}
 	healed += int(fallen.RowsAffected)
 	return healed, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round54 阶段2：恢复会话
+//
+// 设计要点（见设计文档第 8/9/10 节）：
+//   - 恢复任务 = 更新任务语义（UpdateForComicID 关联旧记录，绕过「已下载」去重）
+//   - 恢复中判定由「未终结恢复任务」推导，不新增状态表（避免状态漂移）
+//   - 锁粒度按扫描路径：只锁恢复队列本子原属路径
+//   - 取消保留候选清单，可幂等重新入队
+// ─────────────────────────────────────────────────────────────
+
+// RecoveryGroup 恢复任务在 download_tasks.group 中的标记
+const RecoveryGroup = "recovery"
+
+// 恢复方案（UI 档位；与设计文档 8.1 档位映射一致）
+const (
+	RecoverySchemeArchiveOriginal = "archive-original" // H@H 原图（归档原图，耗 GP）
+	RecoverySchemeArchiveResample = "archive-resample" // H@H 压缩（归档压缩）
+	RecoverySchemeGallery         = "gallery"          // 画廊逐图（不耗 GP 但慢）
+)
+
+// 恢复相关哨兵错误（handler 据此映射状态码）
+var (
+	ErrRecoveryNoCandidates  = errors.New("没有可恢复的候选（请先对扫描路径执行全量扫描）")
+	ErrRecoveryInProgress    = errors.New("恢复任务进行中，请等待完成或先取消")
+	ErrRecoverySchemeInvalid = errors.New("无效的恢复方案（仅支持 archive-original / archive-resample / gallery）")
+)
+
+// recoveryUnfinishedStatuses 视为「恢复进行中」的任务状态集合。
+// error / error_lock 视为可重试（网络/配额失败留队列），确定性失败由钩子转为 cancelled。
+func recoveryUnfinishedStatuses() []string {
+	return []string{
+		string(models.DownloadQueued),
+		string(models.DownloadDownloading),
+		string(models.DownloadPaused),
+		string(models.DownloadError),
+		string(models.DownloadErrorLock),
+	}
+}
+
+// RecoveryStatus 恢复功能状态（前端按钮置灰/进度展示用）
+type RecoveryStatus struct {
+	Phase          string   `json:"phase"`          // idle | ready | recovering
+	CandidateCount int64    `json:"candidateCount"` // 恢复候选数
+	ActiveTasks    int64    `json:"activeTasks"`    // 未终结恢复任务数
+	LockedPathIDs  []string `json:"lockedPathIds"`  // 恢复中锁定的扫描路径
+}
+
+// GetRecoveryStatus 推导恢复状态（无状态表，全部由查询得出，重启自动恢复语义）。
+func GetRecoveryStatus(db *gorm.DB) (*RecoveryStatus, error) {
+	if db == nil {
+		return nil, errors.New("恢复状态查询失败：db 为空")
+	}
+	st := &RecoveryStatus{LockedPathIDs: []string{}}
+
+	if err := db.Model(&models.RecoveryCandidate{}).Count(&st.CandidateCount).Error; err != nil {
+		return nil, err
+	}
+
+	statuses := recoveryUnfinishedStatuses()
+	if err := db.Model(&models.DownloadTask{}).
+		Where("\"group\" = ? AND status IN ?", RecoveryGroup, statuses).
+		Count(&st.ActiveTasks).Error; err != nil {
+		return nil, err
+	}
+
+	// 锁定路径 = 存在未终结恢复任务、且其 g_id 仍在候选表中的扫描路径
+	if err := db.Raw(`SELECT DISTINCT c.scan_path_id FROM recovery_candidates c
+		WHERE c.scan_path_id <> '' AND EXISTS (
+			SELECT 1 FROM download_tasks t
+			WHERE t."group" = ? AND t.g_id = c.g_id AND t.status IN ?
+		)`, RecoveryGroup, statuses).Scan(&st.LockedPathIDs).Error; err != nil {
+		return nil, err
+	}
+
+	switch {
+	case st.ActiveTasks > 0:
+		st.Phase = "recovering"
+	case st.CandidateCount > 0:
+		st.Phase = "ready"
+	default:
+		st.Phase = "idle"
+	}
+	return st, nil
+}
+
+// IsRecoveryLockedPath 该扫描路径是否被恢复任务锁定（扫描守卫用）
+func IsRecoveryLockedPath(db *gorm.DB, pathID string) (bool, error) {
+	if db == nil || strings.TrimSpace(pathID) == "" {
+		return false, nil
+	}
+	var count int64
+	err := db.Model(&models.RecoveryCandidate{}).
+		Where("scan_path_id = ?", pathID).
+		Where(`EXISTS (SELECT 1 FROM download_tasks t
+			WHERE t."group" = ? AND t.g_id = recovery_candidates.g_id AND t.status IN ?)`,
+			RecoveryGroup, recoveryUnfinishedStatuses()).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ListRecoveryCandidates 分页读取恢复候选（按创建时间升序）
+func ListRecoveryCandidates(db *gorm.DB, page, size int) ([]models.RecoveryCandidate, int64, error) {
+	if size <= 0 || size > 500 {
+		size = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
+	var total int64
+	if err := db.Model(&models.RecoveryCandidate{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var items []models.RecoveryCandidate
+	err := db.Order("created_at ASC, g_id ASC").
+		Offset((page - 1) * size).Limit(size).
+		Find(&items).Error
+	return items, total, err
+}
+
+// RecoveryStartParams 启动恢复入参
+type RecoveryStartParams struct {
+	Scheme string `json:"scheme"` // archive-original | archive-resample | gallery
+	UserID uint   `json:"userId"` // 任务发起者（执行时使用其 E 站凭证）
+}
+
+// RecoveryStartResult 启动恢复统计
+type RecoveryStartResult struct {
+	Created int      `json:"created"`
+	Skipped int      `json:"skipped"` // 已有未终结同 gid 任务（幂等）
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors"`
+}
+
+// recoverySchemeToMode 档位 → 下载模式/归档类型映射（设计文档 8.1）
+func recoverySchemeToMode(scheme string) (models.DownloadMode, models.ArchiveType, error) {
+	switch scheme {
+	case RecoverySchemeArchiveOriginal:
+		return models.DownloadModeArchive, models.ArchiveTypeOriginal, nil
+	case RecoverySchemeArchiveResample:
+		return models.DownloadModeArchive, models.ArchiveTypeResample, nil
+	case RecoverySchemeGallery:
+		return models.DownloadModeGallery, "", nil
+	}
+	return "", "", ErrRecoverySchemeInvalid
+}
+
+// StartRecovery 把全部恢复候选批量转为下载任务并入队。
+//
+// 语义：
+//   - 每条候选 → CreateTask(UpdateForComicID=候选.ComicID, Group="recovery",
+//     ForceDeleteOriginal=true)。UpdateForComicID 非空 → 绕过「已下载」去重，
+//     且完成后 finalizeUpdate 负责删旧记录、迁移引用、清候选/阵亡（阶段3钩子）。
+//   - 幂等：已有未终结同 gid 恢复任务 → CreateTask 返回 errTaskAlreadyExists，计入 skipped。
+//   - 无候选 / 恢复中 → 哨兵错误（handler 映射 400/409）。
+func (m *DownloadManager) StartRecovery(p RecoveryStartParams) (*RecoveryStartResult, error) {
+	mode, archiveType, err := recoverySchemeToMode(p.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	status, err := GetRecoveryStatus(m.db)
+	if err != nil {
+		return nil, err
+	}
+	if status.ActiveTasks > 0 {
+		return nil, ErrRecoveryInProgress
+	}
+	if status.CandidateCount == 0 {
+		return nil, ErrRecoveryNoCandidates
+	}
+
+	var cands []models.RecoveryCandidate
+	if err := m.db.Order("created_at ASC, g_id ASC").Find(&cands).Error; err != nil {
+		return nil, err
+	}
+
+	res := &RecoveryStartResult{Errors: []string{}}
+	for _, c := range cands {
+		_, err := m.CreateTask(CreateDownloadParams{
+			GID:                 c.GID,
+			Token:               c.Token,
+			Title:               c.Title,
+			CoverURL:            c.CoverURL,
+			Mode:                mode,
+			ArchiveType:         archiveType,
+			UpdateForComicID:    c.ComicID,
+			ForceDeleteOriginal: true, // 恢复 = 旧记录指向失效文件，完成后必须无条件删旧
+			Group:               RecoveryGroup,
+			UserID:              p.UserID,
+		})
+		if err != nil {
+			if errors.Is(err, errTaskAlreadyExists) || errors.Is(err, errAlreadyDownloaded) {
+				res.Skipped++
+			} else {
+				res.Failed++
+				res.Errors = append(res.Errors, fmt.Sprintf("gid=%s: %v", c.GID, err))
+			}
+			continue
+		}
+		res.Created++
+	}
+	log.Printf("%s [recovery] 启动恢复（%s）：候选 %d，创建 %d，跳过 %d，失败 %d",
+		dlLogTag, p.Scheme, len(cands), res.Created, res.Skipped, res.Failed)
+	return res, nil
+}
+
+// RecoveryCancelParams 取消恢复入参（GIDs 为空 = 全部取消）
+type RecoveryCancelParams struct {
+	GIDs []string `json:"gids"`
+}
+
+// RecoveryCancelResult 取消恢复统计
+type RecoveryCancelResult struct {
+	Cancelled int      `json:"cancelled"`
+	Errors    []string `json:"errors"`
+}
+
+// CancelRecovery 取消未终结的恢复任务（单条或全部）。
+// 候选清单全部保留（设计 8.3）：取消后可再次点「恢复」按 g_id 幂等重入。
+func (m *DownloadManager) CancelRecovery(p RecoveryCancelParams) (*RecoveryCancelResult, error) {
+	q := m.db.Where("\"group\" = ? AND status IN ?", RecoveryGroup, recoveryUnfinishedStatuses())
+	if len(p.GIDs) > 0 {
+		q = q.Where("g_id IN ?", p.GIDs)
+	}
+	var tasks []models.DownloadTask
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	res := &RecoveryCancelResult{Errors: []string{}}
+	for _, t := range tasks {
+		if _, err := m.CancelTask(t.ID); err != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("gid=%s: %v", t.GID, err))
+			continue
+		}
+		res.Cancelled++
+	}
+	log.Printf("%s [recovery] 取消恢复任务：命中 %d，成功 %d，失败 %d",
+		dlLogTag, len(tasks), res.Cancelled, len(res.Errors))
+	return res, nil
+}
+
+// convertCandidatesToFallen 把某扫描路径下的恢复候选转为阵亡条目
+// （reason=path-removed），并清空候选行。移除路径时调用（设计第 11 节）。
+//
+// 候选自包含快照直接搬入阵亡名单；按 dedupe_key upsert 幂等，
+// 保留用户已存在的 dismissed 状态。
+func convertCandidatesToFallen(db *gorm.DB, scanPathID, sourcePath string) (int, error) {
+	if db == nil || strings.TrimSpace(scanPathID) == "" {
+		return 0, nil
+	}
+	var cands []models.RecoveryCandidate
+	if err := db.Where("scan_path_id = ?", scanPathID).Find(&cands).Error; err != nil {
+		return 0, err
+	}
+	if len(cands) == 0 {
+		return 0, nil
+	}
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, c := range cands {
+			f := models.FallenComic{
+				DedupeKey:  "gid:" + c.GID,
+				GID:        c.GID,
+				ComicID:    c.ComicID,
+				Title:      c.Title,
+				TitleJpn:   c.TitleJpn,
+				CoverURL:   c.CoverURL,
+				Category:   c.Category,
+				FileSize:   c.FileSize,
+				PageCount:  c.PageCount,
+				Reason:     models.FallenReasonPathRemoved,
+				SourcePath: sourcePath,
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "dedupe_key"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"g_id", "comic_id", "title", "title_jpn", "cover_url", "category",
+					"file_size", "page_count", "reason", "source_path", "updated_at",
+				}),
+			}).Create(&f).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("scan_path_id = ?", scanPathID).Delete(&models.RecoveryCandidate{}).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(cands), nil
 }

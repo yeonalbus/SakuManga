@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,5 +139,53 @@ func TestRecoveryStartContract(t *testing.T) {
 	}
 	if cancelRes.Cancelled != 1 {
 		t.Fatalf("应取消 1 条任务，得到 %+v", cancelRes)
+	}
+}
+
+// TestFallenListAndDismissContract 阵亡名单接口契约：列表 / x toggle / 权限 / 参数校验
+func TestFallenListAndDismissContract(t *testing.T) {
+	db, h := newRecoveryHandlerTestDB(t)
+	db.Create(&models.FallenComic{DedupeKey: "gid:100", GID: "100", Title: "a"})
+
+	r := gin.New()
+	adminMW := authAsUser(&models.User{ID: 1, Role: services.RoleAdmin})
+	memberMW := authAsUser(&models.User{ID: 2, Role: "member"})
+	r.GET("/fallen", adminMW, h.GetFallen)
+	r.GET("/fallen-member", memberMW, h.GetFallen)
+	r.POST("/fallen/dismiss", adminMW, h.DismissFallen)
+
+	// 权限
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/fallen-member", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("非管理员应 403，得到 %d", w.Code)
+	}
+
+	// 列表
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/fallen", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("列表应 200，得到 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 缺 id → 400
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/fallen/dismiss", strings.NewReader(`{"dismissed":true}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("缺 id 应 400，得到 %d", w.Code)
+	}
+
+	// 正常 toggle
+	var f models.FallenComic
+	db.First(&f, "dedupe_key = ?", "gid:100")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/fallen/dismiss",
+		strings.NewReader(`{"id":`+strconv.FormatUint(uint64(f.ID), 10)+`,"dismissed":true}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("dismiss 应 200，得到 %d: %s", w.Code, w.Body.String())
+	}
+	db.First(&f, "dedupe_key = ?", "gid:100")
+	if !f.Dismissed {
+		t.Fatalf("dismissed 应置 true")
 	}
 }

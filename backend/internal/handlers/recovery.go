@@ -112,3 +112,45 @@ func (h *RecoveryHandler) CancelRecovery(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, res)
 }
+
+// GetFallen 阵亡名单 GET /api/v1/offline/fallen?page=&size=
+// 排序：未 dismissed 在前（创建时间升序），dismissed 划线置底（dismissed_at 升序）。
+func (h *RecoveryHandler) GetFallen(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "50"))
+	items, total, err := services.ListFallenComics(h.db, services.FallenListParams{Page: page, Size: size})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "size": size})
+}
+
+// DismissFallen 阵亡条目手动 x POST /api/v1/offline/fallen/dismiss
+// body: { id: 123, dismissed: true }（按条目 id：no-ehentai 条目没有 g_id）
+// dismissed=true → 划线 + 置底（保留显示）；false → 撤销划线回到原位置。
+func (h *RecoveryHandler) DismissFallen(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	var req struct {
+		ID        uint `json:"id"`
+		Dismissed bool `json:"dismissed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误，需传 id 与 dismissed"})
+		return
+	}
+	if err := services.SetFallenDismissed(h.db, req.ID, req.Dismissed); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "阵亡条目不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}

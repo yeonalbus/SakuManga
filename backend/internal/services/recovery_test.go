@@ -474,3 +474,225 @@ func TestDeleteScanPathRecoveryBoundary(t *testing.T) {
 		t.Fatalf("候选应清空、路径应删除（候选=%d 路径=%d）", candCount, pathCount)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// 阶段3：完成/失败钩子 + 阵亡名单查询
+// ─────────────────────────────────────────────────────────────
+
+// TestClassifyRecoveryFailure 恢复失败分类：确定性（removed/解压失败）vs 可重试
+func TestClassifyRecoveryFailure(t *testing.T) {
+	cases := []struct {
+		msg     string
+		want    string
+		wantAny bool
+	}{
+		{"获取画廊页面列表失败: 画廊已被删除或不可用（This gallery has been removed or is unavailable）", models.FallenReasonRemoved, true},
+		{"Gallery has been removed", models.FallenReasonRemoved, true},
+		{"copyright violation", models.FallenReasonRemoved, true},
+		{"解压失败: zip: not a valid zip file", models.FallenReasonUnlockFail, true},
+		{"下载连接超时: EOF", "", false},
+		{"有 3 张图片下载失败（已完成 10 张已断点保存，可重试跳过）", "", false},
+		{"入库失败: no such file", "", false},
+	}
+	for _, c := range cases {
+		reason, deterministic := classifyRecoveryFailure(c.msg)
+		if reason != c.want || deterministic != c.wantAny {
+			t.Errorf("classifyRecoveryFailure(%q) = (%q,%v)，期望 (%q,%v)", c.msg, reason, deterministic, c.want, c.wantAny)
+		}
+	}
+}
+
+// TestFailTaskRecoveryDeterministic 恢复任务确定性失败 → 阵亡 + cancelled
+func TestFailTaskRecoveryDeterministic(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+	db.Create(&models.RecoveryCandidate{GID: "100", Token: "t", Title: "a", ComicID: "c1"})
+	db.Create(&models.DownloadTask{
+		ID: "r1", UserID: 1, GID: "100", Token: "t", Title: "a",
+		Mode: models.DownloadModeGallery, Status: models.DownloadDownloading, Group: RecoveryGroup,
+	})
+
+	var task models.DownloadTask
+	db.First(&task, "id = ?", "r1")
+	mgr.failTask(&task, "获取画廊页面列表失败: 画廊已被删除或不可用（This gallery has been removed or is unavailable）")
+
+	db.First(&task, "id = ?", "r1")
+	if task.Status != models.DownloadCancelled {
+		t.Fatalf("确定性失败应置 cancelled，得到 %s", task.Status)
+	}
+	var f models.FallenComic
+	if err := db.First(&f, "dedupe_key = ?", "gid:100").Error; err != nil {
+		t.Fatalf("确定性失败应记入阵亡: %v", err)
+	}
+	if f.Reason != models.FallenReasonRemoved {
+		t.Fatalf("阵亡原因应为 removed，得到 %q", f.Reason)
+	}
+	var candCount int64
+	db.Model(&models.RecoveryCandidate{}).Count(&candCount)
+	if candCount != 0 {
+		t.Fatalf("确定性失败后候选应移除，实际 %d", candCount)
+	}
+}
+
+// TestFailTaskRecoveryRetryable 恢复任务可重试失败 → 保持 error，不写阵亡
+func TestFailTaskRecoveryRetryable(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+	db.Create(&models.RecoveryCandidate{GID: "200", Token: "t", Title: "b", ComicID: "c2"})
+	db.Create(&models.DownloadTask{
+		ID: "r2", UserID: 1, GID: "200", Token: "t", Title: "b",
+		Mode: models.DownloadModeGallery, Status: models.DownloadDownloading, Group: RecoveryGroup,
+	})
+
+	var task models.DownloadTask
+	db.First(&task, "id = ?", "r2")
+	mgr.failTask(&task, "连接超时: EOF")
+
+	db.First(&task, "id = ?", "r2")
+	if task.Status != models.DownloadError {
+		t.Fatalf("可重试失败应保持 error，得到 %s", task.Status)
+	}
+	var fallenCount int64
+	db.Model(&models.FallenComic{}).Count(&fallenCount)
+	if fallenCount != 0 {
+		t.Fatalf("可重试失败不应写阵亡，实际 %d 条", fallenCount)
+	}
+}
+
+// TestFinalizeUpdateRecovery 恢复任务完成钩子：防御校验 + 删旧记录 + 清候选/阵亡
+func TestFinalizeUpdateRecovery(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old-gone") // 旧路径不存在（被删）
+	newPath := filepath.Join(root, "new")
+	if err := os.MkdirAll(newPath, 0o755); err != nil {
+		t.Fatalf("创建新路径失败: %v", err)
+	}
+
+	db.Create(&models.OfflineComic{ID: "old1", GID: "300", Token: "t", Title: "old", LocalPath: oldPath, ScanPathID: "p1"})
+	db.Create(&models.RecoveryCandidate{GID: "300", Token: "t", Title: "old", ComicID: "old1", ScanPathID: "p1"})
+	db.Create(&models.FallenComic{DedupeKey: "gid:300", GID: "300", Title: "old"})
+	// 新记录（ingest 产物）：同 gid、文件存在
+	db.Create(&models.OfflineComic{ID: "new1", GID: "300", Token: "t", Title: "old", LocalPath: newPath})
+
+	task := &models.DownloadTask{
+		ID: "r3", UserID: 1, GID: "300", Token: "t", Title: "old",
+		Mode: models.DownloadModeGallery, Status: models.DownloadCompleted,
+		Group: RecoveryGroup, UpdateForComicID: "old1", ForceDeleteOriginal: true,
+	}
+	mgr.finalizeUpdate(task)
+
+	var oldCount int64
+	db.Model(&models.OfflineComic{}).Where("id = ?", "old1").Count(&oldCount)
+	if oldCount != 0 {
+		t.Fatalf("旧记录应被删除，实际 %d", oldCount)
+	}
+	var candCount, fallenCount int64
+	db.Model(&models.RecoveryCandidate{}).Count(&candCount)
+	db.Model(&models.FallenComic{}).Count(&fallenCount)
+	if candCount != 0 || fallenCount != 0 {
+		t.Fatalf("恢复完成应清空候选/阵亡（候选=%d 阵亡=%d）", candCount, fallenCount)
+	}
+}
+
+// TestFinalizeUpdateRecoveryDefensive 防御校验：新记录未就绪 → 保留旧记录与候选/阵亡
+func TestFinalizeUpdateRecoveryDefensive(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+
+	db.Create(&models.OfflineComic{ID: "old2", GID: "400", Token: "t", Title: "old", LocalPath: "Z:/gone/400", ScanPathID: "p1"})
+	db.Create(&models.RecoveryCandidate{GID: "400", Token: "t", Title: "old", ComicID: "old2", ScanPathID: "p1"})
+	db.Create(&models.FallenComic{DedupeKey: "gid:400", GID: "400", Title: "old"})
+
+	task := &models.DownloadTask{
+		ID: "r4", UserID: 1, GID: "400", Token: "t", Title: "old",
+		Mode: models.DownloadModeGallery, Status: models.DownloadCompleted,
+		Group: RecoveryGroup, UpdateForComicID: "old2", ForceDeleteOriginal: true,
+	}
+	mgr.finalizeUpdate(task)
+
+	var oldCount int64
+	db.Model(&models.OfflineComic{}).Where("id = ?", "old2").Count(&oldCount)
+	if oldCount != 1 {
+		t.Fatalf("新记录未就绪时旧记录应保留")
+	}
+	var candCount int64
+	db.Model(&models.RecoveryCandidate{}).Count(&candCount)
+	if candCount != 1 {
+		t.Fatalf("防御校验拦截时候选应保留，实际 %d", candCount)
+	}
+}
+
+// TestListFallenComicsOrder 阵亡名单排序：未 dismissed 在前，dismissed 置底
+func TestListFallenComicsOrder(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	db.Create(&models.FallenComic{DedupeKey: "gid:1", GID: "1", Title: "a"})
+	db.Create(&models.FallenComic{DedupeKey: "gid:2", GID: "2", Title: "b", Dismissed: true})
+	db.Create(&models.FallenComic{DedupeKey: "gid:3", GID: "3", Title: "c"})
+
+	items, total, err := ListFallenComics(db, FallenListParams{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("查询阵亡名单失败: %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("应返回 3 条，实际 total=%d len=%d", total, len(items))
+	}
+	// 未 dismissed（a、c）在前，dismissed（b）在最后
+	if items[2].GID != "2" {
+		t.Fatalf("dismissed 条目应排最后，实际顺序 %v/%v/%v", items[0].GID, items[1].GID, items[2].GID)
+	}
+	for _, it := range items[:2] {
+		if it.Dismissed {
+			t.Fatalf("前段不应出现 dismissed 条目")
+		}
+	}
+}
+
+// TestSetFallenDismissedToggle 阵亡条目 x toggle：设置/撤销 dismissed
+func TestSetFallenDismissedToggle(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	db.Create(&models.FallenComic{DedupeKey: "gid:500", GID: "500", Title: "x"})
+	var f models.FallenComic
+	db.First(&f, "dedupe_key = ?", "gid:500")
+
+	if err := SetFallenDismissed(db, f.ID, true); err != nil {
+		t.Fatalf("dismiss 失败: %v", err)
+	}
+	db.First(&f, "dedupe_key = ?", "gid:500")
+	if !f.Dismissed || f.DismissedAt == nil {
+		t.Fatalf("dismissed 应置 true 且记录 dismissed_at")
+	}
+
+	if err := SetFallenDismissed(db, f.ID, false); err != nil {
+		t.Fatalf("撤销 dismiss 失败: %v", err)
+	}
+	// 用全新变量查询：GORM 复用结构体时 NULL 列不会覆盖旧值（会残留上次读到的 dismissed_at）
+	var after models.FallenComic
+	db.First(&after, "dedupe_key = ?", "gid:500")
+	if after.Dismissed || after.DismissedAt != nil {
+		t.Fatalf("撤销后 dismissed 应 false 且清空 dismissed_at（dismissed=%v at=%v）", after.Dismissed, after.DismissedAt)
+	}
+}
+
+// TestReconcileSkipsFallenGID 已在阵亡名单的 gid 失效时不重入候选
+func TestReconcileSkipsFallenGID(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	root := t.TempDir()
+
+	db.Create(&models.OfflineComic{ID: "c1", GID: "600", Token: "t", Title: "a", LocalPath: filepath.Join(root, "gone"), ScanPathID: "p1"})
+	db.Create(&models.FallenComic{DedupeKey: "gid:600", GID: "600", Title: "a", Reason: models.FallenReasonRemoved})
+
+	res, err := ReconcileScanPathAgainstDisk(db, "p1", root, nil)
+	if err != nil {
+		t.Fatalf("对账失败: %v", err)
+	}
+	if res.Candidates != 0 {
+		t.Fatalf("阵亡 gid 不应重入候选，实际候选 %d", res.Candidates)
+	}
+	var f models.FallenComic
+	if err := db.First(&f, "dedupe_key = ?", "gid:600").Error; err != nil {
+		t.Fatalf("阵亡条目应保留: %v", err)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"SakuManga/internal/models"
 
@@ -96,6 +97,17 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 	}
 	wg.Wait()
 
+	// 预加载阵亡 gid 集合（Round54 阶段3）：确定性失败已入阵亡的本子不再重入候选，
+	// 避免「恢复失败 → 阵亡 → 下次对账又进候选 → 再恢复再失败」的循环。
+	fallenGIDs := map[string]bool{}
+	var fallenGIDList []string
+	if err := db.Model(&models.FallenComic{}).Where("g_id <> ''").Pluck("g_id", &fallenGIDList).Error; err != nil {
+		return nil, err
+	}
+	for _, g := range fallenGIDList {
+		fallenGIDs[g] = true
+	}
+
 	// 逐条分类写入
 	for i := range comics {
 		c := &comics[i]
@@ -127,6 +139,9 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 				return nil, err
 			}
 			res.Fallen++
+		case fallenGIDs[c.GID]:
+			// 已在阵亡名单（恢复确定性失败）：保持阵亡，不重入候选
+			continue
 		default:
 			// 可恢复：进候选
 			if err := upsertCandidate(db, c, pathID); err != nil {
@@ -536,4 +551,137 @@ func convertCandidatesToFallen(db *gorm.DB, scanPathID, sourcePath string) (int,
 		return 0, err
 	}
 	return len(cands), nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round54 阶段3：完成/失败钩子 + 阵亡名单查询
+// ─────────────────────────────────────────────────────────────
+
+// classifyRecoveryFailure 恢复任务失败分类：
+//   - 确定性失败（removed/copyright/密码压缩包解压失败）→ 返回阵亡原因，true
+//   - 可重试失败（网络/EOF/配额锁定等）→ 返回 "", false（留队列重试，设计 6.4）
+func classifyRecoveryFailure(msg string) (string, bool) {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "removed") ||
+		strings.Contains(lower, "copyright") ||
+		strings.Contains(msg, "已被删除") ||
+		strings.Contains(msg, "不可用"):
+		return models.FallenReasonRemoved, true
+	case strings.Contains(msg, "解压失败") ||
+		strings.Contains(lower, "unlock") ||
+		strings.Contains(lower, "password"):
+		return models.FallenReasonUnlockFail, true
+	}
+	return "", false
+}
+
+// recordRecoveryFallen 恢复任务确定性失败 → 写入阵亡名单（按 g_id upsert），
+// 并从恢复候选移除该条目（避免再次入队）。快照优先取候选表（自包含）。
+func (m *DownloadManager) recordRecoveryFallen(task *models.DownloadTask, reason string) error {
+	if task == nil || task.GID == "" {
+		return errors.New("恢复任务缺少 g_id，无法记入阵亡")
+	}
+
+	f := models.FallenComic{
+		DedupeKey: "gid:" + task.GID,
+		GID:       task.GID,
+		Title:     task.Title,
+		CoverURL:  task.CoverURL,
+		Reason:    reason,
+	}
+	var cand models.RecoveryCandidate
+	if err := m.db.First(&cand, "g_id = ?", task.GID).Error; err == nil {
+		f.ComicID = cand.ComicID
+		f.Title = cand.Title
+		f.TitleJpn = cand.TitleJpn
+		f.CoverURL = cand.CoverURL
+		f.Category = cand.Category
+		f.FileSize = cand.FileSize
+		f.PageCount = cand.PageCount
+		f.SourcePath = cand.LocalPath
+	}
+
+	if err := m.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "dedupe_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"comic_id", "title", "title_jpn", "cover_url", "category",
+			"file_size", "page_count", "reason", "source_path", "updated_at",
+		}),
+	}).Create(&f).Error; err != nil {
+		return err
+	}
+	return m.db.Where("g_id = ?", task.GID).Delete(&models.RecoveryCandidate{}).Error
+}
+
+// cleanupRecoveryArtifacts 恢复完成后清理候选与阵亡条目（按 g_id）
+func (m *DownloadManager) cleanupRecoveryArtifacts(gid string) {
+	if gid == "" {
+		return
+	}
+	if err := m.db.Where("g_id = ?", gid).Delete(&models.RecoveryCandidate{}).Error; err != nil {
+		log.Printf("%s [recovery] 清理候选 gid=%s 失败: %v", dlWarnTag, gid, err)
+	}
+	if err := m.db.Where("g_id = ?", gid).Delete(&models.FallenComic{}).Error; err != nil {
+		log.Printf("%s [recovery] 清理阵亡 gid=%s 失败: %v", dlWarnTag, gid, err)
+	}
+}
+
+// recoveredRecordAlive 恢复任务完成的防御校验：按 g_id 确认新记录已入库且文件有效。
+// 只有确认新记录存在，才允许删除旧记录（防悬空，设计 9.1）。
+func (m *DownloadManager) recoveredRecordAlive(gid string) bool {
+	if gid == "" {
+		return false
+	}
+	var comics []models.OfflineComic
+	if err := m.db.Where("g_id = ?", gid).Find(&comics).Error; err != nil {
+		return false
+	}
+	for i := range comics {
+		if pathExistsConservative(comics[i].LocalPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// FallenListParams 阵亡名单查询参数
+type FallenListParams struct {
+	Page int `json:"page"`
+	Size int `json:"size"`
+}
+
+// ListFallenComics 分页读取全局阵亡名单。
+// 排序（设计第 12 节）：未 dismissed 按创建时间升序在前；dismissed 按 dismissed_at 升序置底。
+func ListFallenComics(db *gorm.DB, p FallenListParams) ([]models.FallenComic, int64, error) {
+	if p.Size <= 0 || p.Size > 500 {
+		p.Size = 50
+	}
+	if p.Page <= 0 {
+		p.Page = 1
+	}
+	var total int64
+	if err := db.Model(&models.FallenComic{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var items []models.FallenComic
+	err := db.Order("CASE WHEN dismissed THEN 1 ELSE 0 END ASC, dismissed_at ASC, created_at ASC").
+		Offset((p.Page - 1) * p.Size).Limit(p.Size).
+		Find(&items).Error
+	return items, total, err
+}
+
+// SetFallenDismissed 用户手动 x toggle（按条目 id：no-ehentai 条目无 g_id，id 更通用）。
+// dismissed=true → 划线 + 置底（保留显示）；false → 撤销划线，回到原位置。
+// 注意：撤销时必须写 NULL，GORM 的 map/struct 更新会忽略 nil（实测无效），故用显式 SQL。
+func SetFallenDismissed(db *gorm.DB, id uint, dismissed bool) error {
+	var f models.FallenComic
+	if err := db.First(&f, "id = ?", id).Error; err != nil {
+		return err
+	}
+	if dismissed {
+		return db.Model(&models.FallenComic{}).Where("id = ?", id).
+			Updates(map[string]interface{}{"dismissed": true, "dismissed_at": time.Now()}).Error
+	}
+	return db.Exec("UPDATE fallen_comics SET dismissed = 0, dismissed_at = NULL WHERE id = ?", id).Error
 }

@@ -20,10 +20,12 @@ import (
 
 // ─────────────────────────────────────────────────────────────
 // 下载日志统一前缀（便于验收时 grep 定位）
-//   [DOWNLOAD]        常规流程
-//   [DOWNLOAD-WARN]   警告（不影响主流程）
-//   [DOWNLOAD-ERROR]  错误（任务失败/异常）
-//   [ARCHIVER]        archiver.php 相关
+//
+//	[DOWNLOAD]        常规流程
+//	[DOWNLOAD-WARN]   警告（不影响主流程）
+//	[DOWNLOAD-ERROR]  错误（任务失败/异常）
+//	[ARCHIVER]        archiver.php 相关
+//
 // ─────────────────────────────────────────────────────────────
 const (
 	dlLogTag  = "[DOWNLOAD]"
@@ -276,7 +278,12 @@ func (m *DownloadManager) postDownloadBookkeeping(task *models.DownloadTask) {
 	MarkLibraryChanged()
 }
 
-// finalizeUpdate 离线更新任务完成后处理旧版漫画（按 AutoUpdateDeleteOriginal 设置）
+// finalizeUpdate 离线更新任务完成后处理旧版漫画（按 AutoUpdateDeleteOriginal 设置）。
+//
+// Round54：恢复任务（group=recovery）额外规则（设计 9.1）：
+//   - 完成前防御校验：按 g_id 确认新记录已入库且文件有效，否则保留旧记录并告警（防悬空）
+//   - 无条件删除旧记录（旧记录指向失效文件，删除无风险，不受 AutoUpdateDeleteOriginal 影响）
+//   - 完成后清理候选/阵亡条目（按 g_id）
 func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 	if task == nil || task.UpdateForComicID == "" {
 		return
@@ -288,19 +295,38 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 		return
 	}
 
+	isRecovery := task.Group == RecoveryGroup
+
+	// Round54 防御校验：恢复任务完成但新记录未就绪 → 保留旧记录并告警
+	// （正常链路下 ingest 已在任务置 completed 前同步完成，此处为防御性兜底）
+	if isRecovery && !m.recoveredRecordAlive(task.GID) {
+		log.Printf("%s [update] 恢复任务 %s 完成但未检测到有效新记录（gid=%s），保留旧记录并告警",
+			dlErrTag, task.ID, task.GID)
+		return
+	}
+
 	var old models.OfflineComic
 	if err := m.db.First(&old, "id = ?", task.UpdateForComicID).Error; err != nil {
 		log.Printf("%s [update] 任务 %s 未找到被更新漫画 %s（可能已删除）: %v", dlWarnTag, task.ID, task.UpdateForComicID, err)
+		// Round54：旧记录已不存在时，仍清理候选/阵亡残留（恢复任务已完成）
+		if isRecovery {
+			m.cleanupRecoveryArtifacts(task.GID)
+		}
 		return
 	}
 
 	setting := m.GetSettings()
 	// 画质升级任务（ForceDeleteOriginal）：用户已确认「升级=替换」，无论
 	// autoUpdateDeleteOriginal 设置如何都删除旧版（新版已落地独立目录，安全）。
-	if (setting.AutoUpdateDeleteOriginal || task.ForceDeleteOriginal) && old.LocalPath != "" {
+	// Round54：恢复任务同样固定强制删除旧记录。
+	forceDelete := task.ForceDeleteOriginal || isRecovery
+	if (setting.AutoUpdateDeleteOriginal || forceDelete) && old.LocalPath != "" {
 		reason := "autoUpdateDeleteOriginal=true"
 		if task.ForceDeleteOriginal {
 			reason = "画质升级（forceDeleteOriginal）"
+		}
+		if isRecovery {
+			reason = "恢复任务（旧记录指向失效文件）"
 		}
 		// D14：复用统一删除链（两阶段原子删除 + 同 gid 引用/评分迁移到新版）。
 		// 新版记录此时已入库，历史/书架/评分会迁移过去，而非一律清空。
@@ -312,6 +338,9 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 		// 需求4：旧版已删除 → 记录书库变更 + 使维护查重结果过期（被删项移除）
 		MarkLibraryChanged()
 		InvalidateMaintainDedupResult([]string{old.ID})
+		if isRecovery {
+			m.cleanupRecoveryArtifacts(task.GID)
+		}
 		return
 	}
 
@@ -328,6 +357,9 @@ func (m *DownloadManager) finalizeUpdate(task *models.DownloadTask) {
 	MarkLibraryChanged()
 	MarkMaintainDedupReplacement(m.db, &old, task.GID)
 	log.Printf("%s [update] 任务 %s 更新完成（保留旧版，仅清除更新标记）", dlLogTag, task.ID)
+	if isRecovery {
+		m.cleanupRecoveryArtifacts(task.GID)
+	}
 }
 
 // fallbackUpdateToGallery 自动更新任务归档下载失败时按设置降级为画廊下载（无 H@H 场景）
@@ -426,9 +458,29 @@ func (m *DownloadManager) dispatchEngine(task *models.DownloadTask, res *reserva
 	}
 }
 
-// failTask 将任务置为错误状态并记录原因
+// failTask 将任务置为错误状态并记录原因。
+//
+// Round54：恢复任务（group=recovery）的确定性失败（removed/copyright/解压失败）
+// → 记入阵亡名单并把任务置 cancelled（释放「恢复中」集合）；
+// 可重试失败（网络/EOF/配额锁定）保持 error/error_lock 等待重试（设计 6.4）。
 func (m *DownloadManager) failTask(task *models.DownloadTask, msg string) {
 	log.Printf("%s 任务 %s 失败: %s", dlErrTag, task.ID, msg)
+
+	if task.Group == RecoveryGroup {
+		if reason, deterministic := classifyRecoveryFailure(msg); deterministic {
+			if err := m.recordRecoveryFallen(task, reason); err != nil {
+				log.Printf("%s [recovery] 任务 %s 记入阵亡失败（按普通错误处理）: %v", dlErrTag, task.ID, err)
+			} else {
+				log.Printf("%s [recovery] 任务 %s 确定性失败，已记入阵亡（reason=%s）并取消", dlLogTag, task.ID, reason)
+				task.Status = models.DownloadCancelled
+				task.Error = msg
+				task.UpdatedAt = time.Now()
+				m.db.Save(task)
+				return
+			}
+		}
+	}
+
 	task.Status = models.DownloadError
 	task.Error = msg
 	task.UpdatedAt = time.Now()

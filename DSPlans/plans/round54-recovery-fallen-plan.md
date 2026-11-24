@@ -95,7 +95,8 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | int PK auto | |
-| gid | string uniqueIndex | 狗牌 |
+| dedupe_key | string uniqueIndex | 显式去重键：有 g_id → `gid:<gid>`；无 g_id → `cid:<comic_id>`（SQLite 唯一索引对 NULL 不去重，no-ehentai 条目没有 g_id，必须显式键保证 upsert 幂等） |
+| gid | string index | 狗牌（可空：no-ehentai 条目为空） |
 | comic_id | string | 原记录 ID（可空） |
 | title / title_jpn / cover_url / category | string | 快照，不依赖记录 |
 | file_size / page_count | int64 / int | 快照 |

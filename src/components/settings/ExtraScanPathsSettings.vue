@@ -358,7 +358,11 @@ function startRecoveryPolling() {
   if (recoveryPollTimer) return
   recoveryPollTimer = setInterval(async () => {
     await fetchRecoveryStatus()
-    if (recoveryStatus.value.phase !== 'recovering') stopRecoveryPolling()
+    if (recoveryStatus.value.phase !== 'recovering') {
+      stopRecoveryPolling()
+      // 恢复结束可能已剔除阵亡条目 → 刷新阵亡名单
+      void fetchFallen()
+    }
   }, 1000)
 }
 
@@ -444,8 +448,9 @@ watch(
           toast.error(`扫描失败：${p.error}`)
         } else {
           toast.success(`扫描完成：${p.comicCount ?? p.found} 本漫画`)
-          // Round54：全量扫描含失效对账 → 刷新恢复状态（候选/锁路径）
+          // Round54：全量扫描含失效对账 → 刷新恢复状态（候选/锁路径）+ 阵亡名单（对账会写入阵亡条目）
           void fetchRecoveryStatus()
+          void fetchFallen()
           // 完成后展示几秒，再收起进度提示区
           setTimeout(() => {
             if (getScanProgress(id)?.done) clearScanProgress(id)

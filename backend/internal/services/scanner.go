@@ -29,9 +29,10 @@ func generateID(path string) string {
 type ScanPhase string
 
 const (
-	ScanPhaseCounting ScanPhase = "counting" // 统计待扫描条目
-	ScanPhaseScanning ScanPhase = "scanning" // 正在逐条处理
-	ScanPhaseDone     ScanPhase = "done"     // 完成
+	ScanPhaseCounting    ScanPhase = "counting"    // 统计待扫描条目
+	ScanPhaseScanning    ScanPhase = "scanning"    // 正在逐条处理
+	ScanPhaseReconciling ScanPhase = "reconciling" // Round54：扫描完成后的失效对账（仅全量）
+	ScanPhaseDone        ScanPhase = "done"        // 完成
 )
 
 // ScanProgress 单条扫描路径的进度快照结构（线程安全）
@@ -57,6 +58,15 @@ type ScanProgress struct {
 	SkippedGid         int      `json:"skippedGid,omitempty"`         // 同 gid 冲突
 	Failed             int      `json:"failed,omitempty"`             // 写库失败
 	Warnings           []string `json:"warnings,omitempty"`
+
+	// ── Round54：失效对账阶段（全量扫描完成后；增量不做）──
+	PathMissing        bool `json:"pathMissing,omitempty"`        // 扫描根路径不存在（整条路径判失效）
+	ReconcileTotal     int  `json:"reconcileTotal,omitempty"`     // 对账待检查记录数
+	ReconcileProcessed int  `json:"reconcileProcessed,omitempty"` // 对账已检查记录数
+	MissingCount       int  `json:"missingCount,omitempty"`       // 判定失效的记录数
+	CandidateCount     int  `json:"candidateCount,omitempty"`     // 恢复候选数
+	FallenCount        int  `json:"fallenCount,omitempty"`        // 阵亡条目数
+	HealedCount        int  `json:"healedCount,omitempty"`        // 自愈清除条目数
 }
 
 func newScanProgress(pathID, mode string) *ScanProgress {
@@ -94,6 +104,10 @@ func (p *ScanProgress) Snapshot() *ScanProgress {
 		SkippedEmpty: p.SkippedEmpty, SkippedUnsupported: p.SkippedUnsupported,
 		SkippedExisting: p.SkippedExisting, SkippedGid: p.SkippedGid, Failed: p.Failed,
 		Warnings: append([]string(nil), p.Warnings...),
+		// Round54：对账阶段字段
+		PathMissing: p.PathMissing, ReconcileTotal: p.ReconcileTotal,
+		ReconcileProcessed: p.ReconcileProcessed, MissingCount: p.MissingCount,
+		CandidateCount: p.CandidateCount, FallenCount: p.FallenCount, HealedCount: p.HealedCount,
 	}
 }
 
@@ -153,6 +167,36 @@ func (p *ScanProgress) incSkipped() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Skipped++
+}
+
+// ── Round54：失效对账阶段进度 ──
+
+func (p *ScanProgress) setPathMissing(missing bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.PathMissing = missing
+}
+
+func (p *ScanProgress) setReconcileTotal(total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ReconcileTotal = total
+}
+
+func (p *ScanProgress) incReconcileProcessed() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ReconcileProcessed++
+}
+
+// setReconcileResult 写入对账统计（路径缺失标记已在 PathMissing 单独维护）
+func (p *ScanProgress) setReconcileResult(res ScanReconcileResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.MissingCount = res.Missing
+	p.CandidateCount = res.Candidates
+	p.FallenCount = res.Fallen
+	p.HealedCount = res.Healed
 }
 
 func (p *ScanProgress) finish(err error) {
@@ -523,11 +567,11 @@ func saveComicWithResult(localPath string, isDir bool, incremental bool, scanPat
 		Remark:            remarkPreserve,
 		CoverURL:          coverURL,
 		Source:            models.SourceOffline,
-		Category:          category,             // 写入解析出的分类
-		Tags:              string(tagsJSON),     // 写入解析出的多元标签数组 JSON
-		CommunityRating:   communityRating,      // Round52：社区评分（本地解析 / 保留库中已有）
-		PageCount:         effectivePageCount,   // Round23：有效页数（物理 − 隐藏）
-		HiddenPages:       hidden.Marshal(),     // D10：相对路径数组
+		Category:          category,           // 写入解析出的分类
+		Tags:              string(tagsJSON),   // 写入解析出的多元标签数组 JSON
+		CommunityRating:   communityRating,    // Round52：社区评分（本地解析 / 保留库中已有）
+		PageCount:         effectivePageCount, // Round23：有效页数（物理 − 隐藏）
+		HiddenPages:       hidden.Marshal(),   // D10：相对路径数组
 		OriginalPageCount: originalPageCount,
 		UpdatedAt:         time.Now(),
 		AddedAt:           addedAt,

@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -52,22 +53,50 @@ func (m *ScanManager) StartScan(pathID, path string, includeSubfolders bool, mod
 	m.mu.Unlock()
 
 	go func() {
-		stats, err := scanDirectory(path, includeSubfolders, mode, progress, pathID)
-		progress.finish(err)
-		if err == nil {
+		// Round54：根路径不存在时不再直接报错——标记「路径缺失」并继续执行对账，
+		// 把该路径下全部记录判失效（误删整条目录的恢复/阵亡触发场景）。
+		scanned := ScanStats{}
+		var scanErr error
+		if _, statErr := os.Stat(path); statErr != nil && os.IsNotExist(statErr) {
+			progress.setPathMissing(true)
+		} else {
+			scanned, scanErr = scanDirectory(path, includeSubfolders, mode, progress, pathID)
+		}
+
+		// Round54：全量扫描成功（或路径缺失）后执行失效对账；增量维持原有语义不做对账。
+		var recon *ScanReconcileResult
+		if mode == "full" && scanErr == nil {
+			progress.setPhase(ScanPhaseReconciling)
+			recon, scanErr = ReconcileScanPathAgainstDisk(database.DB, pathID, path, progress)
+			if scanErr != nil {
+				// 对账失败不阻断扫描本身（扫描已完成入库）：仅记录日志，进度仍按成功收尾
+				log.Printf("%s [scan] 路径 %q 失效对账失败（不影响扫描结果）: %v", dlErrTag, path, scanErr)
+				scanErr = nil
+			} else if recon != nil {
+				progress.setReconcileResult(*recon)
+			}
+		}
+
+		progress.finish(scanErr)
+		if scanErr == nil {
 			// 扫描成功 → 回写路径记录的统计（供列表直接展示）
 			now := time.Now().UnixMilli()
 			database.DB.Model(&models.ExtraScanPath{}).Where("id = ?", pathID).Updates(map[string]interface{}{
 				"last_scanned": now,
-				"comic_count":  stats.Found,
+				"comic_count":  scanned.Found,
 			})
-			log.Printf("%s [scan] 路径 %q 扫描完成：入库 %d 本（跳过：已存在 %d / 同gid %d / 空目录 %d / 不支持归档 %d；失败 %d，mode=%s）",
-				dlLogTag, path, stats.Found, stats.SkippedExisting, stats.SkippedGid,
-				stats.SkippedEmpty, stats.SkippedUnsupported, stats.Failed, mode)
+			reconNote := ""
+			if recon != nil {
+				reconNote = fmt.Sprintf("；对账：失效 %d / 候选 %d / 阵亡 %d / 自愈 %d",
+					recon.Missing, recon.Candidates, recon.Fallen, recon.Healed)
+			}
+			log.Printf("%s [scan] 路径 %q 扫描完成：入库 %d 本（跳过：已存在 %d / 同gid %d / 空目录 %d / 不支持归档 %d；失败 %d，mode=%s%s）",
+				dlLogTag, path, scanned.Found, scanned.SkippedExisting, scanned.SkippedGid,
+				scanned.SkippedEmpty, scanned.SkippedUnsupported, scanned.Failed, mode, reconNote)
 			// Round32：扫描会成批新增/更新/删除本地漫画 → 异步全量重建 XP 统计表
 			XpRebuildAsync("扫描")
 		} else {
-			log.Printf("%s [scan] 路径 %q 扫描失败: %v", dlErrTag, path, err)
+			log.Printf("%s [scan] 路径 %q 扫描失败: %v", dlErrTag, path, scanErr)
 		}
 	}()
 

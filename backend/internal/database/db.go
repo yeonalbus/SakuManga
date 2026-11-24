@@ -46,6 +46,8 @@ func InitDB() {
 		&models.DedupSetting{},          // Round42 D2：查重设置（联网复核默认关闭）
 		&models.NetworkSetting{},        // Round48：高级代理设置（Clash 控制面 + 代理组）
 		&models.ArchiveBinding{},        // Round48：归档 ↔ 节点绑定（重试时切回原节点省 GP）
+		&models.RecoveryCandidate{},     // Round54：恢复候选（全量扫描失效对账产物）
+		&models.FallenComic{},           // Round54：阵亡名单（全局，快照化）
 	)
 
 	migrateFavoriteStateTable()

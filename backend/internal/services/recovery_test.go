@@ -492,7 +492,8 @@ func TestClassifyRecoveryFailure(t *testing.T) {
 		// archiver.php 对已删除/被替换画廊返回 404：确定性失败（E 站实装错误文本）
 		{"archiver.php 返回状态码 404", models.FallenReasonRemoved, true},
 		{"HTTP 404 Not Found", models.FallenReasonRemoved, true},
-		{"解压失败: zip: not a valid zip file", models.FallenReasonUnlockFail, true},
+		// 解压失败可重试（zip 损坏/断点不完整/磁盘错误），不判阵亡
+		{"解压失败: zip: not a valid zip file", "", false},
 		{"下载连接超时: EOF", "", false},
 		{"有 3 张图片下载失败（已完成 10 张已断点保存，可重试跳过）", "", false},
 		{"入库失败: no such file", "", false},

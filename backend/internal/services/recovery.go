@@ -558,12 +558,13 @@ func convertCandidatesToFallen(db *gorm.DB, scanPathID, sourcePath string) (int,
 // ─────────────────────────────────────────────────────────────
 
 // classifyRecoveryFailure 恢复任务失败分类：
-//   - 确定性失败（removed/copyright/404/密码压缩包解压失败）→ 返回阵亡原因，true
-//   - 可重试失败（网络/EOF/配额锁定等）→ 返回 "", false（留队列重试，设计 6.4）
+//   - 确定性失败（removed/copyright/404/下架）→ 返回阵亡原因，true
+//   - 可重试失败（网络/EOF/配额锁定/解压失败等）→ 返回 "", false（留队列重试，设计 6.4）
 //
-// 404 判定说明：archiver.php 对已删除/被替换的画廊返回 404
-// （错误文本「archiver.php 返回状态码 404」），属于确定性失败；
-// 旧 gid/token 因画廊被替换而 404 时同样无法自动找回新 gid，归入阵亡。
+// 注意：
+//   - 「解压失败」（zip 损坏/断点不完整/磁盘写入错误）可重试，不判阵亡；
+//   - unlock-failed 分类保留（模型常量），但当前无触达路径——项目尚无密码压缩包处理，
+//     未来实现密码压缩包支持时再启用。
 func classifyRecoveryFailure(msg string) (string, bool) {
 	lower := strings.ToLower(msg)
 	switch {
@@ -575,10 +576,6 @@ func classifyRecoveryFailure(msg string) (string, bool) {
 		strings.Contains(msg, "已被删除") ||
 		strings.Contains(msg, "不可用"):
 		return models.FallenReasonRemoved, true
-	case strings.Contains(msg, "解压失败") ||
-		strings.Contains(lower, "unlock") ||
-		strings.Contains(lower, "password"):
-		return models.FallenReasonUnlockFail, true
 	}
 	return "", false
 }

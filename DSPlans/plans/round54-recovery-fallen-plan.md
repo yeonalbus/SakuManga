@@ -130,13 +130,14 @@
 | reason | 场景 |
 |---|---|
 | `removed` | removed_status=1（EH 已下架/版权），或恢复任务 404/removed |
-| `unlock-failed` | 恢复任务解锁失败（密码压缩包无法解锁） |
+| `unlock-failed` | 密码压缩包无法解锁（**保留分类，当前无触达路径**：项目尚无密码压缩包处理，未来实现后再启用；解压失败不归此类） |
 | `no-ehentai` | 失效且无 g_id/token（非 E 站来源） |
 | `path-removed` | 用户移除路径时，未恢复的候选转写 |
 
 ### 6.4 恢复失败分类
-- **确定性失败**（404 / removed / copyright / unlock-failed）→ 阵亡 + 任务 cancel。
-- **可重试失败**（EOF/超时/连接重置/代理组失效/配额锁定）→ 保持 error/error_lock，留在恢复队列，可手动/自动重试。
+- **确定性失败**（404 / removed / copyright / 下架）→ 阵亡 + 任务 cancel。
+- **可重试失败**（EOF/超时/连接重置/代理组失效/配额锁定/**解压失败**）→ 保持 error/error_lock，留在恢复队列，可手动/自动重试。
+- 说明：解压失败可能是 zip 损坏、断点不完整、磁盘写入错误等，重试大概率恢复，不判阵亡。
 
 ## 7. 扫描对账阶段设计
 
@@ -196,10 +197,11 @@
 
 ### 9.2 failTask（download.go 现有函数）
 - `task.Group == "recovery"` 且 `UpdateForComicID != ""`：
-  - 错误分类（新增 `classifyRecoveryFailure`，基于现有 archive 锁定分类 + 404/removed 判定）：
-    - **404 判定**：`archiver.php 返回状态码 404` / `HTTP 404` / `not found` 均视为「画廊已删除或被替换」的确定性失败 → 阵亡 `removed`（旧 gid/token 因画廊被替换而 404 时同样无法自动找回新 gid）
-    - 确定性 → 写 fallen（removed / unlock-failed），任务置 `cancelled`。
-    - 可重试 → 保持 error / error_lock。
+  - 错误分类（新增 `classifyRecoveryFailure`）：
+    - **确定性失败**：`removed` / `copyright` / `archiver.php 返回状态码 404` / `HTTP 404` / `not found` / 「已被删除」/「不可用」
+      → 写 fallen（`removed`）+ 任务置 `cancelled`（旧 gid/token 因画廊被替换而 404 时同样无法自动找回新 gid）
+    - **可重试失败**：网络/EOF/连接重置/代理组失效/配额锁定/**解压失败** → 保持 error / error_lock
+  - `unlock-failed` 分类保留但当前无触达路径（项目尚无密码压缩包处理）。
 
 ### 9.3 现有链路顺序（已核实，天然满足删除时机）
 `executeTask`：`dispatchEngine`（下载 + 同步 `ingestDownloadDir` 入库）→ `finalizeUpdate` → `postDownloadBookkeeping`。新记录先于旧记录删除存在。

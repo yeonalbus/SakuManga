@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,10 +15,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// scanPathItem 扫描路径列表项（Round54：附 pathMissing 供前端提示「路径不存在，建议进行恢复」）
+type scanPathItem struct {
+	models.ExtraScanPath
+	PathMissing bool `json:"pathMissing"`
+}
+
 func GetScanPaths(c *gin.Context) {
 	var paths []models.ExtraScanPath
 	database.DB.Find(&paths)
-	c.JSON(http.StatusOK, paths)
+	items := make([]scanPathItem, 0, len(paths))
+	for _, p := range paths {
+		_, err := os.Stat(p.Path)
+		items = append(items, scanPathItem{
+			ExtraScanPath: p,
+			PathMissing:   os.IsNotExist(err),
+		})
+	}
+	c.JSON(http.StatusOK, items)
 }
 
 func AddScanPath(c *gin.Context) {

@@ -21,6 +21,8 @@ export interface ExtraScanPath {
   // 问题3/4：可配置显示名（来源标签）+ 是否参与离线更新/维护查重
   name?: string
   enableOfflineUpdate?: boolean
+  /** Round54：路径不存在（整条目录被删）——显示「建议进行恢复」提示 */
+  pathMissing?: boolean
 }
 
 /** 扫描模式：full=全文件夹扫描，incremental=增量式更新 */
@@ -30,7 +32,7 @@ export type ScanMode = 'full' | 'incremental'
 export interface ScanProgress {
   pathId: string
   mode: ScanMode
-  phase: 'counting' | 'scanning' | 'done'
+  phase: 'counting' | 'scanning' | 'reconciling' | 'done'
   total: number
   processed: number
   found: number
@@ -53,6 +55,16 @@ export interface ScanProgress {
   failed?: number
   /** 跳过项摘要（前若干条，供告警展示） */
   warnings?: string[]
+  /** Round54：扫描根路径不存在（整条路径判失效） */
+  pathMissing?: boolean
+  /** Round54：对账待检查记录数 / 已检查数 */
+  reconcileTotal?: number
+  reconcileProcessed?: number
+  /** Round54：对账结果（失效 / 候选 / 阵亡 / 自愈） */
+  missingCount?: number
+  candidateCount?: number
+  fallenCount?: number
+  healedCount?: number
 }
 
 /** 扫描路径列表 */
@@ -234,4 +246,111 @@ export const removeScanPath = async (id: string): Promise<number> => {
   scanPaths.value = scanPaths.value.filter((p) => p.id !== id)
   clearScanProgress(id)
   return res?.removedComics ?? 0
+}
+
+// --------------------------------------------------
+// Round54：恢复与阵亡
+// --------------------------------------------------
+
+/** 恢复功能状态（后端由未终结任务推导） */
+export interface RecoveryStatus {
+  phase: 'idle' | 'ready' | 'recovering'
+  candidateCount: number
+  activeTasks: number
+  lockedPathIds: string[]
+}
+
+/** 恢复方案（档位）：H@H 原图 / H@H 压缩 / 画廊逐图 */
+export type RecoveryScheme = 'archive-original' | 'archive-resample' | 'gallery'
+
+/** 恢复启动结果 */
+export interface RecoveryStartResult {
+  created: number
+  skipped: number
+  failed: number
+  errors?: string[]
+}
+
+/** 阵亡条目（全局名单） */
+export interface FallenComic {
+  id: number
+  gid?: string
+  title: string
+  titleJpn?: string
+  coverUrl?: string
+  category?: string
+  fileSize?: number
+  pageCount?: number
+  reason: 'removed' | 'unlock-failed' | 'no-ehentai' | 'path-removed'
+  sourcePath?: string
+  dismissed: boolean
+  dismissedAt?: string
+  createdAt?: string
+}
+
+/** 恢复状态（全局） */
+export const recoveryStatus = ref<RecoveryStatus>({
+  phase: 'idle',
+  candidateCount: 0,
+  activeTasks: 0,
+  lockedPathIds: [],
+})
+
+/** 阵亡名单（缓存最近一页） */
+export const fallenItems = ref<FallenComic[]>([])
+export const fallenTotal = ref(0)
+
+/** 拉取恢复状态 */
+export const fetchRecoveryStatus = async () => {
+  try {
+    recoveryStatus.value = await http<RecoveryStatus>('/offline/recovery/status')
+  } catch (err) {
+    console.error('拉取恢复状态失败:', err)
+  }
+}
+
+/** 启动恢复（档位由弹窗选择） */
+export const startRecovery = async (scheme: RecoveryScheme): Promise<RecoveryStartResult> => {
+  return await http<RecoveryStartResult>('/offline/recovery/start', {
+    method: 'POST',
+    body: JSON.stringify({ scheme }),
+  })
+}
+
+/** 取消恢复（gids 为空 = 全部取消；候选保留可重新启动） */
+export const cancelRecovery = async (gids?: string[]): Promise<{ cancelled: number }> => {
+  return await http<{ cancelled: number }>('/offline/recovery/cancel', {
+    method: 'POST',
+    body: JSON.stringify(gids && gids.length > 0 ? { gids } : {}),
+  })
+}
+
+/** 拉取阵亡名单（全局，按需刷新） */
+export const fetchFallen = async (page = 1, size = 200) => {
+  try {
+    const res = await http<{ items: FallenComic[]; total: number }>(
+      `/offline/fallen?page=${page}&size=${size}`,
+    )
+    fallenItems.value = res.items ?? []
+    fallenTotal.value = res.total ?? 0
+  } catch (err) {
+    console.error('拉取阵亡名单失败:', err)
+  }
+}
+
+/** 阵亡条目 x toggle（划线与撤销划线） */
+export const dismissFallen = async (id: number, dismissed: boolean) => {
+  await http('/offline/fallen/dismiss', {
+    method: 'POST',
+    body: JSON.stringify({ id, dismissed }),
+  })
+  const item = fallenItems.value.find((f) => f.id === id)
+  if (item) {
+    item.dismissed = dismissed
+    item.dismissedAt = dismissed ? new Date().toISOString() : undefined
+  }
+  // dismissed 置底：本地重排（未 dismissed 按原顺序在前，dismissed 在最后）
+  const active = fallenItems.value.filter((f) => !f.dismissed)
+  const done = fallenItems.value.filter((f) => f.dismissed)
+  fallenItems.value = [...active, ...done]
 }

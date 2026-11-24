@@ -88,6 +88,8 @@
                 • 发现 {{ item.comicCount }} 本漫画
               </span>
               <span v-if="isScanning(item)" class="scan-badge">{{ scanModeText(item) }}</span>
+              <!-- Round54：路径不存在（整条目录被删）→ 提示恢复，不提示移除路径 -->
+              <span v-if="item.pathMissing" class="path-missing">⚠ 路径不存在，建议进行恢复</span>
             </div>
           </div>
 
@@ -130,6 +132,7 @@
               <button
                 class="btn btn-mode"
                 @click="handleSingleScan(item, 'full')"
+                :disabled="isPathLocked(item)"
                 title="全文件夹扫描：重新扫描整个目录"
               >
                 全量
@@ -137,9 +140,28 @@
               <button
                 class="btn btn-mode incremental"
                 @click="handleSingleScan(item, 'incremental')"
+                :disabled="isPathLocked(item)"
                 title="增量式更新：跳过已收录的漫画，仅入库新内容"
               >
                 增量
+              </button>
+              <!-- Round54：恢复（增量右侧），可恢复队列非空且未在恢复中时可点击 -->
+              <button
+                class="btn btn-mode recovery"
+                :disabled="!canRecover || recoveryBusy"
+                :title="recoverTitle"
+                @click="openRecovery"
+              >
+                恢复
+              </button>
+              <!-- Round54：阵亡（移除路径左侧），全局阵亡名单非空时可点击 -->
+              <button
+                class="btn btn-mode fallen"
+                :disabled="fallenTotal === 0"
+                :title="fallenTotal > 0 ? `阵亡名单（${fallenTotal}）` : '暂无阵亡记录'"
+                @click="openFallen"
+              >
+                阵亡
               </button>
             </template>
 
@@ -214,6 +236,10 @@
             <template v-else-if="progressOf(item)!.skipped"
               >（跳过 {{ progressOf(item)!.skipped }}）</template
             >
+            <!-- Round54：失效对账结果（失效 / 可恢复 / 阵亡 / 自愈） -->
+            <template v-if="reconDetail(progressOf(item)!)">
+              （对账：{{ reconDetail(progressOf(item)!) }}）
+            </template>
           </span>
         </div>
       </div>
@@ -223,12 +249,39 @@
         暂无额外的扫描路径，请在上方输入框添加
       </div>
     </div>
+
+    <!-- Round54：恢复中状态条 -->
+    <div v-if="recoveryStatus.phase === 'recovering'" class="recovery-banner card">
+      <span class="recovery-text">
+        恢复中：进行中 {{ recoveryStatus.activeTasks }} 个任务（候选剩余
+        {{ recoveryStatus.candidateCount }} 本）
+      </span>
+      <button class="btn btn-mode danger" @click="handleCancelRecovery">全部取消</button>
+    </div>
+
+    <!-- Round54：恢复档位弹窗 / 阵亡名单面板 -->
+    <RecoveryDialog
+      :open="recoveryDialogOpen"
+      :candidate-count="recoveryStatus.candidateCount"
+      :busy="recoveryBusy"
+      @confirm="handleConfirmRecovery"
+      @cancel="recoveryDialogOpen = false"
+    />
+    <FallenMenu
+      :open="fallenOpen"
+      :items="fallenItems"
+      :loading="fallenLoading"
+      @dismiss="handleDismissFallen"
+      @close="fallenOpen = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
+import RecoveryDialog from '@/components/settings/RecoveryDialog.vue'
+import FallenMenu from '@/components/settings/FallenMenu.vue'
 import {
   scanPaths,
   scanProgress,
@@ -245,9 +298,18 @@ import {
   clearScanProgress,
   getScanProgress,
   hasActiveScan,
+  recoveryStatus,
+  fallenItems,
+  fallenTotal,
+  fetchRecoveryStatus,
+  fetchFallen,
+  startRecovery,
+  cancelRecovery,
+  dismissFallen,
   type ExtraScanPath,
   type ScanProgress,
   type ScanMode,
+  type RecoveryScheme,
 } from '@/stores/scanPathStore'
 import { fetchOfflineComics } from '@/stores/comicStore'
 import { useUI } from '@/composables/useUI'
@@ -258,12 +320,117 @@ defineEmits<{
   (e: 'back'): void
 }>()
 
+// ─────────────────────────────────────────────────────────────
+// Round54：恢复与阵亡
+// ─────────────────────────────────────────────────────────────
+
+const recoveryDialogOpen = ref(false)
+const recoveryBusy = ref(false)
+const fallenOpen = ref(false)
+const fallenLoading = ref(false)
+
+/** 恢复按钮可点：有候选且未在恢复中 */
+const canRecover = computed(
+  () => recoveryStatus.value.phase === 'ready' && recoveryStatus.value.candidateCount > 0,
+)
+
+const recoverTitle = computed(() => {
+  if (recoveryStatus.value.phase === 'recovering') return '恢复任务进行中，请等待完成或取消'
+  if (recoveryStatus.value.candidateCount === 0) return '没有可恢复的本子（请先对路径执行全量扫描）'
+  return `恢复 ${recoveryStatus.value.candidateCount} 个本子`
+})
+
+/** 该路径是否被恢复任务锁定（恢复期间禁止扫描该路径） */
+const isPathLocked = (item: ExtraScanPath): boolean =>
+  recoveryStatus.value.lockedPathIds.includes(item.id)
+
+// 恢复进度轮询：恢复中每 1s 刷新一次，结束自动停止
+let recoveryPollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopRecoveryPolling() {
+  if (recoveryPollTimer) {
+    clearInterval(recoveryPollTimer)
+    recoveryPollTimer = null
+  }
+}
+
+function startRecoveryPolling() {
+  if (recoveryPollTimer) return
+  recoveryPollTimer = setInterval(async () => {
+    await fetchRecoveryStatus()
+    if (recoveryStatus.value.phase !== 'recovering') stopRecoveryPolling()
+  }, 1000)
+}
+
+onUnmounted(stopRecoveryPolling)
+
+const openRecovery = () => {
+  if (!canRecover.value || recoveryBusy.value) return
+  recoveryDialogOpen.value = true
+}
+
+const handleConfirmRecovery = async (scheme: RecoveryScheme) => {
+  if (recoveryBusy.value) return
+  recoveryBusy.value = true
+  try {
+    const res = await startRecovery(scheme)
+    const extra = [res.skipped ? `跳过 ${res.skipped}` : '', res.failed ? `失败 ${res.failed}` : '']
+      .filter(Boolean)
+      .join('，')
+    toast.success(`已启动恢复：创建 ${res.created} 个任务${extra ? `（${extra}）` : ''}`)
+    recoveryDialogOpen.value = false
+    await fetchRecoveryStatus()
+    startRecoveryPolling()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '启动恢复失败')
+  } finally {
+    recoveryBusy.value = false
+  }
+}
+
+const handleCancelRecovery = async () => {
+  const confirmed = await modal.confirm(
+    '取消全部恢复任务？\n候选清单会保留，之后可再次点击「恢复」重新入队。',
+    '取消恢复',
+    { tone: 'warn', confirmText: '取消恢复' },
+  )
+  if (!confirmed) return
+  try {
+    const res = await cancelRecovery()
+    toast.success(`已取消 ${res.cancelled} 个恢复任务`)
+    await fetchRecoveryStatus()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '取消恢复失败')
+  }
+}
+
+const openFallen = async () => {
+  fallenOpen.value = true
+  fallenLoading.value = true
+  try {
+    await fetchFallen()
+  } finally {
+    fallenLoading.value = false
+  }
+}
+
+const handleDismissFallen = async (id: number, dismissed: boolean) => {
+  try {
+    await dismissFallen(id, dismissed)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '操作失败')
+  }
+}
+
 // 组件挂载时向 Go 后端拉取最新路径列表，并恢复可能仍在进行的扫描进度
 // （解决切页后“看起来被截断”的问题：后端扫描在 goroutine 中持续运行，回来时重新拉取）
 onMounted(async () => {
   await fetchScanPaths()
   await refreshScanProgress()
   if (hasActiveScan()) ensurePolling()
+  // Round54：恢复状态 / 阵亡名单（恢复中则启动进度轮询）
+  await Promise.all([fetchRecoveryStatus(), fetchFallen()])
+  if (recoveryStatus.value.phase === 'recovering') startRecoveryPolling()
 })
 
 // 记录上一轮各路径是否已完成，用于在扫描完成瞬间弹出提示
@@ -277,6 +444,8 @@ watch(
           toast.error(`扫描失败：${p.error}`)
         } else {
           toast.success(`扫描完成：${p.comicCount ?? p.found} 本漫画`)
+          // Round54：全量扫描含失效对账 → 刷新恢复状态（候选/锁路径）
+          void fetchRecoveryStatus()
           // 完成后展示几秒，再收起进度提示区
           setTimeout(() => {
             if (getScanProgress(id)?.done) clearScanProgress(id)
@@ -406,6 +575,16 @@ const skippedDetail = (p: ScanProgress): string => {
   if (p.skippedExisting) parts.push(`已存在 ${p.skippedExisting}`)
   if (p.skippedGid) parts.push(`同 gid ${p.skippedGid}`)
   if (p.failed) parts.push(`失败 ${p.failed}`)
+  return parts.join(' / ')
+}
+
+// Round54：失效对账摘要（失效 / 可恢复 / 阵亡 / 自愈）
+const reconDetail = (p: ScanProgress): string => {
+  const parts: string[] = []
+  if (p.missingCount) parts.push(`失效 ${p.missingCount}`)
+  if (p.candidateCount) parts.push(`可恢复 ${p.candidateCount}`)
+  if (p.fallenCount) parts.push(`阵亡 ${p.fallenCount}`)
+  if (p.healedCount) parts.push(`自愈 ${p.healedCount}`)
   return parts.join(' / ')
 }
 
@@ -783,6 +962,52 @@ input:checked + .slider:before {
 .btn-mode.incremental:hover {
   border-color: #4fc3f7;
   color: #4fc3f7;
+}
+
+/* Round54：恢复 / 阵亡按钮 */
+.btn-mode:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-mode.recovery {
+  border-color: rgba(255, 117, 136, 0.5);
+  color: #ff7588;
+}
+
+.btn-mode.recovery:hover:not(:disabled) {
+  border-color: #ff7588;
+  background: rgba(255, 117, 136, 0.12);
+}
+
+.btn-mode.fallen:hover:not(:disabled) {
+  border-color: #f0b429;
+  color: #f0b429;
+}
+
+.btn-mode.danger {
+  border-color: rgba(255, 117, 136, 0.4);
+  color: #ff7588;
+}
+
+/* Round54：路径不存在提示（建议恢复，不提示移除路径） */
+.path-missing {
+  font-size: 12px;
+  color: #f0b429;
+}
+
+/* Round54：恢复中状态条 */
+.recovery-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: rgba(255, 117, 136, 0.3);
+}
+
+.recovery-text {
+  font-size: 13px;
+  color: var(--app-text-2);
 }
 
 /* 旋转动画 */

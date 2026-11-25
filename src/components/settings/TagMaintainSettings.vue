@@ -5,9 +5,8 @@
       <div class="intro-title"><AppIcon name="tag" :size="15" /> 双轨 Tag 维护说明</div>
       <div class="intro-text">
         <p>· <b>OnlineTags</b>：E站官方 tag，每日刷新时整体覆盖。</p>
-        <p>· <b>OfflineAddTags</b>：本地新增 tag（客制化，不写回）。</p>
-        <p>· <b>OfflineRemoveTags</b>：本地删除的 online tag（刷新时略过、写回时剔除）。</p>
-        <p>每周反向写回仅写入 <b>OnlineTags − OfflineRemoveTags</b>，本地客制化不会写回。</p>
+        <p>· <b>OfflineAddTags</b>：本地新增 tag（客制化，刷新不覆盖）。</p>
+        <p>· <b>OfflineRemoveTags</b>：本地删除的 online tag（每日刷新时略过，不再恢复）。</p>
       </div>
     </div>
 
@@ -16,10 +15,6 @@
       <div class="status-row">
         <span class="status-key">上次每日刷新</span>
         <span class="status-val">{{ formatTime(setting.lastDailyRunAt) }}</span>
-      </div>
-      <div class="status-row">
-        <span class="status-key">上次每周写回</span>
-        <span class="status-val">{{ formatTime(setting.lastWeeklyRunAt) }}</span>
       </div>
     </div>
 
@@ -165,53 +160,10 @@
       />
     </div>
 
-    <!-- 每周写回 -->
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">每周反向写回 ComicInfo</div>
-        <div class="item-subtext">
-          每周{{ weekdayLabel }} {{ setting.writebackHour }}:00（系统本地）将数据库 tag 写回
-          ComicInfo.xml（zip/cbz 自动重打包）
-        </div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="setting.enableWeeklyWriteback" @change="saveSetting" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">写回日</div>
-        <div class="item-subtext">每周的哪一天执行反向写回</div>
-      </div>
-      <select class="select-input" v-model.number="setting.writebackWeekday" @change="saveSetting">
-        <option v-for="(label, i) in weekdayLabels" :key="i" :value="i">{{ label }}</option>
-      </select>
-    </div>
-
-    <div class="setting-item">
-      <div class="item-info">
-        <div class="item-title">写回时刻</div>
-        <div class="item-subtext">系统本地小时（0-23），默认 6 点</div>
-      </div>
-      <input
-        class="num-input"
-        type="number"
-        min="0"
-        max="23"
-        v-model.number="setting.writebackHour"
-        @change="saveSetting"
-      />
-    </div>
-
     <!-- 手动触发 -->
     <div class="manual-row">
       <button class="action-btn refresh-btn" :disabled="busy" @click="handleRefresh">
         <AppIcon name="refresh" :size="15" /> 立即刷新
-      </button>
-      <button class="action-btn writeback-btn" :disabled="busy" @click="handleWriteback">
-        <AppIcon name="save" :size="15" /> 立即写回
       </button>
     </div>
 
@@ -242,37 +194,26 @@ import { useTagStore } from '@/stores/tagStore'
 
 interface TagMaintainSetting {
   enableDailyRefresh: boolean
-  enableWeeklyWriteback: boolean
   refreshHour: number
-  writebackWeekday: number
-  writebackHour: number
   enableFSearchAutoCorrect: boolean
   lastDailyRunAt?: number
-  lastWeeklyRunAt?: number
 }
 
 interface TagMaintainProgress {
   status: 'idle' | 'running' | 'success' | 'error'
-  type: 'refresh' | 'writeback'
+  type: 'refresh'
   done: number
   total: number
   updated?: number
-  written?: number
   failed?: number
   noTags?: number
   message: string
   startedAt?: number
 }
 
-const weekdayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-const weekdayLabel = computed(() => weekdayLabels[setting.value.writebackWeekday] ?? '周日')
-
 const setting = ref<TagMaintainSetting>({
   enableDailyRefresh: true,
-  enableWeeklyWriteback: true,
   refreshHour: 6,
-  writebackWeekday: 0,
-  writebackHour: 6,
   enableFSearchAutoCorrect: true,
 })
 const progress = ref<TagMaintainProgress | null>(null)
@@ -384,19 +325,6 @@ const handleRefresh = async () => {
   } catch (e) {
     busy.value = false
     toast.error(e instanceof Error ? e.message : '触发刷新失败')
-  }
-}
-
-const handleWriteback = async () => {
-  if (busy.value) return
-  busy.value = true
-  try {
-    await http('/offline/tags/writeback', { method: 'POST' })
-    toast.info('已开始反向写回，请稍候…')
-    startPolling()
-  } catch (e) {
-    busy.value = false
-    toast.error(e instanceof Error ? e.message : '触发写回失败')
   }
 }
 
@@ -746,15 +674,6 @@ input:checked + .slider:before {
 
 .refresh-btn:not(:disabled):hover {
   background-color: #ff5f75;
-  transform: translateY(-1px);
-}
-
-.writeback-btn {
-  background-color: #4c9aff;
-}
-
-.writeback-btn:not(:disabled):hover {
-  background-color: #3385f5;
   transform: translateY(-1px);
 }
 

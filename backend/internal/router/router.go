@@ -327,11 +327,10 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 			admin.GET("/tags/settings", handlers.GetTagEngineSettings)
 			admin.POST("/tags/settings", handlers.UpdateTagEngineSettings)
 
-			// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 手动写回 / 进度轮询）
+			// 🏷️ Tag 维护（双轨三态：设置 / 手动刷新 / 进度轮询）
 			admin.GET("/offline/tags/setting", tagMaintainHandler.GetSetting)
 			admin.POST("/offline/tags/setting", tagMaintainHandler.SaveSetting)
 			admin.POST("/offline/tags/refresh", tagMaintainHandler.RefreshTags)
-			admin.POST("/offline/tags/writeback", tagMaintainHandler.Writeback)
 			admin.GET("/offline/tags/progress", tagMaintainHandler.GetProgress)
 
 			// 单本 tag 增删落库（详情页编辑，仅管理员可改本地 Tag）

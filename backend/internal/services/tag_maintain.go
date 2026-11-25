@@ -1,14 +1,9 @@
 package services
 
 import (
-	"archive/zip"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,12 +19,11 @@ import (
 //
 // 双轨三态模型：
 //   - OnlineTags         E站官方 tag（每日刷新覆盖）
-//   - OfflineAddTags     本地新增 tag（用户客制化，不写回）
-//   - OfflineRemoveTags  本地删除的 online tag（刷新时略过、写回时剔除）
+//   - OfflineAddTags     本地新增 tag（用户客制化）
+//   - OfflineRemoveTags  本地删除的 online tag（刷新时略过）
 //
 // 展示规则：   展示 = (Online ∪ OfflineAdd) − OfflineRemove
 // 刷新规则：   新 OnlineTags 中处于 OfflineRemoveTags 的 tag 不恢复
-// 写回规则：   ComicInfo.Tags = OnlineTags − OfflineRemoveTags
 // ─────────────────────────────────────────────────────────────
 
 // 系统本地时区（Round9-时区统一：调度基准与计算机时间一致，随系统时区/DST 自动变化）
@@ -51,14 +45,13 @@ func SetFSearchAutoCorrect(v bool) { fSearchAutoCorrect.Store(v) }
 // FSearchAutoCorrectEnabled 读取 f_search 自动修正开关（未初始化时默认开启）
 func FSearchAutoCorrectEnabled() bool { return fSearchAutoCorrect.Load() }
 
-// TagMaintainProgress 刷新/写回任务进度（供界面轮询）
+// TagMaintainProgress 刷新任务进度（供界面轮询）
 type TagMaintainProgress struct {
 	Status    string `json:"status"`    // idle | running | success | error
-	Type      string `json:"type"`      // refresh | writeback
+	Type      string `json:"type"`      // refresh
 	Done      int    `json:"done"`      // 已处理数
 	Total     int    `json:"total"`     // 总数
 	Updated   int    `json:"updated"`   // 实际变更数
-	Written   int    `json:"written"`   // 写回成功数
 	Failed    int    `json:"failed"`    // 失败数
 	NoTags    int    `json:"noTags"`    // 无 tags 跳过数
 	Message   string `json:"message"`   // 最近提示
@@ -134,12 +127,9 @@ func LoadTagMaintainSetting(db *gorm.DB) *models.TagMaintainSetting {
 	var setting models.TagMaintainSetting
 	if err := db.First(&setting, 1).Error; err != nil {
 		setting = models.TagMaintainSetting{
-			ID:                      1,
-			EnableDailyRefresh:      true,
-			EnableWeeklyWriteback:   true,
-			RefreshHour:             6,
-			WritebackWeekday:        0,
-			WritebackHour:           6,
+			ID:                       1,
+			EnableDailyRefresh:       true,
+			RefreshHour:              6,
 			EnableFSearchAutoCorrect: true,
 		}
 		if err := db.Create(&setting).Error; err != nil {
@@ -389,285 +379,6 @@ func sameTagSet(a, b []string) bool {
 	return true
 }
 
-// ─────────────────────────────────────────────────────────────
-// 每周反向写回 ComicInfo
-// ─────────────────────────────────────────────────────────────
-
-// WritebackResult 单次写回结果
-type WritebackResult struct {
-	Total      int    `json:"total"`      // 处理漫画总数
-	Written    int    `json:"written"`    // 成功写回数
-	Failed     int    `json:"failed"`     // 失败数
-	NoTags     int    `json:"noTags"`     // 无 tags 可写跳过
-	ElapsedSec float64 `json:"elapsedSec"` // 耗时(秒)
-}
-
-// WritebackComicInfo 将数据库 online tag 反向写入 ComicInfo.xml
-func (s *TagMaintainService) WritebackComicInfo() (*WritebackResult, error) {
-	if !s.beginRun("writeback") {
-		return nil, fmt.Errorf("已有 Tag 维护任务正在执行，请稍后再试")
-	}
-	defer s.endRun()
-	result, err := s.writebackLocked()
-	// Round32：写回不改变库内 Tag 口径（OnlineTags − RemoveTags），但编辑/恢复可能已变动 → 一并重建
-	if err == nil {
-		XpRebuildAsync("Tag 写回")
-	}
-	return result, err
-}
-
-// writebackLocked 实际写回逻辑
-func (s *TagMaintainService) writebackLocked() (*WritebackResult, error) {
-	start := time.Now()
-	result := &WritebackResult{}
-
-	var comics []models.OfflineComic
-	if err := s.db.Find(&comics).Error; err != nil {
-		s.setProgress(TagMaintainProgress{Status: "error", Type: "writeback", Message: "读取离线漫画失败"})
-		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
-	}
-
-	result.Total = len(comics)
-	s.setProgress(TagMaintainProgress{Status: "running", Type: "writeback", Total: len(comics), StartedAt: start.UnixMilli(), Message: "开始反向写回…"})
-	log.Printf("%s [tagm] 开始反向写回 ComicInfo：共 %d 个漫画", dlLogTag, len(comics))
-
-	for i := range comics {
-		c := &comics[i]
-		s.mu.Lock()
-		s.progress.Done = i + 1
-		s.progress.Message = fmt.Sprintf("写回 %q …", c.Title)
-		s.mu.Unlock()
-
-		// 写回规则：OnlineTags − OfflineRemoveTags（不含 OfflineAddTags）
-		writeTags := MergeTags(UnmarshalTagSlice(c.OnlineTags), nil, UnmarshalTagSlice(c.OfflineRemoveTags))
-		if len(writeTags) == 0 {
-			result.NoTags++
-			continue
-		}
-
-		if c.LocalPath == "" {
-			result.Failed++
-			continue
-		}
-
-		var err error
-		fi, statErr := os.Stat(c.LocalPath)
-		if statErr != nil {
-			log.Printf("%s [tagm] 漫画 %s 路径不存在（跳过）: %v", dlWarnTag, c.ID, statErr)
-			result.Failed++
-			continue
-		}
-		if fi.IsDir() {
-			err = writeComicInfoToDir(c.LocalPath, writeTags)
-		} else if IsArchive(c.LocalPath) {
-			err = writeComicInfoToZip(c.LocalPath, writeTags)
-		} else {
-			result.Failed++
-			continue
-		}
-
-		if err != nil {
-			log.Printf("%s [tagm] 漫画 %q(%s) 写回 ComicInfo 失败: %v", dlErrTag, c.Title, c.LocalPath, err)
-			result.Failed++
-		} else {
-			result.Written++
-			log.Printf("%s [tagm] 已写回 %q：tags=%d（%s）", dlLogTag, c.Title, len(writeTags), c.LocalPath)
-		}
-	}
-
-	result.ElapsedSec = time.Since(start).Seconds()
-
-	setting := LoadTagMaintainSetting(s.db)
-	setting.LastWeeklyRunAt = time.Now().UnixMilli()
-	_ = s.db.Model(setting).Update("last_weekly_run_at", setting.LastWeeklyRunAt).Error
-
-	s.setProgress(TagMaintainProgress{Status: "success", Type: "writeback", Done: result.Total, Total: result.Total, Written: result.Written,
-		Message: fmt.Sprintf("写回完成：成功 %d，失败 %d，无 tags %d", result.Written, result.Failed, result.NoTags), StartedAt: start.UnixMilli()})
-	log.Printf("%s [tagm] 反向写回完成：成功 %d / 失败 %d / 无 tags %d，耗时 %.1fs", dlLogTag, result.Written, result.Failed, result.NoTags, result.ElapsedSec)
-	return result, nil
-}
-
-// ─────────────────────────────────────────────────────────────
-// ComicInfo.xml 写回实现
-// ─────────────────────────────────────────────────────────────
-
-// readComicInfo 读取目录下 ComicInfo.xml（不存在返回 nil, nil）
-func readComicInfo(path string) (*ComicInfoXML, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var meta ComicInfoXML
-	if err := xml.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("解析 ComicInfo.xml 失败: %v", err)
-	}
-	return &meta, nil
-}
-
-// writeComicInfoFile 将 ComicInfoXML 写盘（含 XML 头）
-func writeComicInfoFile(path string, meta *ComicInfoXML) error {
-	xmlData, err := xml.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	xmlFull := append([]byte(xml.Header), xmlData...)
-	return os.WriteFile(path, xmlFull, 0o644)
-}
-
-// writeComicInfoToDir 改写散图文件夹内的 ComicInfo.xml（保留其它字段）
-func writeComicInfoToDir(dirPath string, writeTags []string) error {
-	ciPath := filepath.Join(dirPath, "ComicInfo.xml")
-	meta, err := readComicInfo(ciPath)
-	if err != nil {
-		return err
-	}
-	if meta == nil {
-		meta = &ComicInfoXML{}
-	}
-	meta.Tags = strings.Join(writeTags, ",")
-	return writeComicInfoFile(ciPath, meta)
-}
-
-// writeComicInfoToZip 重打包 zip/cbz 并更新其中的 ComicInfo.xml
-func writeComicInfoToZip(zipPath string, writeTags []string) error {
-	zr, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return fmt.Errorf("打开压缩包失败: %v", err)
-	}
-	defer zr.Close()
-
-	tmpPath := zipPath + ".tmp"
-	tmp, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("创建临时文件失败: %v", err)
-	}
-
-	zw := zip.NewWriter(tmp)
-	comicInfoWritten := false
-
-	for _, f := range zr.File {
-		lower := strings.ToLower(filepath.Base(f.Name))
-		var header *zip.FileHeader
-		var rc io.ReadCloser
-
-		if lower == "comicinfo.xml" {
-			// 读取旧内容保留其它字段
-			var meta ComicInfoXML
-			if r, err := f.Open(); err == nil {
-				if data, err := io.ReadAll(r); err == nil {
-					_ = xml.Unmarshal(data, &meta)
-				}
-				r.Close()
-			}
-			meta.Tags = strings.Join(writeTags, ",")
-			xmlData, err := xml.MarshalIndent(meta, "", "  ")
-			if err != nil {
-				zr.Close()
-				tmp.Close()
-				os.Remove(tmpPath)
-				return err
-			}
-			xmlFull := append([]byte(xml.Header), xmlData...)
-
-			header = &zip.FileHeader{Name: f.Name, Method: zip.Deflate}
-			header.SetModTime(f.ModTime())
-			w, err := zw.CreateHeader(header)
-			if err != nil {
-				zr.Close()
-				tmp.Close()
-				os.Remove(tmpPath)
-				return err
-			}
-			if _, err := w.Write(xmlFull); err != nil {
-				zr.Close()
-				tmp.Close()
-				os.Remove(tmpPath)
-				return err
-			}
-			comicInfoWritten = true
-			continue
-		}
-
-		// 其它文件原样复制
-		header = &zip.FileHeader{Name: f.Name, Method: f.Method}
-		header.SetModTime(f.ModTime())
-		w, err := zw.CreateHeader(header)
-		if err != nil {
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-		rc, err = f.Open()
-		if err != nil {
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-		if _, err := io.Copy(w, rc); err != nil {
-			rc.Close()
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-		rc.Close()
-	}
-
-	// 压缩包内无 ComicInfo.xml 时新增
-	if !comicInfoWritten {
-		meta := ComicInfoXML{Tags: strings.Join(writeTags, ",")}
-		xmlData, err := xml.MarshalIndent(meta, "", "  ")
-		if err != nil {
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-		xmlFull := append([]byte(xml.Header), xmlData...)
-		header := &zip.FileHeader{Name: "ComicInfo.xml", Method: zip.Deflate}
-		header.SetModTime(time.Now())
-		w, err := zw.CreateHeader(header)
-		if err != nil {
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-		if _, err := w.Write(xmlFull); err != nil {
-			zr.Close()
-			tmp.Close()
-			os.Remove(tmpPath)
-			return err
-		}
-	}
-
-	if err := zw.Close(); err != nil {
-		zr.Close()
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("压缩包写入失败: %v", err)
-	}
-	if err := tmp.Close(); err != nil {
-		zr.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	// 关闭读取器后原子替换
-	zr.Close()
-	if err := os.Remove(zipPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("替换原压缩包失败（移除旧文件）: %v", err)
-	}
-	if err := os.Rename(tmpPath, zipPath); err != nil {
-		return fmt.Errorf("替换原压缩包失败（重命名）: %v", err)
-	}
-	return nil
-}
 
 // ─────────────────────────────────────────────────────────────
 // 数据迁移：旧 Tags → OnlineTags

@@ -27,12 +27,9 @@ func (h *TagMaintainHandler) GetSetting(c *gin.Context) {
 
 // saveTagSettingReq 保存设置的请求体（指针字段以区分“未传”与“传 false”）
 type saveTagSettingReq struct {
-	EnableDailyRefresh      *bool `json:"enableDailyRefresh"`
-	EnableWeeklyWriteback   *bool `json:"enableWeeklyWriteback"`
+	EnableDailyRefresh       *bool `json:"enableDailyRefresh"`
 	EnableFSearchAutoCorrect *bool `json:"enableFSearchAutoCorrect"`
-	RefreshHour             *int  `json:"refreshHour"`
-	WritebackWeekday        *int  `json:"writebackWeekday"`
-	WritebackHour           *int  `json:"writebackHour"`
+	RefreshHour              *int  `json:"refreshHour"`
 }
 
 // SaveSetting 保存 Tag 维护设置 POST /api/v1/offline/tags/setting
@@ -47,21 +44,12 @@ func (h *TagMaintainHandler) SaveSetting(c *gin.Context) {
 	if req.EnableDailyRefresh != nil {
 		setting.EnableDailyRefresh = *req.EnableDailyRefresh
 	}
-	if req.EnableWeeklyWriteback != nil {
-		setting.EnableWeeklyWriteback = *req.EnableWeeklyWriteback
-	}
 	// 修复：请求体缺该字段导致「在线搜索 Tag 语法自动修正」开关无法关闭/开启
 	if req.EnableFSearchAutoCorrect != nil {
 		setting.EnableFSearchAutoCorrect = *req.EnableFSearchAutoCorrect
 	}
 	if req.RefreshHour != nil {
 		setting.RefreshHour = *req.RefreshHour
-	}
-	if req.WritebackWeekday != nil {
-		setting.WritebackWeekday = *req.WritebackWeekday
-	}
-	if req.WritebackHour != nil {
-		setting.WritebackHour = *req.WritebackHour
 	}
 
 	saved, err := services.SaveTagMaintainSetting(h.db, setting)
@@ -87,19 +75,7 @@ func (h *TagMaintainHandler) RefreshTags(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "type": "refresh"})
 }
 
-// Writeback 手动立即反向写回 ComicInfo POST /api/v1/offline/tags/writeback
-func (h *TagMaintainHandler) Writeback(c *gin.Context) {
-	if h.svc.IsRunning() {
-		c.JSON(http.StatusConflict, gin.H{"error": "已有 Tag 维护任务正在执行，请稍后再试"})
-		return
-	}
-	go func() {
-		_, _ = h.svc.WritebackComicInfo()
-	}()
-	c.JSON(http.StatusAccepted, gin.H{"ok": true, "type": "writeback"})
-}
-
-// GetProgress 读取刷新/写回任务进度 GET /api/v1/offline/tags/progress
+// GetProgress 读取刷新任务进度 GET /api/v1/offline/tags/progress
 func (h *TagMaintainHandler) GetProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, h.svc.GetProgress())
 }

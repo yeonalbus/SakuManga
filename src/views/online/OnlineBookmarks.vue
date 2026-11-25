@@ -13,18 +13,28 @@ import {
   scrapeBookmarks,
   updateBookmarkFields,
   probeScrapeBookmarks,
+  bookmarkDisplayTitle,
   PINNED_BOOKMARK_LIMIT,
 } from '@/stores/scrapeBookmarksStore'
 import { bookmarkTitleWith } from '@/utils/bookmarkTitle'
 import { useTagStore } from '@/stores/tagStore'
 import { useUI } from '@/composables/useUI'
-import type { ScrapeBookmark } from '@/types/comic'
+import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
 
 const tagStore = useTagStore()
 const { toast } = useUI()
 
 const probing = ref(false)
 const noteEditing = ref<ScrapeBookmark | null>(null)
+const activeRole = ref<'all' | ScrapeBookmarkRole>('all')
+const filterQuery = ref('')
+
+const roleTabs: { key: 'all' | ScrapeBookmarkRole; label: string; dot?: ScrapeBookmarkRole }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'newest', label: '追新', dot: 'newest' },
+  { key: 'interest', label: '兴趣', dot: 'interest' },
+  { key: 'oldest', label: '续扫', dot: 'oldest' },
+]
 
 const collator = new Intl.Collator('zh-CN', { numeric: true })
 
@@ -41,11 +51,42 @@ const total = computed(() => scrapeBookmarks.value.length)
 const pinnedCount = computed(() => scrapeBookmarks.value.filter((b) => b.pinned).length)
 const updateCount = computed(() => scrapeBookmarks.value.filter((b) => b.hasUpdate).length)
 
+const roleCounts = computed<Record<'all' | ScrapeBookmarkRole, number>>(() => {
+  const counts: Record<'all' | ScrapeBookmarkRole, number> = {
+    all: scrapeBookmarks.value.length,
+    newest: 0,
+    interest: 0,
+    oldest: 0,
+  }
+  for (const b of scrapeBookmarks.value) {
+    if (b.role in counts) counts[b.role] += 1
+  }
+  return counts
+})
+
+const isFiltered = computed(() => activeRole.value !== 'all' || filterQuery.value.trim().length > 0)
+
+const filteredBookmarks = computed(() => {
+  const kw = filterQuery.value.trim().toLowerCase()
+  return scrapeBookmarks.value.filter((b) => {
+    if (activeRole.value !== 'all' && b.role !== activeRole.value) return false
+    if (!kw) return true
+    const mainTitle = titleOf(b).toLowerCase()
+    const subTitle = bookmarkDisplayTitle(b).toLowerCase()
+    return mainTitle.includes(kw) || subTitle.includes(kw)
+  })
+})
+
+const resetFilters = () => {
+  activeRole.value = 'all'
+  filterQuery.value = ''
+}
+
 const pinnedList = computed(() =>
-  scrapeBookmarks.value.filter((b) => b.pinned).slice().sort(byUpdateThenTitle),
+  filteredBookmarks.value.filter((b) => b.pinned).slice().sort(byUpdateThenTitle),
 )
 const normalList = computed(() =>
-  scrapeBookmarks.value.filter((b) => !b.pinned).slice().sort(byUpdateThenTitle),
+  filteredBookmarks.value.filter((b) => !b.pinned).slice().sort(byUpdateThenTitle),
 )
 
 const editNote = (bm: ScrapeBookmark) => {
@@ -97,8 +138,16 @@ onMounted(() => {
         <div class="bm-head-left">
           <h2 class="bm-page-title"><AppIcon name="bookmark" :size="18" /> 书签</h2>
           <span class="bm-page-stat">
-            共 {{ total }} 条 · 置顶 {{ pinnedCount }}/{{ PINNED_BOOKMARK_LIMIT }} · 有更新
-            {{ updateCount }}
+            <template v-if="isFiltered">
+              筛选命中 {{ filteredBookmarks.length }} / 共 {{ total }} 条 · 置顶 {{ pinnedCount }}/{{
+                PINNED_BOOKMARK_LIMIT
+              }}
+              · 有更新 {{ updateCount }}
+            </template>
+            <template v-else>
+              共 {{ total }} 条 · 置顶 {{ pinnedCount }}/{{ PINNED_BOOKMARK_LIMIT }} · 有更新
+              {{ updateCount }}
+            </template>
           </span>
         </div>
         <button class="bm-probe-btn" :disabled="probing" @click="runProbe">
@@ -114,30 +163,74 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <!-- 置顶区 -->
-        <div v-if="pinnedList.length" class="bm-grid">
-          <BookmarkCard
-            v-for="bm in pinnedList"
-            :key="bm.id"
-            :bm="bm"
-            :pinned-count="pinnedCount"
-            @edit-note="editNote"
-          />
+        <!-- Round55 方案 1：页内单行轻量过滤条（左标记胶囊 + 右紧凑筛选框） -->
+        <section class="bm-toolbar" aria-label="书签筛选">
+          <div class="bm-role-tabs">
+            <button
+              v-for="tab in roleTabs"
+              :key="tab.key"
+              type="button"
+              class="bm-tab"
+              :class="[{ active: activeRole === tab.key }, tab.key !== 'all' ? `role-${tab.key}` : '']"
+              @click="activeRole = tab.key"
+            >
+              <span v-if="tab.dot" class="bm-tab-dot" :class="tab.dot" />
+              {{ tab.label }}
+              <span class="bm-tab-cnt">{{ roleCounts[tab.key] }}</span>
+            </button>
+          </div>
+          <div class="bm-filter-box">
+            <AppIcon name="search" :size="13" class="bm-filter-icon" />
+            <input
+              v-model="filterQuery"
+              class="bm-filter-input"
+              type="text"
+              placeholder="筛选当前书签（标题 / 副标题）…"
+              autocomplete="off"
+            />
+            <button
+              v-if="filterQuery.length > 0"
+              type="button"
+              class="bm-filter-clear"
+              title="清空"
+              @click="filterQuery = ''"
+            >
+              <AppIcon name="close" :size="11" />
+            </button>
+          </div>
+        </section>
+
+        <div v-if="filteredBookmarks.length === 0" class="bm-page-empty">
+          没有匹配的书签
+          <button type="button" class="bm-reset-btn" @click="resetFilters">清空筛选</button>
         </div>
 
-        <!-- 置顶区 / 普通区分隔线 -->
-        <div v-if="pinnedList.length && normalList.length" class="bm-divider" />
+        <template v-else>
+          <!-- 置顶区 -->
+          <div v-if="pinnedList.length" class="bm-grid">
+            <BookmarkCard
+              v-for="bm in pinnedList"
+              :key="bm.id"
+              :bm="bm"
+              :pinned-count="pinnedCount"
+              @edit-note="editNote"
+            />
+          </div>
 
-        <!-- 普通区 -->
-        <div v-if="normalList.length" class="bm-grid">
-          <BookmarkCard
-            v-for="bm in normalList"
-            :key="bm.id"
-            :bm="bm"
-            :pinned-count="pinnedCount"
-            @edit-note="editNote"
-          />
-        </div>
+          <!-- 置顶区 / 普通区分隔线 -->
+          <div v-if="pinnedList.length && normalList.length" class="bm-divider" />
+
+          <!-- 普通区 -->
+          <div v-if="normalList.length" class="bm-grid">
+            <BookmarkCard
+              v-for="bm in normalList"
+              :key="bm.id"
+              :bm="bm"
+              :pinned-count="pinnedCount"
+              @edit-note="editNote"
+            />
+          </div>
+        </template>
       </template>
 
       <!-- 备注编辑弹窗 -->
@@ -209,6 +302,160 @@ onMounted(() => {
   text-align: center;
   color: var(--app-text-muted);
   font-size: 0.9rem;
+}
+
+.bm-reset-btn {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-3);
+  background-color: var(--app-surface-2);
+  color: var(--app-text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.bm-reset-btn:hover {
+  color: var(--app-text-strong);
+  border-color: var(--app-text-muted);
+}
+
+/* Round55：页内单行轻量过滤条 */
+.bm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--app-border-2);
+  border-radius: 10px;
+}
+
+.bm-role-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.bm-tab:hover {
+  background-color: var(--app-surface-2);
+  color: var(--app-text-strong);
+}
+.bm-tab-cnt {
+  font-size: 0.72rem;
+  color: var(--app-text-muted);
+}
+.bm-tab.active {
+  background-color: var(--app-surface-2);
+  border-color: var(--app-border-3);
+  color: var(--app-text-strong);
+  font-weight: 600;
+}
+.bm-tab.active.role-newest {
+  border-color: rgba(79, 163, 227, 0.55);
+  color: #4fa3e3;
+  background-color: rgba(79, 163, 227, 0.1);
+}
+.bm-tab.active.role-oldest {
+  border-color: rgba(76, 195, 138, 0.55);
+  color: #4cc38a;
+  background-color: rgba(76, 195, 138, 0.1);
+}
+.bm-tab.active.role-interest {
+  border-color: rgba(154, 154, 154, 0.55);
+  color: var(--app-text-strong);
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.bm-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.bm-tab-dot.newest {
+  background-color: #4fa3e3;
+}
+.bm-tab-dot.interest {
+  background-color: #9a9a9a;
+}
+.bm-tab-dot.oldest {
+  background-color: #4cc38a;
+}
+
+.bm-filter-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 240px;
+  max-width: 100%;
+}
+
+.bm-filter-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--app-text-muted);
+  pointer-events: none;
+}
+
+.bm-filter-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 26px 0 28px;
+  border-radius: 7px;
+  border: 1px solid var(--app-border-2);
+  background-color: var(--app-input-bg);
+  color: var(--app-text-strong);
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.bm-filter-input::placeholder {
+  color: var(--app-text-muted);
+}
+.bm-filter-input:focus {
+  border-color: var(--app-border-3);
+}
+
+.bm-filter-clear {
+  position: absolute;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--app-surface-3);
+  color: var(--app-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.bm-filter-clear:hover {
+  color: var(--app-text-strong);
+}
+
+@media (max-width: 820px) {
+  .bm-filter-box {
+    width: 100%;
+  }
 }
 
 /* 名片墙：3 列（窄屏降列） */

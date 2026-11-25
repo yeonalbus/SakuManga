@@ -7,7 +7,7 @@
 // 样式沿用 DateJumpModal 的 overlay/panel 暗色主题结构
 import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
-import type { ScrapeBookmarkRole } from '@/types/comic'
+import type { ScrapeBookmark, ScrapeBookmarkRole } from '@/types/comic'
 import { noteCounterText, validateNote } from '@/utils/noteLimit'
 
 const props = defineProps<{
@@ -20,6 +20,8 @@ const props = defineProps<{
   anchorTitle?: string
   /** 锚定画廊发布时间（E 站 posted 日期，可空） */
   postedAt?: string
+  /** 同条件已有书签（命中时预填充标记/备注/开关） */
+  prefillSource?: ScrapeBookmark | null
 }>()
 
 const emit = defineEmits<{
@@ -55,17 +57,32 @@ const roleOptions: { value: ScrapeBookmarkRole; label: string; hint: string }[] 
   { value: 'interest', label: '兴趣', hint: '只是感兴趣，暂未搜刮' },
 ]
 
-// 每次打开重置
+const roleLabelMap: Record<ScrapeBookmarkRole, string> = {
+  newest: '追新',
+  oldest: '续扫',
+  interest: '兴趣',
+}
+
+const prefillHint = computed(() => {
+  const src = props.prefillSource
+  if (!src) return ''
+  const roleText = roleLabelMap[src.role] || src.role
+  const timeText = src.anchor?.postedAt || '无时间'
+  return `已载入已有书签配置（${roleText} · ${timeText}）`
+})
+
+// 每次打开时按 prefillSource 预填充，无命中则重置为默认
 watch(
   () => props.show,
   (v) => {
     if (v) {
+      const src = props.prefillSource
       name.value = ''
-      role.value = 'newest'
-      note.value = ''
+      role.value = src ? src.role : 'newest'
+      note.value = src ? src.note || '' : ''
       noteError.value = false
-      updateWatch.value = false
-      bulkDone.value = false
+      updateWatch.value = src ? !!src.updateWatch : false
+      bulkDone.value = src ? !!src.bulkDone : false
     }
   },
 )
@@ -124,6 +141,11 @@ const handleConfirm = () => {
                 <span class="bm-record-label"><AppIcon name="cards" :size="13" /> 锚定画廊</span>
                 <span class="bm-record-value" :title="anchorTitle">{{ anchorTitle }}</span>
               </div>
+            </div>
+
+            <div v-if="prefillHint" class="bm-prefill-hint">
+              <AppIcon name="info" :size="13" />
+              <span>{{ prefillHint }}</span>
             </div>
 
             <!-- Round49：书签标题固定为「位置字段 + 非默认筛选摘要」，不再由用户手填； -->
@@ -479,5 +501,17 @@ const handleConfirm = () => {
 .bm-error {
   font-size: 0.72rem;
   color: #ef4444;
+}
+
+.bm-prefill-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background-color: rgba(0, 168, 150, 0.1);
+  border: 1px solid rgba(0, 168, 150, 0.28);
+  color: var(--app-text-2);
+  font-size: 0.75rem;
 }
 </style>

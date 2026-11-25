@@ -13,6 +13,7 @@ import { onlineSearchConfig, applySearchOptionsInherit } from '@/stores/searchSt
 import {
   addScrapeBookmark,
   updateBookmarkAnchor,
+  updateBookmarkFields,
   scrapeBookmarks,
   scopedBookmarkedGids,
   getBookmarkById,
@@ -27,6 +28,7 @@ import { useDetailPanel } from '@/composables/useDetailPanel'
 import { useUI } from '@/composables/useUI'
 // Round49：锚点转移判据（同检索条件 + 同书签标记 → 提示转移而非新建）
 import { isSameTransferScope } from '@/utils/bookmarkScope'
+import { pickPrefillBookmark } from '@/utils/bookmarkPrefill'
 // Round34：书签「按日期定位」编排（seek 到 postedAt 当天 → 自动向下翻页寻找锚定卡片）
 import { useBookmarkLocate } from '@/composables/useBookmarkLocate'
 // Round36：「加载较新内容」滚动锚定（前置插入后保持锚点卡不动 + 脉冲高亮）
@@ -228,6 +230,17 @@ const bmLocationLabel = computed(() =>
   bookmarkLocationLabel({ type: bmType.value, keyword: bmKeyword.value }),
 )
 
+// Round55：同条件已有书签的智能回显参考
+const bmPrefillSource = computed(() =>
+  bmModalOpen.value
+    ? pickPrefillBookmark(
+        scrapeBookmarks.value,
+        onlineSearchConfig.value,
+        pendingAnchor.value?.postedAt,
+      )
+    : null,
+)
+
 // Round29：点「存为书签」直接进入拾取模式（弹窗推迟到选中卡片后出现）
 const handleBookmarkCreate = () => {
   pendingAnchor.value = null
@@ -264,6 +277,21 @@ const handleBookmarkSave = async (payload: {
         migratedFrom: null,
       })
       if (!ok) return // 失败已由 store toast 提示
+
+      // Round55：锚点转移时同步保存用户在弹窗内修改过的备注/更新开关/已囤货状态
+      const fieldsChanged =
+        payload.note !== (existing.note || '') ||
+        payload.updateWatch !== !!existing.updateWatch ||
+        payload.bulkDone !== !!existing.bulkDone
+      if (fieldsChanged) {
+        const fieldsOk = await updateBookmarkFields(existing.id, {
+          note: payload.note,
+          updateWatch: payload.updateWatch,
+          bulkDone: payload.bulkDone,
+        })
+        if (!fieldsOk) return
+      }
+
       bmModalOpen.value = false
       pickMode.value = false
       pendingAnchor.value = null
@@ -474,6 +502,7 @@ onUnmounted(() => {
       :location-label="bmLocationLabel"
       :anchor-title="pendingAnchor?.title"
       :posted-at="pendingAnchor?.postedAt"
+      :prefill-source="bmPrefillSource"
       @close="handleBookmarkCancel"
       @create="handleBookmarkSave"
     />

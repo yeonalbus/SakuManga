@@ -97,17 +97,20 @@ const setRole = async (role: ScrapeBookmarkRole) => {
   if (ok) toast.success(`标记已改为「${roleLabels[role]}」`)
 }
 
-/** 修改名称（留空恢复默认显示） */
+/** 修改名称（预填充当前展示标题；未自定义且未改字时不固化；留空恢复默认显示） */
 const rename = async () => {
   closeMenu()
+  const initialName = props.bm.name || title.value
   const val = await modal.prompt(
     '输入自定义名称（留空则恢复默认显示）',
-    props.bm.name,
+    initialName,
     '修改名称',
   )
   if (val === null || val === undefined) return
-  const ok = await renameScrapeBookmark(props.bm.id, val.trim())
-  if (ok) toast.success(val.trim() ? '名称已保存' : '已恢复默认名称')
+  const trimmed = val.trim()
+  if (!props.bm.name && trimmed === title.value) return
+  const ok = await renameScrapeBookmark(props.bm.id, trimmed)
+  if (ok) toast.success(trimmed ? '名称已保存' : '已恢复默认名称')
 }
 
 const remove = async () => {

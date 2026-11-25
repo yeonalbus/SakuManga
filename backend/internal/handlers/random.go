@@ -295,10 +295,11 @@ func (h *OnlineComicHandler) GetRandomComics(c *gin.Context) {
 		mode = "random"
 	}
 	recoOpts := services.NormalizeRecommendOptions(services.RecommendOptions{
-		Theta:       parseFloatOr(c.Query("recoTheta"), services.RecoDefaultTheta),
-		Explore:     parseFloatOr(c.Query("recoExplore"), services.RecoDefaultExplore),
-		Temperature: parseFloatOr(c.Query("recoTemp"), services.RecoDefaultTemperature),
-		Gamma:       parseFloatOr(c.Query("recoGamma"), services.RecoDefaultGamma),
+		Theta:         parseFloatOr(c.Query("recoTheta"), services.RecoDefaultTheta),
+		ThetaExplicit: strings.TrimSpace(c.Query("recoTheta")) != "",
+		Explore:       parseFloatOr(c.Query("recoExplore"), services.RecoDefaultExplore),
+		Temperature:   parseFloatOr(c.Query("recoTemp"), services.RecoDefaultTemperature),
+		Gamma:         parseFloatOr(c.Query("recoGamma"), services.RecoDefaultGamma),
 	})
 	recoExcludeRead := c.DefaultQuery("recoExcludeRead", "false") == "true"
 	recoExcludeShelf := c.DefaultQuery("recoExcludeShelf", "false") == "true"

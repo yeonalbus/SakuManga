@@ -84,3 +84,19 @@ func (h *XpCloudHandler) RebuildXpCloud(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "统计已重算", "meta": result.Meta})
 }
+
+// GetPersonalToplist 个人综合偏好榜 GET /api/v1/offline/toplist?limit=25
+func (h *XpCloudHandler) GetPersonalToplist(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "25"))
+	items, err := h.svc.PersonalToplist(user.ID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "排行榜计算失败：" + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+}

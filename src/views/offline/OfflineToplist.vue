@@ -3,7 +3,7 @@ import { computed, onMounted, onActivated, nextTick, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import ItemCard from '@/components/ItemCard.vue'
 // 🟢 1. 从 comicStore 引入真实的全局离线漫画数据
-import { offlineComics } from '@/stores/comicStore'
+import { offlineComics, fetchOfflineComics } from '@/stores/comicStore'
 import type { OfflineComic, XpCloudArtist, XpCloudGroup, XpCloudResult, XpCloudTag, XpCloudView } from '@/types/comic'
 import { detectDeviceClass } from '@/utils/device'
 // Round7-任务8：列表状态记忆 + 提供者（新标签返回本页恢复滚动位置）
@@ -16,7 +16,12 @@ import {
 // Round32 阶段一：XP 词云面板
 import XpWordCloud, { type XpCloudStats } from '@/components/XpWordCloud.vue'
 import ArtistTopList from '@/components/ArtistTopList.vue'
-import { fetchXpCloudApi, rebuildXpCloudApi } from '@/api/xpCloud'
+import {
+  fetchXpCloudApi,
+  rebuildXpCloudApi,
+  fetchPersonalToplistApi,
+  type PersonalToplistItem,
+} from '@/api/xpCloud'
 import { formatFSearchTag } from '@/utils/tagFilter'
 // Round32 视觉改版：词云展示参数（持久化，用户可自行调节）
 import {
@@ -33,21 +38,42 @@ import AppIcon from '@/components/icons/AppIcon.vue'
 
 interface RankedOfflineComic extends OfflineComic {
   rank: number
+  personalRating?: number
+  inShelf?: boolean
+  progress?: number
 }
 
-// 🟢 2. 核心计算属性：根据阅读/点击次数（readCount）降序排列并生成 TOP 25
-const rankedComics = computed<RankedOfflineComic[]>(() => {
-  const sorted = [...offlineComics.value].sort((a, b) => {
-    const countA = a.readCount || 0
-    const countB = b.readCount || 0
-    return countB - countA
-  })
+const toplistItems = ref<PersonalToplistItem[]>([])
 
-  // 截取前 25 名，并自动打上 1 ~ 25 名的 rank 标签
-  return sorted.slice(0, 25).map((comic, index) => ({
-    ...comic,
-    rank: index + 1,
-  }))
+const loadToplist = async () => {
+  if (offlineComics.value.length === 0) {
+    await fetchOfflineComics()
+  }
+  try {
+    const res = await fetchPersonalToplistApi(25)
+    toplistItems.value = res.items || []
+  } catch (err) {
+    console.error('加载个人综合偏好榜失败:', err)
+  }
+}
+
+// 🟢 2. 核心计算属性：按后端个人综合偏好榜（阅读次数 + 书架 + 个人评分 + 完读深度 + 近期性，排除 1~2 星）生成 TOP 25
+const rankedComics = computed<RankedOfflineComic[]>(() => {
+  const byId = new Map(offlineComics.value.map((c) => [c.id, c]))
+  const out: RankedOfflineComic[] = []
+  for (const item of toplistItems.value) {
+    const comic = byId.get(item.comicId)
+    if (!comic) continue
+    out.push({
+      ...comic,
+      readCount: item.readCount ?? comic.readCount ?? 0,
+      rank: out.length + 1,
+      personalRating: item.rating,
+      inShelf: item.inShelf,
+      progress: item.progress,
+    })
+  }
+  return out
 })
 
 // 🟢 3. 动态派生前三名与剩余榜单
@@ -58,9 +84,16 @@ const restItemsForView = computed(() =>
   isMobileDevice ? rankedComics.value.slice(0, 25) : rankedComics.value.slice(3, 25),
 )
 
-// 辅助展示函数：获取漫画的实际阅读/点击次数
-const getComicReadCount = (item: OfflineComic) => {
-  return item.readCount || 0
+// 辅助展示函数：生成简洁的偏好信号摘要
+const formatRankMeta = (item: RankedOfflineComic) => {
+  const parts: string[] = []
+  if ((item.readCount || 0) > 0) parts.push(`${item.readCount} 次阅读`)
+  if ((item.personalRating || 0) > 0) parts.push(`★${item.personalRating}`)
+  if (item.inShelf) parts.push('书架')
+  if (parts.length === 0 && (item.progress || 0) > 0) {
+    parts.push(`已读 ${Math.round((item.progress || 0) * 100)}%`)
+  }
+  return parts.join(' · ') || '偏好推荐'
 }
 
 // Round7-任务8：恢复/记忆列表滚动位置 + 注册列表状态提供者（无分页，page 恒为 1）
@@ -79,12 +112,18 @@ const restoreListState = async () => {
   }))
 }
 
-onMounted(restoreListState)
+onMounted(() => {
+  void loadToplist()
+  void restoreListState()
+})
 
 // keep-alive 缓存下「同标签返回」只触发 onActivated，同样恢复列表状态
 let activatedOnce = false
 onActivated(() => {
-  if (activatedOnce) restoreListState()
+  if (activatedOnce) {
+    void loadToplist()
+    void restoreListState()
+  }
   activatedOnce = true
 })
 
@@ -152,14 +191,19 @@ watch([cloudView, cloudGroup], () => {
   if (activeTab.value === 'cloud') void loadCloud()
 })
 
-/** 覆盖率提示：阅读信号过于稀疏时提醒以库藏视图为主 */
+/** 覆盖率提示：按绝对有效偏好样本数（阅读/书架/评分）判断，≥ 50 本样本已足够稳定 */
 const coverageHint = computed(() => {
   const meta = cloudData.value?.meta
   if (!meta || meta.totalComics === 0) return ''
-  const ratio = meta.readSignalComics / meta.totalComics
   if (cloudView.value !== 'reading') return ''
-  if (ratio >= 0.05) return ''
-  return `阅读信号仅覆盖 ${meta.readSignalComics} / ${meta.totalComics} 本（多读几本后会更准确），当前建议以「库藏」视图为主`
+  const n = meta.readSignalComics
+  if (n < 20) {
+    return `偏好样本较少（仅 ${n} 本，含阅读/书架/评分），建议先以「库藏」视图为主`
+  }
+  if (n < 50) {
+    return `已积累 ${n} 本偏好样本，继续阅读、收藏书架或评分会更精准`
+  }
+  return ''
 })
 
 /** 词条/画师点击：按当前模式走既有快捷搜索语义（离线带关键词跳首页，在线跳搜索页） */
@@ -229,7 +273,7 @@ const resetCloudParams = () => {
         :class="{ active: activeTab === 'rank' }"
         @click="activeTab = 'rank'"
       >
-        <AppIcon name="chart" :size="14" /> 阅读榜
+        <AppIcon name="chart" :size="14" /> 综合榜
       </button>
       <button
         class="switch-btn"
@@ -242,7 +286,7 @@ const resetCloudParams = () => {
 
     <template v-if="activeTab === 'rank'">
       <h2 class="page-title">
-        <AppIcon name="chart" :size="18" /> 本地个人阅读频次榜 (TOP 25)
+        <AppIcon name="chart" :size="18" /> 本地个人综合偏好榜 (TOP 25)
       </h2>
 
       <div v-if="!isMobileDevice" class="podium-section">
@@ -258,7 +302,7 @@ const resetCloudParams = () => {
             :hide-bottom-meta="true"
             :title-lines="2"
           />
-          <div class="read-count">{{ getComicReadCount(topThree[1]) }} 次阅读</div>
+          <div class="read-count">{{ formatRankMeta(topThree[1]) }}</div>
         </div>
 
         <div v-if="topThree[0]" class="podium-item rank-1-wrapper">
@@ -273,7 +317,7 @@ const resetCloudParams = () => {
             :hide-bottom-meta="true"
             :title-lines="2"
           />
-          <div class="read-count gold-text">{{ getComicReadCount(topThree[0]) }} 次阅读</div>
+          <div class="read-count gold-text">{{ formatRankMeta(topThree[0]) }}</div>
         </div>
 
         <div v-if="topThree[2]" class="podium-item rank-3-wrapper">
@@ -288,7 +332,7 @@ const resetCloudParams = () => {
             :hide-bottom-meta="true"
             :title-lines="2"
           />
-          <div class="read-count">{{ getComicReadCount(topThree[2]) }} 次阅读</div>
+          <div class="read-count">{{ formatRankMeta(topThree[2]) }}</div>
         </div>
       </div>
 
@@ -308,7 +352,7 @@ const resetCloudParams = () => {
               :hide-bottom-meta="true"
               :title-lines="2"
             />
-            <div class="sub-read-count">{{ getComicReadCount(item) }} 次阅读</div>
+            <div class="sub-read-count">{{ formatRankMeta(item) }}</div>
           </div>
         </div>
       </div>

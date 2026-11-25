@@ -345,9 +345,17 @@ func (h *LibraryHandler) DeleteBookshelf(c *gin.Context) {
 		return
 	}
 
+	var shelf models.Bookshelf
+	var affected []string
+	if err := h.db.Select("comic_ids").Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&shelf).Error; err == nil {
+		affected = parseComicIDs(shelf.ComicIDs)
+	}
 	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).Delete(&models.Bookshelf{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除书架失败"})
 		return
+	}
+	for _, cid := range affected {
+		services.XpRecomposeComicForUser(user.ID, cid)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "书架已删除"})
 }
@@ -391,6 +399,7 @@ func (h *LibraryHandler) AddComicToBookshelf(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
 		return
 	}
+	services.XpRecomposeComicForUser(user.ID, req.ComicID)
 	c.JSON(http.StatusOK, gin.H{"message": "已加入书架", "data": shelf})
 }
 
@@ -510,6 +519,9 @@ func (h *LibraryHandler) BatchAddComicsToBookshelf(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
 		return
 	}
+	for _, id := range req.ComicIDs {
+		services.XpRecomposeComicForUser(user.ID, id)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "批量加入完成", "added": added, "skipped": skipped, "data": shelf})
 }
 
@@ -549,6 +561,7 @@ func (h *LibraryHandler) RemoveComicFromBookshelf(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
 		return
 	}
+	services.XpRecomposeComicForUser(user.ID, comicID)
 	c.JSON(http.StatusOK, gin.H{"message": "已移出书架", "data": shelf})
 }
 
@@ -604,6 +617,9 @@ func (h *LibraryHandler) BatchRemoveComicsFromBookshelf(c *gin.Context) {
 	if err := h.db.Save(&shelf).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存书架失败"})
 		return
+	}
+	for id := range removedSet {
+		services.XpRecomposeComicForUser(user.ID, id)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "批量移出完成", "removed": removed, "data": shelf})
 }

@@ -32,10 +32,13 @@ const (
 	RecoDefaultTemperature = 0.50 // 采样温度 T
 	RecoDefaultGamma       = 0.50 // 长度归一指数 γ（抑制 tag 多的本子刷分）
 
-	RecoMaxTemperature      = 2.0
-	RecoMinTemperature      = 0.2
-	RecoMaxExplore          = 0.5
-	RecoDiversityMaxSameKey = 2 // 同一 parody/artist 单轮最多本数
+	RecoMaxTemperature       = 2.0
+	RecoMinTemperature       = 0.2
+	RecoMaxExplore           = 0.5
+	RecoDiversityMaxSameKey  = 2    // 同一 parody/artist 单轮最多本数
+	RecoRecentCooldownFactor = 0.35 // 近 7 天读过的本子冷却系数
+	RecoColdStartSamples     = 50   // 冷启动自适应样本阈值
+	RecoColdStartMinTheta    = 0.20 // 0 样本时阅读侧保底权重
 )
 
 // ErrRecommendNoWeights 无可用权重（权重表为空或候选全零分）→ 调用方退回纯随机
@@ -43,10 +46,11 @@ var ErrRecommendNoWeights = errors.New("本地库暂无可用偏好权重")
 
 // RecommendOptions 推荐参数（已归一化）
 type RecommendOptions struct {
-	Theta       float64 // 0~1
-	Explore     float64 // 0~0.5
-	Temperature float64 // 0.2~2
-	Gamma       float64 // 0~1
+	Theta         float64 // 0~1
+	ThetaExplicit bool    // 是否由前端显式指定（未显式指定时启用冷启动自适应）
+	Explore       float64 // 0~0.5
+	Temperature   float64 // 0.2~2
+	Gamma         float64 // 0~1
 }
 
 // NormalizeRecommendOptions 夹取参数到合法区间（非法/缺省值回退默认）
@@ -109,12 +113,25 @@ func (s *RecommendService) Recommend(userID uint, candidates []models.OfflineCom
 		return nil, ErrRecommendNoWeights
 	}
 
+	recoCtx := s.xp.LoadUserRecoContext(userID)
+	if !opts.ThetaExplicit && recoCtx != nil && recoCtx.ReadSignalCount < RecoColdStartSamples {
+		ratio := float64(recoCtx.ReadSignalCount) / float64(RecoColdStartSamples)
+		opts.Theta = RecoColdStartMinTheta + (RecoDefaultTheta-RecoColdStartMinTheta)*ratio
+	}
+
 	ranked := make([]RankedComic, 0, len(candidates))
 	usable := 0
 	for i := range candidates {
 		comic := &candidates[i]
+		// 个人 1~2 星彻底排除（绝不采信社区评分）
+		if recoCtx != nil && recoCtx.LowRated[comic.ID] {
+			continue
+		}
 		tags := XpEffectiveTags(comic)
 		score, matched := ScoreComic(tags, table, opts)
+		if score > 0 && recoCtx != nil && recoCtx.RecentRead[comic.ID] {
+			score *= RecoRecentCooldownFactor
+		}
 		if score > 0 {
 			usable++
 		}
@@ -125,7 +142,7 @@ func (s *RecommendService) Recommend(userID uint, candidates []models.OfflineCom
 			divKeys:     comicDiversityKeys(comic),
 		})
 	}
-	if usable == 0 {
+	if len(ranked) == 0 || usable == 0 {
 		return nil, ErrRecommendNoWeights
 	}
 

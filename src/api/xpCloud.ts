@@ -31,3 +31,23 @@ export const rebuildXpCloudApi = async (): Promise<{ message: string; meta?: XpC
     method: 'POST',
   })
 }
+
+/** Round55：个人综合偏好榜条目 */
+export interface PersonalToplistItem {
+  comicId: string
+  score: number
+  readCount: number
+  rating?: number
+  inShelf?: boolean
+  progress?: number
+  lastReadAt?: string
+}
+
+/** 获取个人综合偏好榜（TOP N） */
+export const fetchPersonalToplistApi = async (
+  limit = 25,
+): Promise<{ items: PersonalToplistItem[]; total: number }> => {
+  return await http<{ items: PersonalToplistItem[]; total: number }>(
+    `/offline/toplist?limit=${limit}`,
+  )
+}

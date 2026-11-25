@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"SakuManga/internal/models"
 )
@@ -308,6 +309,56 @@ func TestRecommendFallsBackWhenNoWeights(t *testing.T) {
 
 	// 空候选集：返回空结果，不报错
 	if out, err := reco.Recommend(user.ID, nil, 3, RecommendOptions{}); err != nil || out != nil {
-		t.Fatalf("空候选应返回空结果，实得 %v / %v", out, err)
+		t.Fatalf("空候选应返回 nil, nil")
+	}
+}
+
+func TestRecommendExcludesPersonalLowRatingAndCooldown(t *testing.T) {
+	db := newXpTestDB(t)
+	xp := NewXpCloudService(db)
+	reco := NewRecommendService(xp)
+	reco.rng = rand.New(rand.NewSource(7))
+
+	user := models.User{Username: "u1"}
+	db.Create(&user)
+
+	// cBad：个人 2★（必须排除，哪怕标签匹配度最高）
+	// cLowComm：社区 1.2★（不得排除）
+	// cRecent：近 7 天刚读过（冷却降权）
+	db.Create(&models.OfflineComic{ID: "cSeed", LocalPath: "p0", OnlineTags: `["female:yuri"]`, ReadCount: 8})
+	db.Create(&models.OfflineComic{ID: "cBad", LocalPath: "p1", OnlineTags: `["female:yuri"]`})
+	db.Create(&models.OfflineComic{ID: "cLowComm", LocalPath: "p2", OnlineTags: `["female:yuri"]`, CommunityRating: 1.2})
+	db.Create(&models.OfflineComic{ID: "cRecent", LocalPath: "p3", OnlineTags: `["female:yuri"]`})
+
+	db.Create(&models.ComicRating{UserID: user.ID, ComicID: "cBad", Score: 2})
+	db.Create(&models.HistoryRecord{UserID: user.ID, ComicID: "cRecent", Source: models.SourceOffline, LastReadAt: time.Now()})
+	if err := xp.RebuildAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	var candidates []models.OfflineComic
+	db.Where("id IN ?", []string{"cBad", "cLowComm", "cRecent"}).Find(&candidates)
+
+	out, err := reco.Recommend(user.ID, candidates, 10, RecommendOptions{ThetaExplicit: true, Theta: 0.6})
+	if err != nil {
+		t.Fatalf("Recommend 失败: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("cBad 应被排除，只剩 2 本，实际 %d", len(out))
+	}
+	var recentScore, normalScore float64
+	for _, it := range out {
+		if it.Comic.ID == "cBad" {
+			t.Fatalf("个人 2★ 不得被推荐")
+		}
+		if it.Comic.ID == "cRecent" {
+			recentScore = it.Score
+		}
+		if it.Comic.ID == "cLowComm" {
+			normalScore = it.Score
+		}
+	}
+	if recentScore <= 0 || math.Abs(recentScore-normalScore*RecoRecentCooldownFactor) > 1e-6 {
+		t.Fatalf("近期读过应按 %v 冷却降权：recent=%v normal=%v", RecoRecentCooldownFactor, recentScore, normalScore)
 	}
 }

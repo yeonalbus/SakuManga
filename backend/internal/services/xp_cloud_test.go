@@ -38,6 +38,7 @@ func newXpTestDB(t *testing.T) *gorm.DB {
 		&models.OfflineComic{},
 		&models.HistoryRecord{},
 		&models.ComicRating{},
+		&models.Bookshelf{},
 		&models.XpComicStat{},
 		&models.XpTagStat{},
 		&models.XpMeta{},
@@ -152,24 +153,33 @@ func TestXpReadSignalFusion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 三本：纯库藏 / 有阅读次数 / 全信号齐备
+	// 四本：纯库藏 / 有阅读次数 / 全信号齐备（含书架+进度+5★） / 个人1星排除
 	comics := []models.OfflineComic{
 		{ID: "c1", Title: "纯库藏", OnlineTags: `["female:ahegao"]`, LocalPath: "p1"},
 		{ID: "c2", Title: "读过 9 次", OnlineTags: `["female:yuri"]`, ReadCount: 9, LocalPath: "p2"},
 		{ID: "c3", Title: "全信号", OnlineTags: `["female:stockings"]`, ReadCount: 4, LocalPath: "p3"},
+		{ID: "c4", Title: "个人低分", OnlineTags: `["female:loli"]`, ReadCount: 10, LocalPath: "p4"},
 	}
 	for i := range comics {
 		if err := db.Create(&comics[i]).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	// c3：历史 + 满分评分（评分上限 10）
+	// c3：历史(刚读+完读 50%) + 5星评分 + 书架
 	if err := db.Create(&models.HistoryRecord{
-		UserID: user.ID, ComicID: "c3", Source: models.SourceOffline, LastReadAt: time.Now(),
+		UserID: user.ID, ComicID: "c3", Source: models.SourceOffline,
+		LastPageIndex: 9, TotalPageCount: 20, LastReadAt: time.Now(),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&models.ComicRating{UserID: user.ID, ComicID: "c3", Score: 10}).Error; err != nil {
+	if err := db.Create(&models.ComicRating{UserID: user.ID, ComicID: "c3", Score: 5}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.Bookshelf{ID: "s1", UserID: user.ID, Name: "fav", ComicIDs: `["c3"]`, Count: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// c4：个人 1 星 → 阅读侧权重必须为 0
+	if err := db.Create(&models.ComicRating{UserID: user.ID, ComicID: "c4", Score: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -177,7 +187,7 @@ func TestXpReadSignalFusion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var s1, s2, s3 models.XpComicStat
+	var s1, s2, s3, s4 models.XpComicStat
 	if err := db.Where("user_id = ? AND comic_id = ?", user.ID, "c1").First(&s1).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -187,16 +197,22 @@ func TestXpReadSignalFusion(t *testing.T) {
 	if err := db.Where("user_id = ? AND comic_id = ?", user.ID, "c3").First(&s3).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Where("user_id = ? AND comic_id = ?", user.ID, "c4").First(&s4).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	if s1.ReadWeight != 0 {
 		t.Fatalf("纯库藏本阅读信号应为 0，实得 %v", s1.ReadWeight)
 	}
-	wantC2 := 0.60 * math.Log1p(9)
+	if s4.ReadWeight != 0 {
+		t.Fatalf("个人 1 星本阅读信号应为 0，实得 %v", s4.ReadWeight)
+	}
+	wantC2 := xpReadCountWeight * (math.Log1p(9) / math.Log1p(xpReadCountSat))
 	if math.Abs(s2.ReadWeight-wantC2) > 1e-6 {
 		t.Fatalf("c2 阅读信号 = %v，期望 %v", s2.ReadWeight, wantC2)
 	}
-	// c3：0.6·log1p(4) + 0.25·exp(0) + 0.15·1（历史刚发生、评分满分）
-	wantC3 := 0.60*math.Log1p(4) + 0.25 + 0.15
+	wantC3 := xpReadCountWeight*(math.Log1p(4)/math.Log1p(xpReadCountSat)) +
+		xpShelfWeight + xpRatingWeight + xpProgressWeight*0.5 + xpHistoryWeight
 	if math.Abs(s3.ReadWeight-wantC3) > 0.01 {
 		t.Fatalf("c3 阅读信号 = %v，期望 ≈%v", s3.ReadWeight, wantC3)
 	}
@@ -370,8 +386,8 @@ func TestXpReadSideIsolatedPerUser(t *testing.T) {
 	if s2.ReadWeight <= s1.ReadWeight {
 		t.Fatalf("阅读侧未按用户隔离：u1=%v u2=%v", s1.ReadWeight, s2.ReadWeight)
 	}
-	if math.Abs(s2.ReadWeight-s1.ReadWeight-0.25) > 0.01 {
-		t.Fatalf("历史近期性增益应 ≈0.25，实得 %v", s2.ReadWeight-s1.ReadWeight)
+	if math.Abs(s2.ReadWeight-s1.ReadWeight-xpHistoryWeight) > 0.01 {
+		t.Fatalf("历史近期性增益应 ≈%v，实得 %v", xpHistoryWeight, s2.ReadWeight-s1.ReadWeight)
 	}
 }
 
@@ -610,5 +626,46 @@ func TestXpDirtyFlagTriggersRebuild(t *testing.T) {
 	}
 	if meta.Dirty {
 		t.Fatal("重建后脏标记应被清除")
+	}
+}
+
+func TestXpPersonalToplist(t *testing.T) {
+	db := newXpTestDB(t)
+	svc := NewXpCloudService(db)
+	user := models.User{Username: "u1"}
+	db.Create(&user)
+
+	// testOld：纯点击 15 次但无评分/书架；fav：点击 2 次 + 5★ + 书架 + 完读
+	// badPersonal：个人 2 星（必须排除）；lowComm：社区 1.5 分但个人 4 星（不得排除）
+	// gone：file_missing=true（必须排除）
+	db.Create(&models.OfflineComic{ID: "testOld", Title: "test", LocalPath: "p1", ReadCount: 15})
+	db.Create(&models.OfflineComic{ID: "fav", Title: "fav", LocalPath: "p2", ReadCount: 2})
+	db.Create(&models.OfflineComic{ID: "badPersonal", Title: "bad", LocalPath: "p3", ReadCount: 20})
+	db.Create(&models.OfflineComic{ID: "lowComm", Title: "lowComm", LocalPath: "p4", ReadCount: 1, CommunityRating: 1.5})
+	db.Create(&models.OfflineComic{ID: "gone", Title: "gone", LocalPath: "p5", ReadCount: 30, FileMissing: true})
+
+	db.Create(&models.ComicRating{UserID: user.ID, ComicID: "fav", Score: 5})
+	db.Create(&models.ComicRating{UserID: user.ID, ComicID: "badPersonal", Score: 2})
+	db.Create(&models.ComicRating{UserID: user.ID, ComicID: "lowComm", Score: 4})
+	db.Create(&models.Bookshelf{ID: "s1", UserID: user.ID, Name: "shelf", ComicIDs: `["fav"]`, Count: 1})
+	db.Create(&models.HistoryRecord{
+		UserID: user.ID, ComicID: "fav", Source: models.SourceOffline,
+		LastPageIndex: 19, TotalPageCount: 20, LastReadAt: time.Now(),
+	})
+
+	items, err := svc.PersonalToplist(user.ID, 25)
+	if err != nil {
+		t.Fatalf("PersonalToplist 失败: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("应返回 3 条（排除 badPersonal 与 gone），实际 %d: %+v", len(items), items)
+	}
+	if items[0].ComicID != "fav" {
+		t.Fatalf("综合高分本 fav 应排第 1，实际第 1 为 %s", items[0].ComicID)
+	}
+	for _, it := range items {
+		if it.ComicID == "badPersonal" || it.ComicID == "gone" {
+			t.Fatalf("不应包含 %s", it.ComicID)
+		}
 	}
 }

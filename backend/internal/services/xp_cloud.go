@@ -41,19 +41,22 @@ const (
 	XpSchemaVersion = 1
 	// XpFormulaVersion 权重公式/分组口径版本（调整时递增 → 触发全量重建）
 	//
-	// v2（2026-09-12）：other 命名空间从「核心 XP」移入「其他」分组（决策更新）——
-	// 实测 other:mosaic censorship（629 本）等元信息型 tag 会挤进核心 XP 前列，
-	// 而核心 XP 应只反映体态/属性/玩法本身。
-	XpFormulaVersion = 2
+	// v2（2026-09-12）：other 命名空间从「核心 XP」移入「其他」分组
+	// v3（2026-11-25）：多信号融合升级（阅读次数饱和对数 + 书架收藏 + 1~5星修正 + 完读深度 + 近期性；1~2星排除）
+	XpFormulaVersion = 3
 
 	// xpWeightCacheTTL 权重表内存缓存有效期（推荐抽卡高频读取，避免每次重扫统计表）
 	xpWeightCacheTTL = 60 * time.Second
 
-	// 阅读侧多信号融合系数（三项各自量纲对齐后加权）
-	xpReadCountWeight = 0.60 // 阅读次数（log1p 压缩长尾）
-	xpHistoryWeight   = 0.25 // 阅读历史近期性
-	xpRatingWeight    = 0.15 // 个人评分
-	xpHistoryHalfLife = 90.0 // 阅读历史半衰期（天）：越久远的历史权重越低，反映 XP 漂移
+	// 阅读侧多信号融合系数（Round55：各信号有界封顶，避免单本多次误点淹没整体偏好）
+	xpReadCountWeight    = 0.45 // 阅读次数（在 xpReadCountSat 次左右饱和）
+	xpReadCountSat       = 10.0
+	xpShelfWeight        = 0.30 // 书架收藏强意图信号
+	xpRatingWeight       = 0.35 // 个人评分（1~5星制：5★=1.0, 4★=0.5, 3★=0, 1~2★=排除）
+	xpProgressWeight     = 0.20 // 完读深度（last_page_index / total_page_count）
+	xpHistoryWeight      = 0.15 // 阅读历史近期性
+	xpHistoryHalfLife    = 90.0 // 阅读历史半衰期（天）
+	xpRecentCooldownDays = 7.0  // 推荐近期刚读过冷却窗口（天）
 
 	// xpPruneEpsilon 聚合行的清理阈值（差分归零判定，容忍浮点累积误差）
 	xpPruneEpsilon = 1e-6
@@ -333,15 +336,26 @@ func xpRebuildLoop(reason string) {
 // 信号计算
 // ─────────────────────────────────────────────────────────────
 
-// xpSignalCtx 阅读侧信号的批量上下文（一次性加载历史/评分，避免逐本查库）
-type xpSignalCtx struct {
-	history map[string]time.Time // comicID → 最后阅读时间
-	rating  map[string]int       // comicID → 个人评分（1-10）
+// xpHistorySignal 单本阅读历史摘要（近期性 + 完读深度）
+type xpHistorySignal struct {
+	LastReadAt time.Time
+	Progress   float64 // 0~1
 }
 
-// loadSignalCtx 加载指定用户的阅读侧信号（历史取离线来源；同 comic 多条取最新）
+// xpSignalCtx 阅读侧信号的批量上下文（一次性加载历史/评分/书架，避免逐本查库）
+type xpSignalCtx struct {
+	history map[string]xpHistorySignal // comicID → 历史信号
+	rating  map[string]int             // comicID → 个人评分（1-5星，绝不用社区评分）
+	shelved map[string]bool            // comicID → 是否在任意书架中
+}
+
+// loadSignalCtx 加载指定用户的阅读侧信号（历史取离线来源 + 个人评分 + 书架收藏）
 func (s *XpCloudService) loadSignalCtx(tx *gorm.DB, userID uint) *xpSignalCtx {
-	ctx := &xpSignalCtx{history: map[string]time.Time{}, rating: map[string]int{}}
+	ctx := &xpSignalCtx{
+		history: map[string]xpHistorySignal{},
+		rating:  map[string]int{},
+		shelved: map[string]bool{},
+	}
 
 	var records []models.HistoryRecord
 	if err := tx.Where("user_id = ? AND source = ?", userID, models.SourceOffline).Find(&records).Error; err == nil {
@@ -350,9 +364,25 @@ func (s *XpCloudService) loadSignalCtx(tx *gorm.DB, userID uint) *xpSignalCtx {
 			if h.ComicID == "" {
 				continue
 			}
-			if prev, ok := ctx.history[h.ComicID]; !ok || h.LastReadAt.After(prev) {
-				ctx.history[h.ComicID] = h.LastReadAt
+			prog := 0.0
+			if h.TotalPageCount > 0 && h.LastPageIndex > 0 {
+				prog = float64(h.LastPageIndex+1) / float64(h.TotalPageCount)
+				if prog > 1 {
+					prog = 1
+				}
 			}
+			prev, ok := ctx.history[h.ComicID]
+			if !ok {
+				ctx.history[h.ComicID] = xpHistorySignal{LastReadAt: h.LastReadAt, Progress: prog}
+				continue
+			}
+			if h.LastReadAt.After(prev.LastReadAt) {
+				prev.LastReadAt = h.LastReadAt
+			}
+			if prog > prev.Progress {
+				prev.Progress = prog
+			}
+			ctx.history[h.ComicID] = prev
 		}
 	}
 
@@ -362,29 +392,59 @@ func (s *XpCloudService) loadSignalCtx(tx *gorm.DB, userID uint) *xpSignalCtx {
 			ctx.rating[ratings[i].ComicID] = ratings[i].Score
 		}
 	}
+
+	var shelves []models.Bookshelf
+	if err := tx.Select("comic_ids").Where("user_id = ?", userID).Find(&shelves).Error; err == nil {
+		for i := range shelves {
+			for _, cid := range parseComicIDsJSON(shelves[i].ComicIDs) {
+				if cid != "" {
+					ctx.shelved[cid] = true
+				}
+			}
+		}
+	}
 	return ctx
 }
 
-// readWeightOf 单本阅读侧信号（多信号融合）
+// readWeightOf 单本阅读侧信号（多信号融合；个人 1~2 星返回 0）
 func (c *xpSignalCtx) readWeightOf(comicID string, readCount int) float64 {
-	if readCount < 0 {
-		readCount = 0
-	}
-	w := xpReadCountWeight * math.Log1p(float64(readCount))
-
-	if t, ok := c.history[comicID]; ok && !t.IsZero() {
-		days := time.Since(t).Hours() / 24
-		if days < 0 {
-			days = 0
-		}
-		w += xpHistoryWeight * math.Exp(-days/xpHistoryHalfLife)
+	// 用户打 1~2 星的雷作不计入正向偏好
+	if score, ok := c.rating[comicID]; ok && score >= 1 && score <= 2 {
+		return 0
 	}
 
-	if score, ok := c.rating[comicID]; ok && score > 0 {
-		if score > 10 {
-			score = 10
+	w := 0.0
+	if readCount > 0 {
+		sat := math.Log1p(float64(readCount)) / math.Log1p(xpReadCountSat)
+		if sat > 1 {
+			sat = 1
 		}
-		w += xpRatingWeight * float64(score-1) / 9.0
+		w += xpReadCountWeight * sat
+	}
+
+	if c.shelved[comicID] {
+		w += xpShelfWeight
+	}
+
+	if score, ok := c.rating[comicID]; ok && score >= 4 {
+		if score >= 5 {
+			w += xpRatingWeight
+		} else {
+			w += xpRatingWeight * 0.5
+		}
+	}
+
+	if h, ok := c.history[comicID]; ok {
+		if h.Progress > 0 {
+			w += xpProgressWeight * h.Progress
+		}
+		if !h.LastReadAt.IsZero() {
+			days := time.Since(h.LastReadAt).Hours() / 24
+			if days < 0 {
+				days = 0
+			}
+			w += xpHistoryWeight * math.Exp(-days/xpHistoryHalfLife)
+		}
 	}
 	return w
 }
@@ -1047,4 +1107,124 @@ func (s *XpCloudService) WeightTable(userID uint) (*XpWeightTable, error) {
 	s.cache[userID] = &xpWeightCacheEntry{table: table, at: time.Now()}
 	s.cacheMu.Unlock()
 	return table, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round55：个人综合偏好榜 & 推荐上下文
+// ─────────────────────────────────────────────────────────────
+
+// PersonalToplistItem 个人综合偏好榜条目
+type PersonalToplistItem struct {
+	ComicID    string     `json:"comicId"`
+	Score      float64    `json:"score"`
+	ReadCount  int        `json:"readCount"`
+	Rating     int        `json:"rating,omitempty"`
+	InShelf    bool       `json:"inShelf,omitempty"`
+	Progress   float64    `json:"progress,omitempty"`
+	LastReadAt *time.Time `json:"lastReadAt,omitempty"`
+}
+
+// PersonalToplist 计算当前用户的个人综合偏好榜（TOP N）。
+// 融合阅读次数、书架收藏、个人评分（1~5 星，1~2 星彻底排除）、完读深度与近期性。
+func (s *XpCloudService) PersonalToplist(userID uint, limit int) ([]PersonalToplistItem, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	ctx := s.loadSignalCtx(s.db, userID)
+
+	var comics []models.OfflineComic
+	if err := s.db.Select("id, read_count").Where("file_missing = ?", false).Find(&comics).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]PersonalToplistItem, 0, len(comics))
+	for i := range comics {
+		c := &comics[i]
+		rating := ctx.rating[c.ID]
+		// 仅排除个人 1~2 星，绝不使用 community_rating
+		if rating >= 1 && rating <= 2 {
+			continue
+		}
+		score := ctx.readWeightOf(c.ID, c.ReadCount)
+		if score <= 0 {
+			continue
+		}
+		item := PersonalToplistItem{
+			ComicID:   c.ID,
+			Score:     score,
+			ReadCount: c.ReadCount,
+			Rating:    rating,
+			InShelf:   ctx.shelved[c.ID],
+		}
+		if h, ok := ctx.history[c.ID]; ok {
+			item.Progress = h.Progress
+			if !h.LastReadAt.IsZero() {
+				t := h.LastReadAt
+				item.LastReadAt = &t
+			}
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if math.Abs(items[i].Score-items[j].Score) > 1e-9 {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].ReadCount != items[j].ReadCount {
+			return items[i].ReadCount > items[j].ReadCount
+		}
+		ti, tj := time.Time{}, time.Time{}
+		if items[i].LastReadAt != nil {
+			ti = *items[i].LastReadAt
+		}
+		if items[j].LastReadAt != nil {
+			tj = *items[j].LastReadAt
+		}
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return items[i].ComicID < items[j].ComicID
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+// UserRecoContext 推荐阶段所需的用户偏好上下文
+type UserRecoContext struct {
+	LowRated        map[string]bool // 个人 1~2 星（排除）
+	RecentRead      map[string]bool // 近 7 天内读过（冷却降权）
+	ReadSignalCount int             // 有效偏好样本数（冷启动自适应 theta）
+}
+
+// LoadUserRecoContext 加载用户推荐上下文（1~2 星排除、近期冷却、样本量）
+func (s *XpCloudService) LoadUserRecoContext(userID uint) *UserRecoContext {
+	out := &UserRecoContext{
+		LowRated:   map[string]bool{},
+		RecentRead: map[string]bool{},
+	}
+	if s == nil || s.db == nil || userID == 0 {
+		return out
+	}
+	ctx := s.loadSignalCtx(s.db, userID)
+	for cid, score := range ctx.rating {
+		if score >= 1 && score <= 2 {
+			out.LowRated[cid] = true
+		}
+	}
+	cutoff := time.Now().Add(-time.Duration(xpRecentCooldownDays*24) * time.Hour)
+	for cid, h := range ctx.history {
+		if !h.LastReadAt.IsZero() && h.LastReadAt.After(cutoff) {
+			out.RecentRead[cid] = true
+		}
+	}
+	var cnt int64
+	if err := s.db.Model(&models.XpComicStat{}).Where("user_id = ? AND read_weight > 0", userID).Count(&cnt).Error; err == nil {
+		out.ReadSignalCount = int(cnt)
+	}
+	return out
 }

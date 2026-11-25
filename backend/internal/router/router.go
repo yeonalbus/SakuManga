@@ -278,6 +278,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, ehService *services.EHService) {
 		// Round32 阶段一：XP 词云（本地库 tag 偏好画像）
 		// 词云为只读统计，登录即可查看；阅读侧按当前登录用户隔离，库藏侧全库共享。
 		api.GET("/offline/xp-cloud", xpCloudHandler.GetXpCloud)
+		api.GET("/offline/toplist", xpCloudHandler.GetPersonalToplist)
 
 		// ─── 3.1 管理员分组（用户管理 / 服务器 / 系统级设置 / 离线更新维护）───
 		// Round3-任务2：离线更新检测 + 维护查重从登录组移入仅管理员分组

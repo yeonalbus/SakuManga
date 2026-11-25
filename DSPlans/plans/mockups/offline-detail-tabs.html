@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>离线详情页 · 方案 A（双栏对齐 + 全宽 Tab + 书架搜索浮层）</title>
+<style>
+  :root {
+    --bg: #141414;
+    --surface: #1e1e1e;
+    --surface-2: #262626;
+    --surface-3: #2f2f2f;
+    --border: #3a3a3a;
+    --border-2: #2c2c2c;
+    --text: #e6e6e6;
+    --text-2: #b5b5b5;
+    --muted: #7d7d7d;
+    --accent: #ff7588;
+    --teal: #00a896;
+    --gold: #f5b942;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-2);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px 20px 64px;
+  }
+
+  /* ─── 顶部操作栏 ─── */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 13px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 0.84rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--surface-3); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.teal {
+    background: rgba(0, 168, 150, 0.14);
+    border-color: rgba(0, 168, 150, 0.45);
+    color: #4dd4c2;
+  }
+  .btn.danger {
+    color: #f87171;
+    border-color: rgba(248, 113, 113, 0.35);
+  }
+  .right-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* ─── 顶层 Tab：信息 | 画廊预览 ─── */
+  .detail-tabs {
+    display: flex;
+    gap: 6px;
+    border-bottom: 1px solid var(--border-2);
+    margin-bottom: 18px;
+  }
+  .detail-tab-btn {
+    padding: 9px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .detail-tab-btn:hover { color: var(--text); }
+  .detail-tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ─── 上半区：双栏对齐（封面高度 ≈ 右侧识别+摘要+书架条）─── */
+  .hero-layout {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  .left-cover {
+    width: 210px;
+    flex-shrink: 0;
+  }
+  .cover-box {
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: linear-gradient(155deg, #2b2328, #1c1c22);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 0.84rem;
+    gap: 6px;
+  }
+  .hero-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .category-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 2px 9px;
+    border-radius: 5px;
+    background: #9e9e9e;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .title-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .title {
+    margin: 0;
+    font-size: 1.28rem;
+    line-height: 1.38;
+    color: var(--text);
+  }
+  .edit-title-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-size: 0.85rem;
+  }
+  .edit-title-btn:hover { background: var(--surface-3); color: var(--text); }
+  .subtitle {
+    width: 100%;
+    font-size: 0.84rem;
+    color: var(--muted);
+  }
+
+  /* 紧凑速览条 */
+  .summary-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 9px 13px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    font-size: 0.82rem;
+    color: var(--text-2);
+  }
+  .sum-item { display: inline-flex; align-items: center; gap: 4px; }
+  .sum-sep { color: var(--border); }
+  .sum-val { color: var(--text); font-weight: 600; }
+  .sum-val.gold { color: var(--gold); }
+  .sum-val.teal { color: #4dd4c2; }
+
+  /* 归属书架条：只展示已选胶囊 + 「+ 管理书架」按钮 */
+  .shelf-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 13px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+  }
+  .shelf-strip-label {
+    font-size: 0.8rem;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 2px;
+  }
+  .shelf-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: rgba(0, 168, 150, 0.12);
+    border: 1px solid rgba(0, 168, 150, 0.45);
+    color: #d7faf4;
+    font-size: 0.78rem;
+  }
+  .shelf-chip-remove {
+    cursor: pointer;
+    color: #6ee7d8;
+    opacity: 0.75;
+    font-size: 0.88rem;
+    line-height: 1;
+  }
+  .shelf-chip-remove:hover { opacity: 1; color: #f87171; }
+  .shelf-empty-hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .manage-shelf-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.14s ease;
+  }
+  .manage-shelf-btn:hover {
+    border-color: var(--teal);
+    color: #4dd4c2;
+  }
+
+  /* ─── 下半区：全宽通栏子 Tab ─── */
+  .full-tabs-section {
+    width: 100%;
+  }
+  .sub-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    width: fit-content;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .sub-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.14s ease;
+  }
+  .sub-tab-btn:hover { color: var(--text); }
+  .sub-tab-btn.active {
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  .sub-cnt {
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .note-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+  }
+
+  /* ─── 信息卡片 ─── */
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .card-title {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .card-hint {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  /* ─── 全宽 Tag 云（模拟各命名空间配色）─── */
+  .tags-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .detail-tag-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #333;
+  }
+  .detail-tag-item.ns-language { background: #3f444a; }
+  .detail-tag-item.ns-parody { background: #00828f; }
+  .detail-tag-item.ns-character { background: #1e824c; }
+  .detail-tag-item.ns-artist { background: #b8292f; }
+  .detail-tag-item.ns-female { background: #b01860; }
+  .detail-tag-item.ns-male { background: #1864ab; }
+  .detail-tag-item.tag-local {
+    box-shadow: 0 0 0 1px rgba(0, 210, 184, 0.75);
+  }
+  .detail-tag-item.tag-removed {
+    opacity: 0.45;
+    text-decoration: line-through;
+    cursor: pointer;
+    background: var(--surface-2);
+    color: var(--muted);
+    border-style: dashed;
+  }
+  .tag-ns { opacity: 0.85; font-size: 0.73rem; }
+  .local-badge {
+    font-size: 0.65rem;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.35);
+    color: #6ee7d8;
+  }
+  .removed-badge {
+    font-size: 0.65rem;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--surface-3);
+    color: var(--muted);
+  }
+  .remove-tag {
+    cursor: pointer;
+    opacity: 0.72;
+    font-size: 0.88rem;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .remove-tag:hover { opacity: 1; color: #ffe4e6; }
+
+  /* 联想添加栏 */
+  .add-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .suggest-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .tag-input {
+    width: 100%;
+    height: 35px;
+    padding: 0 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.84rem;
+    outline: none;
+  }
+  .tag-input:focus { border-color: var(--teal); }
+  .tag-suggest-dropdown {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+    z-index: 40;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+  .suggest-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .suggest-item:hover { background: var(--surface-3); }
+  .suggest-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .suggest-raw { color: var(--text); font-weight: 500; }
+  .suggest-cn { color: var(--muted); font-size: 0.76rem; }
+  .suggest-count { color: var(--accent); font-size: 0.74rem; white-space: nowrap; }
+
+  /* ─── Tab 2：评分（双栏）+ 备注 ─── */
+  .rating-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .rating-pane {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+  }
+  .rating-pane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .stars { display: inline-flex; align-items: center; gap: 4px; }
+  .star-btn {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #4b4b4b;
+    transition: transform 0.1s ease, color 0.1s ease;
+  }
+  .star-btn.active { color: var(--gold); }
+  .star-btn.interactive:hover { transform: scale(1.12); }
+  .rating-score {
+    margin-left: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .rating-sub { margin-top: 6px; font-size: 0.74rem; color: var(--muted); }
+  .mini-toggle-btn {
+    border: 1px solid var(--border);
+    background: var(--surface-3);
+    color: var(--text-2);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
+  .mini-toggle-btn:hover { color: var(--text); }
+
+  .remark-input {
+    width: 100%;
+    min-height: 82px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.86rem;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+  }
+  .remark-input:focus { border-color: var(--teal); }
+  .remark-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+
+  /* ─── Tab 3：文件属性 ─── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 16px;
+    font-size: 0.84rem;
+  }
+  .info-item { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .info-item.full { grid-column: 1 / -1; align-items: center; }
+  .info-item .k { color: var(--muted); white-space: nowrap; }
+  .info-item .v { color: var(--text); word-break: break-all; }
+  .orig-page-hint { color: var(--muted); font-size: 0.76rem; }
+  .path-text {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.78rem;
+    background: var(--bg);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-2);
+  }
+
+  /* ─── 书架搜索多选浮层（模拟 BookshelfPickerOverlay）─── */
+  .picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.62);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 80;
+  }
+  .picker-overlay.open { display: flex; }
+  .picker-panel {
+    width: 100%;
+    max-width: 560px;
+    max-height: 80vh;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .picker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-2);
+  }
+  .picker-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+  .picker-close {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .picker-close:hover { background: var(--surface-3); color: var(--text); }
+  .picker-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-2);
+  }
+  .picker-search-wrap {
+    position: relative;
+    flex: 1;
+  }
+  .picker-search-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 28px 0 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.82rem;
+    outline: none;
+  }
+  .picker-search-input:focus { border-color: var(--teal); }
+  .picker-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--text-2);
+    font-size: 0.72rem;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .picker-clear.visible { display: inline-flex; }
+  .picker-filter-btn {
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 0.76rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .picker-filter-btn.active {
+    border-color: var(--teal);
+    color: #4dd4c2;
+    background: rgba(0, 168, 150, 0.12);
+  }
+  .picker-list {
+    padding: 12px 16px;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+    gap: 8px;
+  }
+  .picker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-2);
+    transition: all 0.12s ease;
+  }
+  .picker-item:hover { border-color: var(--border); }
+  .picker-item.checked {
+    border-color: rgba(0, 168, 150, 0.55);
+    background: rgba(0, 168, 150, 0.12);
+    color: var(--text);
+  }
+  .picker-item input { accent-color: var(--teal); pointer-events: none; }
+  .picker-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-2);
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  /* ─── 预览占位 & Toast ─── */
+  .preview-placeholder {
+    padding: 48px 20px;
+    text-align: center;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .toast {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+    background: #222;
+    border: 1px solid var(--teal);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.83rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.2s ease;
+    z-index: 120;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 768px) {
+    .hero-layout { flex-direction: column; }
+    .left-cover { width: 160px; margin: 0 auto; }
+    .rating-grid, .info-grid { grid-template-columns: 1fr; }
+    .sub-tabs { width: 100%; }
+    .manage-shelf-btn { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top-bar">
+    <button class="btn" onclick="showToast('返回来源列表')">← 返回</button>
+    <div class="right-actions">
+      <button class="btn" onclick="showToast('已加入本地阅读清单')">☰ 加入清单</button>
+      <button class="btn primary" onclick="showToast('打开阅读器')">📖 立即阅读</button>
+      <button class="btn" onclick="showToast('跳转 E 站在线画廊')">🌐 在线</button>
+      <button class="btn danger" onclick="showToast('删除确认')">🗑 删除</button>
+    </div>
+  </div>
+
+  <!-- 顶层切换 -->
+  <div class="detail-tabs">
+    <button id="topTabInfo" class="detail-tab-btn active" onclick="switchTopTab('info')">📄 信息</button>
+    <button id="topTabPreview" class="detail-tab-btn" onclick="switchTopTab('preview')">🖼 画廊预览 (850)</button>
+  </div>
+
+  <div id="previewView" class="preview-placeholder" style="display: none;">
+    画廊预览区保持现有逻辑不变（分批缩略图 + 管理模式隐藏/恢复页面）。<br />
+    点击上方「📄 信息」返回主视图。
+  </div>
+
+  <div id="infoView">
+    <!-- 上半区：封面 + 右侧识别/摘要/书架条（高度齐平，消灭左侧黑洞） -->
+    <div class="hero-layout">
+      <div class="left-cover">
+        <div class="cover-box">
+          <span style="font-size: 2rem;">📘</span>
+          <span>3:4 本地封面</span>
+        </div>
+      </div>
+
+      <div class="hero-right">
+        <span class="category-badge">IMAGE SET</span>
+        <div class="title-wrap">
+          <h1 class="title">Miwerjooggetser [Fanbox] [Chinese]</h1>
+          <button class="edit-title-btn" title="修改标题" onclick="showToast('弹出修改标题弹窗')">✏️</button>
+          <div class="subtitle">[Artist] Fanbox Archive Collection [Digital]</div>
+        </div>
+
+        <div class="summary-strip" id="summaryStrip"></div>
+
+        <!-- 书架单行区：只显示已加入的书架胶囊 + 管理按钮 -->
+        <div class="shelf-strip" id="shelfStrip"></div>
+      </div>
+    </div>
+
+    <!-- 下半区：全宽通栏 3 个 Tab（吃满 1000px 宽度） -->
+    <div class="full-tabs-section">
+      <div class="sub-tabs" role="tablist">
+        <button class="sub-tab-btn active" data-sub="tags" onclick="switchSubTab('tags')">
+          🏷️ 标签 <span class="sub-cnt" id="tabTagCnt"></span>
+        </button>
+        <button class="sub-tab-btn" data-sub="rating-remark" onclick="switchSubTab('rating-remark')">
+          ⭐ 评分与备注 <span class="note-dot" id="noteDot" title="有本地备注"></span>
+        </button>
+        <button class="sub-tab-btn" data-sub="file-props" onclick="switchSubTab('file-props')">
+          📁 文件属性
+        </button>
+      </div>
+
+      <!-- Tab 1：全宽 Tag 云 + 联想输入 -->
+      <section id="panel-tags">
+        <div class="info-card">
+          <div class="card-header">
+            <h3 class="card-title">🏷️ 本地作品标签 (Tags)</h3>
+            <span class="card-hint">全宽平铺不折叠 · 下方输入支持中英文联想 · 点击「×」叉除/删除</span>
+          </div>
+          <div class="tags-cloud" id="tagsCloud"></div>
+          <div class="add-row">
+            <div class="suggest-wrap">
+              <input
+                id="tagInput"
+                class="tag-input"
+                type="text"
+                placeholder="输入标签名，如 female: / artist:（支持中英文联想）"
+                autocomplete="off"
+              />
+              <div id="suggestDropdown" class="tag-suggest-dropdown" style="display: none;"></div>
+            </div>
+            <button class="btn teal" onclick="addTagFromInput()">+ 添加 Tag</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2：评分与备注 -->
+      <section id="panel-rating-remark" style="display: none;">
+        <div class="info-card">
+          <div class="card-header">
+            <h3 class="card-title">⭐ 作品评分</h3>
+            <button class="mini-toggle-btn" onclick="toggleCommunityMock()">切换全站有/无评分态</button>
+          </div>
+          <div class="rating-grid">
+            <div class="rating-pane">
+              <div class="rating-pane-head"><span>我的个人评分</span><span id="myRatingLabel"></span></div>
+              <div style="display:flex;align-items:center;">
+                <div class="stars" id="myStars"></div>
+                <span class="rating-score" id="myRatingNum"></span>
+              </div>
+              <div class="rating-sub">点击星级即时保存（按账号隔离）</div>
+            </div>
+
+            <div class="rating-pane">
+              <div class="rating-pane-head"><span>E 站全站评分</span><span>只读</span></div>
+              <div style="display:flex;align-items:center;" id="communityStarsWrap"></div>
+              <div class="rating-sub">随每日 Tag 刷新自动同步（与维护页同源）</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <div class="card-header">
+            <h3 class="card-title">📝 本地备注</h3>
+            <span class="card-hint">仅本应用可见，扫描不覆盖</span>
+          </div>
+          <textarea
+            id="remarkInput"
+            class="remark-input"
+            rows="3"
+            placeholder="添加本地备注（仅本应用可见，扫描不会覆盖）..."
+          ></textarea>
+          <div class="remark-actions">
+            <button class="btn teal" onclick="saveRemark()">保存备注</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 3：文件属性 -->
+      <section id="panel-file-props" style="display: none;">
+        <div class="info-card">
+          <div class="card-header">
+            <h3 class="card-title">📁 本地文件属性</h3>
+          </div>
+          <div class="info-grid">
+            <div class="info-item"><span class="k">文件大小:</span><span class="v">2423.1 MB</span></div>
+            <div class="info-item">
+              <span class="k">总页数:</span>
+              <span class="v">850 页 <span class="orig-page-hint">（原 862 页，已隐藏 12 页）</span></span>
+            </div>
+            <div class="info-item"><span class="k">入库时间:</span><span class="v">2026-09-05 11:01</span></div>
+            <div class="info-item"><span class="k">发布时间:</span><span class="v">2026-09-05 04:49</span></div>
+            <div class="info-item"><span class="k">修改时间:</span><span class="v">2026-09-05 11:01</span></div>
+            <div class="info-item"><span class="k">最后扫描:</span><span class="v">2026-11-25 07:25</span></div>
+            <div class="info-item"><span class="k">来源:</span><span class="v">下载</span></div>
+            <div class="info-item full">
+              <span class="k">存储路径:</span>
+              <span class="v path-text">Z:\SakuHentai\Comics\archive - 4169714 - Miwerjooggetser.cbz</span>
+              <button class="btn" style="padding:4px 10px;font-size:0.76rem;" onclick="showToast('已复制本地路径')">复制</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- 书架搜索多选浮层 -->
+<div id="pickerOverlay" class="picker-overlay" onclick="if(event.target===this) closePicker()">
+  <div class="picker-panel">
+    <div class="picker-head">
+      <span class="picker-title">📚 管理归属本地书架</span>
+      <button class="picker-close" onclick="closePicker()">×</button>
+    </div>
+    <div class="picker-search-bar">
+      <div class="picker-search-wrap">
+        <input
+          id="pickerSearch"
+          class="picker-search-input"
+          type="text"
+          placeholder="搜索书架名称（共 26 个）…"
+          autocomplete="off"
+        />
+        <button id="pickerClear" class="picker-clear" onclick="clearPickerSearch()">×</button>
+      </div>
+      <button id="pickerOnlyChecked" class="picker-filter-btn" onclick="togglePickerOnlyChecked()">仅看已选</button>
+    </div>
+    <div class="picker-list" id="pickerList"></div>
+    <div class="picker-foot">
+      <span id="pickerFootStat"></span>
+      <button class="btn teal" style="padding:5px 14px;" onclick="closePicker()">完成</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const DICT = [
+  { ns: 'female', key: 'elf', cn: '精灵', count: 14230 },
+  { ns: 'female', key: 'stockings', cn: '丝袜', count: 138420 },
+  { ns: 'female', key: 'glasses', cn: '眼镜娘', count: 67540 },
+  { ns: 'female', key: 'kemonomimi', cn: '兽耳', count: 78110 },
+  { ns: 'female', key: 'sole female', cn: '仅女性', count: 421500 },
+  { ns: 'male', key: 'sole male', cn: '仅男性', count: 382900 },
+  { ns: 'artist', key: 'mizuryu kei', cn: '水龙敬', count: 412 },
+  { ns: 'parody', key: 'touhou project', cn: '东方Project', count: 29400 },
+  { ns: 'parody', key: 'blue archive', cn: '碧蓝档案', count: 18600 },
+  { ns: 'language', key: 'chinese', cn: '中文', count: 245000 },
+  { ns: 'other', key: 'uncensored', cn: '无修正', count: 52100 },
+  { ns: 'other', key: 'mosaic censorship', cn: '马赛克修正', count: 39800 },
+];
+
+// 模拟真实 30 个 Tag
+let tags = [
+  { raw: 'language:chinese', cn: '汉语', source: 'online', removed: false },
+  { raw: 'parody:blue archive', cn: '蔚蓝档案', source: 'online', removed: false },
+  { raw: 'parody:genshin impact', cn: '原神', source: 'online', removed: false },
+  { raw: 'parody:pokemon', cn: '宝可梦', source: 'online', removed: false },
+  { raw: 'parody:sousou no frieren', cn: '葬送的芙莉莲', source: 'online', removed: false },
+  { raw: 'character:frieren', cn: '芙莉莲', source: 'online', removed: false },
+  { raw: 'artist:mumei rouzu', cn: '無名老圖', source: 'online', removed: false },
+  { raw: 'female:ahegao', cn: '阿黑颜', source: 'online', removed: false },
+  { raw: 'female:anal', cn: '肛交', source: 'online', removed: false },
+  { raw: 'female:big breasts', cn: '巨乳', source: 'online', removed: false },
+  { raw: 'female:blowjob', cn: '口交', source: 'online', removed: false },
+  { raw: 'female:bukkake', cn: '口交颜', source: 'online', removed: false },
+  { raw: 'female:body modification', cn: '身体改造', source: 'online', removed: false },
+  { raw: 'female:breast expansion', cn: '乳房膨胀', source: 'online', removed: false },
+  { raw: 'female:deepthroat', cn: '深喉', source: 'online', removed: false },
+  { raw: 'female:gape', cn: '高比例肛交', source: 'online', removed: false },
+  { raw: 'female:halo', cn: '光环', source: 'online', removed: false },
+  { raw: 'female:lactation', cn: '母乳', source: 'online', removed: false },
+  { raw: 'female:loli', cn: '萝莉', source: 'online', removed: false },
+  { raw: 'female:mind control', cn: '催眠', source: 'online', removed: false },
+  { raw: 'female:netorare', cn: 'NTR', source: 'online', removed: false },
+  { raw: 'female:piercing', cn: '穿孔', source: 'online', removed: false },
+  { raw: 'female:pregnant', cn: '怀孕', source: 'online', removed: false },
+  { raw: 'female:rimjob', cn: '舔肛', source: 'online', removed: false },
+  { raw: 'female:sex toys', cn: '性玩具', source: 'online', removed: false },
+  { raw: 'female:slime', cn: '史莱姆', source: 'online', removed: false },
+  { raw: 'female:stockings', cn: '丝袜', source: 'online', removed: true },
+  { raw: 'male:facesitting', cn: '坐脸', source: 'online', removed: false },
+  { raw: 'female:kemonomimi', cn: '兽耳', source: 'local', removed: false },
+  { raw: 'other:uncensored', cn: '无修正', source: 'online', removed: false },
+];
+
+// 模拟真实 26 个书架
+const SHELF_NAMES = [
+  '配菜', '很好用', '夢双月', 'テイ○ット牧場', 'JK退魔部',
+  '退魔部敗北録', 'スレイブボール洗脳', 'マリー触手堕ち', '魔法少女ゆーしゃちゃん',
+  '破魔の巫女系列', '退魔ノ隷刻', 'onigirikao', '異花 -聖神官触手乳辱調教',
+  '触手なんかに敗北けない!', '隷烙特課', '聖僧査官白蓮', '女傑篭絡',
+  '[すごい火]イリヤちゃん', '铃兰Futa本子', '銀兎神装アイリス', '魔薬捜査官',
+  '聖裁の乙女', 'ゆきかぜ完全屈服記録', '極東絢爛賭博島ドリームアイランド', '蟲鳥', 'Fanbox精选',
+];
+let shelves = SHELF_NAMES.map((name, i) => ({
+  id: String(i + 1),
+  name,
+  checked: i === 0 || i === 1,
+}));
+
+let myRating = 4;
+let communityRating = 4.62;
+let remark = '850P Fanbox 合集，画质极佳。';
+document.getElementById('remarkInput').value = remark;
+
+let pickerQuery = '';
+let pickerOnlyChecked = false;
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+function switchTopTab(tab) {
+  document.getElementById('topTabInfo').classList.toggle('active', tab === 'info');
+  document.getElementById('topTabPreview').classList.toggle('active', tab === 'preview');
+  document.getElementById('infoView').style.display = tab === 'info' ? 'block' : 'none';
+  document.getElementById('previewView').style.display = tab === 'preview' ? 'block' : 'none';
+}
+
+function switchSubTab(sub) {
+  document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
+  document.getElementById('panel-tags').style.display = sub === 'tags' ? 'block' : 'none';
+  document.getElementById('panel-rating-remark').style.display = sub === 'rating-remark' ? 'block' : 'none';
+  document.getElementById('panel-file-props').style.display = sub === 'file-props' ? 'block' : 'none';
+}
+
+function renderSummary() {
+  const activeTags = tags.filter(t => !t.removed).length;
+  const checkedShelves = shelves.filter(s => s.checked).length;
+  const commText = communityRating > 0 ? communityRating.toFixed(2) : '未知';
+  document.getElementById('tabTagCnt').textContent = `${activeTags}`;
+  document.getElementById('noteDot').style.display = remark.trim() ? 'inline-block' : 'none';
+  document.getElementById('summaryStrip').innerHTML = `
+    <span class="sum-item">个人 <span class="sum-val gold">${myRating.toFixed(1)}</span></span>
+    <span class="sum-sep">·</span>
+    <span class="sum-item">全站 <span class="sum-val">${commText}</span></span>
+    <span class="sum-sep">·</span>
+    <span class="sum-item"><span class="sum-val">850</span> 页</span>
+    <span class="sum-sep">·</span>
+    <span class="sum-item">书架 <span class="sum-val teal">${checkedShelves}</span></span>
+    <span class="sum-sep">·</span>
+    <span class="sum-item">${remark.trim() ? '有本地备注' : '无备注'}</span>
+  `;
+}
+
+function renderShelfStrip() {
+  const selected = shelves.filter(s => s.checked);
+  const chips = selected.length
+    ? selected.map(s => `
+        <span class="shelf-chip">
+          ${s.name}
+          <span class="shelf-chip-remove" title="移出书架" onclick="toggleShelf('${s.id}')">×</span>
+        </span>
+      `).join('')
+    : '<span class="shelf-empty-hint">暂未加入任何书架</span>';
+
+  document.getElementById('shelfStrip').innerHTML = `
+    <span class="shelf-strip-label">📚 书架</span>
+    ${chips}
+    <button class="manage-shelf-btn" onclick="openPicker()">+ 管理书架 (${selected.length}/${shelves.length})</button>
+  `;
+  renderSummary();
+}
+
+function toggleShelf(id) {
+  const s = shelves.find(x => x.id === id);
+  if (!s) return;
+  s.checked = !s.checked;
+  renderShelfStrip();
+  renderPicker();
+}
+
+function openPicker() {
+  document.getElementById('pickerOverlay').classList.add('open');
+  renderPicker();
+  setTimeout(() => document.getElementById('pickerSearch').focus(), 40);
+}
+function closePicker() {
+  document.getElementById('pickerOverlay').classList.remove('open');
+}
+function clearPickerSearch() {
+  pickerQuery = '';
+  document.getElementById('pickerSearch').value = '';
+  renderPicker();
+}
+function togglePickerOnlyChecked() {
+  pickerOnlyChecked = !pickerOnlyChecked;
+  document.getElementById('pickerOnlyChecked').classList.toggle('active', pickerOnlyChecked);
+  renderPicker();
+}
+function renderPicker() {
+  const q = pickerQuery.trim().toLowerCase();
+  document.getElementById('pickerClear').classList.toggle('visible', pickerQuery.length > 0);
+  const filtered = shelves.filter(s => {
+    if (pickerOnlyChecked && !s.checked) return false;
+    if (!q) return true;
+    return s.name.toLowerCase().includes(q);
+  });
+  document.getElementById('pickerList').innerHTML = filtered.length
+    ? filtered.map(s => `
+        <div class="picker-item ${s.checked ? 'checked' : ''}" onclick="toggleShelf('${s.id}')">
+          <input type="checkbox" ${s.checked ? 'checked' : ''} readonly />
+          <span title="${s.name}">${s.name}</span>
+        </div>
+      `).join('')
+    : '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:24px 0;">无匹配书架</div>';
+  const checkedCnt = shelves.filter(s => s.checked).length;
+  document.getElementById('pickerFootStat').textContent = `已选 ${checkedCnt} / 共 ${shelves.length} 个书架`;
+}
+
+document.getElementById('pickerSearch').addEventListener('input', e => {
+  pickerQuery = e.target.value;
+  renderPicker();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closePicker();
+});
+
+function renderTags() {
+  const cloud = document.getElementById('tagsCloud');
+  cloud.innerHTML = tags.map((t, idx) => {
+    const [ns, key] = t.raw.includes(':') ? t.raw.split(':', 2) : ['other', t.raw];
+    const cls = [
+      'detail-tag-item',
+      `ns-${ns}`,
+      t.source === 'local' ? 'tag-local' : '',
+      t.removed ? 'tag-removed' : '',
+    ].join(' ');
+    return `<div class="${cls}" ${t.removed ? `onclick="restoreTag(${idx})" title="点击恢复"` : ''}>
+      <span class="tag-ns">${ns}:</span>
+      <span>${t.cn || key}</span>
+      ${t.source === 'local' ? '<span class="local-badge">本地</span>' : ''}
+      ${t.removed ? '<span class="removed-badge">被叉除</span>' : ''}
+      ${(t.source === 'local' || !t.removed) ? `<span class="remove-tag" onclick="event.stopPropagation();removeTag(${idx})">×</span>` : ''}
+    </div>`;
+  }).join('');
+  renderSummary();
+}
+
+function removeTag(idx) {
+  const t = tags[idx];
+  if (t.source === 'local') {
+    tags.splice(idx, 1);
+    showToast(`已移除本地标签「${t.raw}」`);
+  } else {
+    t.removed = true;
+    showToast(`已叉除标签「${t.raw}」（点击可恢复）`);
+  }
+  renderTags();
+}
+function restoreTag(idx) {
+  tags[idx].removed = false;
+  showToast(`已恢复标签「${tags[idx].raw}」`);
+  renderTags();
+}
+function addTagValue(raw, cn = '') {
+  const clean = raw.trim();
+  if (!clean) return;
+  if (tags.some(t => t.raw.toLowerCase() === clean.toLowerCase() && !t.removed)) {
+    showToast(`标签「${clean}」已存在`);
+    return;
+  }
+  tags.push({ raw: clean, cn, source: 'local', removed: false });
+  document.getElementById('tagInput').value = '';
+  document.getElementById('suggestDropdown').style.display = 'none';
+  showToast(`已添加本地标签「${clean}」`);
+  renderTags();
+}
+function addTagFromInput() {
+  addTagValue(document.getElementById('tagInput').value);
+}
+
+const tagInput = document.getElementById('tagInput');
+const dropdown = document.getElementById('suggestDropdown');
+function updateSuggestions() {
+  const q = tagInput.value.trim().toLowerCase();
+  if (!q) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  const matches = DICT.filter(d => `${d.ns}:${d.key}`.includes(q) || d.cn.includes(q)).slice(0, 8);
+  if (matches.length === 0) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  dropdown.innerHTML = matches.map(m => {
+    const full = `${m.ns}:${m.key}`;
+    return `<div class="suggest-item" onmousedown="event.preventDefault();addTagValue('${full}','${m.cn}')">
+      <div class="suggest-main">
+        <span class="suggest-raw">${full}</span>
+        <span class="suggest-cn">${m.cn}</span>
+      </div>
+      <span class="suggest-count">🔥 ${m.count.toLocaleString()}</span>
+    </div>`;
+  }).join('');
+  dropdown.style.display = 'block';
+}
+tagInput.addEventListener('input', updateSuggestions);
+tagInput.addEventListener('focus', updateSuggestions);
+tagInput.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 120));
+tagInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') addTagFromInput();
+});
+
+function renderRatings() {
+  document.getElementById('myStars').innerHTML = [1, 2, 3, 4, 5].map(n => `
+    <button class="star-btn interactive ${n <= myRating ? 'active' : ''}" onclick="setMyRating(${n})">★</button>
+  `).join('');
+  document.getElementById('myRatingNum').textContent = `${myRating} / 5.0`;
+  document.getElementById('myRatingLabel').textContent = myRating > 0 ? '已评分' : '未评分';
+
+  const wrap = document.getElementById('communityStarsWrap');
+  if (communityRating > 0) {
+    const rounded = Math.round(communityRating);
+    wrap.innerHTML = `<div class="stars">${[1, 2, 3, 4, 5].map(n => `<span class="star-btn ${n <= rounded ? 'active' : ''}">★</span>`).join('')}</div>
+      <span class="rating-score">${communityRating.toFixed(2)} / 5.0</span>`;
+  } else {
+    wrap.innerHTML = `<span style="color:var(--muted);font-size:0.86rem;">暂无全站评分（等待 Tag 刷新同步）</span>`;
+  }
+  renderSummary();
+}
+function setMyRating(n) {
+  myRating = n;
+  showToast(`个人评分更新为 ${n} 星`);
+  renderRatings();
+}
+function toggleCommunityMock() {
+  communityRating = communityRating > 0 ? 0 : 4.62;
+  renderRatings();
+}
+function saveRemark() {
+  remark = document.getElementById('remarkInput').value;
+  showToast('本地备注已保存');
+  renderSummary();
+}
+
+renderShelfStrip();
+renderTags();
+renderRatings();
+</script>
+</body>
+</html>

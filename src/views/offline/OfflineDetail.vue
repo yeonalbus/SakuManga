@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUI } from '@/composables/useUI'
+import { useTagSuggest, type TagSuggestion } from '@/composables/useTagSuggest'
 import { bookshelves, addComicToShelf, removeComicFromShelf } from '@/stores/bookshelfStore'
 import { offlineReadingList, addToReadingList, removeFromReadingList } from '@/stores/readingStore'
 import { getMyRating, setMyRating } from '@/stores/ratingStore'
@@ -40,6 +41,7 @@ interface OfflineDetailDTO {
   offlineAddTagsList?: string[]
   offlineRemoveTagsList?: string[]
   rating?: number
+  communityRating?: number
   pageCount?: number
   updatedAt: string
   localPath: string
@@ -78,6 +80,7 @@ const comic = ref<OfflineDetailComic>({
   category: 'Local',
   tags: [],
   rating: 0,
+  communityRating: 0,
   pageCount: 0,
   updatedAt: '',
   localPath: '',
@@ -325,26 +328,107 @@ const copyPath = () => {
   toast.info('本地文件路径已复制到剪贴板')
 }
 
-const handleAddTag = async () => {
-  const newTag = await modal.prompt(
-    '请输入要新增的 Tag 名称（如 artist:xxx）：',
-    '',
-    '新增本地标签',
-  )
-  if (!newTag || !newTag.trim()) return
-  const trimmed = newTag.trim()
-  // 本地新增 tag 走双轨模型：加入 OfflineAddTags（仅本地客制化，不写回）
+const infoSubTab = ref<'tags' | 'rating-remark' | 'file-props'>('tags')
+
+// 本地 Tag 联想添加（参考 MyTagsSettings.vue）
+const newTagInput = ref('')
+const addingTag = ref(false)
+const tagSuggestOpen = ref(false)
+let tagSuggestBlurTimer: number | null = null
+const {
+  suggestions: tagSuggestions,
+  refresh: refreshTagSuggest,
+  clear: clearTagSuggest,
+} = useTagSuggest(() => newTagInput.value, 8, 150)
+
+const handleTagInputFocus = () => {
+  if (tagSuggestBlurTimer) {
+    window.clearTimeout(tagSuggestBlurTimer)
+    tagSuggestBlurTimer = null
+  }
+  tagSuggestOpen.value = true
+  if (newTagInput.value.trim()) refreshTagSuggest()
+}
+
+const handleTagInputBlur = () => {
+  tagSuggestBlurTimer = window.setTimeout(() => {
+    tagSuggestOpen.value = false
+  }, 120)
+}
+
+const submitAddTag = async (raw?: string) => {
+  const trimmed = (raw ?? newTagInput.value).trim()
+  if (!trimmed || addingTag.value) return
+  if (
+    displayTags.value.some((dt) => !dt.removed && dt.raw.toLowerCase() === trimmed.toLowerCase())
+  ) {
+    toast.info(`标签「${trimmed}」已存在`)
+    return
+  }
+  addingTag.value = true
   try {
     await http(`/comics/${comic.value.id}/tags`, {
       method: 'PUT',
       body: JSON.stringify({ addTags: [trimmed], removeTags: [] }),
     })
+    newTagInput.value = ''
+    tagSuggestOpen.value = false
+    clearTagSuggest()
     toast.success(`标签「${trimmed}」添加成功！`)
     await fetchComicDetail()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '添加标签失败')
+  } finally {
+    addingTag.value = false
   }
 }
+
+const pickTagSuggestion = (s: TagSuggestion) => {
+  void submitAddTag(s.displayKey)
+}
+
+// 书架管理搜索多选浮层
+const shelfPickerOpen = ref(false)
+const shelfSearch = ref('')
+const shelfOnlyChecked = ref(false)
+
+const openShelfPicker = () => {
+  shelfSearch.value = ''
+  shelfOnlyChecked.value = false
+  shelfPickerOpen.value = true
+}
+
+const closeShelfPicker = () => {
+  shelfPickerOpen.value = false
+}
+
+const handlePickerEsc = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && shelfPickerOpen.value) closeShelfPicker()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handlePickerEsc)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handlePickerEsc)
+  if (tagSuggestBlurTimer) window.clearTimeout(tagSuggestBlurTimer)
+})
+
+const joinedShelves = computed(() => bookshelves.value.filter((s) => isComicInShelf(s.id)))
+
+const filteredPickerShelves = computed(() => {
+  const q = shelfSearch.value.trim().toLowerCase()
+  return bookshelves.value.filter((s) => {
+    if (shelfOnlyChecked.value && !isComicInShelf(s.id)) return false
+    if (!q) return true
+    return s.name.toLowerCase().includes(q)
+  })
+})
+
+const activeTagCount = computed(() => displayTags.value.filter((dt) => !dt.removed).length)
+const communityRatingValue = computed(() => Number(comic.value.communityRating) || 0)
+const hasRemark = computed(() => Boolean((remarkText.value || '').trim()))
 
 // 删除/叉除 tag：本地 tag 物理移除；原生(online) tag 记入 OfflineRemoveTags（软删除，展示置灰可恢复）
 const handleRemoveTag = async (dt: DisplayTag) => {
@@ -1036,176 +1120,418 @@ const goOnlineGallery = () => {
       </div>
     </div>
 
-    <div v-else class="main-layout">
-      <div class="left-cover">
-        <img :src="comic.coverUrl" :alt="comic.title" />
+    <div v-else class="info-container">
+      <!-- 上半区：左封面 + 右识别/速览/书架胶囊（高度齐平，消灭左侧大留白） -->
+      <div class="hero-layout">
+        <div class="left-cover">
+          <img :src="comic.coverUrl" :alt="comic.title" />
+        </div>
+
+        <div class="hero-right">
+          <div v-if="comic.category" class="category-wrapper">
+            <span
+              class="category-badge"
+              :style="{ backgroundColor: getCategoryColor(comic.category) }"
+            >
+              {{ comic.category }}
+            </span>
+          </div>
+
+          <div class="title-wrap">
+            <!-- BUG2：主标题日文原名优先（与卡片/在线详情/阅读器一致），
+                 罗马音标题作为副标题；修改标题编辑主标题（titleJpn），清空恢复日文原名 -->
+            <div class="title-row">
+              <h1 class="title">{{ comic.titleJpn || comic.title }}</h1>
+              <button
+                class="edit-title-btn"
+                title="修改标题（清空可恢复日文原名）"
+                @click="handleEditTitle"
+              >
+                <AppIcon name="edit" :size="13" />
+              </button>
+            </div>
+            <span
+              v-if="comic.titleJpn && comic.title && comic.title !== comic.titleJpn"
+              class="subtitle"
+            >
+              {{ comic.title }}
+            </span>
+          </div>
+
+          <!-- 紧凑核心摘要条 -->
+          <div class="summary-strip">
+            <span class="sum-item">
+              个人
+              <span class="sum-val gold">
+                {{ myLocalRating > 0 ? myLocalRating.toFixed(1) : '未评' }}
+              </span>
+            </span>
+            <span class="sum-sep">·</span>
+            <span class="sum-item">
+              全站
+              <span class="sum-val">
+                {{ communityRatingValue > 0 ? communityRatingValue.toFixed(2) : '未知' }}
+              </span>
+            </span>
+            <span class="sum-sep">·</span>
+            <span class="sum-item">
+              <span class="sum-val">{{ comic.pageCount || 0 }}</span> 页
+            </span>
+            <span class="sum-sep">·</span>
+            <span class="sum-item">
+              书架 <span class="sum-val teal">{{ joinedShelves.length }}</span>
+            </span>
+            <span class="sum-sep">·</span>
+            <span class="sum-item">{{ hasRemark ? '有本地备注' : '无备注' }}</span>
+          </div>
+
+          <!-- 归属书架条：仅平铺已加入胶囊 + 「+ 管理书架」按钮 -->
+          <div class="shelf-strip">
+            <span class="shelf-strip-label"><AppIcon name="books" :size="14" /> 书架</span>
+            <span v-for="shelf in joinedShelves" :key="shelf.id" class="shelf-chip">
+              {{ shelf.name }}
+              <span
+                class="shelf-chip-remove"
+                title="移出该书架"
+                @click="toggleShelfCheck(shelf.id)"
+              >
+                <AppIcon name="close" :size="11" />
+              </span>
+            </span>
+            <span v-if="joinedShelves.length === 0" class="shelf-empty-hint">
+              暂未加入任何书架
+            </span>
+            <button type="button" class="manage-shelf-btn" @click="openShelfPicker">
+              <AppIcon name="plus" :size="12" /> 管理书架 ({{ joinedShelves.length }}/{{
+                bookshelves.length
+              }})
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div class="right-panel">
-        <div v-if="comic.category" class="category-wrapper">
-          <span
-            class="category-badge"
-            :style="{ backgroundColor: getCategoryColor(comic.category) }"
-          >
-            {{ comic.category }}
-          </span>
-        </div>
-
-        <div class="title-wrap">
-          <!-- BUG2：主标题日文原名优先（与卡片/在线详情/阅读器一致），
-               罗马音标题作为副标题；修改标题编辑主标题（titleJpn），清空恢复日文原名 -->
-          <h1 class="title">{{ comic.titleJpn || comic.title }}</h1>
+      <!-- 下半区：全宽通栏 3 个子 Tab -->
+      <div class="full-tabs-section">
+        <div class="sub-tabs" role="tablist">
           <button
-            class="edit-title-btn"
-            title="修改标题（清空可恢复日文原名）"
-            @click="handleEditTitle"
+            type="button"
+            class="sub-tab-btn"
+            :class="{ active: infoSubTab === 'tags' }"
+            @click="infoSubTab = 'tags'"
           >
-            <AppIcon name="edit" :size="13" />
+            <AppIcon name="tag" :size="14" /> 标签
+            <span class="sub-cnt">{{ activeTagCount }}</span>
           </button>
-          <span v-if="comic.titleJpn && comic.title && comic.title !== comic.titleJpn" class="subtitle">
-            {{ comic.title }}
-          </span>
+          <button
+            type="button"
+            class="sub-tab-btn"
+            :class="{ active: infoSubTab === 'rating-remark' }"
+            @click="infoSubTab = 'rating-remark'"
+          >
+            <AppIcon name="star" :size="14" /> 评分与备注
+            <span v-if="hasRemark" class="note-dot" title="有本地备注"></span>
+          </button>
+          <button
+            type="button"
+            class="sub-tab-btn"
+            :class="{ active: infoSubTab === 'file-props' }"
+            @click="infoSubTab = 'file-props'"
+          >
+            <AppIcon name="local" :size="14" /> 文件属性
+          </button>
         </div>
 
-        <div class="rating-box">
-          <span class="label">我的个人评分：</span>
-          <div class="stars">
-            <span
-              v-for="star in 5"
-              :key="star"
-              class="star-icon"
-              :class="{ active: star <= myLocalRating }"
-              @click="setRating(star)"
-            >
-              <AppIcon name="star" :weight="star <= myLocalRating ? 'fill' : 'regular'" :size="18" />
-            </span>
-          </div>
-          <span class="rating-num">({{ myLocalRating }} / 5.0)</span>
-        </div>
-
-        <div class="info-card">
-          <div class="card-header">
-            <h3 class="card-title"><AppIcon name="tag" :size="15" /> 本地作品标签 (Tags)</h3>
-            <button v-if="userStore.isAdmin" class="add-tag-btn" @click="handleAddTag">
-              <AppIcon name="plus" :size="12" /> 添加 Tag
-            </button>
-          </div>
-
-          <!-- 🎯 TagChip 组件 + 独立删除按钮组合（Round23：原生 tag 删除置灰可恢复，本地 tag 物理删除） -->
-          <div class="tags-cloud">
-            <div
-              v-for="dt in displayTags"
-              :key="dt.raw"
-              class="detail-tag-item"
-              :class="[
-                dt.source === 'local' ? 'tag-local' : 'tag-official',
-                dt.removed ? 'tag-removed' : '',
-              ]"
-              :title="dt.removed ? '已叉除，点击恢复此标签' : ''"
-              @click="dt.removed && userStore.isAdmin ? handleRestoreTag(dt) : undefined"
-            >
-              <TagChip :tag="dt.raw" :disable-quick-search="dt.removed" />
-              <span v-if="dt.source === 'local'" class="local-badge" title="本地新增标签">
-                本地
+        <!-- Tab 1：全宽 Tag 云 + 联想添加 -->
+        <section v-if="infoSubTab === 'tags'">
+          <div class="info-card">
+            <div class="card-header">
+              <h3 class="card-title"><AppIcon name="tag" :size="15" /> 本地作品标签 (Tags)</h3>
+              <span class="card-hint">
+                {{ userStore.isAdmin ? '支持联想添加 · 点击「×」叉除/删除' : '全部标签' }}
               </span>
-              <span v-else-if="dt.removed" class="removed-badge" title="已叉除，点击恢复">
-                被叉除
-              </span>
-              <span
-                v-if="userStore.isAdmin && (dt.source === 'local' || !dt.removed)"
-                class="remove-tag"
-                :title="dt.source === 'local' ? '删除此标签' : '叉除此标签（可点击恢复）'"
-                @click.stop="handleRemoveTag(dt)"
+            </div>
+
+            <!-- 🎯 TagChip 组件 + 独立删除按钮组合（Round23：原生 tag 删除置灰可恢复，本地 tag 物理删除） -->
+            <div class="tags-cloud">
+              <div
+                v-for="dt in displayTags"
+                :key="dt.raw"
+                class="detail-tag-item"
+                :class="[
+                  dt.source === 'local' ? 'tag-local' : 'tag-official',
+                  dt.removed ? 'tag-removed' : '',
+                ]"
+                :title="dt.removed ? '已叉除，点击恢复此标签' : ''"
+                @click="dt.removed && userStore.isAdmin ? handleRestoreTag(dt) : undefined"
               >
-                <AppIcon name="close" :size="12" />
-              </span>
-            </div>
-
-            <span v-if="displayTags.length === 0" class="empty-tag-tip">
-              暂无标签，点击右上方按钮添加...
-            </span>
-          </div>
-        </div>
-
-        <div class="info-card">
-          <h3 class="card-title"><AppIcon name="local" :size="15" /> 本地文件属性</h3>
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="k">文件大小:</span>
-              <span class="v">{{ formattedSize }}</span>
-            </div>
-            <div class="info-item">
-              <span class="k">总页数:</span>
-              <span class="v">
-                {{ comic.pageCount }} 页
-                <span
-                  v-if="comic.originalPageCount && comic.originalPageCount > (comic.pageCount || 0)"
-                  class="orig-page-hint"
-                >
-                  （原 {{ comic.originalPageCount }} 页，已隐藏 {{ hiddenPagesList.length }} 页）
+                <TagChip :tag="dt.raw" :disable-quick-search="dt.removed" />
+                <span v-if="dt.source === 'local'" class="local-badge" title="本地新增标签">
+                  本地
                 </span>
+                <span v-else-if="dt.removed" class="removed-badge" title="已叉除，点击恢复">
+                  被叉除
+                </span>
+                <span
+                  v-if="userStore.isAdmin && (dt.source === 'local' || !dt.removed)"
+                  class="remove-tag"
+                  :title="dt.source === 'local' ? '删除此标签' : '叉除此标签（可点击恢复）'"
+                  @click.stop="handleRemoveTag(dt)"
+                >
+                  <AppIcon name="close" :size="12" />
+                </span>
+              </div>
+
+              <span v-if="displayTags.length === 0" class="empty-tag-tip">
+                暂无标签{{ userStore.isAdmin ? '，可在下方输入添加...' : '' }}
               </span>
             </div>
-            <div class="info-item">
-              <span class="k">入库时间:</span>
-              <span class="v">{{ fmtTime(comic.addedAt) || '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="k">发布时间:</span>
-              <span class="v">{{ fmtTime(comic.publishedAt) || '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="k">修改时间:</span>
-              <span class="v">{{ fmtTime(comic.fileModifiedAt) || '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="k">最后扫描:</span>
-              <span class="v">{{ fmtTime(comic.updatedAt) || '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="k">来源:</span>
-              <span class="v">{{ comic.sourceLabel || '下载' }}</span>
-            </div>
-            <div class="info-item full">
-              <span class="k">存储路径:</span>
-              <span class="v path-text">{{ comic.localPath }}</span>
-              <button class="copy-btn" @click="copyPath">复制</button>
+
+            <div v-if="userStore.isAdmin" class="tag-add-row">
+              <div class="tag-suggest-wrap">
+                <input
+                  v-model="newTagInput"
+                  class="tag-suggest-input"
+                  type="text"
+                  placeholder="输入标签名，如 female: / artist:（支持中英文联想）"
+                  autocomplete="off"
+                  @focus="handleTagInputFocus"
+                  @blur="handleTagInputBlur"
+                  @keyup.enter="submitAddTag()"
+                />
+                <div
+                  v-if="tagSuggestOpen && tagSuggestions.length > 0"
+                  class="tag-suggest-dropdown"
+                >
+                  <div
+                    v-for="s in tagSuggestions"
+                    :key="s.displayKey"
+                    class="suggest-item"
+                    @mousedown.prevent="pickTagSuggestion(s)"
+                  >
+                    <div class="suggest-main">
+                      <span class="suggest-raw">{{ s.displayKey }}</span>
+                      <span v-if="s.name" class="suggest-cn">{{ s.name }}</span>
+                    </div>
+                    <span v-if="s.count" class="suggest-count">
+                      <AppIcon name="fire" :size="12" /> {{ s.count.toLocaleString() }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="add-tag-submit-btn"
+                :disabled="addingTag || !newTagInput.trim()"
+                @click="submitAddTag()"
+              >
+                <AppIcon name="plus" :size="13" /> {{ addingTag ? '添加中…' : '添加 Tag' }}
+              </button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="info-card">
-          <h3 class="card-title"><AppIcon name="notebook" :size="15" /> 本地备注</h3>
-          <textarea
-            v-model="remarkText"
-            class="remark-input"
-            rows="3"
-            placeholder="添加本地备注（仅本应用可见，扫描不会覆盖）..."
-          ></textarea>
-          <div class="remark-actions">
-            <button class="add-tag-btn" :disabled="savingRemark" @click="saveRemark">
-              {{ savingRemark ? '保存中…' : '保存备注' }}
+        <!-- Tab 2：评分与备注 -->
+        <section v-else-if="infoSubTab === 'rating-remark'">
+          <div class="info-card">
+            <div class="card-header">
+              <h3 class="card-title"><AppIcon name="star" :size="15" /> 作品评分</h3>
+            </div>
+            <div class="rating-grid">
+              <div class="rating-pane">
+                <div class="rating-pane-head">
+                  <span>我的个人评分</span>
+                  <span>{{ myLocalRating > 0 ? '已评分' : '未评分' }}</span>
+                </div>
+                <div class="rating-stars-row">
+                  <div class="stars">
+                    <span
+                      v-for="star in 5"
+                      :key="star"
+                      class="star-icon"
+                      :class="{ active: star <= myLocalRating }"
+                      @click="setRating(star)"
+                    >
+                      <AppIcon
+                        name="star"
+                        :weight="star <= myLocalRating ? 'fill' : 'regular'"
+                        :size="18"
+                      />
+                    </span>
+                  </div>
+                  <span class="rating-num">({{ myLocalRating }} / 5.0)</span>
+                </div>
+                <div class="rating-sub">点击星级即时保存（按账号隔离）</div>
+              </div>
+
+              <div class="rating-pane">
+                <div class="rating-pane-head">
+                  <span>E 站全站评分</span>
+                  <span>只读</span>
+                </div>
+                <div v-if="communityRatingValue > 0" class="rating-stars-row">
+                  <div class="stars readonly">
+                    <span
+                      v-for="star in 5"
+                      :key="star"
+                      class="star-icon"
+                      :class="{ active: star <= Math.round(communityRatingValue) }"
+                    >
+                      <AppIcon
+                        name="star"
+                        :weight="star <= Math.round(communityRatingValue) ? 'fill' : 'regular'"
+                        :size="18"
+                      />
+                    </span>
+                  </div>
+                  <span class="rating-num">({{ communityRatingValue.toFixed(2) }} / 5.0)</span>
+                </div>
+                <div v-else class="community-empty">暂无全站评分（等待 Tag 刷新同步）</div>
+                <div class="rating-sub">随每日 Tag 刷新自动同步（与维护页同源）</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-card">
+            <div class="card-header">
+              <h3 class="card-title"><AppIcon name="notebook" :size="15" /> 本地备注</h3>
+              <span class="card-hint">仅本应用可见，扫描不会覆盖</span>
+            </div>
+            <textarea
+              v-model="remarkText"
+              class="remark-input"
+              rows="3"
+              placeholder="添加本地备注（仅本应用可见，扫描不会覆盖）..."
+            ></textarea>
+            <div class="remark-actions">
+              <button class="add-tag-btn" :disabled="savingRemark" @click="saveRemark">
+                {{ savingRemark ? '保存中…' : '保存备注' }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 3：文件属性 -->
+        <section v-else>
+          <div class="info-card">
+            <h3 class="card-title"><AppIcon name="local" :size="15" /> 本地文件属性</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="k">文件大小:</span>
+                <span class="v">{{ formattedSize }}</span>
+              </div>
+              <div class="info-item">
+                <span class="k">总页数:</span>
+                <span class="v">
+                  {{ comic.pageCount }} 页
+                  <span
+                    v-if="
+                      comic.originalPageCount && comic.originalPageCount > (comic.pageCount || 0)
+                    "
+                    class="orig-page-hint"
+                  >
+                    （原 {{ comic.originalPageCount }} 页，已隐藏 {{ hiddenPagesList.length }} 页）
+                  </span>
+                </span>
+              </div>
+              <div class="info-item">
+                <span class="k">入库时间:</span>
+                <span class="v">{{ fmtTime(comic.addedAt) || '—' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="k">发布时间:</span>
+                <span class="v">{{ fmtTime(comic.publishedAt) || '—' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="k">修改时间:</span>
+                <span class="v">{{ fmtTime(comic.fileModifiedAt) || '—' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="k">最后扫描:</span>
+                <span class="v">{{ fmtTime(comic.updatedAt) || '—' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="k">来源:</span>
+                <span class="v">{{ comic.sourceLabel || '下载' }}</span>
+              </div>
+              <div class="info-item full">
+                <span class="k">存储路径:</span>
+                <span class="v path-text">{{ comic.localPath }}</span>
+                <button class="copy-btn" @click="copyPath">复制</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 书架搜索多选浮层 -->
+    <Teleport to="body">
+      <div
+        v-if="shelfPickerOpen"
+        class="shelf-picker-overlay"
+        @click.self="closeShelfPicker"
+      >
+        <div class="shelf-picker-panel">
+          <div class="shelf-picker-head">
+            <span class="shelf-picker-title">
+              <AppIcon name="books" :size="15" /> 管理归属本地书架
+            </span>
+            <button type="button" class="shelf-picker-close" @click="closeShelfPicker">
+              <AppIcon name="close" :size="15" />
             </button>
           </div>
-        </div>
-
-        <div class="info-card">
-          <h3 class="card-title"><AppIcon name="books" :size="15" /> 归属本地书架 (可多选)</h3>
-          <div class="bookshelves-list">
+          <div class="shelf-picker-search-bar">
+            <div class="shelf-picker-search-wrap">
+              <input
+                v-model="shelfSearch"
+                class="shelf-picker-search-input"
+                type="text"
+                :placeholder="`搜索书架名称（共 ${bookshelves.length} 个）…`"
+                autocomplete="off"
+              />
+              <button
+                v-if="shelfSearch.length > 0"
+                type="button"
+                class="shelf-picker-clear"
+                title="清空"
+                @click="shelfSearch = ''"
+              >
+                <AppIcon name="close" :size="11" />
+              </button>
+            </div>
+            <button
+              type="button"
+              class="shelf-picker-filter-btn"
+              :class="{ active: shelfOnlyChecked }"
+              @click="shelfOnlyChecked = !shelfOnlyChecked"
+            >
+              仅看已选
+            </button>
+          </div>
+          <div class="shelf-picker-list">
+            <div v-if="filteredPickerShelves.length === 0" class="shelf-picker-empty">
+              {{ shelfSearch || shelfOnlyChecked ? '无匹配书架' : '暂无书架' }}
+            </div>
             <div
-              v-for="shelf in bookshelves"
+              v-for="shelf in filteredPickerShelves"
               :key="shelf.id"
               class="shelf-checkbox-item"
               :class="{ checked: isComicInShelf(shelf.id) }"
               @click="toggleShelfCheck(shelf.id)"
             >
               <input type="checkbox" :checked="isComicInShelf(shelf.id)" readonly />
-              <span class="shelf-name">{{ shelf.name }}</span>
+              <span class="shelf-name" :title="shelf.name">{{ shelf.name }}</span>
             </div>
+          </div>
+          <div class="shelf-picker-foot">
+            <span>已选 {{ joinedShelves.length }} / 共 {{ bookshelves.length }} 个书架</span>
+            <button type="button" class="shelf-picker-done-btn" @click="closeShelfPicker">
+              完成
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1306,29 +1632,47 @@ const goOnlineGallery = () => {
   cursor: pointer;
 }
 
-.main-layout {
+.hero-layout {
   display: flex;
-  gap: 28px;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.left-cover {
+  width: 210px;
+  flex-shrink: 0;
 }
 
 .left-cover img {
-  width: 240px;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
   border: 1px solid var(--app-border-3);
+  display: block;
 }
 
-.right-panel {
+.hero-right {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .title-wrap {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .title {
@@ -1343,14 +1687,305 @@ const goOnlineGallery = () => {
   word-break: break-all;
 }
 
-.rating-box {
+.summary-strip {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 9px 13px;
+  border-radius: 8px;
   background: var(--app-surface-2);
-  padding: 10px 14px;
-  border-radius: 6px;
   border: 1px solid var(--app-border-2);
+  font-size: 0.82rem;
+  color: var(--app-text-2);
+}
+
+.sum-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sum-sep {
+  color: var(--app-border-3);
+}
+
+.sum-val {
+  color: var(--app-text-strong);
+  font-weight: 600;
+}
+
+.sum-val.gold {
+  color: #f5b942;
+}
+
+.sum-val.teal {
+  color: #00a896;
+}
+
+.shelf-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+}
+
+.shelf-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--app-text-3);
+  margin-right: 2px;
+}
+
+.shelf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(0, 168, 150, 0.14);
+  border: 1px solid rgba(0, 168, 150, 0.45);
+  color: var(--app-text-strong);
+  font-size: 0.78rem;
+}
+
+.shelf-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: #00a896;
+  opacity: 0.8;
+}
+.shelf-chip-remove:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.shelf-empty-hint {
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+}
+
+.manage-shelf-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.manage-shelf-btn:hover {
+  border-color: #00a896;
+  color: #00a896;
+}
+
+.full-tabs-section {
+  width: 100%;
+}
+
+.sub-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 4px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-2);
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.sub-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--app-text-3);
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.sub-tab-btn:hover {
+  color: var(--app-text-strong);
+}
+.sub-tab-btn.active {
+  background: var(--app-surface-3);
+  color: var(--app-text-strong);
+  font-weight: 600;
+}
+
+.sub-cnt {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--app-surface-2);
+  color: var(--app-text-2);
+}
+
+.note-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00a896;
+}
+
+.card-hint {
+  font-size: 0.75rem;
+  color: var(--app-text-3);
+}
+
+.tag-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.tag-suggest-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-suggest-input {
+  width: 100%;
+  height: 35px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-input-bg);
+  color: var(--app-text-strong);
+  font-size: 0.84rem;
+  outline: none;
+  box-sizing: border-box;
+}
+.tag-suggest-input:focus {
+  border-color: #00a896;
+}
+
+.tag-suggest-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.suggest-item:hover {
+  background: var(--app-surface-3);
+}
+
+.suggest-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.suggest-raw {
+  color: var(--app-text-strong);
+  font-weight: 500;
+}
+
+.suggest-cn {
+  color: var(--app-text-3);
+  font-size: 0.76rem;
+}
+
+.suggest-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #ff7588;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.add-tag-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 35px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 168, 150, 0.5);
+  background: rgba(0, 168, 150, 0.14);
+  color: #00a896;
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.add-tag-submit-btn:hover:not(:disabled) {
+  background: rgba(0, 168, 150, 0.24);
+}
+.add-tag-submit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rating-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.rating-pane {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--app-surface-3);
+  border: 1px solid var(--app-border-2);
+}
+
+.rating-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--app-text-3);
+  margin-bottom: 8px;
+}
+
+.rating-stars-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .stars {
@@ -1358,6 +1993,10 @@ const goOnlineGallery = () => {
   gap: 4px;
   cursor: pointer;
 }
+.stars.readonly {
+  cursor: default;
+}
+
 .star-icon {
   font-size: 1.2rem;
   color: var(--app-border-3);
@@ -1366,9 +2005,177 @@ const goOnlineGallery = () => {
 .star-icon.active {
   color: #ffc107;
 }
+
 .rating-num {
-  color: var(--app-text-3);
+  color: var(--app-text-strong);
+  font-weight: 600;
   font-size: 0.85rem;
+}
+
+.community-empty {
+  font-size: 0.84rem;
+  color: var(--app-text-3);
+  padding: 4px 0;
+}
+
+.rating-sub {
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: var(--app-text-3);
+}
+
+/* 书架搜索多选浮层 */
+.shelf-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 2100;
+}
+
+.shelf-picker-panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-3);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shelf-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--app-border-2);
+}
+
+.shelf-picker-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--app-text-strong);
+}
+
+.shelf-picker-close {
+  border: none;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+.shelf-picker-close:hover {
+  background: var(--app-surface-3);
+  color: var(--app-text-strong);
+}
+
+.shelf-picker-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--app-border-2);
+}
+
+.shelf-picker-search-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.shelf-picker-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-input-bg);
+  color: var(--app-text-strong);
+  font-size: 0.82rem;
+  outline: none;
+  box-sizing: border-box;
+}
+.shelf-picker-search-input:focus {
+  border-color: #00a896;
+}
+
+.shelf-picker-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.shelf-picker-filter-btn {
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--app-border-3);
+  background: var(--app-surface-3);
+  color: var(--app-text-2);
+  font-size: 0.76rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.shelf-picker-filter-btn.active {
+  border-color: #00a896;
+  color: #00a896;
+  background: rgba(0, 168, 150, 0.14);
+}
+
+.shelf-picker-list {
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  gap: 8px;
+}
+
+.shelf-picker-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--app-text-3);
+  padding: 24px 0;
+  font-size: 0.84rem;
+}
+
+.shelf-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--app-border-2);
+  font-size: 0.78rem;
+  color: var(--app-text-3);
+}
+
+.shelf-picker-done-btn {
+  padding: 5px 14px;
+  border-radius: 7px;
+  border: 1px solid #00a896;
+  background: #00a896;
+  color: #fff;
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
 .info-card {
@@ -1665,24 +2472,25 @@ const goOnlineGallery = () => {
   }
 
   /* 详情主体：封面居中、信息区单列堆叠 */
-  .main-layout {
+  .hero-layout {
     flex-direction: column;
     align-items: center;
     gap: 16px;
   }
-  .left-cover img {
-    width: 100%;
-    max-width: 220px;
-    margin: 0 auto;
-    display: block;
+  .left-cover {
+    width: 180px;
   }
-  .right-panel {
+  .hero-right {
     width: 100%;
   }
-
-  /* 个人评分：允许换行避免挤压 */
-  .rating-box {
-    flex-wrap: wrap;
+  .manage-shelf-btn {
+    margin-left: 0;
+  }
+  .sub-tabs {
+    width: 100%;
+  }
+  .rating-grid {
+    grid-template-columns: 1fr;
   }
 
   /* 本地文件属性：两列改单列，路径换行完整显示 */

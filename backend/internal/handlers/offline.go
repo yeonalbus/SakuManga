@@ -80,7 +80,7 @@ func (h *OfflineHandler) GetCheckUpdatesResult(c *gin.Context) {
 // ListOfflineUpdates 列出需要更新的漫画 GET /api/v1/offline/updates
 func (h *OfflineHandler) ListOfflineUpdates(c *gin.Context) {
 	var comics []models.OfflineComic
-	if err := h.db.Where("needs_update = ?", true).Order("updated_at desc").Find(&comics).Error; err != nil {
+	if err := h.db.Where("needs_update = ? AND file_missing = ?", true, false).Order("updated_at desc").Find(&comics).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

@@ -96,8 +96,9 @@ func sortedComicIDs(comicIDs []string, sortKeys map[string]float64) []string {
 
 // bookshelfStat 单个书架的派生统计（Round38 书架墙）
 type bookshelfStat struct {
-	unread   int    // 架内仍存在且 read_count <= 0 的本子数
-	coverURL string // 封面：展示顺序中第一个仍存在且带封面的本子的 cover_url
+	aliveCount int    // 架内仍有效（未缺失）的本子数
+	unread     int    // 架内仍存在且 read_count <= 0 的本子数
+	coverURL   string // 封面：展示顺序中第一个仍存在且带封面的本子的 cover_url
 }
 
 // comicStatRow 批量统计查询的原始行（一次 IN 查询取回，避免按书架 N 次查询）
@@ -136,7 +137,7 @@ func loadBookshelfStats(
 		var rows []comicStatRow
 		if err := db.Model(&models.OfflineComic{}).
 			Select("id, read_count, cover_url").
-			Where("id IN ?", all).
+			Where("id IN ? AND file_missing = ?", all, false).
 			Scan(&rows).Error; err != nil {
 			log.Printf("[bookshelf] 未读/封面统计失败: %v", err)
 		} else {
@@ -158,8 +159,9 @@ func loadBookshelfStats(
 		for _, id := range ids {
 			rc, ok := readCount[id]
 			if !ok {
-				continue // 失效引用：本子已不在库中
+				continue // 失效引用：本子已不在库中或 file_missing=true
 			}
+			st.aliveCount++
 			if rc <= 0 {
 				st.unread++
 			}
@@ -243,7 +245,7 @@ func (h *LibraryHandler) GetBookshelves(c *gin.Context) {
 		resp = append(resp, gin.H{
 			"id":       s.ID,
 			"name":     s.Name,
-			"count":    len(ids),
+			"count":    st.aliveCount,
 			"comicIds": ids, // Round22：按权值排序后的展示顺序
 			"pinned":   s.Pinned,
 			"sortKey":  s.SortKey,
@@ -668,6 +670,24 @@ func (h *LibraryHandler) ReorderBookshelfComics(c *gin.Context) {
 	if req.ComicIDs == nil {
 		req.ComicIDs = []string{}
 	}
+	// Round55：保留原书架中因 file_missing=true 被软隐藏的冻结引用，避免全量重排时误丢
+	existingIDs := parseComicIDs(shelf.ComicIDs)
+	if len(existingIDs) > 0 {
+		inReq := make(map[string]bool, len(req.ComicIDs))
+		for _, id := range req.ComicIDs {
+			inReq[id] = true
+		}
+		var hiddenIDs []string
+		h.db.Model(&models.OfflineComic{}).
+			Where("id IN ? AND file_missing = ?", existingIDs, true).
+			Pluck("id", &hiddenIDs)
+		for _, hid := range hiddenIDs {
+			if !inReq[hid] {
+				req.ComicIDs = append(req.ComicIDs, hid)
+				inReq[hid] = true
+			}
+		}
+	}
 	shelf.ComicIDs = joinComicIDs(req.ComicIDs)
 	shelf.Count = len(req.ComicIDs)
 	// Round22：全量重排后权值表重建为 1000*i，与数组顺序一致
@@ -759,6 +779,9 @@ func (h *LibraryHandler) GetHistory(c *gin.Context) {
 	source := c.Query("source")
 	if source == "online" || source == "offline" {
 		q = q.Where("source = ?", source)
+	}
+	if source == "offline" {
+		q = q.Where("NOT EXISTS (SELECT 1 FROM offline_comics o WHERE o.id = history_records.comic_id AND o.file_missing = ?)", true)
 	}
 
 	// Round3-任务1：可选 comicId 单条查询（阅读器进入时按账号精确读取进度）

@@ -223,7 +223,7 @@ func FindReplacementByGID(db *gorm.DB, gid, excludeID string) string {
 	}
 	var id string
 	if err := db.Model(&models.OfflineComic{}).
-		Where("g_id = ? AND id != ?", gid, excludeID).
+		Where("g_id = ? AND id != ? AND file_missing = ?", gid, excludeID, false).
 		Limit(1).
 		Pluck("id", &id).Error; err != nil {
 		return ""

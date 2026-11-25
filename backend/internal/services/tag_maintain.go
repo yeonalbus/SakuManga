@@ -274,7 +274,7 @@ func (s *TagMaintainService) refreshAllTagsLocked() (*TagRefreshResult, error) {
 	ehSetting := loadEHSetting(s.db, LoadAdminUserID(s.db))
 
 	var comics []models.OfflineComic
-	if err := s.db.Where("g_id != ''").Find(&comics).Error; err != nil {
+	if err := s.db.Where("g_id != '' AND file_missing = ?", false).Find(&comics).Error; err != nil {
 		s.setProgress(TagMaintainProgress{Status: "error", Type: "refresh", Message: "读取离线漫画失败"})
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}

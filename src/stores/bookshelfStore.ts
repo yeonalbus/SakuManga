@@ -546,6 +546,6 @@ export const removeComicsFromShelf = async (shelfId: string, comicIds: string[])
 export const computedBookshelves = computed(() => {
   return bookshelves.value.map((shelf) => ({
     ...shelf,
-    count: shelf.count || shelf.comicIds?.length || 0,
+    count: shelf.count ?? shelf.comicIds?.length ?? 0,
   }))
 })

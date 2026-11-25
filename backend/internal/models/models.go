@@ -90,6 +90,8 @@ type OfflineComic struct {
 	// ── 画廊可用性（需求 3(2)：区分「画廊被删」与「网络故障」）──
 	RemovedStatus bool  `gorm:"default:false" json:"removedStatus"`    // 画廊被删除/版权移除（removed/copyright）；网络故障不得标记
 	RemovedAt     int64 `json:"removedAt,omitempty"`                   // 标记时间戳(ms)
+	// Round55：本地文件缺失软隐藏标记（恢复候选冻结引用等待恢复迁移；阵亡条目直接删库）
+	FileMissing   bool  `gorm:"default:false;index" json:"fileMissing,omitempty"`
 
 	// ── Round11：标题恢复 + 本地备注 ──
 	OriginalTitle string `gorm:"type:text" json:"originalTitle,omitempty"` // 首次入库标题（手动改标题后可恢复，扫描更新不覆盖）

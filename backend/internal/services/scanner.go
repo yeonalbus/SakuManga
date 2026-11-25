@@ -434,6 +434,9 @@ func saveComicWithResult(localPath string, isDir bool, incremental bool, scanPat
 	if incremental {
 		var existing models.OfflineComic
 		if err := database.DB.Where("local_path = ?", localPath).First(&existing).Error; err == nil {
+			if existing.FileMissing {
+				_ = database.DB.Model(&existing).Update("file_missing", false).Error
+			}
 			if existing.GID == "" && meta.GID != "" {
 				updates := map[string]interface{}{"g_id": meta.GID}
 				if meta.Token != "" {
@@ -619,6 +622,9 @@ func scanFieldUpdates(existing *models.OfflineComic, incoming *models.OfflineCom
 	u := map[string]interface{}{}
 
 	// ── Scan-Owned：扫描可完全决定 ──
+	if existing.FileMissing {
+		u["file_missing"] = false
+	}
 	u["page_count"] = incoming.PageCount
 	u["original_page_count"] = incoming.OriginalPageCount
 	u["file_size"] = incoming.FileSize

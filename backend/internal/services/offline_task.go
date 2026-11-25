@@ -327,7 +327,7 @@ func SyncMaintainDedupClusters(db *gorm.DB) {
 	// 候选集与扫描时同口径：离线来源 + 「离线维护」开关过滤 + 排除确定性建议删除项
 	// Round50（G）：改用「本地查重候选」（不排除老化/失效本），与扫描主流程保持一致
 	var comics []models.OfflineComic
-	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
+	if err := db.Where("source = ? AND file_missing = ?", models.SourceOffline, false).Order("updated_at desc").Find(&comics).Error; err != nil {
 		log.Printf("%s [dedup-sync] 读取离线漫画失败，跳过疑似重复簇同步: %v", dlWarnTag, err)
 		return
 	}

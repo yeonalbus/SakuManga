@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,44 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 		return nil, errors.New("对账失败：pathID 为空")
 	}
 
+	var comics []models.OfflineComic
+	if err := db.Where("scan_path_id = ?", pathID).Find(&comics).Error; err != nil {
+		return nil, err
+	}
+	return reconcileComicsAgainstDisk(db, comics, pathID, rootPath, progress)
+}
+
+// ReconcileDefaultDownloadComics 对默认下载目录（scan_path_id 为空）执行失效对账（Round55）。
+// 若存在「无 scan_path_id 归属」的未终结恢复任务，返回 ErrRecoveryInProgress。
+func ReconcileDefaultDownloadComics(db *gorm.DB, extractPath string) (*ScanReconcileResult, error) {
+	if db == nil {
+		return nil, errors.New("对账失败：db 为空")
+	}
+	var activeCount int64
+	if err := db.Model(&models.RecoveryCandidate{}).
+		Where("(scan_path_id = '' OR scan_path_id IS NULL)").
+		Where(`EXISTS (SELECT 1 FROM download_tasks t
+			WHERE t."group" = ? AND t.g_id = recovery_candidates.g_id AND t.status IN ?)`,
+			RecoveryGroup, recoveryUnfinishedStatuses()).
+		Count(&activeCount).Error; err != nil {
+		return nil, err
+	}
+	if activeCount > 0 {
+		return nil, ErrRecoveryInProgress
+	}
+
+	var comics []models.OfflineComic
+	if err := db.Where("(scan_path_id = '' OR scan_path_id IS NULL)").Find(&comics).Error; err != nil {
+		return nil, err
+	}
+	return reconcileComicsAgainstDisk(db, comics, "", extractPath, nil)
+}
+
+// reconcileComicsAgainstDisk 共享失效对账实现（Round55 双轨生命周期）：
+//   - 阵亡（no-ehentai / removed_status=1 / 已在阵亡名单）：写入 fallen_comics 并彻底删除 offline_comics 记录及引用（不删磁盘文件）
+//   - 可恢复：写入 recovery_candidates，并将 offline_comics.file_missing 置 true（软隐藏，保留书架/历史/评分等引用待恢复迁移）
+//   - 自愈：文件重新存在时清除候选/未 dismissed 阵亡，并将 file_missing 恢复为 false
+func reconcileComicsAgainstDisk(db *gorm.DB, comics []models.OfflineComic, pathID, rootPath string, progress *ScanProgress) (*ScanReconcileResult, error) {
 	res := &ScanReconcileResult{}
 
 	// 根路径不存在 → 标记整条路径失效（本场景下所有记录的 local_path 也必然 Stat 失败）
@@ -73,10 +112,6 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 		}
 	}
 
-	var comics []models.OfflineComic
-	if err := db.Where("scan_path_id = ?", pathID).Find(&comics).Error; err != nil {
-		return nil, err
-	}
 	res.Total = len(comics)
 	if progress != nil {
 		progress.setReconcileTotal(len(comics))
@@ -108,6 +143,10 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 		fallenGIDs[g] = true
 	}
 
+	var toMarkMissing []string
+	var toUnmarkMissing []string
+	var toPurge []models.OfflineComic
+
 	// 逐条分类写入
 	for i := range comics {
 		c := &comics[i]
@@ -116,6 +155,9 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 			progress.incReconcileProcessed()
 		}
 		if exists[i] {
+			if c.FileMissing {
+				toUnmarkMissing = append(toUnmarkMissing, c.ID)
+			}
 			healed, err := healRecoveredRecord(db, c)
 			if err != nil {
 				log.Printf("%s [reconcile] 自愈清除 %q 失败: %v", dlWarnTag, c.Title, err)
@@ -128,32 +170,131 @@ func ReconcileScanPathAgainstDisk(db *gorm.DB, pathID, rootPath string, progress
 		res.Missing++
 		switch {
 		case c.GID == "" || c.Token == "":
-			// 非 E 站来源：无法重下
+			// 非 E 站来源：无法重下 → 记阵亡 + 删死记录
 			if err := upsertFallen(db, c, models.FallenReasonNoEhentai, rootPath); err != nil {
 				return nil, err
 			}
+			toPurge = append(toPurge, *c)
 			res.Fallen++
 		case c.RemovedStatus:
-			// EH 版权/下架：可重下但已 404
+			// EH 版权/下架：可重下但已 404 → 记阵亡 + 删死记录
 			if err := upsertFallen(db, c, models.FallenReasonRemoved, rootPath); err != nil {
 				return nil, err
 			}
+			toPurge = append(toPurge, *c)
 			res.Fallen++
 		case fallenGIDs[c.GID]:
-			// 已在阵亡名单（恢复确定性失败）：保持阵亡，不重入候选
+			// 已在阵亡名单（恢复确定性失败）：保持阵亡，删死记录，不重入候选
+			toPurge = append(toPurge, *c)
 			continue
 		default:
-			// 可恢复：进候选
+			// 可恢复：进候选 + 软隐藏（保留引用）
 			if err := upsertCandidate(db, c, pathID); err != nil {
 				return nil, err
+			}
+			if !c.FileMissing {
+				toMarkMissing = append(toMarkMissing, c.ID)
 			}
 			res.Candidates++
 		}
 	}
 
-	log.Printf("%s [reconcile] 路径 %q 对账完成：记录 %d / 失效 %d / 候选 %d / 阵亡 %d / 自愈 %d（路径缺失=%v）",
-		dlLogTag, rootPath, res.Total, res.Missing, res.Candidates, res.Fallen, res.Healed, res.PathMissing)
+	// 批量更新 file_missing 标记
+	if len(toUnmarkMissing) > 0 {
+		if err := db.Model(&models.OfflineComic{}).Where("id IN ?", toUnmarkMissing).Update("file_missing", false).Error; err != nil {
+			return nil, err
+		}
+	}
+	if len(toMarkMissing) > 0 {
+		if err := db.Model(&models.OfflineComic{}).Where("id IN ?", toMarkMissing).Update("file_missing", true).Error; err != nil {
+			return nil, err
+		}
+	}
+	if len(toPurge) > 0 {
+		if _, err := purgeDeadOfflineComics(db, toPurge, "失效对账清理阵亡"); err != nil {
+			return nil, err
+		}
+	}
+	if len(toMarkMissing) > 0 || len(toUnmarkMissing) > 0 {
+		MarkLibraryChanged()
+		XpRebuildAsync("失效对账")
+	}
+
+	log.Printf("%s [reconcile] 路径 %q 对账完成：记录 %d / 失效 %d / 候选 %d / 阵亡 %d / 自愈 %d / 清理死记录 %d（路径缺失=%v）",
+		dlLogTag, rootPath, res.Total, res.Missing, res.Candidates, res.Fallen, res.Healed, len(toPurge), res.PathMissing)
 	return res, nil
+}
+
+// purgeDeadOfflineComics 批量物理删除已确认失效且无法恢复的 offline_comics 记录与关联引用（不触碰磁盘文件）。
+// 若库中存在同 g_id 且仍存活（file_missing=false）的副本，引用/评分会自动迁移到该副本。
+func purgeDeadOfflineComics(db *gorm.DB, comics []models.OfflineComic, triggerReason string) (int, error) {
+	if db == nil || len(comics) == 0 {
+		return 0, nil
+	}
+	ids := make([]string, 0, len(comics))
+	gids := make([]string, 0, len(comics))
+	for i := range comics {
+		if comics[i].ID == "" {
+			continue
+		}
+		ids = append(ids, comics[i].ID)
+		if comics[i].GID != "" {
+			gids = append(gids, comics[i].GID)
+		}
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	// 查找同 gid 的其他存活副本作为引用迁移目标
+	migrate := map[string]string{}
+	if len(gids) > 0 {
+		var others []models.OfflineComic
+		if err := db.Select("id, g_id").
+			Where("g_id IN ? AND id NOT IN ? AND file_missing = ?", gids, ids, false).
+			Find(&others).Error; err == nil {
+			byGID := make(map[string]string, len(others))
+			for _, o := range others {
+				if o.GID != "" && byGID[o.GID] == "" {
+					byGID[o.GID] = o.ID
+				}
+			}
+			for _, c := range comics {
+				if c.GID != "" {
+					if rep, ok := byGID[c.GID]; ok {
+						migrate[c.ID] = rep
+					}
+				}
+			}
+		}
+	}
+
+	deleted := 0
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("id IN ?", ids).Delete(&models.OfflineComic{})
+		if res.Error != nil {
+			return res.Error
+		}
+		deleted = int(res.RowsAffected)
+		CleanupComicReferencesBatch(tx, ids, migrate)
+		CleanupComicAuxiliaryBatch(tx, ids, migrate)
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	for _, id := range ids {
+		if err := InvalidateCoverCache(id); err != nil {
+			log.Printf("%s [reconcile] 清理封面缓存失败 comic=%s: %v", dlWarnTag, id, err)
+		}
+		_ = os.RemoveAll(filepath.Join(pageCacheDir, id))
+	}
+	MarkLibraryChanged()
+	InvalidateMaintainDedupResult(ids)
+	if triggerReason != "" {
+		XpRebuildAsync(triggerReason)
+	}
+	return deleted, nil
 }
 
 // pathExistsConservative 判定本地漫画路径是否仍存在。
@@ -581,7 +722,7 @@ func classifyRecoveryFailure(msg string) (string, bool) {
 }
 
 // recordRecoveryFallen 恢复任务确定性失败 → 写入阵亡名单（按 g_id upsert），
-// 并从恢复候选移除该条目（避免再次入队）。快照优先取候选表（自包含）。
+// 从恢复候选移除该条目，并彻底清理对应的已失效 offline_comics 记录及引用。
 func (m *DownloadManager) recordRecoveryFallen(task *models.DownloadTask, reason string) error {
 	if task == nil || task.GID == "" {
 		return errors.New("恢复任务缺少 g_id，无法记入阵亡")
@@ -595,7 +736,9 @@ func (m *DownloadManager) recordRecoveryFallen(task *models.DownloadTask, reason
 		Reason:    reason,
 	}
 	var cand models.RecoveryCandidate
+	hasCand := false
 	if err := m.db.First(&cand, "g_id = ?", task.GID).Error; err == nil {
+		hasCand = true
 		f.ComicID = cand.ComicID
 		f.Title = cand.Title
 		f.TitleJpn = cand.TitleJpn
@@ -615,7 +758,171 @@ func (m *DownloadManager) recordRecoveryFallen(task *models.DownloadTask, reason
 	}).Create(&f).Error; err != nil {
 		return err
 	}
-	return m.db.Where("g_id = ?", task.GID).Delete(&models.RecoveryCandidate{}).Error
+	if err := m.db.Where("g_id = ?", task.GID).Delete(&models.RecoveryCandidate{}).Error; err != nil {
+		return err
+	}
+
+	// 彻底删除失效的 offline_comics 记录及书架/历史/评分引用（仅在磁盘文件确实不存在时）
+	deadID := ""
+	if hasCand && cand.ComicID != "" {
+		deadID = cand.ComicID
+	} else if task.UpdateForComicID != "" {
+		deadID = task.UpdateForComicID
+	}
+	var dead models.OfflineComic
+	foundDead := false
+	if deadID != "" {
+		if err := m.db.First(&dead, "id = ?", deadID).Error; err == nil {
+			foundDead = true
+		}
+	}
+	if !foundDead {
+		if err := m.db.Where("g_id = ? AND file_missing = ?", task.GID, true).First(&dead).Error; err == nil {
+			foundDead = true
+		}
+	}
+	if foundDead && !pathExistsConservative(dead.LocalPath) {
+		if err := DeleteOfflineComic(m.db, dead.ID, false); err != nil && !errors.Is(err, ErrComicNotFound) {
+			log.Printf("%s [recovery] 清理阵亡死记录失败 comic=%s: %v", dlWarnTag, dead.ID, err)
+		} else {
+			InvalidateMaintainDedupResult([]string{dead.ID})
+		}
+	}
+	return nil
+}
+
+// RecoveryClearResult 清空恢复候选统计
+type RecoveryClearResult struct {
+	Converted int `json:"converted"`
+	Purged    int `json:"purged"`
+}
+
+// ClearRecoveryCandidates 清空全部恢复候选（Round55）：
+// 全部转为阵亡（reason=abandoned）并物理删除对应的失效 offline_comics 记录及引用。
+// 恢复任务进行中返回 ErrRecoveryInProgress。
+func ClearRecoveryCandidates(db *gorm.DB) (*RecoveryClearResult, error) {
+	if db == nil {
+		return nil, errors.New("清空候选失败：db 为空")
+	}
+	status, err := GetRecoveryStatus(db)
+	if err != nil {
+		return nil, err
+	}
+	if status.ActiveTasks > 0 {
+		return nil, ErrRecoveryInProgress
+	}
+
+	var cands []models.RecoveryCandidate
+	if err := db.Find(&cands).Error; err != nil {
+		return nil, err
+	}
+	if len(cands) == 0 {
+		return &RecoveryClearResult{}, nil
+	}
+
+	comicIDs := make([]string, 0, len(cands))
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		for _, c := range cands {
+			if c.ComicID != "" {
+				comicIDs = append(comicIDs, c.ComicID)
+			}
+			f := models.FallenComic{
+				DedupeKey:  "gid:" + c.GID,
+				GID:        c.GID,
+				ComicID:    c.ComicID,
+				Title:      c.Title,
+				TitleJpn:   c.TitleJpn,
+				CoverURL:   c.CoverURL,
+				Category:   c.Category,
+				FileSize:   c.FileSize,
+				PageCount:  c.PageCount,
+				Reason:     models.FallenReasonAbandoned,
+				SourcePath: c.LocalPath,
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "dedupe_key"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"g_id", "comic_id", "title", "title_jpn", "cover_url", "category",
+					"file_size", "page_count", "reason", "source_path", "updated_at",
+				}),
+			}).Create(&f).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("1 = 1").Delete(&models.RecoveryCandidate{}).Error
+	}); err != nil {
+		return nil, err
+	}
+
+	purged := 0
+	if len(comicIDs) > 0 {
+		var rows []models.OfflineComic
+		if err := db.Where("id IN ?", comicIDs).Find(&rows).Error; err == nil {
+			dead := make([]models.OfflineComic, 0, len(rows))
+			for _, r := range rows {
+				if !pathExistsConservative(r.LocalPath) {
+					dead = append(dead, r)
+				}
+			}
+			if len(dead) > 0 {
+				p, perr := purgeDeadOfflineComics(db, dead, "清空恢复候选")
+				if perr != nil {
+					log.Printf("%s [recovery] 清空候选后清理死记录失败: %v", dlWarnTag, perr)
+				} else {
+					purged = p
+				}
+			}
+		}
+	}
+
+	log.Printf("%s [recovery] 已清空恢复候选：转阵亡 %d 条，清理死记录 %d 条", dlLogTag, len(cands), purged)
+	return &RecoveryClearResult{Converted: len(cands), Purged: purged}, nil
+}
+
+// SyncRecoveryAndFallenOnStartup 启动期幂等同步存量候选与阵亡状态（Round55）：
+//   - 仍在 recovery_candidates 中的记录 → offline_comics.file_missing 置 true（软隐藏）
+//   - 已在 fallen_comics 中且磁盘文件确实缺失的记录 → 彻底删除 offline_comics 记录及引用
+func SyncRecoveryAndFallenOnStartup(db *gorm.DB) (hidden int, purged int) {
+	if db == nil {
+		return 0, 0
+	}
+
+	// 1. 软隐藏存量候选对应的 offline_comics
+	res := db.Model(&models.OfflineComic{}).
+		Where("file_missing = ? AND id IN (SELECT comic_id FROM recovery_candidates WHERE comic_id <> '')", false).
+		Update("file_missing", true)
+	if res.Error != nil {
+		log.Printf("%s [startup] 同步候选隐藏标记失败: %v", dlWarnTag, res.Error)
+	} else {
+		hidden = int(res.RowsAffected)
+	}
+
+	// 2. 彻底清理存量阵亡仍残留的 offline_comics 死记录（二次 Stat 确认文件确实不存在）
+	var fallenRows []models.OfflineComic
+	if err := db.Where("id IN (SELECT comic_id FROM fallen_comics WHERE comic_id <> '')").Find(&fallenRows).Error; err != nil {
+		log.Printf("%s [startup] 查询阵亡残留记录失败: %v", dlWarnTag, err)
+	} else if len(fallenRows) > 0 {
+		dead := make([]models.OfflineComic, 0, len(fallenRows))
+		for _, r := range fallenRows {
+			if !pathExistsConservative(r.LocalPath) {
+				dead = append(dead, r)
+			}
+		}
+		if len(dead) > 0 {
+			p, perr := purgeDeadOfflineComics(db, dead, "启动清理阵亡记录")
+			if perr != nil {
+				log.Printf("%s [startup] 清理阵亡残留失败: %v", dlWarnTag, perr)
+			} else {
+				purged = p
+			}
+		}
+	}
+
+	if hidden > 0 && purged == 0 {
+		MarkLibraryChanged()
+		XpRebuildAsync("启动同步失效状态")
+	}
+	return hidden, purged
 }
 
 // cleanupRecoveryArtifacts 恢复完成后清理候选与阵亡条目（按 g_id）

@@ -490,7 +490,7 @@ func (h *OnlineComicHandler) GetOnlineComicDetail(c *gin.Context) {
 	preferLocal := c.Query("preferLocal") == "1" || c.Query("preferLocal") == "true"
 	if preferLocal && detail != nil {
 		var local models.OfflineComic
-		if err := h.db.Where("g_id = ?", gid).First(&local).Error; err == nil {
+		if err := h.db.Where("g_id = ? AND file_missing = ?", gid, false).First(&local).Error; err == nil {
 			detail.Local = &services.GalleryLocalInfo{
 				ComicID:     local.ID,
 				PageCount:   local.PageCount,

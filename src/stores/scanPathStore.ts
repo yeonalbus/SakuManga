@@ -281,7 +281,7 @@ export interface FallenComic {
   category?: string
   fileSize?: number
   pageCount?: number
-  reason: 'removed' | 'unlock-failed' | 'no-ehentai' | 'path-removed'
+  reason: 'removed' | 'unlock-failed' | 'no-ehentai' | 'path-removed' | 'abandoned'
   sourcePath?: string
   dismissed: boolean
   dismissedAt?: string
@@ -348,6 +348,33 @@ export const reclassifyRecovery = async (): Promise<{
     '/offline/recovery/reclassify',
     { method: 'POST' },
   )
+}
+
+/** Round55：清空全部恢复候选（全部转入阵亡 abandoned 并清理对应的失效记录） */
+export const clearRecoveryCandidates = async (): Promise<{
+  converted: number
+  purged: number
+}> => {
+  return await http<{ converted: number; purged: number }>('/offline/recovery/clear-candidates', {
+    method: 'POST',
+  })
+}
+
+/** Round55：默认下载目录失效检测与清理结果 */
+export interface DefaultReconcileResult {
+  Total: number
+  Missing: number
+  Candidates: number
+  Fallen: number
+  Healed: number
+  PathMissing: boolean
+}
+
+/** Round55：默认下载目录（scan_path_id 为空）失效检测与清理 */
+export const reconcileDefaultDownloadDir = async (): Promise<DefaultReconcileResult> => {
+  return await http<DefaultReconcileResult>('/offline/recovery/reconcile-default', {
+    method: 'POST',
+  })
 }
 
 /** 阵亡条目 x toggle（划线与撤销划线） */

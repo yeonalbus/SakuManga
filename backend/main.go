@@ -85,6 +85,11 @@ func main() {
 		log.Printf("[DB] 已回填 %d 条书签的新字段（Round49）", n)
 	}
 
+	// 1.4 Round55：启动期幂等同步存量恢复候选（软隐藏）与阵亡死记录（彻底清理）
+	if hidden, purged := services.SyncRecoveryAndFallenOnStartup(database.DB); hidden > 0 || purged > 0 {
+		log.Printf("[DB] 启动同步失效状态：隐藏恢复候选 %d 条，清理阵亡死记录 %d 条", hidden, purged)
+	}
+
 	// 2. 启动时加载 config.json 中的代理配置
 	services.InitProxyConfig()
 

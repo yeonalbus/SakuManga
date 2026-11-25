@@ -62,7 +62,7 @@ func checkUpdatesWithProgress(db *gorm.DB, ehService *EHService, onProgress Offl
 	ehSetting := loadEHSetting(db, LoadAdminUserID(db))
 
 	var comics []models.OfflineComic
-	if err := db.Where("g_id != ''").Order("updated_at desc").Find(&comics).Error; err != nil {
+	if err := db.Where("g_id != '' AND file_missing = ?", false).Order("updated_at desc").Find(&comics).Error; err != nil {
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}
 	// 问题4：按「离线维护」开关过滤——已关闭的额外路径下的漫画不参与更新检测
@@ -296,8 +296,8 @@ func ageCheckWithProgress(db *gorm.DB, ehService *EHService, onProgress OfflineP
 	cutoff := time.Now().AddDate(0, 0, -365)
 
 	var comics []models.OfflineComic
-	if err := db.Where("g_id != '' AND aged_status = ? AND aged_checked_at = ? AND published_at < ?",
-		false, 0, cutoff).Order("published_at asc").Find(&comics).Error; err != nil {
+	if err := db.Where("g_id != '' AND aged_status = ? AND aged_checked_at = ? AND published_at < ? AND file_missing = ?",
+		false, 0, cutoff, false).Order("published_at asc").Find(&comics).Error; err != nil {
 		return nil, fmt.Errorf("读取老化候选漫画失败: %v", err)
 	}
 	// 与常规更新检测一致：已关闭离线维护的额外路径漫画不参与
@@ -857,7 +857,7 @@ func maintainDedupWithProgress(db *gorm.DB, ehService *EHService, onProgress Off
 	}
 
 	var comics []models.OfflineComic
-	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
+	if err := db.Where("source = ? AND file_missing = ?", models.SourceOffline, false).Order("updated_at desc").Find(&comics).Error; err != nil {
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}
 	// 问题4：按「离线维护」开关过滤——已关闭的额外路径下的漫画不参与查重

@@ -16,6 +16,7 @@ const (
 	FallenReasonUnlockFail  = "unlock-failed" // 密码压缩包无法解锁
 	FallenReasonNoEhentai   = "no-ehentai"    // 非 E 站来源（无 g_id/token，无法重下）
 	FallenReasonPathRemoved = "path-removed"  // 扫描路径被移除，未恢复候选转写
+	FallenReasonAbandoned   = "abandoned"     // 用户手动清空候选，放弃恢复
 )
 
 // RecoveryCandidate 恢复候选（全量扫描失效对账的产物，自包含）。

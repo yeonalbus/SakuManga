@@ -370,7 +370,7 @@ func AttachDownloadStates(db *gorm.DB, comics []OnlineComicDTO) []OnlineComicDTO
 
 	var rows []models.OfflineComic
 	// 同 GID 存在多条本地记录（重复扫描/替换残留）时按 ID 升序取首条，保证跳转目标稳定
-	db.Select("id, g_id").Where("g_id IN ?", gids).Order("id ASC").Find(&rows)
+	db.Select("id, g_id").Where("g_id IN ? AND file_missing = ?", gids, false).Order("id ASC").Find(&rows)
 
 	// gid → 本地漫画 ID（同 gid 只保留首条，与上方排序配合）
 	localIDs := make(map[string]string, len(rows))
@@ -420,7 +420,7 @@ func AttachDetailDownloadState(db *gorm.DB, detail *GalleryDetailResult) *Galler
 	var local models.OfflineComic
 	// 同 GID 多条时按 ID 升序取首条，保证前端跳转目标稳定；
 	// 用 Find + Limit 而非 First：无本地记录属正常情况，不应产生 record not found 日志噪音
-	db.Select("id").Where("g_id = ?", detail.ID).Order("id ASC").Limit(1).Find(&local)
+	db.Select("id").Where("g_id = ? AND file_missing = ?", detail.ID, false).Order("id ASC").Limit(1).Find(&local)
 	if local.ID != "" {
 		detail.IsDownloaded = true
 		detail.LocalID = local.ID

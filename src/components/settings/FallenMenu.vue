@@ -30,7 +30,7 @@ const groups = computed(() => {
   const others = props.items.filter((f) => f.reason !== 'removed')
   return [
     { key: 'removed', label: 'EH 版权 / 下架', items: sortGroup(removed) },
-    { key: 'others', label: '无法恢复（解锁失败 / 非 E 站 / 路径已移除）', items: sortGroup(others) },
+    { key: 'others', label: '无法恢复（已放弃 / 解锁失败 / 非 E 站 / 路径已移除）', items: sortGroup(others) },
   ].filter((g) => g.items.length > 0)
 })
 </script>

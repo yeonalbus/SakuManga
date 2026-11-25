@@ -437,8 +437,8 @@ func TestGetBookshelvesUnreadAndCover(t *testing.T) {
 	}
 
 	aShelf := resp.Bookshelves[byName["A"]]
-	if aShelf.Count != 4 {
-		t.Fatalf("count 应为架内 id 数 4: %d", aShelf.Count)
+	if aShelf.Count != 3 {
+		t.Fatalf("count 应为架内有效本数 3（ghost 不计）: %d", aShelf.Count)
 	}
 	// c2、c3 未读；c1 已读；ghost 失效不计
 	if aShelf.UnreadCount != 2 {

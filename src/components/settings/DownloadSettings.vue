@@ -44,6 +44,18 @@
       <span class="arrow-icon"><AppIcon name="arrowRight" :size="18" /></span>
     </div>
 
+    <div class="setting-item clickable" @click="handleReconcileDefaultDir">
+      <div class="item-info">
+        <div class="item-title">
+          {{ reconcilingDefault ? '正在检测默认下载目录…' : '默认下载目录失效检测与清理' }}
+        </div>
+        <div class="item-subtext">
+          扫描通过下载导入的本地本子：已阵亡记录直接清理，可恢复本子入候选并自动隐藏
+        </div>
+      </div>
+      <span class="arrow-icon"><AppIcon name="refresh" :size="18" /></span>
+    </div>
+
     <div class="setting-item clickable" @click="handleResetDownloadPaths">
       <div class="item-info">
         <div class="item-title">重置下载路径</div>
@@ -251,6 +263,13 @@ import {
   resetDownloadSettings,
   DEFAULT_DOWNLOAD_SCHEME_OPTIONS,
 } from '@/stores/downloadSettings'
+import {
+  reconcileDefaultDownloadDir,
+  fetchRecoveryStatus,
+  fetchFallen,
+} from '@/stores/scanPathStore'
+import { fetchOfflineComics } from '@/stores/comicStore'
+import { refreshBookshelves } from '@/stores/bookshelfStore'
 
 const { toast, modal } = useUI()
 
@@ -262,6 +281,34 @@ const usingDefaultPaths = computed(() => isUsingDefaultDownloadPaths())
 
 const handleExtraScanPaths = () => {
   showExtraScanPaths.value = true
+}
+
+// Round55：默认下载目录（scan_path_id 为空）失效检测与清理
+const reconcilingDefault = ref(false)
+const handleReconcileDefaultDir = async () => {
+  if (reconcilingDefault.value) return
+  const confirmed = await modal.confirm(
+    '检测默认下载目录中已被手动删除的本地本子？\n无法恢复的将直接清理记录与引用，可恢复的将移入恢复候选并从列表隐藏。',
+    '默认下载目录失效检测',
+  )
+  if (!confirmed) return
+  reconcilingDefault.value = true
+  try {
+    const res = await reconcileDefaultDownloadDir()
+    toast.success(
+      `共检查 ${res.Total} 本，失效 ${res.Missing} 本（候选 ${res.Candidates} / 阵亡清理 ${res.Fallen} / 自愈 ${res.Healed}）`,
+    )
+    await Promise.all([
+      fetchOfflineComics(),
+      refreshBookshelves(),
+      fetchRecoveryStatus(),
+      fetchFallen(),
+    ])
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '默认下载目录检测失败')
+  } finally {
+    reconcilingDefault.value = false
+  }
 }
 
 // ── 下载路径：点击弹出输入框修改，写入 store 后自动同步到后端 ──

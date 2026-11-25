@@ -85,7 +85,7 @@ func GetOfflineComics(c *gin.Context) {
 	if strings.ToLower(sortOrder) == "asc" {
 		dir = "ASC"
 	}
-	q := database.DB
+	q := database.DB.Where("file_missing = ?", false)
 	// NULL 时间排最后（旧数据无 added_at/published_at/file_modified_at）
 	if col == "added_at" || col == "published_at" || col == "file_modified_at" {
 		q = q.Order(col + " IS NULL")

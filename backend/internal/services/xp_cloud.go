@@ -625,7 +625,7 @@ func (s *XpCloudService) rebuild(force bool) error {
 		return err
 	}
 	var comics []models.OfflineComic
-	if err := s.db.Find(&comics).Error; err != nil {
+	if err := s.db.Where("file_missing = ?", false).Find(&comics).Error; err != nil {
 		return err
 	}
 
@@ -884,7 +884,7 @@ func (s *XpCloudService) meta(userID uint) (XpCloudMeta, error) {
 	out := XpCloudMeta{FormulaVersion: XpFormulaVersion}
 
 	var total, tagged, readSignal int64
-	if err := s.db.Model(&models.OfflineComic{}).Count(&total).Error; err != nil {
+	if err := s.db.Model(&models.OfflineComic{}).Where("file_missing = ?", false).Count(&total).Error; err != nil {
 		return out, err
 	}
 	if err := s.db.Model(&models.XpComicStat{}).Where("user_id = ?", userID).Count(&tagged).Error; err != nil {

@@ -430,7 +430,7 @@ func loadDedupCandidates(db *gorm.DB) ([]models.OfflineComic, error) {
 		return nil, nil
 	}
 	var comics []models.OfflineComic
-	if err := db.Where("source = ?", models.SourceOffline).Order("updated_at desc").Find(&comics).Error; err != nil {
+	if err := db.Where("source = ? AND file_missing = ?", models.SourceOffline, false).Order("updated_at desc").Find(&comics).Error; err != nil {
 		return nil, fmt.Errorf("读取离线漫画失败: %v", err)
 	}
 	return filterOfflineLocalCandidates(db, comics), nil

@@ -154,6 +154,19 @@
               >
                 恢复
               </button>
+              <!-- Round55：清空候选（全部转入阵亡并清理失效记录） -->
+              <button
+                class="btn btn-mode danger-outline"
+                :disabled="!canRecover || recoveryBusy"
+                :title="
+                  canRecover
+                    ? `清空 ${recoveryStatus.candidateCount} 个恢复候选（转阵亡并删除失效记录）`
+                    : '暂无可清空的恢复候选'
+                "
+                @click="handleClearCandidates"
+              >
+                清空候选
+              </button>
               <!-- Round54：阵亡（移除路径左侧），全局阵亡名单非空时可点击 -->
               <button
                 class="btn btn-mode fallen"
@@ -308,12 +321,14 @@ import {
   cancelRecovery,
   dismissFallen,
   reclassifyRecovery,
+  clearRecoveryCandidates,
   type ExtraScanPath,
   type ScanProgress,
   type ScanMode,
   type RecoveryScheme,
 } from '@/stores/scanPathStore'
 import { fetchOfflineComics } from '@/stores/comicStore'
+import { refreshBookshelves } from '@/stores/bookshelfStore'
 import { useUI } from '@/composables/useUI'
 
 const { toast, modal } = useUI()
@@ -441,9 +456,41 @@ const handleReclassifyFallen = async () => {
     toast.success(
       `已转入阵亡 ${res.fallen} 条${res.left ? `，保留 ${res.left} 条可重试任务` : ''}`,
     )
-    await Promise.all([fetchFallen(), fetchRecoveryStatus()])
+    await Promise.all([
+      fetchFallen(),
+      fetchRecoveryStatus(),
+      fetchOfflineComics(),
+      refreshBookshelves(),
+    ])
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '操作失败')
+  }
+}
+
+// Round55：清空恢复候选（全部转入阵亡 abandoned 并彻底删除对应失效记录与引用）
+const handleClearCandidates = async () => {
+  if (!canRecover.value || recoveryBusy.value) return
+  const count = recoveryStatus.value.candidateCount
+  const confirmed = await modal.confirm(
+    `确定清空全部 ${count} 个恢复候选吗？\n这些本子将转入「阵亡名单（已放弃恢复）」，同时永久删除它们的本地记录及书架/历史/评分引用，之后不可再恢复。`,
+    '清空恢复候选',
+    { tone: 'danger', confirmText: '确认清空' },
+  )
+  if (!confirmed) return
+  recoveryBusy.value = true
+  try {
+    const res = await clearRecoveryCandidates()
+    toast.success(`已清空 ${res.converted} 个候选并清理 ${res.purged} 条失效记录`)
+    await Promise.all([
+      fetchRecoveryStatus(),
+      fetchFallen(),
+      fetchOfflineComics(),
+      refreshBookshelves(),
+    ])
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '清空候选失败')
+  } finally {
+    recoveryBusy.value = false
   }
 }
 
@@ -472,6 +519,8 @@ watch(
           // Round54：全量扫描含失效对账 → 刷新恢复状态（候选/锁路径）+ 阵亡名单（对账会写入阵亡条目）
           void fetchRecoveryStatus()
           void fetchFallen()
+          void fetchOfflineComics()
+          void refreshBookshelves()
           // 完成后展示几秒，再收起进度提示区
           setTimeout(() => {
             if (getScanProgress(id)?.done) clearScanProgress(id)

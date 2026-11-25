@@ -140,6 +140,7 @@ func ListUpgradeCandidates(db *gorm.DB) ([]UpgradeCandidate, error) {
 		Where("(scan_path_id = '' OR scan_path_id IS NULL)").
 		Where("g_id != '' AND token != ''").
 		Where("removed_status = ?", false).
+		Where("file_missing = ?", false).
 		Order("updated_at desc").
 		Find(&comics).Error; err != nil {
 		return nil, err

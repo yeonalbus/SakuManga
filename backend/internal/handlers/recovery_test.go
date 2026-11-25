@@ -52,6 +52,8 @@ func recoveryRouter(h *RecoveryHandler) *gin.Engine {
 	r.GET("/recovery/candidates", adminMW, h.ListCandidates)
 	r.POST("/recovery/start", adminMW, h.StartRecovery)
 	r.POST("/recovery/cancel", adminMW, h.CancelRecovery)
+	r.POST("/recovery/clear-candidates", adminMW, h.ClearCandidates)
+	r.POST("/recovery/reconcile-default", adminMW, h.ReconcileDefault)
 	return r
 }
 
@@ -187,5 +189,84 @@ func TestFallenListAndDismissContract(t *testing.T) {
 	db.First(&f, "dedupe_key = ?", "gid:100")
 	if !f.Dismissed {
 		t.Fatalf("dismissed 应置 true")
+	}
+}
+
+func TestClearCandidatesAndReconcileDefaultEndpoints(t *testing.T) {
+	db, h := newRecoveryHandlerTestDB(t)
+	db.AutoMigrate(&models.Bookshelf{}, &models.HistoryRecord{}, &models.ReadingList{},
+		&models.ComicRating{}, &models.ComicBookmark{}, &models.ComicChapter{})
+	r := recoveryRouter(h)
+
+	// 恢复中调用 clear-candidates → 409
+	db.Create(&models.RecoveryCandidate{GID: "700", Token: "t", Title: "c700", ComicID: "c700"})
+	db.Create(&models.DownloadTask{ID: "t700", GID: "700", Group: services.RecoveryGroup, Status: models.DownloadPaused})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/recovery/clear-candidates", nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("恢复中清空候选应 409，得到 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 取消任务后清空候选 → 200
+	db.Where("id = ?", "t700").Delete(&models.DownloadTask{})
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/recovery/clear-candidates", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("清空候选应 200，得到 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 默认目录对账接口 → 200
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/recovery/reconcile-default", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("默认目录对账应 200，得到 %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestFileMissingFilteredInBookshelfAndHistory(t *testing.T) {
+	db, h := newLibraryTestDB(t)
+	db.AutoMigrate(&models.HistoryRecord{}, &models.ServerSetting{})
+	db.Create(&models.OfflineComic{ID: "alive", Title: "alive", LocalPath: "p1", CoverURL: "/c/alive"})
+	db.Create(&models.OfflineComic{ID: "hidden", Title: "hidden", LocalPath: "p2", CoverURL: "/c/hidden", FileMissing: true})
+	seedShelf(t, db, 1, "S1", []string{"hidden", "alive"})
+	db.Create(&models.HistoryRecord{UserID: 1, ComicID: "alive", Source: models.SourceOffline, ComicTitle: "alive"})
+	db.Create(&models.HistoryRecord{UserID: 1, ComicID: "hidden", Source: models.SourceOffline, ComicTitle: "hidden"})
+
+	r := gin.New()
+	r.GET("/bookshelves", authAs(db, 1), h.GetBookshelves)
+	r.GET("/history", authAs(db, 1), h.GetHistory)
+
+	// 书架 count=1、unread=1、coverUrl 回退到 alive，且 comicIds 保留冻结的 hidden
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/bookshelves", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("书架查询失败: %d", w.Code)
+	}
+	var shelfResp struct {
+		Bookshelves []struct {
+			Count       int      `json:"count"`
+			UnreadCount int      `json:"unreadCount"`
+			CoverURL    string   `json:"coverUrl"`
+			ComicIDs    []string `json:"comicIds"`
+		} `json:"bookshelves"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &shelfResp)
+	s := shelfResp.Bookshelves[0]
+	if s.Count != 1 || s.UnreadCount != 1 || s.CoverURL != "/c/alive" || len(s.ComicIDs) != 2 {
+		t.Fatalf("书架应隐藏 file_missing=true 但保留冻结 ID，实际 %+v", s)
+	}
+
+	// 离线历史应排除 file_missing=true
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/history?source=offline", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("历史查询失败: %d", w.Code)
+	}
+	var histResp struct {
+		Items []models.HistoryRecord `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &histResp)
+	if len(histResp.Items) != 1 || histResp.Items[0].ComicID != "alive" {
+		t.Fatalf("离线历史应过滤 file_missing=true，实际 %+v", histResp.Items)
 	}
 }

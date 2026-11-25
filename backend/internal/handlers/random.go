@@ -146,7 +146,7 @@ type offlineFilter struct {
 
 // buildOfflineQuery 按硬约束构造离线候选查询（不含排序与分页）
 func buildOfflineQuery(db *gorm.DB, f offlineFilter) *gorm.DB {
-	q := db.Model(&models.OfflineComic{})
+	q := db.Model(&models.OfflineComic{}).Where("file_missing = ?", false)
 
 	if kw := strings.TrimSpace(f.keyword); kw != "" {
 		like := "%" + services.EscapeLike(kw) + "%"

@@ -39,7 +39,9 @@ func newRecoveryTestDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(&models.OfflineComic{}, &models.ExtraScanPath{},
 		&models.RecoveryCandidate{}, &models.FallenComic{},
-		&models.DownloadSetting{}, &models.DownloadTask{}); err != nil {
+		&models.DownloadSetting{}, &models.DownloadTask{},
+		&models.Bookshelf{}, &models.HistoryRecord{}, &models.ReadingList{},
+		&models.ComicRating{}, &models.ComicBookmark{}, &models.ComicChapter{}); err != nil {
 		t.Fatalf("迁移模型失败: %v", err)
 	}
 	return db
@@ -771,5 +773,224 @@ func TestReconcileSkipsFallenGID(t *testing.T) {
 	var f models.FallenComic
 	if err := db.First(&f, "dedupe_key = ?", "gid:600").Error; err != nil {
 		t.Fatalf("阵亡条目应保留: %v", err)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// Round55：双轨失效生命周期测试
+// ─────────────────────────────────────────────────────────────
+
+// TestRound55DualTrackReconcileAndHeal 验证双轨对账：
+//   - 可恢复缺失 → file_missing=true 且保留书架/历史引用
+//   - 阵亡缺失 → 从 offline_comics 彻底删除并清理书架/历史引用
+//   - 文件恢复后自愈 → file_missing 恢复为 false
+func TestRound55DualTrackReconcileAndHeal(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	root := t.TempDir()
+	recDir := filepath.Join(root, "rec-gone")
+	deadDir := filepath.Join(root, "dead-gone")
+
+	db.Create(&models.OfflineComic{ID: "rec1", GID: "1001", Token: "t1", Title: "rec", LocalPath: recDir, ScanPathID: "p1"})
+	db.Create(&models.OfflineComic{ID: "dead1", GID: "1002", Token: "t2", Title: "dead", LocalPath: deadDir, ScanPathID: "p1", RemovedStatus: true})
+	db.Create(&models.Bookshelf{ID: "s1", UserID: 1, Name: "shelf", ComicIDs: `["rec1","dead1"]`, Count: 2})
+	db.Create(&models.HistoryRecord{UserID: 1, ComicID: "rec1", GID: "1001", Source: models.SourceOffline, ComicTitle: "rec"})
+	db.Create(&models.HistoryRecord{UserID: 1, ComicID: "dead1", GID: "1002", Source: models.SourceOffline, ComicTitle: "dead"})
+
+	res, err := ReconcileScanPathAgainstDisk(db, "p1", root, nil)
+	if err != nil {
+		t.Fatalf("对账失败: %v", err)
+	}
+	if res.Candidates != 1 || res.Fallen != 1 {
+		t.Fatalf("统计不符: %+v", res)
+	}
+
+	// 可恢复记录保留但 file_missing=true
+	var rec models.OfflineComic
+	if err := db.First(&rec, "id = ?", "rec1").Error; err != nil {
+		t.Fatalf("可恢复记录应保留: %v", err)
+	}
+	if !rec.FileMissing {
+		t.Fatalf("可恢复记录应置 file_missing=true")
+	}
+
+	// 阵亡记录应被物理删除
+	var deadCount int64
+	db.Model(&models.OfflineComic{}).Where("id = ?", "dead1").Count(&deadCount)
+	if deadCount != 0 {
+		t.Fatalf("阵亡记录应被物理删除，实际 %d", deadCount)
+	}
+
+	// 书架与历史：保留 rec1，剔除 dead1
+	var shelf models.Bookshelf
+	db.First(&shelf, "id = ?", "s1")
+	if shelf.ComicIDs != `["rec1"]` {
+		t.Fatalf("书架应保留 rec1 剔除 dead1，实际 %s", shelf.ComicIDs)
+	}
+	var histCount int64
+	db.Model(&models.HistoryRecord{}).Where("comic_id = ?", "rec1").Count(&histCount)
+	if histCount != 1 {
+		t.Fatalf("rec1 历史应保留")
+	}
+	db.Model(&models.HistoryRecord{}).Where("comic_id = ?", "dead1").Count(&histCount)
+	if histCount != 0 {
+		t.Fatalf("dead1 历史应被清理")
+	}
+
+	// 文件重新存在 → 自愈恢复 file_missing=false
+	if err := os.MkdirAll(recDir, 0o755); err != nil {
+		t.Fatalf("创建自愈目录失败: %v", err)
+	}
+	res2, err := ReconcileScanPathAgainstDisk(db, "p1", root, nil)
+	if err != nil {
+		t.Fatalf("自愈对账失败: %v", err)
+	}
+	if res2.Healed != 1 {
+		t.Fatalf("应自愈 1 条，实际 %d", res2.Healed)
+	}
+	db.First(&rec, "id = ?", "rec1")
+	if rec.FileMissing {
+		t.Fatalf("自愈后 file_missing 应恢复为 false")
+	}
+}
+
+// TestRound55RecordRecoveryFallenPurgesDeadComic 恢复确定性失败记入阵亡时同步删死记录
+func TestRound55RecordRecoveryFallenPurgesDeadComic(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	mgr := NewDownloadManager(db, nil)
+	gone := filepath.Join(t.TempDir(), "gone-2001")
+
+	db.Create(&models.OfflineComic{ID: "c2001", GID: "2001", Token: "t", Title: "gone", LocalPath: gone, FileMissing: true})
+	db.Create(&models.RecoveryCandidate{GID: "2001", Token: "t", Title: "gone", ComicID: "c2001", LocalPath: gone})
+	db.Create(&models.Bookshelf{ID: "s1", UserID: 1, Name: "shelf", ComicIDs: `["c2001"]`, Count: 1})
+
+	task := &models.DownloadTask{ID: "t2001", GID: "2001", Token: "t", Title: "gone", Group: RecoveryGroup, UpdateForComicID: "c2001"}
+	if err := mgr.recordRecoveryFallen(task, models.FallenReasonRemoved); err != nil {
+		t.Fatalf("recordRecoveryFallen 失败: %v", err)
+	}
+
+	var count int64
+	db.Model(&models.OfflineComic{}).Where("id = ?", "c2001").Count(&count)
+	if count != 0 {
+		t.Fatalf("阵亡后死记录应被删除，实际 %d", count)
+	}
+	var shelf models.Bookshelf
+	db.First(&shelf, "id = ?", "s1")
+	if shelf.ComicIDs != "[]" {
+		t.Fatalf("死记录书架引用应被清理，实际 %s", shelf.ComicIDs)
+	}
+}
+
+// TestRound55ClearRecoveryCandidates 清空候选转阵亡并删死记录；恢复中返回 409 错误
+func TestRound55ClearRecoveryCandidates(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	gone := filepath.Join(t.TempDir(), "gone-3001")
+
+	db.Create(&models.OfflineComic{ID: "c3001", GID: "3001", Token: "t", Title: "ab", LocalPath: gone, FileMissing: true})
+	db.Create(&models.RecoveryCandidate{GID: "3001", Token: "t", Title: "ab", ComicID: "c3001", LocalPath: gone})
+
+	// 恢复中拒绝清空
+	db.Create(&models.DownloadTask{ID: "tk1", GID: "3001", Group: RecoveryGroup, Status: models.DownloadPaused})
+	if _, err := ClearRecoveryCandidates(db); !errors.Is(err, ErrRecoveryInProgress) {
+		t.Fatalf("恢复中应返回 ErrRecoveryInProgress，实际 %v", err)
+	}
+	db.Where("id = ?", "tk1").Delete(&models.DownloadTask{})
+
+	res, err := ClearRecoveryCandidates(db)
+	if err != nil {
+		t.Fatalf("ClearRecoveryCandidates 失败: %v", err)
+	}
+	if res.Converted != 1 || res.Purged != 1 {
+		t.Fatalf("统计异常: %+v", res)
+	}
+	var candCount, comicCount int64
+	db.Model(&models.RecoveryCandidate{}).Count(&candCount)
+	db.Model(&models.OfflineComic{}).Count(&comicCount)
+	if candCount != 0 || comicCount != 0 {
+		t.Fatalf("候选与死记录应均清零，实际 cand=%d comic=%d", candCount, comicCount)
+	}
+	var f models.FallenComic
+	if err := db.First(&f, "dedupe_key = ?", "gid:3001").Error; err != nil || f.Reason != models.FallenReasonAbandoned {
+		t.Fatalf("应写入 abandoned 阵亡记录: err=%v reason=%q", err, f.Reason)
+	}
+}
+
+// TestRound55ReconcileDefaultDownloadComics 默认下载目录（scan_path_id=''）失效对账
+func TestRound55ReconcileDefaultDownloadComics(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	root := t.TempDir()
+	alive := filepath.Join(root, "alive")
+	if err := os.MkdirAll(alive, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	db.Create(&models.OfflineComic{ID: "d1", GID: "4001", Token: "t1", Title: "ok", LocalPath: alive, ScanPathID: ""})
+	db.Create(&models.OfflineComic{ID: "d2", GID: "4002", Token: "t2", Title: "miss", LocalPath: filepath.Join(root, "gone"), ScanPathID: ""})
+	db.Create(&models.OfflineComic{ID: "d3", GID: "4003", Token: "t3", Title: "extra", LocalPath: filepath.Join(root, "extra-gone"), ScanPathID: "p-other"})
+
+	res, err := ReconcileDefaultDownloadComics(db, root)
+	if err != nil {
+		t.Fatalf("默认目录对账失败: %v", err)
+	}
+	if res.Total != 2 || res.Missing != 1 || res.Candidates != 1 {
+		t.Fatalf("应仅检查 scan_path_id='' 的 2 条记录，实际 %+v", res)
+	}
+	var extra models.OfflineComic
+	db.First(&extra, "id = ?", "d3")
+	if extra.FileMissing {
+		t.Fatalf("其他扫描路径记录不应被默认目录对账修改")
+	}
+}
+
+// TestRound55SyncRecoveryAndFallenOnStartup 启动同步幂等隐藏候选并清理阵亡死记录
+func TestRound55SyncRecoveryAndFallenOnStartup(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	root := t.TempDir()
+	aliveDir := filepath.Join(root, "still-here")
+	if err := os.MkdirAll(aliveDir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	db.Create(&models.OfflineComic{ID: "cand1", GID: "5001", Token: "t", Title: "c", LocalPath: filepath.Join(root, "g1")})
+	db.Create(&models.RecoveryCandidate{GID: "5001", Token: "t", Title: "c", ComicID: "cand1"})
+
+	db.Create(&models.OfflineComic{ID: "dead1", GID: "5002", Token: "t", Title: "d", LocalPath: filepath.Join(root, "g2")})
+	db.Create(&models.FallenComic{DedupeKey: "gid:5002", GID: "5002", ComicID: "dead1", Title: "d"})
+
+	// 磁盘文件实际存在时不得误删
+	db.Create(&models.OfflineComic{ID: "alive1", GID: "5003", Token: "t", Title: "a", LocalPath: aliveDir})
+	db.Create(&models.FallenComic{DedupeKey: "gid:5003", GID: "5003", ComicID: "alive1", Title: "a"})
+
+	hidden, purged := SyncRecoveryAndFallenOnStartup(db)
+	if hidden != 1 || purged != 1 {
+		t.Fatalf("启动同步应 hidden=1 purged=1，实际 hidden=%d purged=%d", hidden, purged)
+	}
+	// 再次执行应幂等
+	hidden2, purged2 := SyncRecoveryAndFallenOnStartup(db)
+	if hidden2 != 0 || purged2 != 0 {
+		t.Fatalf("二次启动同步应幂等为 0/0，实际 %d/%d", hidden2, purged2)
+	}
+	var aliveCount int64
+	db.Model(&models.OfflineComic{}).Where("id = ?", "alive1").Count(&aliveCount)
+	if aliveCount != 1 {
+		t.Fatalf("磁盘仍存在的记录不得被误删")
+	}
+}
+
+// TestRound55FilterFileMissingQueries 验证在线已下载/替换查找排除 file_missing=true
+func TestRound55FilterFileMissingQueries(t *testing.T) {
+	db := newRecoveryTestDB(t)
+	db.Create(&models.OfflineComic{ID: "m1", GID: "6001", Token: "t", Title: "missing", LocalPath: "Z:/g/6001", FileMissing: true})
+	db.Create(&models.OfflineComic{ID: "a1", GID: "6002", Token: "t", Title: "alive", LocalPath: "Z:/g/6002", FileMissing: false})
+
+	dtos := AttachDownloadStates(db, []OnlineComicDTO{{ID: "6001"}, {ID: "6002"}})
+	if dtos[0].IsDownloaded || !dtos[1].IsDownloaded {
+		t.Fatalf("AttachDownloadStates 应忽略 file_missing=true: %+v", dtos)
+	}
+	detail := AttachDetailDownloadState(db, &GalleryDetailResult{ID: "6001"})
+	if detail.IsDownloaded {
+		t.Fatalf("AttachDetailDownloadState 应忽略 file_missing=true")
+	}
+	if rep := FindReplacementByGID(db, "6001", "other"); rep != "" {
+		t.Fatalf("FindReplacementByGID 不应返回 file_missing=true 的记录: %q", rep)
 	}
 }

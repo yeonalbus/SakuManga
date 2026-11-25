@@ -128,6 +128,45 @@ func (h *RecoveryHandler) ReclassifyRecovery(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ClearCandidates 清空全部恢复候选 POST /api/v1/offline/recovery/clear-candidates
+// 全部转为阵亡（reason=abandoned）并物理删除对应的失效 offline_comics 记录及引用。
+func (h *RecoveryHandler) ClearCandidates(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	res, err := services.ClearRecoveryCandidates(h.db)
+	if err != nil {
+		if errors.Is(err, services.ErrRecoveryInProgress) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// ReconcileDefault 默认下载目录失效检测与清理 POST /api/v1/offline/recovery/reconcile-default
+func (h *RecoveryHandler) ReconcileDefault(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	extractPath := ""
+	if h.manager != nil {
+		extractPath = h.manager.GetSettings().ExtractPath
+	}
+	res, err := services.ReconcileDefaultDownloadComics(h.db, extractPath)
+	if err != nil {
+		if errors.Is(err, services.ErrRecoveryInProgress) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // GetFallen 阵亡名单 GET /api/v1/offline/fallen?page=&size=
 // 排序：未 dismissed 在前（创建时间升序），dismissed 划线置底（dismissed_at 升序）。
 func (h *RecoveryHandler) GetFallen(c *gin.Context) {

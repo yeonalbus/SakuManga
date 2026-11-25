@@ -522,7 +522,7 @@ func (m *DownloadManager) CreateTask(p CreateDownloadParams) (*models.DownloadTa
 	// 否则手动/自动「下载更新版」会被误判为「已下载」而中断。
 	if p.UpdateForComicID == "" {
 		var offline models.OfflineComic
-		if err := m.db.Select("id").Where("g_id = ?", p.GID).First(&offline).Error; err == nil {
+		if err := m.db.Select("id").Where("g_id = ? AND file_missing = ?", p.GID, false).First(&offline).Error; err == nil {
 			return nil, fmt.Errorf("%w（gid=%s 已下载到本地）", errAlreadyDownloaded, p.GID)
 		}
 	}

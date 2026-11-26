@@ -1,3 +1,16 @@
+# SakuManga
+
+面向自托管与 NAS 的 **E-Hentai / ExHentai** 双库阅读管理器 —— 集在线搜刮、归档下载、本地库查重维护、XP 词云抽卡、多用户权限与 PWA 移动端访问于一体（Go + Vue 3）。
+
+[![CI](https://github.com/yeonalbus/SakuManga/actions/workflows/ci.yml/badge.svg)](https://github.com/yeonalbus/SakuManga/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/yeonalbus/SakuManga)](https://github.com/yeonalbus/SakuManga/releases)
+[![Homepage](https://img.shields.io/badge/Homepage-GitHub%20Pages-f08aac)](https://yeonalbus.github.io/SakuManga/)
+
+[项目展示页](https://yeonalbus.github.io/SakuManga/) · [防呆手册（Wiki FAQ）](DSPlans/VerNotes/wiki.md) · [更新日志](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
+
+---
+
 # 💡 为什么开发这个项目？
 
 市面上的 Web 端媒体管理器界面粗糙、交互笨重；体验优异的桌面客户端又绑定单机设备，无法满足自建服务器 / NAS 用户「集中托管、随时随地访问」的需求。
@@ -124,10 +137,10 @@ SakuManga.exe --headless
 docker run -d --name sakumanga --restart unless-stopped \
   -p 8081:8081 \
   -v /your/data/dir:/app \
-  ghcr.io/yeonalbus/sakumanga:2.2.0
+  ghcr.io/yeonalbus/sakumanga:2.3.0
 ```
 
-镜像同时提供 `linux/amd64` 与 `linux/arm64`（群晖 / 树莓派 / Apple Silicon 均可直接运行），标签策略为 `2.2.0` / `2.2` / `latest`。数据（`manga.db` / `config.json` / `data/` / `logs/`）全部保存在挂载目录，升级 = 换镜像标签重建容器。推送 `SakuManga-X.Y.Z` tag 时由 GitHub Actions 自动构建发布，也可在仓库 Actions 页面手动触发；本机想自己构建用 `build-docker.bat`。完整说明见 [`DSPlans/VerNotes/wiki.md`](DSPlans/VerNotes/wiki.md)「九、Docker 部署」。
+镜像同时提供 `linux/amd64` 与 `linux/arm64`（群晖 / 树莓派 / Apple Silicon 均可直接运行），标签策略为 `2.3.0` / `2.3` / `latest`。数据（`manga.db` / `config.json` / `data/` / `logs/`）全部保存在挂载目录，升级 = 换镜像标签重建容器。推送 `SakuManga-X.Y.Z` tag 时由 GitHub Actions 自动构建发布，也可在仓库 Actions 页面手动触发；本机想自己构建用 `build-docker.bat`。完整说明见 [`DSPlans/VerNotes/wiki.md`](DSPlans/VerNotes/wiki.md)「九、Docker 部署」。
 
 **开发模式：**
 
@@ -155,7 +168,7 @@ npm run dev                   # 前端开发服务器（Vite 代理到后端 API
 
 本项目集成的标签数据库内容由 **EhTagTranslation** 贡献者共同维护，数据依据 **[CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/deed.zh)**（署名-非商业性使用-相同方式共享 3.0）协议提供：
 
-- **非商业性**：本项目及标签数据仅供个人学习与交流使用，严禁任何形式的商业盈利行为。
+- **非商业性**：标签数据仅供个人学习与交流使用，严禁任何形式的商业盈利行为（程序源码本身按下方 AGPL-3.0 协议开源）。
 - **署名与共享**：对标签数据的二次分发或衍生使用均继承原协议条款。
 
 ## 开发者说明 / Notes

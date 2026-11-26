@@ -47,12 +47,17 @@
 | `DSPlans/VerNotes/RELEASE_NOTES_vX.Y.Z.md` | 标题 | 与本次版本号一致 |
 | `DSPlans/YeonBriefs/BRIEF_vX.Y.Z.md` | 文件名与「版本信息」 | 与本次版本号一致 |
 | `CHANGELOG.md` | 顶部版本区块 | 见第 6 节 |
+| `docs/index.html` | 顶部版本徽章、Docker 示例标签、Release Notes 链接 | GitHub Pages 展示页同步 |
+| `.github/ISSUE_TEMPLATE/bug_report.yml` | 版本号输入框 `placeholder` | 示例版本号顺手对齐 |
 
 > ⚠️ 版本号变更后**必须重新构建前端产物**（`npm run build` 并同步 `backend/webui/dist/`，或直接跑一次 `build-release.bat`）——「关于」页版本号是构建时嵌进前端的，不重建会残留旧版本号（Docker 镜像同理）。
 
 无需手动修改：
 - 前端「关于」页 [`AboutSettings.vue`](../../src/components/settings/AboutSettings.vue) 自动 `import { version } from '../../../package.json'`
 - 打包脚本 [`build-release.bat`](../../build-release.bat) 自动 `node -p "require('./package.json').version"`
+- `SECURITY.md` 已采用「仅支持最新正式版本」口径，无需随版本修改
+
+> 仅大改 UI / 里程碑版本按需刷新：`docs/screenshots/*.png`（运行 `npm run demo:shots`）与 `docs/social-preview.png`。
 
 ---
 

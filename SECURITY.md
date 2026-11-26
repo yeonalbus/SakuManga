@@ -6,8 +6,8 @@
 
 | 版本 | 是否支持 |
 | :--- | :--- |
-| `v2.3.x` | ✅ 支持 |
-| `< v2.3.0` | ❌ 建议升级至最新版本 |
+| 最新正式版本（[Latest Release](https://github.com/yeonalbus/SakuManga/releases/latest)） | ✅ 支持 |
+| 更早历史版本 | ❌ 建议升级至最新版本 |
 
 ---
 

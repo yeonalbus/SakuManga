@@ -235,7 +235,7 @@ func groupStats(members []IgnoreMemberView) (groupCount, groupedCount int) {
 
 // memberClusterKey 单本漫画在聚类口径下的主键（title_jpn 优先、title 兜底；含卷号与画师）
 func memberClusterKey(c *models.OfflineComic) string {
-	tags := UnmarshalTagSlice(c.OnlineTags)
+	tags := dedupEffectiveTags(c)
 	artist := extractNamespaceTag(tags, "artist")
 	for _, src := range []string{c.TitleJpn, c.Title} {
 		if strings.TrimSpace(src) == "" {
@@ -286,6 +286,46 @@ func countNewFromCache(ig models.IgnoredIdentifier, clusters []DedupCluster) int
 	return best
 }
 
+// collectCacheClusterMembersForIgnore 从维护结果缓存中收集所有与 seen 有交集的簇的全部成员 ID（去重）。
+// 供忽略清单页未显式传 members 时兜底补全「确认新增」成员集合。
+func collectCacheClusterMembersForIgnore(db *gorm.DB, seen map[string]bool) []string {
+	if len(seen) == 0 {
+		return nil
+	}
+	EnsureMaintainResultLoaded(db)
+	res := GetMaintainDedupResult()
+	if res == nil || len(res.Clusters) == 0 {
+		return nil
+	}
+	idSet := map[string]bool{}
+	for i := range res.Clusters {
+		cl := &res.Clusters[i]
+		intersects := false
+		for j := range cl.Members {
+			if seen[cl.Members[j].Comic.ID] {
+				intersects = true
+				break
+			}
+		}
+		if !intersects {
+			continue
+		}
+		for j := range cl.Members {
+			if cid := strings.TrimSpace(cl.Members[j].Comic.ID); cid != "" {
+				idSet[cid] = true
+			}
+		}
+	}
+	if len(idSet) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(idSet))
+	for id := range idSet {
+		out = append(out, id)
+	}
+	return out
+}
+
 // AckIgnoreSnapshot 「确认新增」：把当前簇的成员并入 title 型忽略集合。
 func AckIgnoreSnapshot(db *gorm.DB, id string, memberIDs []string) (*models.IgnoredIdentifier, error) {
 	if db == nil {
@@ -302,7 +342,10 @@ func AckIgnoreSnapshot(db *gorm.DB, id string, memberIDs []string) (*models.Igno
 		return &rec, nil // 仅 title 型有成员集合
 	}
 	if len(memberIDs) == 0 {
-		return &rec, nil // 前端未提供成员：保持现状
+		memberIDs = collectCacheClusterMembersForIgnore(db, parseSeenComicIDs(rec.SeenComicIDs))
+	}
+	if len(memberIDs) == 0 {
+		return &rec, nil // 缓存无交集簇且前端未提供成员：保持现状
 	}
 	blob, err := json.Marshal(unionComicIDs(rec.SeenComicIDs, memberIDs))
 	if err != nil {
@@ -328,6 +371,74 @@ func PurgeLegacyIgnores(db *gorm.DB) int {
 	}
 	res := db.Where("snapshot_version < ?", ignoreSnapshotVersion).
 		Delete(&models.IgnoredIdentifier{})
+	if res.Error != nil {
+		return 0
+	}
+	return int(res.RowsAffected)
+}
+
+// PurgeConflictingAuthorIgnores 清理旧版跨画师/跨社团误报产生的脏 title 型忽略条目（幂等）。
+// 判定口径：现存成员包含 ≥2 个不同已知 artist，或全无 artist 但包含 ≥2 个不同已知 group。
+func PurgeConflictingAuthorIgnores(db *gorm.DB) int {
+	if db == nil {
+		return 0
+	}
+	var ignores []models.IgnoredIdentifier
+	if err := db.Where("type = ?", "title").Find(&ignores).Error; err != nil || len(ignores) == 0 {
+		return 0
+	}
+
+	needIDs := map[string]bool{}
+	parsed := make([]map[string]bool, len(ignores))
+	for i, ig := range ignores {
+		seen := parseSeenComicIDs(ig.SeenComicIDs)
+		parsed[i] = seen
+		for cid := range seen {
+			needIDs[cid] = true
+		}
+	}
+	if len(needIDs) == 0 {
+		return 0
+	}
+
+	allIDs := make([]string, 0, len(needIDs))
+	for cid := range needIDs {
+		allIDs = append(allIDs, cid)
+	}
+	var comics []models.OfflineComic
+	if err := db.Where("id IN ?", allIDs).Find(&comics).Error; err != nil {
+		return 0
+	}
+	byID := make(map[string]*models.OfflineComic, len(comics))
+	for i := range comics {
+		byID[comics[i].ID] = &comics[i]
+	}
+
+	var conflictIDs []string
+	for i, ig := range ignores {
+		artists := map[string]bool{}
+		groups := map[string]bool{}
+		for cid := range parsed[i] {
+			c := byID[cid]
+			if c == nil {
+				continue
+			}
+			tags := dedupEffectiveTags(c)
+			if a := strings.ToLower(strings.TrimSpace(extractNamespaceTag(tags, "artist"))); a != "" {
+				artists[a] = true
+			}
+			if g := strings.ToLower(strings.TrimSpace(extractNamespaceTag(tags, "group"))); g != "" {
+				groups[g] = true
+			}
+		}
+		if len(artists) >= 2 || (len(artists) == 0 && len(groups) >= 2) {
+			conflictIDs = append(conflictIDs, ig.ID)
+		}
+	}
+	if len(conflictIDs) == 0 {
+		return 0
+	}
+	res := db.Where("id IN ?", conflictIDs).Delete(&models.IgnoredIdentifier{})
 	if res.Error != nil {
 		return 0
 	}

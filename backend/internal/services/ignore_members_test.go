@@ -198,3 +198,113 @@ func TestRestoreIgnoresBatch(t *testing.T) {
 		t.Errorf("空列表批量恢复应返回 0 且不报错，得到 %d / %v", n2, err)
 	}
 }
+
+func TestAckIgnoreSnapshotEmptyMembersFallsBackToMaintainCache(t *testing.T) {
+	db := newIgnoreMemberTestDB(t)
+	if err := db.AutoMigrate(&models.MaintainDedupSnapshot{}); err != nil {
+		t.Fatalf("迁移快照表失败: %v", err)
+	}
+
+	// 忽略记录创建于 t0，只包含 m1、m2
+	ig, err := CreateIgnore(db, "title", "样本作品", "a1", "", "", []string{"m1", "m2"})
+	if err != nil {
+		t.Fatalf("创建忽略失败: %v", err)
+	}
+
+	// 维护缓存里出现忽略后新入库的 m3（addedAtMs 晚于 ig.CreatedAt）
+	offlineTaskMu.Lock()
+	prevRes := offlineMaintainRes
+	offlineMaintainRes = &DedupResult{
+		Items: []DedupItem{},
+		Clusters: []DedupCluster{
+			{
+				ID:       "cl-ack",
+				TitleKey: "样本作品",
+				Artist:   "a1",
+				Ignored:  true,
+				IgnoreID: ig.ID,
+				Members: []ClusterMember{
+					{Comic: MaintainComicView{ID: "m1"}, addedAtMs: ig.CreatedAt.Add(-time.Hour).UnixMilli()},
+					{Comic: MaintainComicView{ID: "m2"}, addedAtMs: ig.CreatedAt.Add(-time.Hour).UnixMilli()},
+					{Comic: MaintainComicView{ID: "m3"}, addedAtMs: ig.CreatedAt.Add(time.Minute).UnixMilli()},
+				},
+			},
+		},
+	}
+	offlineTaskMu.Unlock()
+	t.Cleanup(func() {
+		offlineTaskMu.Lock()
+		offlineMaintainRes = prevRes
+		offlineTaskMu.Unlock()
+	})
+
+	if got := countNewFromCache(*ig, GetMaintainDedupResult().Clusters); got != 1 {
+		t.Fatalf("确认前忽略后新增应为 1，得到 %d", got)
+	}
+
+	// 模拟忽略清单页传空 members 调用确认新增
+	rec, err := AckIgnoreSnapshot(db, ig.ID, nil)
+	if err != nil {
+		t.Fatalf("AckIgnoreSnapshot 失败: %v", err)
+	}
+	ApplyIgnoreFiltersToMaintainResult(db)
+
+	seen := parseSeenComicIDs(rec.SeenComicIDs)
+	if !seen["m3"] {
+		t.Errorf("m3 应已并入 SeenComicIDs，实际 %v", seen)
+	}
+	if res := GetMaintainDedupResult(); len(res.Clusters) != 0 {
+		t.Errorf("确认新增后缓存中的簇应被静默移除，仍剩 %d 簇", len(res.Clusters))
+	}
+	if got := countNewFromCache(*rec, GetMaintainDedupResult().Clusters); got != 0 {
+		t.Errorf("确认后新增数应归 0，得到 %d", got)
+	}
+}
+
+func TestPurgeConflictingAuthorIgnores(t *testing.T) {
+	db := newIgnoreMemberTestDB(t)
+	comics := []models.OfflineComic{
+		{ID: "c-s1", Title: "[shengtian] A", OnlineTags: MarshalTagSlice([]string{"artist:shengtian"})},
+		{ID: "c-u1", Title: "[sunhyun] A", OnlineTags: MarshalTagSlice([]string{"artist:sunhyun"})},
+		{ID: "c-u2", Title: "[sunhyun] B", OnlineTags: MarshalTagSlice([]string{"artist:sunhyun"})},
+		{ID: "c-g1", Title: "[g1] C", OnlineTags: MarshalTagSlice([]string{"group:g1"})},
+		{ID: "c-g2", Title: "[g2] C", OnlineTags: MarshalTagSlice([]string{"group:g2"})},
+		{ID: "c-unk", Title: "[unk] D", OnlineTags: "[]"},
+	}
+	for i := range comics {
+		comics[i].LocalPath = "/tmp/purge-test/" + comics[i].ID
+		if err := db.Create(&comics[i]).Error; err != nil {
+			t.Fatalf("写入漫画失败: %v", err)
+		}
+	}
+
+	// 1. 不同 artist → 应被清理
+	igConflictArtist, _ := CreateIgnore(db, "title", "A", "shengtian", "", "", []string{"c-s1", "c-u1"})
+	// 2. 无 artist 但不同 group → 应被清理
+	igConflictGroup, _ := CreateIgnore(db, "title", "C", "", "", "", []string{"c-g1", "c-g2"})
+	// 3. 同 artist → 保留
+	igSameArtist, _ := CreateIgnore(db, "title", "B", "sunhyun", "", "", []string{"c-u1", "c-u2"})
+	// 4. 1 个已知 artist + 1 个未知 artist → 保留（符合 D10）
+	igWithUnknown, _ := CreateIgnore(db, "title", "D", "sunhyun", "", "", []string{"c-u1", "c-unk"})
+	// 5. gid 型 → 保留
+	igGID, _ := CreateIgnore(db, "gid", "", "", "99999", "", nil)
+
+	if n := PurgeConflictingAuthorIgnores(db); n != 2 {
+		t.Fatalf("应清理 2 条冲突忽略，实际 %d", n)
+	}
+	if err := db.First(&models.IgnoredIdentifier{}, "id = ?", igConflictArtist.ID).Error; err == nil {
+		t.Errorf("不同 artist 的忽略条目应已被删除")
+	}
+	if err := db.First(&models.IgnoredIdentifier{}, "id = ?", igConflictGroup.ID).Error; err == nil {
+		t.Errorf("不同 group 的忽略条目应已被删除")
+	}
+	for _, keepID := range []string{igSameArtist.ID, igWithUnknown.ID, igGID.ID} {
+		if err := db.First(&models.IgnoredIdentifier{}, "id = ?", keepID).Error; err != nil {
+			t.Errorf("合法忽略条目 %s 不应被删除: %v", keepID, err)
+		}
+	}
+	// 幂等验证
+	if n := PurgeConflictingAuthorIgnores(db); n != 0 {
+		t.Errorf("重复执行应返回 0，实际 %d", n)
+	}
+}

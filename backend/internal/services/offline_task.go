@@ -483,6 +483,8 @@ func ApplyIgnoreFiltersToMaintainResult(db *gorm.DB) {
 		return
 	}
 
+	EnsureMaintainResultLoaded(db)
+
 	offlineTaskMu.Lock()
 	res := offlineMaintainRes
 	if res == nil {

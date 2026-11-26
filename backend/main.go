@@ -76,6 +76,12 @@ func main() {
 	if n := services.PurgeLegacyIgnores(database.DB); n > 0 {
 		log.Printf("[DB] 已清空 %d 条旧语义忽略条目（Round51 按组忽略，需重新忽略）", n)
 	}
+	if n := services.PurgeConflictingAuthorIgnores(database.DB); n > 0 {
+		log.Printf("[DB] 已清理 %d 条旧版跨画师/跨社团误报忽略条目", n)
+		if services.EnsureMaintainResultLoaded(database.DB) {
+			services.SyncMaintainDedupClusters(database.DB)
+		}
+	}
 
 	// 1.3 Round49：回填搜刮书签的新增字段（幂等）。
 	//     老书签没有 role / 已囤货 / 置顶 / 更新开关等字段，这里按旧名字语义

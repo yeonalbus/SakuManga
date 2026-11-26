@@ -388,3 +388,30 @@ func TestIncrementalKeepsDownloadOrigin(t *testing.T) {
 		t.Errorf("增量模式不应改写来源，实际 %q", got.ScanPathID)
 	}
 }
+
+func TestFirstScanPopulatesOnlineTags(t *testing.T) {
+	db := setupScanPolicyDB(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "1.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("写图片失败: %v", err)
+	}
+	metaJSON := `{"gid": 123456, "token": "abcdef", "title": "[shengtian] Test", "tags": ["artist:shengtian", "parody:blue archive"]}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metaJSON), 0o644); err != nil {
+		t.Fatalf("写 metadata.json 失败: %v", err)
+	}
+
+	if !saveComic(dir, true, false, "") {
+		t.Fatalf("首次扫描 saveComic 应成功")
+	}
+
+	var got models.OfflineComic
+	if err := db.First(&got, "id = ?", generateID(dir)).Error; err != nil {
+		t.Fatalf("读取新入库记录失败: %v", err)
+	}
+	if got.OnlineTags == "" || got.OnlineTags == "[]" {
+		t.Fatalf("首次扫描应同步写入 OnlineTags，实际为空: %q", got.OnlineTags)
+	}
+	if got.OnlineTags != got.Tags {
+		t.Errorf("首次扫描 OnlineTags (%q) 应与 Tags (%q) 一致", got.OnlineTags, got.Tags)
+	}
+}

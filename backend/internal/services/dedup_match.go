@@ -107,6 +107,7 @@ type approxCandidate struct {
 	volJp    string
 	volTt    string
 	artist   string
+	group    string
 	pages    int
 	size     int64
 	tags     map[string]bool
@@ -206,8 +207,9 @@ func scorePair(a, b *approxCandidate) (score, bodySim float64) {
 
 // newApproxCandidate 由离线漫画构造 Tier 2 候选（核心名为空者返回 nil）
 func newApproxCandidate(c *models.OfflineComic) *approxCandidate {
-	tags := UnmarshalTagSlice(c.OnlineTags)
+	tags := dedupEffectiveTags(c)
 	artist := extractNamespaceTag(tags, "artist")
+	group := extractNamespaceTag(tags, "group")
 
 	fpJp := fingerprintTitle(c.TitleJpn, artist)
 	fpTt := fingerprintTitle(c.Title, artist)
@@ -237,6 +239,7 @@ func newApproxCandidate(c *models.OfflineComic) *approxCandidate {
 		volJp:    fpJp.Volume,
 		volTt:    fpTt.Volume,
 		artist:   strings.ToLower(strings.TrimSpace(artist)),
+		group:    strings.ToLower(strings.TrimSpace(group)),
 		pages:    pages,
 		size:     c.FileSize,
 		tags:     tagSet,
@@ -244,10 +247,10 @@ func newApproxCandidate(c *models.OfflineComic) *approxCandidate {
 	}
 }
 
-// approxComparable 判断一对候选是否允许比较（作者硬否决 + 卷号隔离 + 页数容忍）
+// approxComparable 判断一对候选是否允许比较（作者/社团硬否决 + 卷号隔离 + 页数容忍）
 func approxComparable(a, b *approxCandidate) bool {
-	// 作者硬否决（D10）：双方 artist 都非空且不同 → 不比
-	if a.artist != "" && b.artist != "" && a.artist != b.artist {
+	// 作者硬否决（D10 + 选项 A）：双方 artist 非空且不同，或双方无 artist 且 group 不同 → 不比
+	if authorConflict(a.artist, a.group, b.artist, b.group) {
 		return false
 	}
 	// 卷号隔离：任一方识别出卷号且两者不同 → 不比
@@ -304,8 +307,12 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 	}
 
 	parent := make([]int, len(cands))
+	compArtist := make([]string, len(cands))
+	compGroup := make([]string, len(cands))
 	for i := range parent {
 		parent[i] = i
+		compArtist[i] = cands[i].artist
+		compGroup[i] = cands[i].group
 	}
 	find := func(x int) int {
 		for parent[x] != x {
@@ -314,26 +321,42 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		}
 		return x
 	}
-	union := func(a, b int) {
+	safeUnion := func(a, b int) bool {
 		ra, rb := find(a), find(b)
-		if ra != rb {
-			parent[rb] = ra
+		if ra == rb {
+			return true
 		}
+		if authorConflict(compArtist[ra], compGroup[ra], compArtist[rb], compGroup[rb]) {
+			return false
+		}
+		parent[rb] = ra
+		if compArtist[ra] == "" {
+			compArtist[ra] = compArtist[rb]
+		}
+		if compGroup[ra] == "" {
+			compGroup[ra] = compGroup[rb]
+		}
+		return true
 	}
 
 	// pairScore 记录簇内最低分（用于分档）
 	bestPair := map[[2]int]float64{}
-	consider := func(i, j int) {
+	matchPair := func(i, j int) (float64, bool) {
 		a, b := cands[i], cands[j]
 		if !approxComparable(a, b) {
-			return
+			return 0, false
 		}
 		score, bodySim := scorePair(a, b)
 		// 硬门槛：正文（去括注）相似度不足 → 不做近似判定（防续篇/不同卷误报）
 		if bodySim < dedupBodySimMin || score < dedupScoreMedium {
+			return 0, false
+		}
+		return score, true
+	}
+	recordMatch := func(i, j int, score float64) {
+		if !safeUnion(i, j) {
 			return
 		}
-		union(i, j)
 		key := [2]int{i, j}
 		if i > j {
 			key = [2]int{j, i}
@@ -341,23 +364,99 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		bestPair[key] = score
 	}
 
-	// 同桶内两两（含未知作者桶内部）
-	for _, idxs := range buckets {
+	// 阶段 1：已知 artist 同桶内两两比较
+	for artist, idxs := range buckets {
+		if artist == "" {
+			continue
+		}
 		for a := 0; a < len(idxs); a++ {
 			for b := a + 1; b < len(idxs); b++ {
-				consider(idxs[a], idxs[b])
+				if score, ok := matchPair(idxs[a], idxs[b]); ok {
+					recordMatch(idxs[a], idxs[b], score)
+				}
 			}
 		}
 	}
-	// 未知作者桶 ↔ 其它桶（跨桶：仅当一方无 artist tag 时允许，符合 D10 语义）
+
+	type candMatch struct {
+		idx   int
+		score float64
+	}
+
+	// 阶段 2：未知 artist 桶内按 group 子桶比较（不同 group 隔离，纯未知不桥接不同 group）
 	if unknown, ok := buckets[""]; ok {
-		for artist, idxs := range buckets {
-			if artist == "" {
-				continue
+		groupBuckets := map[string][]int{}
+		for _, idx := range unknown {
+			groupBuckets[cands[idx].group] = append(groupBuckets[cands[idx].group], idx)
+		}
+		for _, gIdxs := range groupBuckets {
+			for a := 0; a < len(gIdxs); a++ {
+				for b := a + 1; b < len(gIdxs); b++ {
+					if score, ok := matchPair(gIdxs[a], gIdxs[b]); ok {
+						recordMatch(gIdxs[a], gIdxs[b], score)
+					}
+				}
 			}
-			for _, i := range unknown {
+		}
+		if pureUnknown := groupBuckets[""]; len(pureUnknown) > 0 {
+			for _, uIdx := range pureUnknown {
+				byGroup := map[string][]candMatch{}
+				candComics := map[string][]*models.OfflineComic{}
+				for grp, gIdxs := range groupBuckets {
+					if grp == "" {
+						continue
+					}
+					for _, j := range gIdxs {
+						if score, ok := matchPair(uIdx, j); ok {
+							byGroup[grp] = append(byGroup[grp], candMatch{idx: j, score: score})
+							candComics[grp] = append(candComics[grp], cands[j].comic)
+						}
+					}
+				}
+				switch {
+				case len(byGroup) == 1:
+					for _, ms := range byGroup {
+						for _, m := range ms {
+							recordMatch(uIdx, m.idx, m.score)
+						}
+					}
+				case len(byGroup) >= 2:
+					if targetGrp, ok := disambiguateKnownAuthor(cands[uIdx].comic, candComics); ok {
+						for _, m := range byGroup[targetGrp] {
+							recordMatch(uIdx, m.idx, m.score)
+						}
+					}
+				}
+			}
+		}
+
+		// 阶段 3：未知 artist 桶 ↔ 已知 artist 桶（先收集再合并，严禁通过未知条目桥接不同已知画师）
+		for _, uIdx := range unknown {
+			byArtist := map[string][]candMatch{}
+			candComics := map[string][]*models.OfflineComic{}
+			for artist, idxs := range buckets {
+				if artist == "" {
+					continue
+				}
 				for _, j := range idxs {
-					consider(i, j)
+					if score, ok := matchPair(uIdx, j); ok {
+						byArtist[artist] = append(byArtist[artist], candMatch{idx: j, score: score})
+						candComics[artist] = append(candComics[artist], cands[j].comic)
+					}
+				}
+			}
+			switch {
+			case len(byArtist) == 1:
+				for _, ms := range byArtist {
+					for _, m := range ms {
+						recordMatch(uIdx, m.idx, m.score)
+					}
+				}
+			case len(byArtist) >= 2:
+				if targetArtist, ok := disambiguateKnownAuthor(cands[uIdx].comic, candComics); ok {
+					for _, m := range byArtist[targetArtist] {
+						recordMatch(uIdx, m.idx, m.score)
+					}
 				}
 			}
 		}
@@ -419,7 +518,7 @@ func detectApproxClusters(comics []models.OfflineComic, exclude map[string]bool,
 		maxDiff := 0
 		for _, idx := range members {
 			c := cands[idx]
-			tags := UnmarshalTagSlice(c.comic.OnlineTags)
+			tags := dedupEffectiveTags(c.comic)
 			membersOut = append(membersOut, ClusterMember{
 				Comic:     toMaintainComicView(*c.comic),
 				PageCount: c.pages,

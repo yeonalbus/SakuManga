@@ -561,6 +561,11 @@ func saveComicWithResult(localPath string, isDir bool, incremental bool, scanPat
 		communityRating = meta.Rating
 	}
 
+	initialOnlineTags := ""
+	if s := strings.TrimSpace(string(tagsJSON)); s != "" && s != "[]" {
+		initialOnlineTags = s
+	}
+
 	comic := models.OfflineComic{
 		ID:                comicID,
 		Title:             title,
@@ -572,6 +577,7 @@ func saveComicWithResult(localPath string, isDir bool, incremental bool, scanPat
 		Source:            models.SourceOffline,
 		Category:          category,           // 写入解析出的分类
 		Tags:              string(tagsJSON),   // 写入解析出的多元标签数组 JSON
+		OnlineTags:        initialOnlineTags,  // 首次入库同步写 OnlineTags（与二次扫描 Merge 口径一致）
 		CommunityRating:   communityRating,    // Round52：社区评分（本地解析 / 保留库中已有）
 		PageCount:         effectivePageCount, // Round23：有效页数（物理 − 隐藏）
 		HiddenPages:       hidden.Marshal(),   // D10：相对路径数组

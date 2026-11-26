@@ -113,3 +113,63 @@ func TestBodyOfAndParenHelpers(t *testing.T) {
 		t.Error("正文不同（妊娠中）时 bodyOf 结果不应相同")
 	}
 }
+
+func TestApproxClustersFallbackToTagsWhenOnlineTagsEmpty(t *testing.T) {
+	// 复现线上 Tier 2 误报：shengtian 的 OnlineTags 为空但 Tags 含 artist:shengtian，
+	// 不得与 sunhyun / topu 的相似标题合并
+	c1 := mkComicFull("at1", "[shengtian] Kamisato Ayaka (Genshin Impact)", "", nil, 4)
+	c1.OnlineTags = ""
+	c1.Tags = MarshalTagSlice([]string{"parody:genshin impact", "artist:shengtian"})
+
+	c2 := mkComicFull("at2", "[topu] Ayaka Kamisato (Genshin Impact) (Uncensored)", "",
+		[]string{"parody:genshin impact", "artist:topu"}, 7)
+
+	if clusters := detectApproxClusters([]models.OfflineComic{c1, c2}, nil, nil); len(clusters) != 0 {
+		t.Fatalf("OnlineTags 为空但 Tags 含不同 artist 时 Tier 2 不应合并，得到 %d 簇", len(clusters))
+	}
+}
+
+func TestApproxClustersUnknownDoesNotBridgeDifferentArtists(t *testing.T) {
+	// 未知作者 U 与两个不同已知画师 A、B 均相似，绝不能通过并查集传递把 A 和 B 合并
+	comics := []models.OfflineComic{
+		mkComicFull("ab1", "[sunhyun] Hayase Yuuka (Blue Archive)", "", []string{"parody:blue archive", "artist:sunhyun"}, 6),
+		mkComicFull("ab2", "[topu] Yuuka Hayase (Blue Archive)", "", []string{"parody:blue archive", "artist:topu"}, 6),
+		mkComicFull("ab3", "[ひら野] Hayase Yuuka (Blue Archive) (Uncensored)", "", []string{"parody:blue archive"}, 6),
+	}
+	if clusters := detectApproxClusters(comics, nil, nil); len(clusters) != 0 {
+		t.Fatalf("无法消歧的未知作者不应桥接不同已知画师，得到 %d 簇", len(clusters))
+	}
+}
+
+func TestApproxClustersUnknownDisambiguatesByTitlePrefix(t *testing.T) {
+	// 未知作者 U 带 [topu] 前缀且同时与 sunhyun、topu 相似 → 仅并入 topu
+	comics := []models.OfflineComic{
+		mkComicFull("ad1", "[sunhyun] Hayase Yuuka (Blue Archive)", "", []string{"parody:blue archive", "artist:sunhyun"}, 6),
+		mkComicFull("ad2", "[topu] Yuuka Hayase (Blue Archive)", "", []string{"parody:blue archive", "artist:topu"}, 6),
+		mkComicFull("ad3", "[topu] Hayase Yuuka (Blue Archive) (Uncensored)", "", []string{"parody:blue archive"}, 6),
+	}
+	clusters := detectApproxClusters(comics, nil, nil)
+	if len(clusters) != 1 {
+		t.Fatalf("应仅产生 1 个簇（topu + 未知），得到 %d 簇", len(clusters))
+	}
+	if len(clusters[0].Members) != 2 {
+		t.Fatalf("簇应含 2 本（不含 sunhyun），得到 %d 本", len(clusters[0].Members))
+	}
+	for _, m := range clusters[0].Members {
+		if m.Comic.ID == "ad1" {
+			t.Errorf("sunhyun (ad1) 不应被并入簇")
+		}
+	}
+}
+
+func TestApproxClustersGroupVetoAndNoBridge(t *testing.T) {
+	// Tier 2 选项 A：双方无 artist 时不同 group 否决，且纯未知不桥接不同 group
+	comics := []models.OfflineComic{
+		mkComicFull("ag1", "[circle_a] Hayase Yuuka (Blue Archive)", "", []string{"parody:blue archive", "group:circle_a"}, 6),
+		mkComicFull("ag2", "[circle_b] Yuuka Hayase (Blue Archive)", "", []string{"parody:blue archive", "group:circle_b"}, 6),
+		mkComicFull("ag3", "[unknown] Hayase Yuuka (Blue Archive) [Chinese]", "", []string{"parody:blue archive"}, 6),
+	}
+	if clusters := detectApproxClusters(comics, nil, nil); len(clusters) != 0 {
+		t.Fatalf("Tier 2 不同 group 且无唯一消歧时不应合并，得到 %d 簇", len(clusters))
+	}
+}

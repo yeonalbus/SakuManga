@@ -299,12 +299,131 @@ func extractNamespaceTag(tags []string, ns string) string {
 	return ""
 }
 
+// dedupEffectiveTags 读取查重用有效标签：优先走双轨三态合成（OnlineTags ∪ OfflineAddTags − OfflineRemoveTags），
+// 仅当三态合成结果为空且 OnlineTags 为空时，回退读取兼容存量/首次入库的 Tags 字段（与 XpEffectiveTags 同口径）。
+func dedupEffectiveTags(c *models.OfflineComic) []string {
+	if c == nil {
+		return nil
+	}
+	merged := MergeTags(
+		UnmarshalTagSlice(c.OnlineTags),
+		UnmarshalTagSlice(c.OfflineAddTags),
+		UnmarshalTagSlice(c.OfflineRemoveTags),
+	)
+	if len(merged) == 0 && strings.TrimSpace(c.OnlineTags) == "" {
+		return UnmarshalTagSlice(c.Tags)
+	}
+	return merged
+}
+
+// authorConflict 判断两条记录的作者/社团是否存在硬冲突：
+//   - 双方均有 artist 且不同 → 冲突；
+//   - 双方均无 artist、但均有 group 且不同 → 冲突（选项 A 兜底）；
+//   - 其它情况（至少一方未知）→ 不冲突。
+func authorConflict(aArtist, aGroup, bArtist, bGroup string) bool {
+	if aArtist != "" && bArtist != "" {
+		return aArtist != bArtist
+	}
+	if aArtist == "" && bArtist == "" && aGroup != "" && bGroup != "" {
+		return aGroup != bGroup
+	}
+	return false
+}
+
+var (
+	reLeadingRoundParen = regexp.MustCompile(`^\s*\([^)]*\)\s*`)
+	reInnerRoundParen   = regexp.MustCompile(`\(([^()]+)\)`)
+)
+
+// extractTitleBracketTokens 提取标题开头方括号 `[...]` 内的社团/画师候选 token（仅用于多画师歧义消歧，绝不用于常规硬否决）。
+func extractTitleBracketTokens(titles ...string) map[string]bool {
+	out := map[string]bool{}
+	for _, raw := range titles {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		s := normalizeTitleForDedup(raw)
+		for {
+			loc := reLeadingRoundParen.FindStringIndex(s)
+			if loc == nil {
+				break
+			}
+			s = s[loc[1]:]
+		}
+		if !strings.HasPrefix(s, "[") {
+			continue
+		}
+		end := strings.Index(s, "]")
+		if end <= 1 {
+			continue
+		}
+		inner := strings.TrimSpace(s[1:end])
+		if inner == "" {
+			continue
+		}
+		out[inner] = true
+		for _, m := range reInnerRoundParen.FindAllStringSubmatch(inner, -1) {
+			if tok := strings.TrimSpace(m[1]); tok != "" {
+				out[tok] = true
+			}
+		}
+		outer := strings.Join(strings.Fields(reInnerRoundParen.ReplaceAllString(inner, " ")), " ")
+		if outer != "" {
+			out[outer] = true
+		}
+	}
+	return out
+}
+
+// disambiguateKnownAuthor 当未知作者条目同时命中 ≥2 个不同已知画师/社团时，
+// 尝试用标题开头 `[...]` 与各候选画师/社团及其标题前缀比对；仅恰好唯一命中 1 个时返回。
+func disambiguateKnownAuthor(unknown *models.OfflineComic, candidates map[string][]*models.OfflineComic) (string, bool) {
+	if unknown == nil || len(candidates) < 2 {
+		return "", false
+	}
+	uTokens := extractTitleBracketTokens(unknown.TitleJpn, unknown.Title)
+	if len(uTokens) == 0 {
+		return "", false
+	}
+	var matched []string
+	for key, comics := range candidates {
+		candTokens := map[string]bool{}
+		if k := strings.ToLower(strings.TrimSpace(key)); k != "" {
+			candTokens[k] = true
+		}
+		for _, c := range comics {
+			for tk := range extractTitleBracketTokens(c.TitleJpn, c.Title) {
+				candTokens[tk] = true
+			}
+		}
+		hit := false
+		for tk := range uTokens {
+			if candTokens[tk] {
+				hit = true
+				break
+			}
+		}
+		if hit {
+			matched = append(matched, key)
+			if len(matched) > 1 {
+				return "", false
+			}
+		}
+	}
+	if len(matched) == 1 {
+		return matched[0], true
+	}
+	return "", false
+}
+
 // ── 判定层 + 决策层 ──
 
 // clusterCandidate 分组过程中的候选成员
 type clusterCandidate struct {
-	comic *models.OfflineComic
-	fp    TitleFingerprint // 主指纹（title_jpn 优先，title 兜底）
+	comic  *models.OfflineComic
+	fp     TitleFingerprint // 主指纹（title_jpn 优先，title 兜底）
+	artist string           // 小写归一的 artist tag
+	group  string           // 小写归一的 group tag
 }
 
 // clusterKey 分组键：归一核心名 + 卷号 + 画师（小写）。
@@ -312,6 +431,17 @@ type clusterCandidate struct {
 // artist tag 双方都非空且不同时不可能同键，从源头避免「不同作者同名」误报）。
 func clusterKey(fp TitleFingerprint) string {
 	return strings.ToLower(fp.Core) + "\x00" + fp.Volume + "\x00" + strings.ToLower(fp.Artist)
+}
+
+// tier1Round1Key 轮 1 分组键：有 artist 沿用 clusterKey；无 artist 但有 group 时按 group 隔离（选项 A）。
+func tier1Round1Key(fp TitleFingerprint, group string) string {
+	if strings.TrimSpace(fp.Artist) != "" {
+		return clusterKey(fp)
+	}
+	if group != "" {
+		return strings.ToLower(fp.Core) + "\x00" + fp.Volume + "\x00g:" + group
+	}
+	return strings.ToLower(fp.Core) + "\x00" + fp.Volume + "\x00"
 }
 
 // coreVolKeyOf 从 clusterKey 截出「核心名 + 卷号」段（去掉 artist），
@@ -337,15 +467,17 @@ func coreVolKeyOf(key string) string {
 func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) []DedupCluster {
 	cands := make([]*clusterCandidate, 0, len(comics))
 	keySets := make([][]string, 0, len(comics))
-	artistKnown := make([]bool, 0, len(comics))
+	round1KeySets := make([][]string, 0, len(comics))
 	for i := range comics {
 		c := &comics[i]
-		tags := UnmarshalTagSlice(c.OnlineTags)
+		tags := dedupEffectiveTags(c)
 		artist := extractNamespaceTag(tags, "artist")
+		group := strings.ToLower(strings.TrimSpace(extractNamespaceTag(tags, "group")))
 
 		// 双字段池：title_jpn 优先（E 站规范标题），title 兜底；两者都可作为分组依据
 		var main TitleFingerprint
 		keys := make([]string, 0, 2)
+		r1Keys := make([]string, 0, 2)
 		for _, src := range []string{c.TitleJpn, c.Title} {
 			if strings.TrimSpace(src) == "" {
 				continue
@@ -358,19 +490,29 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) [
 				main = fp
 			}
 			keys = append(keys, clusterKey(fp))
+			r1Keys = append(r1Keys, tier1Round1Key(fp, group))
 		}
 		if len(keys) == 0 {
 			continue
 		}
-		cands = append(cands, &clusterCandidate{comic: c, fp: main})
+		cands = append(cands, &clusterCandidate{
+			comic:  c,
+			fp:     main,
+			artist: strings.ToLower(strings.TrimSpace(artist)),
+			group:  group,
+		})
 		keySets = append(keySets, keys)
-		artistKnown = append(artistKnown, strings.TrimSpace(main.Artist) != "")
+		round1KeySets = append(round1KeySets, r1Keys)
 	}
 
-	// 并查集：同一键的书连通为同一组
+	// 并查集：同一键的书连通为同一组，同时守住「单簇至多 1 个已知 artist（全无 artist 时至多 1 个已知 group）」硬不变量
 	parent := make([]int, len(cands))
+	compArtist := make([]string, len(cands))
+	compGroup := make([]string, len(cands))
 	for i := range parent {
 		parent[i] = i
+		compArtist[i] = cands[i].artist
+		compGroup[i] = cands[i].group
 	}
 	find := func(x int) int {
 		for parent[x] != x {
@@ -379,50 +521,131 @@ func detectTitleClusters(comics []models.OfflineComic, ignoreIdx *IgnoreIndex) [
 		}
 		return x
 	}
-	union := func(a, b int) {
+	safeUnion := func(a, b int) bool {
 		ra, rb := find(a), find(b)
-		if ra != rb {
-			parent[rb] = ra
+		if ra == rb {
+			return true
 		}
+		if authorConflict(compArtist[ra], compGroup[ra], compArtist[rb], compGroup[rb]) {
+			return false
+		}
+		parent[rb] = ra
+		if compArtist[ra] == "" {
+			compArtist[ra] = compArtist[rb]
+		}
+		if compGroup[ra] == "" {
+			compGroup[ra] = compGroup[rb]
+		}
+		return true
 	}
 	firstSeen := map[string]int{}
-	for i, keys := range keySets {
-		for _, k := range keys {
+	for i, r1Keys := range round1KeySets {
+		for _, k := range r1Keys {
 			if j, ok := firstSeen[k]; ok {
-				union(i, j)
+				safeUnion(i, j)
 			} else {
 				firstSeen[k] = i
 			}
 		}
 	}
 
-	// 轮 2：**作者未知兜底**（D10 语义：artist 缺失不构成否决）。
-	// 同一「核心名 + 卷号」下若**存在 artist 缺失的书**，则该组整体并为一簇——
-	// 空 artist 只代表「作者未知」，不能据此否决；供人工优先确认（buildCluster 会降档并标注）。
-	// 若该组内所有书 artist 都非空，则保持轮 1 的硬否决结果（不同作者同名不合并）。
+	// 轮 2：**作者未知兜底**（D10 语义：artist 缺失不构成否决，但绝不桥接不同已知画师/社团）。
 	byCoreVol := map[string][]int{}
 	for i, keys := range keySets {
+		seenCV := map[string]bool{}
 		for _, k := range keys {
 			cv := coreVolKeyOf(k)
-			byCoreVol[cv] = append(byCoreVol[cv], i)
+			if !seenCV[cv] {
+				seenCV[cv] = true
+				byCoreVol[cv] = append(byCoreVol[cv], i)
+			}
+		}
+	}
+	mergeGroupBucket := func(idxs []int) {
+		if len(idxs) < 2 {
+			return
+		}
+		knownGroups := map[string][]int{}
+		var pureUnknowns []int
+		for _, idx := range idxs {
+			if cands[idx].group != "" {
+				knownGroups[cands[idx].group] = append(knownGroups[cands[idx].group], idx)
+			} else {
+				pureUnknowns = append(pureUnknowns, idx)
+			}
+		}
+		switch {
+		case len(knownGroups) == 1:
+			var rep int
+			for _, gIdxs := range knownGroups {
+				rep = gIdxs[0]
+				break
+			}
+			for _, uIdx := range pureUnknowns {
+				safeUnion(uIdx, rep)
+			}
+		case len(knownGroups) >= 2:
+			candByGroup := make(map[string][]*models.OfflineComic, len(knownGroups))
+			for g, gIdxs := range knownGroups {
+				for _, idx := range gIdxs {
+					candByGroup[g] = append(candByGroup[g], cands[idx].comic)
+				}
+			}
+			for _, uIdx := range pureUnknowns {
+				if targetGroup, ok := disambiguateKnownAuthor(cands[uIdx].comic, candByGroup); ok {
+					safeUnion(uIdx, knownGroups[targetGroup][0])
+				}
+			}
+		default:
+			for _, uIdx := range pureUnknowns[1:] {
+				safeUnion(pureUnknowns[0], uIdx)
+			}
 		}
 	}
 	for _, members := range byCoreVol {
 		if len(members) < 2 {
 			continue
 		}
-		hasUnknown := false
-		for _, i := range members {
-			if !artistKnown[i] {
-				hasUnknown = true
-				break
+		knownArtists := map[string][]int{}
+		var noArtistIdxs []int
+		for _, idx := range members {
+			if cands[idx].artist != "" {
+				knownArtists[cands[idx].artist] = append(knownArtists[cands[idx].artist], idx)
+			} else {
+				noArtistIdxs = append(noArtistIdxs, idx)
 			}
 		}
-		if !hasUnknown {
+		if len(noArtistIdxs) == 0 {
 			continue
 		}
-		for _, i := range members[1:] {
-			union(members[0], i)
+		switch {
+		case len(knownArtists) == 1:
+			var rep int
+			for _, aIdxs := range knownArtists {
+				rep = aIdxs[0]
+				break
+			}
+			for _, uIdx := range noArtistIdxs {
+				safeUnion(uIdx, rep)
+			}
+		case len(knownArtists) >= 2:
+			candByArtist := make(map[string][]*models.OfflineComic, len(knownArtists))
+			for a, aIdxs := range knownArtists {
+				for _, idx := range aIdxs {
+					candByArtist[a] = append(candByArtist[a], cands[idx].comic)
+				}
+			}
+			var unmatchedNoArtist []int
+			for _, uIdx := range noArtistIdxs {
+				if targetArtist, ok := disambiguateKnownAuthor(cands[uIdx].comic, candByArtist); ok {
+					safeUnion(uIdx, knownArtists[targetArtist][0])
+				} else {
+					unmatchedNoArtist = append(unmatchedNoArtist, uIdx)
+				}
+			}
+			mergeGroupBucket(unmatchedNoArtist)
+		default:
+			mergeGroupBucket(noArtistIdxs)
 		}
 	}
 
@@ -525,7 +748,7 @@ func buildCluster(g []*clusterCandidate) *DedupCluster {
 	maxDiff := 0
 	members := make([]ClusterMember, 0, len(g))
 	for _, cand := range g {
-		tags := UnmarshalTagSlice(cand.comic.OnlineTags)
+		tags := dedupEffectiveTags(cand.comic)
 		lang := extractNamespaceTag(tags, "language")
 		pc := cand.comic.OriginalPageCount
 		if pc <= 0 {

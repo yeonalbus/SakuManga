@@ -447,3 +447,80 @@ func TestDetectClustersNoArtistDowngrade(t *testing.T) {
 		t.Errorf("reason 应标注「作者未知」，得到 %q", clusters[0].Reason)
 	}
 }
+
+func TestDetectClustersFallbackToTagsWhenOnlineTagsEmpty(t *testing.T) {
+	// 复现线上场景：OnlineTags 为空，但 Tags 已含 artist:shengtian → 不得误判为作者未知并与 sunhyun 合并
+	c1 := mkComicFull("ft1", "[升天] 早瀬ユウカ", "", nil, 4)
+	c1.OnlineTags = ""
+	c1.Tags = MarshalTagSlice([]string{"parody:blue archive", "artist:shengtian"})
+
+	c2 := mkComicFull("ft2", "[sunhyun] 早瀬ユウカ", "", []string{"parody:blue archive", "artist:sunhyun"}, 6)
+
+	if clusters := detectTitleClusters([]models.OfflineComic{c1, c2}, nil); len(clusters) != 0 {
+		t.Fatalf("OnlineTags 为空但 Tags 含不同 artist 时不应合并，得到 %d 簇", len(clusters))
+	}
+}
+
+func TestDetectClustersUnknownDoesNotBridgeDifferentArtists(t *testing.T) {
+	// 真实样本场景：同核心名下存在多个不同已知画师 + 1 本无法消歧的未知画师 [ひら野]
+	// 硬不变量：不同已知画师绝不合并，且未知画师不强行归属任何一方
+	comics := []models.OfflineComic{
+		mkComicFull("k1", "[DaRoon5] キサキ (ブルーアーカイブ)", "", []string{"artist:daroon5"}, 12),
+		mkComicFull("k2", "[トプ] キサキ (ブルーアーカイブ)", "", []string{"artist:topu"}, 12),
+		mkComicFull("k3", "[トプ] キサキ (ブルーアーカイブ) [無修正]", "", []string{"artist:topu"}, 12),
+		mkComicFull("k4", "[骨カワ] キサキ(復刻)", "", []string{"artist:hone kawa"}, 12),
+		mkComicFull("k5", "[ひら野] キサキ", "", nil, 12),
+	}
+	clusters := detectTitleClusters(comics, nil)
+	if len(clusters) != 1 {
+		t.Fatalf("仅 topu 两本应成 1 簇，得到 %d 簇", len(clusters))
+	}
+	if len(clusters[0].Members) != 2 {
+		t.Fatalf("簇内应只有 topu 的 2 本，得到 %d 本", len(clusters[0].Members))
+	}
+	for _, m := range clusters[0].Members {
+		if m.Artist != "topu" {
+			t.Errorf("簇成员 artist 应为 topu，实际 %q", m.Artist)
+		}
+	}
+}
+
+func TestDetectClustersUnknownDisambiguatesByTitlePrefix(t *testing.T) {
+	// 歧义消歧：未知作者 [topu] 能唯一对上已知画师 topu，应并入 topu 且不粘连 sunhyun
+	comics := []models.OfflineComic{
+		mkComicFull("d1", "[sunhyun] 样本标题", "", []string{"artist:sunhyun"}, 10),
+		mkComicFull("d2", "[topu] 样本标题", "", []string{"artist:topu"}, 10),
+		mkComicFull("d3", "[topu] 样本标题 [中国翻訳]", "", nil, 10),
+	}
+	clusters := detectTitleClusters(comics, nil)
+	if len(clusters) != 1 {
+		t.Fatalf("应仅产生 1 个簇（topu + 未知），得到 %d 簇", len(clusters))
+	}
+	if len(clusters[0].Members) != 2 {
+		t.Fatalf("簇应含 2 本（不含 sunhyun），得到 %d 本", len(clusters[0].Members))
+	}
+	for _, m := range clusters[0].Members {
+		if m.Comic.ID == "d1" {
+			t.Errorf("sunhyun (d1) 不应被并入簇")
+		}
+	}
+}
+
+func TestDetectClustersGroupVetoWhenBothNoArtist(t *testing.T) {
+	// 选项 A：双方均无 artist 时，不同 group 否决，相同 group 合并，且纯未知不桥接不同 group
+	diff := []models.OfflineComic{
+		mkComicFull("g1", "[社团A] 样本", "", []string{"group:circle_a"}, 15),
+		mkComicFull("g2", "[社团B] 样本", "", []string{"group:circle_b"}, 15),
+		mkComicFull("g3", "[未知] 样本", "", nil, 15),
+	}
+	if clusters := detectTitleClusters(diff, nil); len(clusters) != 0 {
+		t.Fatalf("不同 group 且无唯一消歧时不应合并，得到 %d 簇", len(clusters))
+	}
+	same := []models.OfflineComic{
+		mkComicFull("s1", "[社团A] 样本", "", []string{"group:circle_a"}, 15),
+		mkComicFull("s2", "[社团A] 样本 [中国翻訳]", "", []string{"group:circle_a"}, 15),
+	}
+	if clusters := detectTitleClusters(same, nil); len(clusters) != 1 {
+		t.Fatalf("相同 group 应合并成 1 簇，得到 %d 簇", len(clusters))
+	}
+}

@@ -1,0 +1,68 @@
+name: 🐛 Bug 反馈
+description: 报告程序运行、下载、刮削、阅读或界面异常
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先查阅 [防呆手册（wiki.md）](https://github.com/yeonalbus/SakuManga/blob/main/DSPlans/VerNotes/wiki.md) 并搜索是否已有相同 Issue。
+
+  - type: input
+    id: version
+    attributes:
+      label: SakuManga 版本号
+      description: 可在页面「设置 → 关于」或 Releases / Docker 镜像标签中查看
+      placeholder: 例如：v2.3.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式
+      options:
+        - Windows 单文件 EXE
+        - Windows 纯后端 (--headless)
+        - Docker (linux/amd64)
+        - Docker (linux/arm64)
+        - 源码开发模式
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 清晰描述发生了什么，以及你预期的正常行为是什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出触发该问题的操作步骤
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 出现报错 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或截图（选填）
+      description: ⚠️ 粘贴前请务必移除所有 Cookie、密码与代理认证信息！
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索已有 Issue 与防呆手册，确认非已知使用问题
+          required: true
+        - label: 我已确认日志与截图中不包含 E 站 Cookie（ipb_pass_hash / igneous / sk）、管理员密码或代理账号密码
+          required: true

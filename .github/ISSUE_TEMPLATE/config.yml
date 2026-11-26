@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 防呆手册（常见问题与排障）
+    url: https://github.com/yeonalbus/SakuManga/blob/main/DSPlans/VerNotes/wiki.md
+    about: 新手入门、本地导入、E 站网络代理排障与 Docker 部署说明
+  - name: 💬 GitHub Discussions（使用交流与部署问答）
+    url: https://github.com/yeonalbus/SakuManga/discussions
+    about: 部署求助、配置交流、功能许愿与日常讨论

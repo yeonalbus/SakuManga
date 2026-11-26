@@ -5,7 +5,7 @@
 [![CI](https://github.com/yeonalbus/SakuManga/actions/workflows/ci.yml/badge.svg)](https://github.com/yeonalbus/SakuManga/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/yeonalbus/SakuManga)](https://github.com/yeonalbus/SakuManga/releases)
-[![Homepage](https://img.shields.io/badge/Homepage-GitHub%20Pages-f08aac)](https://yeonalbus.github.io/SakuManga/)
+[![Homepage](https://img.shields.io/badge/Homepage-GitHub_Pages-f08aac.svg)](https://yeonalbus.github.io/SakuManga/)
 
 [项目展示页](https://yeonalbus.github.io/SakuManga/) · [防呆手册（Wiki FAQ）](DSPlans/VerNotes/wiki.md) · [更新日志](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
 

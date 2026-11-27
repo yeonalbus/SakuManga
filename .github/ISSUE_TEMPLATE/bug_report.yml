@@ -13,7 +13,7 @@ body:
     attributes:
       label: SakuManga 版本号
       description: 可在页面「设置 → 关于」或 Releases / Docker 镜像标签中查看
-      placeholder: 例如：v2.3.0
+      placeholder: 例如：v2.4.0
     validations:
       required: true
 

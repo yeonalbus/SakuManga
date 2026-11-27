@@ -2,7 +2,7 @@
 
 > 本文件用于快速定位项目文件。已按「前端 Vue 3 + 后端 Go/Gin」分层组织，并给出「功能 → 文件」索引，便于 AI 或新人快速找到需要修改的代码。
 >
-> 版本：v2.3.0 · 最近更新：2026-10
+> 版本：v2.4.0 · 最近更新：2026-11
 
 ## 一、目录总览
 
@@ -11,6 +11,8 @@ SakuManga/
 ├── backend/                        # Go 后端（Gin + GORM + SQLite，含内嵌前端 webui/）
 ├── src/                            # Vue 3 前端（Vite + Pinia + Vue Router）
 ├── public/                         # PWA 静态资源（favicon / manifest 等）
+├── demo/                           # 演示数据服务与 Playwright 自动截图流水线（npm run demo:shots）
+├── docs/                           # GitHub Pages 项目展示页（index.html / social-preview.png / screenshots/）
 ├── scripts/                        # 构建辅助脚本（PWA 图标生成 / 布局 CSS 校验 / verify-round*.mjs 回归验证）
 ├── testdata_eh/                    # E 站抓取测试样本（HTML）
 ├── DSPlans/                        # AI 文档区（仅 AI 编写）：方案 / 问题处理 / 发布文档
@@ -35,7 +37,8 @@ SakuManga/
 ├── Dockerfile                      # 官方镜像构建定义（多阶段：golang 构建 → debian-slim 运行）
 ├── docker-entrypoint.sh            # 容器入口：复制二进制到数据目录 /app 后以 --headless 启动
 ├── .dockerignore                   # 镜像构建上下文排除规则（勿排除 backend/webui/dist）
-├── .github/workflows/              # GitHub Actions：docker-publish.yml（tag / 手动触发 → GHCR 多架构）
+├── .github/workflows/              # GitHub Actions：ci.yml（前后端校验）+ docker-publish.yml（tag / 手动触发 → GHCR 多架构）
+├── .github/ISSUE_TEMPLATE/         # GitHub Issue / PR 模板（bug_report / feature_request / PR 模板）
 ├── dist/                           # 前端 Vite 构建产物（已 gitignore，打包时拷入 webui/dist）
 ├── SakuManga.exe                  # 打包产物（已 gitignore，双击运行即托盘）
 └── PROJECT_TREE.md                 # 本文件
@@ -157,6 +160,7 @@ src/
 │   ├── bookmarkTitle.ts            # Round49：书签标题兜底（无翻译时回退 uploader 名）
 │   ├── noteLimit.ts                # Round49：备注折算显示行数校验（中英混排按宽度折算）
 │   ├── bookmarkTimeAnchor.ts       # 搜刮书签时间锚（seek 日期与越过判定，锚点失效时按发布时间迁移）
+│   ├── bookmarkPrefill.ts          # Round55：书签创建/重命名智能预填充与回显工具
 │   ├── onlineSearchParams.ts       # 在线搜索参数构造/比对（书签作用域与跳转复用）
 │   ├── pageHideFlush.ts            # 页面隐藏时冲刷进度/持久化（防丢失）
 │   ├── readingProgress.ts          # 阅读进度恢复决策（本地/后端取较新，偏好开关）
@@ -191,7 +195,10 @@ src/
         ├── OfflineDetail.vue       # 离线详情（打分/标签/书架）
         ├── OfflineHistory.vue      # 离线历史
         ├── OfflineIgnore.vue       # 忽略清单独立页（Round44：成员卡片 + 同组标注 + 新增感知 + 失效清理）
-        ├── OfflineMaintain.vue     # 离线书目维护（Round44 v3：差异分组 + 组内就地对比 + 移除这本 / 都留 + 含文件勾选记忆 + 舒适/紧凑）
+        ├── OfflineMaintain.vue     # 离线书目维护（Round44 v3：差异分组 + 组内就地对比 + 移除这本 / 都留 + 含文件勾选记忆 + 舒适/紧凑；Round52：页预览缩略图墙）
+        ├── PageThumbWall.vue       # 维护页展开区页预览缩略图墙（Round52）
+        ├── PageLightbox.vue        # 维护页预览灯箱（Round52）
+        ├── usePagePreview.ts       # 维护页预览组合式逻辑（Round52）
         ├── OfflineToplist.vue      # 离线排行榜
         └── OfflineUpdate.vue       # 离线更新检测（含「画廊已删除」徽标）
 ```
@@ -211,6 +218,8 @@ src/
 | 下载与离线 | `DownloadSettings.vue`       | 下载设置（含并发/归档并发/优先级，内嵌子面板）   |     ✔      |
 |            | `UpdateScanSettings.vue`     | 更新扫描（周扫描时刻/老化规则）                  |     ✔      |
 |            | `DedupSettings.vue`          | 维护查重（联网复核 / 移除时删除本地文件的默认值，Round44 从维护页移入） |     ✔      |
+|            | `RecoveryDialog.vue`         | 失效本子恢复弹窗与档位选择（Round54）            |     ✔      |
+|            | `FallenMenu.vue`             | 阵亡名单管理面板（Round54/56）                   |     ✔      |
 | 标签管理   | `MyTagsSettings.vue`         | 我的标签（独立子面板，含返回按钮）               |     —      |
 |            | `TagMaintainSettings.vue`    | Tag 维护（双轨三态：设置/刷新/写回/进度）        |     ✔      |
 | 日志       | `LogSettings.vue`            | 日志（四类日志查看/尾随/清除）                   |     ✔      |
@@ -239,7 +248,9 @@ backend/
 │   │   # 另有 archivedebug / archivercheck / archivespeed / dbcheck / dmscheck /
 │   │   #      metadump / readerdebug / relationscheck / reproissue / schemadump /
 │   │   #      statusdebug / updatelogic / ziprangecheck / e2eseed（Round26 临时库数据注入）、
-│   │   #      xpseed（Round32 隔离库测试用户注入，仅限库副本）等调试小工具
+│   │   #      xpseed（Round32 隔离库测试用户注入，仅限库副本）、
+│   │   #      cleanup_orphan_scanpaths（Round53 孤儿扫描路径清理）、
+│   │   #      cleanup_unsupported_archives（不可读归档死记录清理）等调试小工具
 │   │   # 凭据安全：archivespeed / ziprangecheck 的 E 站凭据均从环境变量读取
 │   │   # （E_IPB_MEMBER_ID / E_IPB_PASS_HASH / E_IGNEOUS / E_SK），源码不落明文
 │
@@ -266,7 +277,8 @@ backend/
     │   ├── maintain_snapshot.go    # Round42：维护结果持久化模型（单行快照表，进维护页秒开上次结果）
     │   ├── dedup_setting.go        # Round42：查重设置模型（联网复核开关 / 「移除时删除本地文件」默认值）
     │   ├── download.go             # 下载任务/设置模型（线程/归档并发/优先级/更新方案；Round48 加 NodeName 所用节点）
-    │   └── network.go              # Round48：NetworkSetting（高级代理单行表）+ ArchiveBinding（归档 ↔ 节点绑定，20h TTL）
+    │   ├── network.go              # Round48：NetworkSetting（高级代理单行表）+ ArchiveBinding（归档 ↔ 节点绑定，20h TTL）
+    │   └── recovery.go             # Round54：RecoveryCandidate（恢复候选）+ FallenComic（阵亡名单）模型
     ├── middleware/
     │   └── auth.go                 # AuthRequired / AdminOnly / CurrentUser
     ├── router/
@@ -300,6 +312,7 @@ backend/
     │   ├── log.go                  # 服务端日志（四类日志查询/监控；Round41 tail 接口尾部反向增量读取 + limit 安全阀）
     │   ├── xp_cloud.go             # Round32：XP 词云查询 / 统计重算接口
     │   ├── scrape_bookmark.go      # Round28/49：搜刮书签 CRUD + `POST /probe`（Round49 删除 position / order 手工排序接口与 check 失效检测）
+    │   ├── recovery.go             # Round54/56：失效恢复会话与阵亡名单接口
     │   └── network_handler.go      # 网络/代理配置 + Round48 高级代理（`/network/advanced` / `clash/test` / `clash/groups`，仅管理员）
     └── services/                   # 业务服务层（抓取/解析/引擎/调度）
         ├── eh_types.go             # EHService 定义 + DTO/搜索参数类型
@@ -368,9 +381,15 @@ backend/
         ├── xp_cloud.go             # Round32 阶段一：XP 词云统计（合并口径/稀释加权/差分/重建/查询）
         ├── recommend.go            # Round32 阶段二：本地偏好推荐（打分/温度采样/多样性/降级）
         └── scrape_bookmark.go      # Round28/49：搜刮书签服务（宽松归一化 + 按用户隔离 CRUD + role/note/pinned 部分更新）
+        ├── recovery.go             # Round54/56：失效本子恢复会话、扫描失效对账与软隐藏
+        ├── trash.go                # Round54/56：阵亡名单与双轨生命周期清理
+        ├── download_ingest.go      # 下载入库与解压剥离单一顶层目录
+        ├── page_thumb.go           # Round52：页缩略图生成与缓存服务（page_cache_v2）
+        ├── offline_view.go         # 离线视图投影辅助服务
+        └── comic_aux.go            # 离线漫画辅助清理与关联操作
 ```
 
-> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化；Round37 排序输出 / 单点移动 / 全量重置）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）、`dedup_match_test.go` / `dedup_verify_test.go`（Round42 Tier2 打分分档与联网复核）、`maintain_snapshot_test.go`（结果持久化）、`offline_sig_cache_test.go`（查重签名目录 mtime 缓存）、`ignore_members_test.go` / `ignore_round42_test.go`（成员快照新增感知 / 旧 key 兼容）、`cover_cache_gc_test.go`（封面回收）、`download_queue_test.go` / `download_dispatcher_test.go`（Round45 无界队列 / 统一调度 / 重启恢复 / 优先级门控）、`download_nofallback_test.go`（普通下载不降级、更新任务按开关降级）、`download_batch_test.go`（Round47 状态统计 / 五种批量动作 / 权限隔离）、`clash_client_test.go` / `archive_binding_test.go`（Round48 控制面客户端 / 绑定生命周期 / 熔断窗口）、`scrape_bookmark_migrate_test.go` / `scrape_bookmark_probe_test.go` / `scrape_bookmark_note_test.go`（Round49 字段回填幂等 / 更新探测判据 / 备注校验）、`eh_tags_test.go`（tag 别名后缀自愈）、`tag_engine_settings_test.go`（标签设置持久化）、`download_state_local_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`、`log_tail_test.go`、`random_titlejpn_test.go`、`network_handler_test.go`、`download_batch_handler_test.go`。
+> services/ 内含多组单元测试：`archive_download_test.go`、`download_race_test.go`、`download_scheduler_test.go`、`gallery_download_test.go`、`offline_reconcile_test.go`、`offline_removed_test.go`、`offline_update_clear_test.go`、`offline_backfill_test.go`、`eh_setting_mytags_test.go`、`log_store_test.go`、`toplist_test.go`、`fsearch_normalize_test.go`、`fsearch_switch_test.go`、`favorites_nil_test.go`、`tag_engine_test.go`、`cover_test.go`、`eh_pagecount_test.go`、`eh_rating_test.go`、`comic_refs_test.go`、`tagfilter_test.go`、`dedup_title_test.go`、`offline_dedup_e2e_test.go`（Round26 O3 清洗/判定 + 查重簇/忽略端到端）、`scrape_bookmark_test.go`（Round28 CRUD / 用户隔离 / 宽松归一化；Round37 排序输出 / 单点移动 / 全量重置）、`maintain_result_sync_test.go`（Round33 结果缓存定向同步：忽略/恢复/删除即时生效）、`dedup_match_test.go` / `dedup_verify_test.go`（Round42 Tier2 打分分档与联网复核）、`maintain_snapshot_test.go`（结果持久化）、`offline_sig_cache_test.go`（查重签名目录 mtime 缓存）、`ignore_members_test.go` / `ignore_round42_test.go`（成员快照新增感知 / 旧 key 兼容）、`cover_cache_gc_test.go`（封面回收）、`download_queue_test.go` / `download_dispatcher_test.go`（Round45 无界队列 / 统一调度 / 重启恢复 / 优先级门控）、`download_nofallback_test.go`（普通下载不降级、更新任务按开关降级）、`download_batch_test.go`（Round47 状态统计 / 五种批量动作 / 权限隔离）、`clash_client_test.go` / `archive_binding_test.go`（Round48 控制面客户端 / 绑定生命周期 / 熔断窗口）、`scrape_bookmark_migrate_test.go` / `scrape_bookmark_probe_test.go` / `scrape_bookmark_note_test.go`（Round49 字段回填幂等 / 更新探测判据 / 备注校验）、`eh_tags_test.go`（tag 别名后缀自愈）、`tag_engine_settings_test.go`（标签设置持久化）、`download_state_local_test.go`、`recovery_test.go` / `recovery_e2e_test.go` / `trash_test.go`（Round54/56 恢复与阵亡双轨）、`scan_candidates_test.go` / `scan_field_policy_test.go` / `scan_path_delete_test.go` / `scan_stats_test.go` / `extract_ingest_test.go` / `metadata_priority_test.go` / `page_hide_relpath_test.go`（D1–D22 扫描入库契约）、`round50_cluster_id_test.go` / `round50_maintain_delete_test.go` / `offline_recalc_test.go` / `offline_switch_test.go` / `dedup_hash_test.go` / `cover_first_page_test.go` / `proxy_windows_test.go` 等；handlers 含 `tag_maintain_test.go`、`library_test.go`、`history_gid_test.go`、`log_tail_test.go`、`random_titlejpn_test.go`、`network_handler_test.go`、`download_batch_handler_test.go`、`recovery_test.go`、`scan_path_delete_test.go`、`source_label_test.go`、`comic_hidden_pages_test.go`。
 
 ---
 
@@ -464,6 +483,8 @@ backend/
 | 改 f_search tag 解析/匹配    | `services/tagfilter.go`、`handlers/random.go`、`handlers/online.go`                                  |
 | 改用户管理/权限            | `backend/internal/handlers/user.go`、`middleware/auth.go`、`services/auth_service.go`、`bootstrap.go` |
 | 改扫描                     | `backend/internal/handlers/scan_path.go`、`services/scanner.go`、`scan_manager.go`                    |
+| 改失效恢复与阵亡（Round54/56） | `components/settings/RecoveryDialog.vue`、`FallenMenu.vue`、`handlers/recovery.go`、`services/recovery.go`、`services/trash.go`、`models/recovery.go` |
+| 改维护页预览缩略图墙（Round52） | `views/offline/PageThumbWall.vue`、`PageLightbox.vue`、`usePagePreview.ts`、`services/page_thumb.go` |
 | 改客户端错误日志           | `backend/internal/handlers/client_log.go`、`src/utils/errorReporter.ts`                               |
 | 改数据模型                 | `backend/internal/models/*.go`                                                                        |
 | 改数据库初始化/迁移        | `backend/internal/database/db.go`                                                                     |
@@ -496,7 +517,7 @@ backend/
 
 ---
 
-## 六、发布注意（v2.3.0）
+## 六、发布注意（v2.4.0）
 
 - **版本号**：唯一来源 `package.json` 的 `version` 字段（如 `2.2.0`）；`AboutSettings.vue`「关于」页与 `build-release.bat` 标题自动跟随。修改后请同步 `package-lock.json` 顶部两处 `version`，以及后端 `backend/internal/version/version.go` 的 `AppVersion`（三处保持一致）。
 - **更新日志**：[`CHANGELOG.md`](CHANGELOG.md) 是跨版本更新状态归档（自 v2.0.0 起），由 AI 维护；每次发布在 **顶部追加**新版本区块，历史区块不改写。`README.md` 由珱垣本人维护，AI 只读；给珱垣的写作素材见 [`DSPlans/YeonBriefs/`](DSPlans/YeonBriefs/) 下 `BRIEF_vX.Y.Z.md`。维护要求见 [`DSPlans/VerNotes/RELEASE_PROCESS.md`](DSPlans/VerNotes/RELEASE_PROCESS.md) 第 6 节。
